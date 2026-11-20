@@ -2,6 +2,7 @@ module
 public import Aeneas
 public import Rind.X86_64.Types
 public import Rind.X86_64.Simd
+public import Rind.GhashSpec
 @[expose] public section
 open Aeneas Aeneas.Std Result
 set_option linter.dupNamespace false
@@ -849,13 +850,6 @@ namespace rind.x86_64
 
 open rind.vale rind.simd
 
-/-- `as_chunks`: the whole chunks of `k` elements, in order. -/
-def chunksOf {α : Type} (k : Nat) (l : List α) : List (List α) :=
-  (List.range (l.length / k)).map fun i => (l.drop (k * i)).take k
-
-/-- What `as_chunks` leaves after the whole chunks of `k` elements. -/
-def chunksRest {α : Type} (k : Nat) (l : List α) : List α := l.drop (k * (l.length / k))
-
 /-- `ghash::BYTESWAP`. -/
 def low.x86_64.ghash.BYTESWAP : Result core.core_arch.x86.__m128i :=
   ok 0x00010203_04050607_08090a0b_0c0d0e0f#128
@@ -1405,10 +1399,6 @@ def low.x86_64.aes_gcm.by16_loop (ENC : Bool) (table : low.x86_64.ghash.GhashTab
     let (counter, current, out) ←
       low.x86_64.aes_gcm.by16_loop ENC table rk_first rks rk_last chunks counter current
     ok (counter, current, cs.flatMap bytes512 ++ out)
-
-/-- `chunks_mut(k)`: the whole chunks of `k` elements, then the rest if any. -/
-def chunksUpTo {α : Type} (k : Nat) (l : List α) : List (List α) :=
-  chunksOf k l ++ if chunksRest k l = [] then [] else [chunksRest k l]
 
 /-- `_cipher_avx512`'s loop over the tail's chunks of up to 64 bytes, each
 zipped with its counters' AES before the last round: the vectors it hashes,

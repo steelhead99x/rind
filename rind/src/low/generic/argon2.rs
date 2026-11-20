@@ -86,6 +86,8 @@ fn gb(v: &mut [u64; 16], a: usize, b: usize, c: usize, d: usize) {
 
 #[inline(always)]
 fn fbla(x: u64, y: u64) -> u64 {
-    let product = (x as u32 as u64) * (y as u32 as u64);
+    // Wrapping: a 32x32-bit product cannot overflow, but a debug build's
+    // overflow check would still branch on the secret operands.
+    let product = (x as u32 as u64).wrapping_mul(y as u32 as u64);
     x.wrapping_add(y).wrapping_add(product.wrapping_mul(2))
 }

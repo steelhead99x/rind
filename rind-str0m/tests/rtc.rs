@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use str0m::crypto::CryptoProvider;
-use str0m::crypto::dtls::DtlsVersion;
+use str0m::crypto::dtls::{DtlsInstance, DtlsOutput, DtlsVersion};
 use str0m::format::Codec;
 use str0m::media::{MediaKind, Mid};
 use str0m::net::{Protocol, Receive};
@@ -210,7 +210,21 @@ fn generated_certificate() {
     );
 }
 
-/// A caller's certificate or key that dimpl cannot use is an error, not a panic.
+/// The provider handed to callers building their own dimpl config builds one,
+/// as the one DTLS runs on does.
+#[test]
+fn dimpl_provider_builds_a_config() {
+    let provider = rind_str0m::dimpl_crypto_provider();
+    assert!(
+        dimpl::Config::builder()
+            .with_crypto_provider(provider)
+            .build()
+            .is_ok()
+    );
+}
+
+/// A caller's certificate, key, or MTU that dimpl cannot use is an error, not
+/// a panic.
 #[test]
 fn unusable_certificate_is_an_error() {
     let provider = rind_str0m::default_provider();
@@ -229,8 +243,190 @@ fn unusable_certificate_is_an_error() {
             assert!(dtls.new_dtls(&bad, Instant::now(), version, None).is_err());
         }
     }
+    // dimpl's minimum MTU is 64 bytes.
+    assert!(
+        dtls.new_dtls(&cert, Instant::now(), DtlsVersion::Auto, Some(63))
+            .is_err()
+    );
     assert!(
         dtls.new_dtls(&cert, Instant::now(), DtlsVersion::Auto, None)
             .is_ok()
+    );
+}
+
+/// A fresh connection reports dimpl's state through str0m's trait. This stays
+/// out of the crate's unit tests: `admin/ctgrind` runs those under valgrind,
+/// and building a dimpl config runs dimpl's own key-exchange self-test, which
+/// compares the two throwaway shared secrets with `!=`.
+#[test]
+fn fresh_connection_reports_dimpl_state() {
+    let dtls = rind_str0m::default_provider().dtls_provider;
+    let cert = dtls.generate_certificate().unwrap();
+    let mut dtls12 = dtls
+        .new_dtls(&cert, Instant::now(), DtlsVersion::Dtls12, None)
+        .unwrap();
+    assert!(!dtls12.is_active());
+    assert_eq!(format!("{:?}", dtls12.protocol_version()), "Some(DTLS1_2)");
+    let dtls13 = dtls
+        .new_dtls(&cert, Instant::now(), DtlsVersion::Dtls13, None)
+        .unwrap();
+    assert_eq!(format!("{:?}", dtls13.protocol_version()), "Some(DTLS1_3)");
+    assert!(!dtls12.is_closing());
+    assert!(!dtls12.is_closed());
+    dtls12.set_active(true);
+    assert!(dtls12.is_active());
+    assert_eq!(dtls12.send_application_data(&[0x11; 8]).unwrap(), 8);
+    dtls12.close().unwrap();
+    assert!(!dtls12.is_closing());
+    assert!(dtls12.is_closed());
+}
+
+#[derive(Default)]
+struct DtlsEvents {
+    connected: bool,
+    close_notify: bool,
+    packets: usize,
+    timeout: Option<Instant>,
+}
+
+fn transfer_dtls(from: &mut dyn DtlsInstance, to: &mut dyn DtlsInstance) -> DtlsEvents {
+    let mut events = DtlsEvents::default();
+    // dimpl's default MTU is 1150. A short buffer is a retry, not a failure:
+    // `BufferTooSmall` keeps the packet queued until the buffer fits it.
+    let mut buffer = vec![0u8; 2048];
+    // One poll cycle ends with Timeout. A cycle that never does would spin
+    // under the caller's one-minute deadline, which is only checked between
+    // transfers.
+    for _ in 0..64 {
+        match from.poll_output(&mut buffer) {
+            DtlsOutput::Packet(packet) => {
+                to.handle_packet(packet).unwrap();
+                events.packets += 1;
+            }
+            DtlsOutput::BufferTooSmall { needed } => {
+                assert!(
+                    needed > buffer.len() && needed <= 65_536,
+                    "DTLS output asked for {needed} bytes after a {}-byte buffer",
+                    buffer.len()
+                );
+                buffer.resize(needed, 0);
+            }
+            DtlsOutput::Connected => events.connected = true,
+            DtlsOutput::CloseNotify => events.close_notify = true,
+            DtlsOutput::PeerCert(_) | DtlsOutput::KeyingMaterial(_, _) => {}
+            // These handshakes send no application data. Swallowing a record
+            // here would let the close assertions pass without seeing it.
+            DtlsOutput::ApplicationData(data) => {
+                panic!(
+                    "application data during handshake or close: {} bytes",
+                    data.len()
+                );
+            }
+            DtlsOutput::Timeout(at) => {
+                events.timeout = Some(at);
+                return events;
+            }
+            other => panic!("unexpected DTLS output: {other:?}"),
+        }
+    }
+    panic!("DTLS poll did not reach Timeout");
+}
+
+/// Graceful close must be visible while close_notify still needs polling,
+/// through the same provider trait str0m uses for an established connection.
+#[test]
+fn established_connection_reports_graceful_close() {
+    for version in [DtlsVersion::Dtls12, DtlsVersion::Dtls13] {
+        for rind_active in [false, true] {
+            let mut now = Instant::now();
+            let rind = rind_str0m::default_provider().dtls_provider;
+            let aws = str0m_aws_lc_rs::default_provider().dtls_provider;
+            let mut a = rind
+                .new_dtls(&rind.generate_certificate().unwrap(), now, version, None)
+                .unwrap();
+            let mut b = aws
+                .new_dtls(&aws.generate_certificate().unwrap(), now, version, None)
+                .unwrap();
+            a.set_active(rind_active);
+            b.set_active(!rind_active);
+            let mut connected = [false; 2];
+            // dimpl's first flight retransmit is one second. Follow the Timeout
+            // it returns, and fail once simulated time passes a minute.
+            let deadline = now + Duration::from_secs(60);
+            loop {
+                assert!(
+                    now < deadline,
+                    "{version:?} handshake timed out, rind active={rind_active}"
+                );
+                a.handle_timeout(now).unwrap();
+                b.handle_timeout(now).unwrap();
+                // Deliver at one instant until neither side sends, so a flight
+                // queued in reply goes out before time advances. The timeouts
+                // that count are the ones from that quiet round.
+                let mut timeouts = [None; 2];
+                for round in 0.. {
+                    assert!(round < 64, "{version:?} handshake did not settle");
+                    let from_a = transfer_dtls(&mut *a, &mut *b);
+                    let from_b = transfer_dtls(&mut *b, &mut *a);
+                    connected[0] |= from_a.connected;
+                    connected[1] |= from_b.connected;
+                    timeouts = [from_a.timeout, from_b.timeout];
+                    if from_a.packets + from_b.packets == 0 {
+                        break;
+                    }
+                }
+                if connected == [true; 2] {
+                    break;
+                }
+                let next =
+                    timeouts.into_iter().flatten().min().unwrap_or_else(|| {
+                        panic!("{version:?} handshake stalled without a timeout")
+                    });
+                // A timeout that is not strictly later still advances, as `step` does,
+                // so a stuck instant cannot spin.
+                now = (now + Duration::from_millis(1)).max(next);
+            }
+            assert_eq!(
+                connected, [true; 2],
+                "{version:?}, rind active={rind_active}"
+            );
+            assert!(!a.is_closing());
+            assert!(!a.is_closed());
+            a.close().unwrap();
+            assert!(a.is_closing(), "{version:?}, rind active={rind_active}");
+            assert!(!a.is_closed());
+            assert!(transfer_dtls(&mut *a, &mut *b).packets > 0);
+            assert!(transfer_dtls(&mut *b, &mut *a).close_notify);
+            b.close().unwrap();
+            transfer_dtls(&mut *b, &mut *a);
+            transfer_dtls(&mut *a, &mut *b);
+            assert!(a.is_closed());
+            assert!(!a.is_closing());
+            assert!(b.is_closed());
+        }
+    }
+}
+
+/// The generated serial stays a positive INTEGER, and the certificate is valid
+/// for exactly 365 days. `clear_serial_high_bit_forces_a_positive_integer`
+/// checks the mask with a forced high bit. Branching on a serial from
+/// `rind::rand` stays here, out of the crate's unit tests, because
+/// `admin/ctgrind adapters` runs those under valgrind.
+#[test]
+fn certificate_serial_stays_positive_and_the_span_is_a_year() {
+    let dtls = rind_str0m::default_provider().dtls_provider;
+    let cert = dtls.generate_certificate().unwrap();
+    let (rest, cert) = x509_parser::parse_x509_certificate(&cert.certificate).unwrap();
+    assert!(rest.is_empty());
+    // The INTEGER's content octets: a set top bit is negative, and all zeros is
+    // zero, neither of which RFC 5280 allows.
+    let serial = cert.tbs_certificate.raw_serial();
+    assert!(!serial.is_empty() && serial.len() <= 20, "{serial:?}");
+    assert_eq!(serial[0] & 0x80, 0, "{serial:?}");
+    assert!(serial.iter().any(|&byte| byte != 0), "{serial:?}");
+    let validity = cert.validity();
+    assert_eq!(
+        validity.not_after.to_datetime() - validity.not_before.to_datetime(),
+        time::Duration::days(365),
     );
 }

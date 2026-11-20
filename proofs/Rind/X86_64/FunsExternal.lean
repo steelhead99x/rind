@@ -10,8 +10,9 @@ set_option linter.dupNamespace false
 /-!
 The rind functions the x86_64 translation leaves opaque, beside those
 `Rind.X86_64.AesGcmModel` and `Rind.X86_64.PointSelectModel` model. No proof assumes anything about them beyond what
-`Rind.X86_64.S2nBignum`, `Rind.X86_64.AwsLc`, and `Rind.X86_64.ValeAesGcm`
-state for s2n-bignum's, aws-lc's, and Vale's routines, what
+`Rind.X86_64.S2nBignum`, `Rind.X86_64.AwsLc`, `Rind.X86_64.ValeAesGcm`,
+`Rind.X86_64.VgRsa`, and `Rind.X86_64.VgChaCha20` state for s2n-bignum's,
+aws-lc's, Vale's, and pyca/verified-garbage's routines, what
 `Rind.X86_64.CtEqual` states for the constant-time compares, and what each theorem
 takes as a hypothesis.
 -/
@@ -51,11 +52,6 @@ opaque low.x86_64.curve25519_x25519.curve25519_x25519
     Result (Array Std.U64 4#usize)
 
 /-! OpenSSL's and aws-lc's SHA-512 routines, behind their Rust wrappers. -/
-
-opaque low.x86_64.sha512.compress_sha512ext
-  :
-  low.x86_64.cpu.HaveSha512 → Array Std.U64 8#usize → Slice Std.U8 → Result
-    (Array Std.U64 8#usize)
 
 opaque low.x86_64.sha512.compress_avx2
   :
@@ -191,6 +187,31 @@ opaque low.generic.chacha20poly1305.open
   : Std.Array Std.U8 32#usize → Std.Array Std.U8 12#usize → Slice Std.U8 → Slice Std.U8 →
     Std.Array Std.U8 16#usize → Result (Bool × (Slice Std.U8))
 
+/-! `cipher::ChaCha20`'s routines: pyca/verified-garbage's, behind one
+wrapper each, whose contracts `Rind.X86_64.VgChaCha20` restates, and aws-lc's
+SSSE3 routine, whose contract `Rind.X86_64.ChaCha20Cipher` takes as the
+hypothesis `Ssse3`. -/
+
+opaque low.x86_64.cpu.HaveAvx512Vl.check : Result (Option low.x86_64.cpu.HaveAvx512Vl)
+
+opaque low.x86_64.chacha20.VgState.uninit : Result low.x86_64.chacha20.VgState
+
+opaque low.x86_64.chacha20.VgState.init
+  : low.x86_64.chacha20.VgState → Std.Array Std.U32 8#usize → Std.Array Std.U32 4#usize →
+    Result low.x86_64.chacha20.VgState
+
+opaque low.x86_64.chacha20.VgState.apply_avx2
+  : low.x86_64.chacha20.VgState → low.x86_64.cpu.HaveAvx2 → Slice Std.U8 →
+    Result (Std.U32 × low.x86_64.chacha20.VgState × (Slice Std.U8))
+
+opaque low.x86_64.chacha20.VgState.apply_avx512vl
+  : low.x86_64.chacha20.VgState → low.x86_64.cpu.HaveAvx512Vl → Slice Std.U8 →
+    Result (Std.U32 × low.x86_64.chacha20.VgState × (Slice Std.U8))
+
+opaque low.x86_64.chacha20.cipher_ssse3_4x
+  : low.x86_64.cpu.HaveSsse3 → Std.Array Std.U32 8#usize → Std.Array Std.U32 4#usize →
+    Slice Std.U8 → Result (Slice Std.U8)
+
 /-! s2n-bignum's Ed25519 routines, transliterated to inline assembly. -/
 
 opaque low.x86_64.edwards25519_decode.edwards25519_decode
@@ -274,15 +295,19 @@ opaque low.x86_64.sha512.path : Result low.x86_64.sha512.Path
 opaque low.x86_64.cpu.HaveBmi2Adx.check
   : Result (Option low.x86_64.cpu.HaveBmi2Adx)
 
-/-- Whether the CPU runs pyca/verified-garbage's AVX-512 IFMA public
-operation for a key's modulus and exponent, and that operation, which the
-proofs of RSA verification take as not running. -/
-opaque low.x86_64.rsa_ifma.RsaIfma.check
-  {N : Std.Usize} : low.posint.PosInt N → Std.U64 → Result (Option low.x86_64.rsa_ifma.RsaIfma)
+opaque low.x86_64.cpu.HaveAvx512ForRsa.check
+  : Result (Option low.x86_64.cpu.HaveAvx512ForRsa)
 
-opaque mid.rsa_pub.RsaPublicKey.public_op_ifma
-  : mid.rsa_pub.RsaPublicKey → low.x86_64.rsa_ifma.RsaIfma → low.posint.PosInt 128#usize →
-    Result (core.result.Result (low.posint.PosInt 128#usize) error.Error)
+/-- pyca/verified-garbage's AVX-512 IFMA public operation and CRT, behind
+the Rust that sizes their scratch and calls them, which `Rind.X86_64.VgRsa`
+states. -/
+opaque low.x86_64.rsa_ifma.RsaIfma.public
+  : low.x86_64.rsa_ifma.RsaIfma → Slice Std.U8 → Slice Std.U64 → Slice Std.U8 → Slice Std.U8 →
+    Result (Bool × Slice Std.U8)
+
+opaque low.x86_64.rsa_ifma.IfmaCrt.crt
+  : low.x86_64.rsa_ifma.IfmaCrt → Slice Std.U8 → Slice Std.U8 → Slice Std.U8 → Slice Std.U8 →
+    Slice Std.U8 → Result (Bool × Slice Std.U8)
 
 opaque low.x86_64.cpu.HaveAvx2.check : Result (Option low.x86_64.cpu.HaveAvx2)
 
@@ -450,6 +475,30 @@ opaque low.x86_64.p384_montjmixadd_alt.p384_montjmixadd_alt
   :
   Array Std.U64 18#usize → Array Std.U64 18#usize → Array Std.U64 12#usize
     → Result (Array Std.U64 18#usize)
+
+/-- Whether pyca/verified-garbage's P-384 `d·G` runs on this CPU, which
+`admin/prove` leaves opaque, as it does the routines it calls: they are VG's
+assembly. -/
+opaque low.x86_64.p384_vg.MulBase.check
+  : Result (Option low.x86_64.p384_vg.MulBase)
+
+/-- pyca/verified-garbage's `d·G` for key generation and ECDSA's nonces,
+opaque as `low.x86_64.p384_vg.MulBase.check` is. -/
+opaque low.x86_64.p384_vg.MulBase.public_key
+  : low.x86_64.p384_vg.MulBase → Array Std.U8 48#usize →
+    Result (Option (Array Std.U8 97#usize))
+
+/-- Whether pyca/verified-garbage's P-384 ECDSA verification runs on this
+CPU, opaque as `low.x86_64.p384_vg.MulBase.check` is. -/
+opaque low.x86_64.p384_vg.Verify.check
+  : Result (Option low.x86_64.p384_vg.Verify)
+
+/-- pyca/verified-garbage's P-384 ECDSA verification, opaque as
+`low.x86_64.p384_vg.MulBase.check` is. -/
+opaque low.x86_64.p384_vg.Verify.ecdsa_verify
+  :
+  low.x86_64.p384_vg.Verify → Array Std.U8 97#usize → Array Std.U8 48#usize →
+    Array Std.U8 96#usize → Result Bool
 
 opaque low.x86_64.p384_montjscalarmul.p384_montjscalarmul
   :
@@ -644,6 +693,27 @@ opaque low.generic.reuse_cache.ReuseCache.Insts.CoreCloneClone.clone
 opaque mid.p256.PrivateKey.new_random
   : Result (core.result.Result mid.p256.PrivateKey error.Error)
 
+/-! Whether the CPU runs pyca/verified-garbage's P-256, which reads no input,
+and its routines behind their Rust wrappers, whose contracts
+`Rind.X86_64.VgP256` states. -/
+
+opaque low.x86_64.p256_vg.P256.check : Result (Option low.x86_64.p256_vg.P256)
+
+opaque low.x86_64.p256_vg.P256.check_public_key : Result (Option low.x86_64.p256_vg.P256)
+
+opaque low.x86_64.p256_vg.P256.public_key
+  : low.x86_64.p256_vg.P256 → Array Std.U8 32#usize → Result (Option (Array Std.U8 65#usize))
+
+opaque low.x86_64.p256_vg.P256.ecdh
+  :
+  low.x86_64.p256_vg.P256 → Array Std.U8 32#usize → Array Std.U8 65#usize → Result (Option
+    (Array Std.U8 32#usize))
+
+opaque low.x86_64.p256_vg.P256.verify
+  :
+  low.x86_64.p256_vg.P256 → Array Std.U8 65#usize → Array Std.U8 32#usize → Array Std.U8
+    64#usize → Result Bool
+
 /-! The other curves, which X25519's results never depend on. -/
 
 opaque mid.p521.PrivateKey.new_random
@@ -783,6 +853,28 @@ opaque low.x86_64.mont.sqr8x
   Slice Std.U64 → Slice Std.U64 → Slice Std.U64 → Std.U64 → Option
     low.x86_64.cpu.HaveBmi2Adx → Result (Slice Std.U64)
 
+/-! pyca/verified-garbage's ML-KEM-768 routines, behind their Rust wrappers,
+whose contracts `Rind.X86_64.VgMlKem` states. -/
+
+opaque low.x86_64.mlkem768_vg.Encaps.check_ek
+  : low.x86_64.mlkem768_vg.Encaps → Array Std.U8 1184#usize → Result Bool
+
+opaque low.x86_64.mlkem768_vg.Encaps.encaps
+  :
+  low.x86_64.mlkem768_vg.Encaps → Array Std.U8 1184#usize → Option (Array
+    Std.U8 32#usize) → Array Std.U8 32#usize → Result (Option ((Array
+    Std.U8 32#usize) × (Array Std.U8 1088#usize)))
+
+opaque low.x86_64.mlkem768_vg.KeyPair.keygen
+  :
+  low.x86_64.mlkem768_vg.KeyPair → Array Std.U8 64#usize → Result (Option
+    (Array Std.U8 2400#usize))
+
+opaque low.x86_64.mlkem768_vg.KeyPair.decaps
+  :
+  low.x86_64.mlkem768_vg.KeyPair → Array Std.U8 2400#usize → Array Std.U8
+    1088#usize → Result (Option (Array Std.U8 32#usize))
+
 /-! RSA's DER parsing and encoding, which the ✓ leaves out. -/
 
 opaque high.rsa.pkcs1_components
@@ -799,5 +891,27 @@ opaque high.rsa.VerifyingKey.to_pkcs1_der
   :
   high.rsa.VerifyingKey → Slice Std.U8 → Result ((core.result.Result (Slice
     Std.U8) error.Error) × (Slice Std.U8))
+
+/-- Whether the CPU runs pyca/verified-garbage's AVX-512 IFMA X25519 and
+Ed25519, and the wrappers of those routines, whose contracts
+`Rind.X86_64.VgCurve25519` restates. -/
+opaque low.x86_64.curve25519_ifma.Curve25519Ifma.check : Result (Option low.x86_64.curve25519_ifma.Curve25519Ifma)
+
+opaque low.x86_64.curve25519_ifma.Curve25519Ifma.x25519
+  : low.x86_64.curve25519_ifma.Curve25519Ifma → Array Std.U64 4#usize → Array Std.U64 4#usize → Array Std.U64 4#usize →
+    Result (Array Std.U64 4#usize)
+
+opaque low.x86_64.curve25519_ifma.Curve25519Ifma.x25519_base
+  : low.x86_64.curve25519_ifma.Curve25519Ifma → Array Std.U64 4#usize → Array Std.U64 4#usize → Result (Array Std.U64 4#usize)
+
+opaque low.x86_64.curve25519_ifma.Curve25519Ifma.ed25519_key_pair
+  : low.x86_64.curve25519_ifma.Curve25519Ifma → Array Std.U8 32#usize → Result (Array Std.U8 64#usize × Array Std.U8 32#usize)
+
+opaque low.x86_64.curve25519_ifma.Curve25519Ifma.ed25519_sign
+  : low.x86_64.curve25519_ifma.Curve25519Ifma → Array Std.U8 64#usize → Array Std.U8 32#usize → Slice Std.U8 →
+    Result (Array Std.U8 64#usize)
+
+opaque low.x86_64.curve25519_ifma.Curve25519Ifma.ed25519_verify
+  : low.x86_64.curve25519_ifma.Curve25519Ifma → Array Std.U8 32#usize → Slice Std.U8 → Array Std.U8 64#usize → Result Bool
 
 end rind.x86_64

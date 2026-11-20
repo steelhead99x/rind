@@ -82,8 +82,9 @@ impl sealed::Sealed for KeyPair {}
 
 impl KeyPair {
     fn new(key: rind::rsa::KeyPair) -> Result<Self, KeyRejected> {
+        // rind's encoding of a key it loaded always parses.
         let public = PublicKey::from_pkcs1(key.public_key().as_ref())
-            .map_err(|_| KeyRejected::unexpected_error())?;
+            .or(Err(KeyRejected::unexpected_error()))?;
         check_bits(der::bits(&public.n))?;
         Ok(Self {
             key: Arc::new(key),
@@ -871,7 +872,7 @@ pub struct PublicEncryptingKey(Arc<EncryptingInner>);
 impl PublicEncryptingKey {
     /// Wraps a PKCS#1 `RSAPublicKey` that rind has already parsed.
     fn new(pkcs1: &[u8]) -> Result<Self, KeyRejected> {
-        let (n, _) = der::rsa_public_key(pkcs1).map_err(|_| KeyRejected::invalid_encoding())?;
+        let (n, _) = der::rsa_public_key(pkcs1).or(Err(KeyRejected::invalid_encoding()))?;
         let bits = der::bits(n);
         check_bits(bits)?;
         Ok(Self(Arc::new(EncryptingInner {

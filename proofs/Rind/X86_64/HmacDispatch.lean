@@ -27,6 +27,11 @@ impl Algorithm {
     pub fn tag_len(&self) -> usize {
         self.tag_len
     }
+
+    /// The hash this algorithm runs over.
+    pub(super) fn id(&self) -> Id {
+        self.id
+    }
 }
 
 pub static HMAC_SHA1: Algorithm = Algorithm {
@@ -107,11 +112,11 @@ impl Context {
         self.0.update(data);
     }
 
-    /// Returns the tag of the message.
+    /// Returns the tag of the message, and starts a new one under the same key.
     #[must_use]
-    pub fn sign(self) -> Tag {
+    pub fn sign(&mut self) -> Tag {
         let _entry = Entry::new_secret();
-        Tag(self.0.finish())
+        Tag(self.0.sign())
     }
 }
 
@@ -191,6 +196,16 @@ impl Streaming {
             Tagged::Sha256(hmac) => hmac.finish(),
             Tagged::Sha384(hmac) => hmac.finish(),
             Tagged::Sha512(hmac) => hmac.finish(),
+        }
+    }
+
+    /// The tag of the message, restarting under the same key, for callers that have entered.
+    fn sign(&mut self) -> Digest {
+        match &mut self.0 {
+            Tagged::Sha1(hmac) => hmac.sign(),
+            Tagged::Sha256(hmac) => hmac.sign(),
+            Tagged::Sha384(hmac) => hmac.sign(),
+            Tagged::Sha512(hmac) => hmac.sign(),
         }
     }
 }
@@ -280,6 +295,7 @@ struct Tagging<H: HmacHash> {
 struct TagOps<H: HmacHash> {
     update: fn(&mut Hmac<H>, &[u8]),
     finish: fn(&Hmac<H>) -> Digest,
+    sign: fn(&mut Hmac<H>) -> Digest,
 }
 
 impl<H: HmacHash> Clone for Tagging<H> {
@@ -300,6 +316,7 @@ impl<H: HmacHash> Tagging<H> {
                     &TagOps {
                         update: |hmac, data| hmac.update(data),
                         finish: Hmac::finish,
+                        sign: Hmac::sign,
                     }
                 },
             ),
@@ -312,6 +329,10 @@ impl<H: HmacHash> Tagging<H> {
 
     fn finish(&self) -> Digest {
         (self.ops.get().finish)(&self.hmac)
+    }
+
+    fn sign(&mut self) -> Digest {
+        (self.ops.get().sign)(&mut self.hmac)
     }
 }
 
@@ -491,6 +512,21 @@ def high.hmac.Streaming.finish : high.hmac.Streaming → Result high.digest.Dige
   | .Sha384 hmac => high.hmac.Hmac.finish Sha384Hash hmac
   | .Sha512 hmac => high.hmac.Hmac.finish Sha512Hash hmac
 
+/-- `Streaming::sign`, through `Tagging::sign`'s `ops.sign`, `Hmac::sign`. -/
+def high.hmac.Streaming.sign : high.hmac.Streaming → Result (high.digest.Digest × high.hmac.Streaming)
+  | .Sha1 hmac => do
+    let r ← high.hmac.Hmac.sign Sha1Hash hmac
+    ok (r.1, .Sha1 r.2)
+  | .Sha256 hmac => do
+    let r ← high.hmac.Hmac.sign Sha256Hash hmac
+    ok (r.1, .Sha256 r.2)
+  | .Sha384 hmac => do
+    let r ← high.hmac.Hmac.sign Sha384Hash hmac
+    ok (r.1, .Sha384 r.2)
+  | .Sha512 hmac => do
+    let r ← high.hmac.Hmac.sign Sha512Hash hmac
+    ok (r.1, .Sha512 r.2)
+
 /-- `Streaming`'s derived `Clone`, through `Tagging`'s, which clones the `Hmac`. -/
 def high.hmac.Streaming.Insts.CoreCloneClone.clone : high.hmac.Streaming → Result high.hmac.Streaming
   | .Sha1 hmac => do
@@ -516,9 +552,10 @@ def high.hmac.Context.update (self : high.hmac.Context) (data : Slice Std.U8) :
   high.hmac.Streaming.update self data
 
 /-- `Context::sign`. -/
-def high.hmac.Context.sign (self : high.hmac.Context) : Result high.hmac.Tag := do
+def high.hmac.Context.sign (self : high.hmac.Context) :
+    Result (high.hmac.Tag × high.hmac.Context) := do
   let _ ← low.entry.Entry.new_secret
-  high.hmac.Streaming.finish self
+  high.hmac.Streaming.sign self
 
 /-- `sign`. -/
 def high.hmac.sign (key : high.hmac.Key) (data : Slice Std.U8) : Result high.hmac.Tag := do

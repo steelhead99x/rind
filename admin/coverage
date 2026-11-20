@@ -31,13 +31,21 @@ cargo llvm-cov clean --workspace
 tests=(--workspace --exclude rind-bench --exclude rind-cpuid --exclude rind-fuzz --exclude rind-timing)
 env SLOW_TESTS=1 cargo test --locked "${tests[@]}"
 
+# The older-CPU tiers of build.yml reach only rind's own fallbacks, so they
+# run rind's tests alone: AVX without AVX2, then no AES, CLMUL, AVX, or
+# SSE4.1 on x86_64, and no AES, PMULL, or SHA-2 on aarch64. SDE without
+# AVX-512 reaches the VAES kernels, which some hosted runners lack.
 case $(uname -m) in
     x86_64)
         env RIND_CPU_DISABLE_sha=1 RIND_CPU_DISABLE_intel=1 RIND_CPU_DISABLE_avx512bw=1 RIND_CPU_DISABLE_avx512f=1 RIND_CPU_DISABLE_vaes=1 cargo test --locked "${tests[@]}"
+        env RIND_CPU_DISABLE_avx2=1 RIND_CPU_DISABLE_sha=1 cargo test --locked -p rind
+        env RIND_CPU_DISABLE_aes=1 RIND_CPU_DISABLE_pclmulqdq=1 RIND_CPU_DISABLE_avx=1 RIND_CPU_DISABLE_sse41=1 cargo test --locked -p rind
         env CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER="sde -dmr --" cargo test --locked "${tests[@]}"
+        env RIND_CPU_DISABLE_avx512f=1 RIND_CPU_DISABLE_avx512bw=1 CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER="sde -dmr --" cargo test --locked -p rind --lib
         ;;
     arm|arm64|aarch64)
         env RIND_CPU_DISABLE_sha3=1 cargo test --locked "${tests[@]}"
+        env RIND_CPU_DISABLE_aes=1 RIND_CPU_DISABLE_pmull=1 RIND_CPU_DISABLE_sha2=1 cargo test --locked -p rind
         ;;
 esac
 
@@ -65,3 +73,25 @@ sh/python.sh test
 install -m 755 "$target"/pyrind/site/pyrind/_rind.*.so "$objects/"
 
 cargo llvm-cov report $OPTIONS "$@"
+
+# The table counts the functions no test ran; this names where each starts,
+# one `path:line` each, counting a generic or a closure as run when any copy
+# of it ran. It skips pyo3's `__pymethod_` trampolines, which the release
+# wheel counts as unrun even when the method each calls, measured on its
+# own, ran.
+cargo llvm-cov report $OPTIONS --json --output-path "$out/report.json"
+echo "Functions no test ran:"
+python3 - "$out/report.json" "$PWD/" <<'EOF'
+import collections, json, sys
+
+runs = collections.Counter()
+for function in json.load(open(sys.argv[1]))["data"][0]["functions"]:
+    if "__pymethod_" in function["name"]:
+        continue
+    path = function["filenames"][0].removeprefix(sys.argv[2])
+    runs[path, function["regions"][0][0]] += function["count"]
+for (path, line), count in sorted(runs.items()):
+    published = not path.startswith("/") and path.split("/")[1] == "src"
+    if count == 0 and published:
+        print(f"  {path}:{line}")
+EOF

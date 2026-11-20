@@ -39,6 +39,7 @@ fn argon2(c: &mut Criterion) {
             })
         });
         group.bench_function("rind", |b| {
+            let _dit = criterion::rind_dit();
             let params = rind::argon2::Params::new(memory_kib, passes, lanes).unwrap();
             let secret = rind::argon2::Secret::new(password);
             b.iter(|| {

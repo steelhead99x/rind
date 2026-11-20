@@ -201,6 +201,7 @@ fn full_handshake_by_group(c: &mut Criterion) {
                 HandshakeKind::Full
             );
             group.bench_function(format!("{group_name}/{name}"), |b| {
+                let _dit = (name == "rind").then(criterion::rind_dit);
                 b.iter(|| handshake(&client, &server))
             });
         }
@@ -218,6 +219,7 @@ fn full_handshake_by_key(c: &mut Criterion) {
                 continue;
             };
             group.bench_function(format!("{key}/{name}"), |b| {
+                let _dit = (name == "rind").then(criterion::rind_dit);
                 b.iter(|| handshake(&client, &server))
             });
         }
@@ -241,6 +243,7 @@ fn resumed_handshake(c: &mut Criterion) {
                 HandshakeKind::Resumed
             );
             group.bench_function(format!("{group_name}/{name}"), |b| {
+                let _dit = (name == "rind").then(criterion::rind_dit);
                 b.iter(|| handshake(&client, &server))
             });
         }
@@ -286,6 +289,8 @@ fn threaded_handshake(c: &mut Criterion) {
                         let (work, jobs) = mpsc::channel::<u64>();
                         let done_tx = done_tx.clone();
                         s.spawn(move || {
+                            // Held for the thread's life, so the timed handshakes run under it.
+                            let _dit = (name == "rind").then(criterion::rind_dit);
                             // Each step reports whether it ran and every handshake
                             // was of `kind`, rather than panic and leave the main
                             // thread waiting on this one.
@@ -365,6 +370,7 @@ fn bulk(c: &mut Criterion) {
             let (mut client, mut server) = handshake(&client, &server);
             let mut buf = Vec::new();
             group.bench_function(format!("{suite_name}/{name}"), |b| {
+                let _dit = (name == "rind").then(criterion::rind_dit);
                 b.iter(|| {
                     for _ in 0..LEN / RECORD {
                         server.writer().write_all(&data).unwrap();

@@ -1,4 +1,5 @@
 import Rind.X86_64.Funs
+import Rind.X86_64.VgCurve25519
 import Rind.Spec
 import Rind.Ed25519
 import Mathlib.Data.Nat.Size
@@ -451,6 +452,22 @@ axiom p384_montjscalarmul_alt_spec (res : Std.Array U64 18#usize) (scalar : Std.
       ∀ P, p384OnCurve P → p384Represents P (tripleNat6 point.val) →
         p384Represents (p384Pow P (wordsNat scalar.val)) (tripleNat6 r.val) ⦄
 
+/-- `P384_MONTJADD_SUBROUTINE_CORRECT`,
+https://github.com/awslabs/s2n-bignum/blob/3f01260ff1bd2577abf0117ce45aa008bc243a80/x86/proofs/p384_montjadd.ml#L7500 -/
+@[step]
+axiom p384_montjadd_spec (p3 p1 p2 : Std.Array U64 18#usize) :
+    low.x86_64.p384_montjadd.p384_montjadd p3 p1 p2 ⦃ r =>
+      ∀ P1 P2, p384Represents P1 (tripleNat6 p1.val) → p384Represents P2 (tripleNat6 p2.val) →
+        (P1 = P2 → P2 = none) → p384Represents (p384Add P1 P2) (tripleNat6 r.val) ⦄
+
+/-- `P384_MONTJADD_ALT_SUBROUTINE_CORRECT`,
+https://github.com/awslabs/s2n-bignum/blob/3f01260ff1bd2577abf0117ce45aa008bc243a80/x86/proofs/p384_montjadd_alt.ml#L7695 -/
+@[step]
+axiom p384_montjadd_alt_spec (p3 p1 p2 : Std.Array U64 18#usize) :
+    low.x86_64.p384_montjadd_alt.p384_montjadd_alt p3 p1 p2 ⦃ r =>
+      ∀ P1 P2, p384Represents P1 (tripleNat6 p1.val) → p384Represents P2 (tripleNat6 p2.val) →
+        (P1 = P2 → P2 = none) → p384Represents (p384Add P1 P2) (tripleNat6 r.val) ⦄
+
 /-- `P384_MONTJDOUBLE_SUBROUTINE_CORRECT`,
 https://github.com/awslabs/s2n-bignum/blob/3f01260ff1bd2577abf0117ce45aa008bc243a80/x86/proofs/p384_montjdouble.ml#L4854 -/
 @[step]
@@ -629,6 +646,34 @@ def Runs : Prop :=
   (∃ e, low.entry.Entry.new_secret = ok e) ∧ (∃ e, low.entry.Entry.new_public = ok e) ∧
     (∃ t, low.x86_64.cpu.HaveBmi2Adx.check = ok t) ∧ ∃ t, low.x86_64.cpu.HaveAvx2.check = ok t
 
+/-- The CPU check for pyca/verified-garbage's AVX-512 IFMA X25519 and Ed25519
+returned `o`: a token where X25519 and Ed25519 run VG's routines,
+`Rind.X86_64.VgCurve25519` restates, and `none` where they run s2n-bignum's
+and rind's glue. The check reads no input. -/
+def CurveIfma (o : Option low.x86_64.curve25519_ifma.Curve25519Ifma) : Prop :=
+  low.x86_64.curve25519_ifma.Curve25519Ifma.check = ok o
+
+/-- X25519 and Ed25519 run s2n-bignum's routines and rind's glue: the CPU
+lacks AVX-512 IFMA. Ed25519's proofs on VG's routines are in
+`Rind.X86_64.Ed25519Ifma`. -/
+def NoCurveIfma : Prop := CurveIfma none
+
+/-- RFC 7748's X25519, as the dispatch computes it where `CurveIfma o`:
+VG's spec, `vgX25519`, on the CPUs that run VG's routines, and HOL Light's
+`rfcx25519` on the rest. -/
+def cpuX25519 : Option low.x86_64.curve25519_ifma.Curve25519Ifma → Nat → Nat → Nat
+  | none => rfcx25519
+  | some _ => vgX25519
+
+/-- The 32 bytes of four words' number, read back, are the number. -/
+theorem decodeLE_encodeLE_words (w : Std.Array U64 4#usize) :
+    VG.Spec.Ed25519.decodeLE (VG.Spec.Ed25519.encodeLE 32 (wordsNat w.val)) = wordsNat w.val := by
+  rw [decodeLE_encodeLE, Nat.mod_eq_of_lt]
+  have h := Nat.ofDigits_lt_base_pow_length (b := 2 ^ 64) (l := w.val.map (·.val)) (by norm_num)
+    (fun x hx => by obtain ⟨y, -, rfl⟩ := List.mem_map.mp hx; exact y.hBounds)
+  rw [List.length_map, w.property] at h
+  simpa [wordsNat] using h
+
 @[step]
 theorem new_secret_spec (h : Runs) : low.entry.Entry.new_secret ⦃ _ => True ⦄ := by
   obtain ⟨⟨e, he⟩, -⟩ := h
@@ -639,24 +684,35 @@ theorem new_public_spec (h : Runs) : low.entry.Entry.new_public ⦃ _ => True �
   obtain ⟨-, ⟨e, he⟩, -⟩ := h
   simp [he]
 
-/-- The dispatch runs one of the twins, whose contracts agree. -/
+/-- The dispatch runs VG's routine or one of s2n-bignum's twins, whose
+contracts agree. -/
 @[step]
-theorem curve25519_x25519_mux_spec (h : Runs) (res scalar point : Std.Array U64 4#usize) :
+theorem curve25519_x25519_mux_spec {o : Option low.x86_64.curve25519_ifma.Curve25519Ifma} (h : Runs) (hi : CurveIfma o) (res scalar point : Std.Array U64 4#usize) :
     low.x86_64.adx_mux.curve25519_x25519 res scalar point ⦃ r =>
-      wordsNat r.val = rfcx25519 (wordsNat scalar.val) (wordsNat point.val) ⦄ := by
+      wordsNat r.val = cpuX25519 o (wordsNat scalar.val) (wordsNat point.val) ⦄ := by
   obtain ⟨-, -, ⟨t, ht⟩, -⟩ := h
   unfold low.x86_64.adx_mux.curve25519_x25519
-  rw [ht]
-  cases t <;> step*
+  rw [hi, ht]
+  rcases o with _ | ifma
+  · simp only [cpuX25519]
+    cases t <;> step*
+  · step as ⟨r, hr⟩
+    rw [← decodeLE_encodeLE_words r, hr]
+    rfl
 
 @[step]
-theorem curve25519_x25519base_mux_spec (h : Runs) (res scalar : Std.Array U64 4#usize) :
+theorem curve25519_x25519base_mux_spec {o : Option low.x86_64.curve25519_ifma.Curve25519Ifma} (h : Runs) (hi : CurveIfma o) (res scalar : Std.Array U64 4#usize) :
     low.x86_64.adx_mux.curve25519_x25519base res scalar ⦃ r =>
-      wordsNat r.val = rfcx25519 (wordsNat scalar.val) 9 ⦄ := by
+      wordsNat r.val = cpuX25519 o (wordsNat scalar.val) 9 ⦄ := by
   obtain ⟨-, -, ⟨t, ht⟩, -⟩ := h
   unfold low.x86_64.adx_mux.curve25519_x25519base
-  rw [ht]
-  cases t <;> step*
+  rw [hi, ht]
+  rcases o with _ | ifma
+  · simp only [cpuX25519]
+    cases t <;> step*
+  · step as ⟨r, hr⟩
+    rw [← decodeLE_encodeLE_words r, hr, ← encodeLE_nine]
+    rfl
 
 @[step]
 theorem edwards25519_decode_mux_spec (h : Runs) (z : Std.Array U64 8#usize)
@@ -824,6 +880,16 @@ theorem p384_montjdouble_mux_spec (h : Runs) (p3 p1 : Std.Array U64 18#usize) :
       ∀ P, p384Represents P (tripleNat6 p1.val) → p384Represents (p384Add P P) (tripleNat6 r.val) ⦄ := by
   obtain ⟨-, -, ⟨t, ht⟩, -⟩ := h
   unfold low.x86_64.adx_mux.p384_montjdouble
+  rw [ht]
+  cases t <;> step*
+
+@[step]
+theorem p384_montjadd_mux_spec (h : Runs) (p3 p1 p2 : Std.Array U64 18#usize) :
+    low.x86_64.adx_mux.p384_montjadd p3 p1 p2 ⦃ r =>
+      ∀ P1 P2, p384Represents P1 (tripleNat6 p1.val) → p384Represents P2 (tripleNat6 p2.val) →
+        (P1 = P2 → P2 = none) → p384Represents (p384Add P1 P2) (tripleNat6 r.val) ⦄ := by
+  obtain ⟨-, -, ⟨t, ht⟩, -⟩ := h
+  unfold low.x86_64.adx_mux.p384_montjadd
   rw [ht]
   cases t <;> step*
 

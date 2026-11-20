@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
-use core::cell::Cell;
 use core::marker::PhantomData;
 
 /// Reports whether rind runs AES on CPU instructions, as aws-lc's `EVP_has_aes_hardware` does.
@@ -65,16 +64,19 @@ pub struct Dit {
 impl Dit {
     /// Turns DIT on for this thread, if rind sets it here, until the guard drops.
     pub fn hold() -> Self {
-        let (guards, cpu_state) = DIT_GUARDS.get();
-        let cpu_state = if guards == 0 {
-            super::enter_cpu_state()
-        } else {
-            cpu_state
-        };
-        // Saturating, here and in `drop`: past `usize::MAX` guards the count
-        // is inexact and DIT may turn off early, which costs speed but never
-        // safety, since every rind call sets DIT itself.
-        DIT_GUARDS.set((guards.saturating_add(1), cpu_state));
+        #[cfg(all(rind_backend = "aarch64", target_vendor = "apple"))]
+        {
+            let (guards, cpu_state) = DIT_GUARDS.get();
+            let cpu_state = if guards == 0 {
+                super::enter_cpu_state()
+            } else {
+                cpu_state
+            };
+            // Saturating, here and in `drop`: past `usize::MAX` guards the
+            // count is inexact and DIT may turn off early, which costs speed
+            // but never safety, since every rind call sets DIT itself.
+            DIT_GUARDS.set((guards.saturating_add(1), cpu_state));
+        }
         Self {
             _thread: PhantomData,
         }
@@ -83,18 +85,24 @@ impl Dit {
 
 impl Drop for Dit {
     fn drop(&mut self) {
-        let (guards, cpu_state) = DIT_GUARDS.get();
-        DIT_GUARDS.set((guards.saturating_sub(1), cpu_state));
-        if guards == 1 {
-            super::leave_cpu_state(cpu_state);
+        #[cfg(all(rind_backend = "aarch64", target_vendor = "apple"))]
+        {
+            let (guards, cpu_state) = DIT_GUARDS.get();
+            DIT_GUARDS.set((guards.saturating_sub(1), cpu_state));
+            if guards == 1 {
+                super::leave_cpu_state(cpu_state);
+            }
         }
     }
 }
 
+// Counted only where rind sets DIT, on Apple's aarch64 platforms, which all
+// have threads and `std`; elsewhere the guard holds nothing.
+#[cfg(all(rind_backend = "aarch64", target_vendor = "apple"))]
 std::thread_local! {
     // This thread's live guards, and what the first one's `enter_cpu_state`
     // returned, for the last one to drop to restore.
-    static DIT_GUARDS: Cell<(usize, u32)> = const { Cell::new((0, 0)) };
+    static DIT_GUARDS: core::cell::Cell<(usize, u32)> = const { core::cell::Cell::new((0, 0)) };
 }
 
 #[cfg(test)]
@@ -111,5 +119,28 @@ mod tests {
         #[cfg(rind_backend = "portable")]
         let hardware = false;
         assert_eq!(super::has_aes_hardware(), hardware);
+    }
+
+    /// rind runs while nested guards are held, on every backend, and where
+    /// rind sets DIT the guards count up and back down to none.
+    #[test]
+    fn dit_guards_nest() {
+        let guards = |_expected: usize| {
+            #[cfg(all(rind_backend = "aarch64", target_vendor = "apple"))]
+            assert_eq!(super::DIT_GUARDS.get().0, _expected);
+        };
+        let outer = super::Dit::hold();
+        let inner = super::Dit::hold();
+        guards(2);
+        assert_eq!(
+            crate::digest::digest(&crate::digest::SHA256, b"")
+                .as_ref()
+                .len(),
+            32
+        );
+        drop(outer);
+        guards(1);
+        drop(inner);
+        guards(0);
     }
 }

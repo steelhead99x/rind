@@ -23,9 +23,9 @@ don't ask again (✅ is the chosen option):
   ([apache/opendal#7582](https://github.com/apache/opendal/pull/7582)), which
   the [migration prompt](/MIGRATE.md) can turn on.
 - Big names on RustCrypto are marketing wins, since rind is several times
-  faster ([BENCHMARKS.md](/BENCHMARKS.md)'s `nixos2`, an i7-8700: RSA-2048
-  verify about 4.7x, P-256 sign and ECDH about 5x, ChaCha20-Poly1305 per
-  packet about 3x, AES-GCM about 2x). Decided 2026-11-09 (maintainer,
+  faster ([BENCHMARKS.md](/BENCHMARKS.md)'s `nixos`, a Zen 3: RSA-2048
+  verify about 4.4x, P-256 sign and ECDH about 7x, ChaCha20-Poly1305 per
+  packet about 3.6x, AES-GCM about 2.7x). Decided 2026-11-09 (maintainer,
   /quest-unblock): Deno and snow are dropped, Deno because it is
   deprecated and rind-snow by closing
   [#470](https://github.com/kixel-ai/rind/pull/470) on purpose.
@@ -67,8 +67,7 @@ don't ask again (✅ is the chosen option):
   a project from choosing rind. The maintainer picked four bets ✅: RustCrypto's
   traits and a `[patch]` spike, which are
   [their own epic](/quest/m2/rustcrypto/README.md), and here
-  [a `no_std` build](/quest/m2/adoption/no-std.md) and
-  adapters on wasm32 (landed), which Bitwarden
+  a `no_std` build and adapters on wasm32 (both landed), which Bitwarden
   and Matrix were left out for above. An npm package was offered and not
   picked, so Node stays out as decided on 2026-11-04. Considered and left out,
   so don't raise them again without new evidence:

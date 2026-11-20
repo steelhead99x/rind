@@ -123,10 +123,10 @@ fn order(suite: &Suite) -> Vec<u8> {
     })
 }
 
-/// Every single-bit change to a vector's proof, a proof truncated or
-/// extended, one with a scalar at the group order or (for ristretto255) a
-/// second encoding of one, one against another key, and one over swapped
-/// elements are refused.
+/// A one-bit change to each byte of a vector's proof, each bit position in
+/// turn, a proof truncated or extended, one with a scalar at the group order
+/// or (for ristretto255) a second encoding of one, one against another key,
+/// and one over swapped elements are refused.
 #[test]
 fn refuses_altered_proofs() {
     struct Steps;
@@ -166,13 +166,16 @@ fn refuses_altered_proofs() {
                 };
                 check(&public, &evaluated, &evaluated_bytes, &proof).unwrap();
 
-                for bit in 0..proof.len() * 8 {
+                // One bit per byte rather than all eight: each check is a
+                // whole verification, and every bit costs ctgrind's armv7
+                // debug rows nearly five hours.
+                for byte in 0..proof.len() {
                     let mut altered = proof.clone();
-                    altered[bit / 8] ^= 1 << (bit % 8);
+                    altered[byte] ^= 1 << (byte % 8);
                     assert_eq!(
                         check(&public, &evaluated, &evaluated_bytes, &altered).unwrap_err(),
                         Error::BadSignature,
-                        "bit {bit}"
+                        "byte {byte}"
                     );
                 }
                 for bad in [&proof[1..], &[&proof[..], &[0]].concat()] {
@@ -435,4 +438,21 @@ fn stays_secret() {
             }
         }
     }
+}
+
+/// Debug output shows the public elements and proof, and hides the blinds.
+#[test]
+fn debug_shows_no_secret() {
+    let server = ServerKey::generate(&RISTRETTO255_SHA512).unwrap();
+    let (blind, blinded) = Blind::new(&RISTRETTO255_SHA512, b"input").unwrap();
+    assert_eq!(
+        format!("{blind:?}"),
+        "Blind { suite: ristretto255-SHA512, .. }"
+    );
+    let (evaluated, proof) = server.blind_evaluate(blinded.as_ref()).unwrap();
+    assert_eq!(
+        format!("{evaluated:?}"),
+        format!("EvaluatedElements({:?})", evaluated.as_ref())
+    );
+    assert_eq!(format!("{proof:?}"), format!("Proof({:?})", proof.as_ref()));
 }

@@ -73,11 +73,12 @@ Outside the model:
   or a wasm engine may emit code no check has seen.
 - A CPU whose multiplier takes time by its operands, and an Intel CPU whose
   operating system leaves DOITM unset, as Linux does, both of which
-  [PLATFORMS.md](PLATFORMS.md) describes. Intel's data-independent list also
-  omits the `VSHA512` instructions, which SHA-384 and SHA-512 run where the
-  CPU has them, until [their quest](/quest/m2/confidence/intel-vsha512.md)
-  drops them. Intel's MXCSR-dependent timing is in the model: rind loads
-  `0x1FBF` around the x86_64 code that reaches an affected multiply, and
+  [PLATFORMS.md](PLATFORMS.md) describes. Intel's data-independent list omits
+  the `VSHA512` instructions; rind does not run them, and `admin/ct-vartime`
+  refuses them. On a Core Ultra 9 275HX (Arrow Lake), SHA-512 takes 2.0 to
+  2.2× its former time at 32 and 64 B and 4.4 to 4.7× from 1200 B, still 0.81
+  to 0.86× aws-lc-rs's. Intel's MXCSR-dependent timing is in the model: rind
+  loads `0x1FBF` around the x86_64 code that reaches an affected multiply, and
   around every call on 32-bit x86.
 - The operating system's random source, which rind trusts through
   `getrandom`, and an attacker who reads the process's memory while it runs.
@@ -103,7 +104,7 @@ The pins, as `admin/audit` renders them from the files that hold them, so
 | BoringSSL | `8f2554dc344d` | `admin/import-boringssl` | copied code |
 | OpenSSL | `2f4e3a5fec05` | `admin/import-openssl` | copied code |
 | HACL\* | `f557259007db` | `admin/import-hacl` | Vale's x86_64 AES-GCM |
-| pyca/verified-garbage | `e7b0fe8a82b7` | `admin/import-vg` | copied code and the Lean ISA models its proofs rest on |
+| pyca/verified-garbage | `0aa40d6c21fd` | `admin/import-vg` | copied code and the Lean ISA models its proofs rest on |
 | s2n-bignum | `3f01260ff1bd` | `thirdparty/s2n-bignum/RIND.md` | assembly and the HOL Light proofs of it |
 | aws-lc | `c21d40da4bbe` | `admin/prove-bytes` | the routines aws-lc-verification's SHA-384/512 proofs are about |
 | ACVP-Server | `975de31eb83d` | `admin/sync-acvp` | test vectors |
@@ -191,8 +192,8 @@ establishes, and what it does not:
   between those two.
 - **`admin/ct-binsec`** has BINSEC check each `ct_binsec_...` region for
   every value of its secrets at once, on x86_64, aarch64, and the portable
-  backend. Its public inputs are fixed, it cannot decode AES-NI, VAES, the
-  SHA512 instructions, AVX-512, or aarch64's crypto extension and SHA3, it
+  backend. Its public inputs are fixed, it cannot decode AES-NI, VAES,
+  AVX-512, or aarch64's crypto extension and SHA3, it
   does not run on armv7, and its lifter misses a secret branch whose two
   sides are empty.
 - **`admin/ct-vartime`**, in `just ci`, scans the release builds of every
@@ -201,7 +202,7 @@ establishes, and what it does not:
   multiply whose timing depends on MXCSR that an export reaches outside
   `rind::low::Mcdt`, the mitigation; on 32-bit x86 and the portable backend,
   that every call enters it is unchecked. It takes the integer multiplier to
-  run in constant time, and does not refuse `VSHA512`.
+  run in constant time, and on x86 it refuses `vsha512*`.
 - **s2n-bignum's `_SAFE` theorems** prove the routines
   [ALGORITHMS.md](ALGORITHMS.md#s2n-bignums-constant-time-theorems) lists
   constant time for every input, variable-time instructions included, but

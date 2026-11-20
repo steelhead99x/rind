@@ -37,6 +37,7 @@ mod macros;
 
 pub(crate) mod ct;
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) mod ct_binsec;
 
 #[cfg(rind_vartime_planted)]
@@ -95,8 +96,16 @@ mod generic {
     // key generation and decapsulation, and every operation elsewhere.
     #[cfg(not(rind_backend = "x86_64"))]
     pub(crate) mod mlkem768_vg;
-    #[cfg(not(rind_backend = "x86_64"))]
-    pub(crate) mod mlkem_sample;
+    // pyca/verified-garbage's P-256 and P-384 where they do not run: armv7
+    // and the portable backend.
+    #[cfg(not(any(rind_backend = "x86_64", rind_backend = "aarch64")))]
+    pub(crate) mod p256_vg;
+    #[cfg(not(any(rind_backend = "x86_64", rind_backend = "aarch64")))]
+    pub(crate) mod p384_vg;
+    // pyca/verified-garbage's PBKDF2 where it does not run: every backend
+    // but aarch64's.
+    #[cfg(not(rind_backend = "aarch64"))]
+    pub(crate) mod pbkdf2_vg;
     // ML-KEM arithmetic for the portable backend and x86_64 CPUs without
     // AVX2.
     #[cfg(not(rind_backend = "aarch64"))]
@@ -121,24 +130,81 @@ mod generic {
         all(test, any(rind_backend = "arm", rind_backend = "x86_64"))
     ))]
     pub(super) mod sha1;
-    #[cfg(all(test, any(rind_backend = "arm", rind_backend = "x86_64")))]
+    #[cfg(all(
+        test,
+        any(
+            rind_backend = "arm",
+            rind_backend = "portable",
+            rind_backend = "x86_64"
+        )
+    ))]
     pub(super) mod sha256;
+    // FIPS 180-4 §4.2.2, one copy. The ESP-IDF Xtensa compressor and the
+    // test compressor above both read it. aarch64 tests compile neither
+    // reader, so the table stays out: clippy denies an unused static.
+    #[cfg(any(
+        all(target_arch = "xtensa", target_os = "espidf"),
+        all(
+            test,
+            any(
+                rind_backend = "arm",
+                rind_backend = "portable",
+                rind_backend = "x86_64"
+            )
+        )
+    ))]
+    pub(super) mod sha256_k;
     // SLH-DSA's SHA-256 lanes one at a time, which x86_64 runs with the SHA
     // extensions or without AVX2.
     pub(super) mod sha256x8;
+    // Rolled SHA-512 on 32-bit microcontrollers (ESP-IDF or no OS), whose
+    // small instruction cache HACL*'s ~47 KiB unrolled body misses. Hosted
+    // 32-bit targets keep HACL*, which took 0.71-0.78 of this loop's time
+    // on i686. Tests compile it everywhere and check it against FIPS 180-4.
+    #[cfg(any(
+        all(
+            rind_backend = "portable",
+            not(target_pointer_width = "64"),
+            any(target_os = "espidf", target_os = "none")
+        ),
+        test
+    ))]
+    pub(super) mod sha512;
     pub(super) mod zeroise;
 }
 
 pub(crate) mod cpu;
 mod entry;
+
+/// Whether `RIND_CPU_DISABLE_<id>` denies the CPU feature `id`, so a CPU with
+/// it also tests the code for one without. Only a debug build reads it, or a
+/// release one with `--cfg rind_cpu_disable`, so benches and ctgrind time and
+/// check the code that ships; only `RUSTFLAGS` sets that, never a dependent
+/// crate. The variable drops the dot from `sse4.1`, since shells drop
+/// variables whose names have one. A target without an OS has no variables.
+#[cfg(all(rind_std, any(debug_assertions, rind_cpu_disable)))]
+#[cfg_attr(any(rind_backend = "portable", rind_backend = "arm"), allow(dead_code))]
+pub(crate) fn cpu_denied(id: &str) -> bool {
+    // Set is enough, whatever the value. Silent, since detection runs inside
+    // any call, where the caller may hold stdout's lock or have closed it.
+    std::env::var_os(std::format!("RIND_CPU_DISABLE_{}", id.replace('.', ""))).is_some()
+}
+
+/// Denies nothing, in a release build or without an OS. The portable backend
+/// asks only on x86, and arm only on Linux and Android.
+#[cfg(not(all(rind_std, any(debug_assertions, rind_cpu_disable))))]
+#[cfg_attr(any(rind_backend = "portable", rind_backend = "arm"), allow(dead_code))]
+#[inline(always)]
+pub(crate) fn cpu_denied(_id: &str) -> bool {
+    false
+}
+
 // Intel's MXCSR mitigation, where the instructions it covers exist: on x86
-// with SSE2, outside Miri, which runs no assembly.
+// and x86_64 targets with SSE2, outside Miri, which runs no assembly.
 #[cfg_attr(
     not(all(
-        any(
-            target_arch = "x86_64",
-            all(target_arch = "x86", target_feature = "sse2")
-        ),
+        any(target_arch = "x86_64", target_arch = "x86"),
+        target_feature = "sse2",
         not(miri)
     )),
     path = "mcdt_none.rs"
@@ -232,7 +298,6 @@ pub(crate) use generic::{
         mlkem_basemul_k2, mlkem_basemul_k3, mlkem_basemul_k4, mlkem_intt, mlkem_mulcache_compute,
         mlkem_ntt, mlkem_reduce, mlkem_rej_uniform_vartime, mlkem_tobytes, mlkem_tomont,
     },
-    mlkem_sample::mlkem_sample_poly_ntt_8x,
     // libcrux's P-256 runs 64-bit limbs and recomputes the nonce's point to
     // sign, it exports P-384 only as ECDH, and it has no P-521, so rind
     // composes their arithmetic itself.
@@ -322,6 +387,7 @@ cfg_if::cfg_if! {
         pub(crate) use x86_64::adx_mux::bignum_tomont_p384;
         pub(crate) use x86_64::adx_mux::curve25519_x25519;
         pub(crate) use x86_64::adx_mux::curve25519_x25519base;
+        pub(crate) use x86_64::curve25519_ifma::Curve25519Ifma;
         pub(crate) use x86_64::adx_mux::edwards25519_decode;
         pub(crate) use x86_64::adx_mux::edwards25519_epadd;
         pub(crate) use x86_64::adx_mux::edwards25519_epdouble;
@@ -337,6 +403,9 @@ cfg_if::cfg_if! {
             mldsa_rej_uniform_eta4_vartime,
         };
         pub(crate) use x86_64::mlkem768_vg;
+        pub(crate) use x86_64::p256_vg;
+        pub(crate) use generic::pbkdf2_vg;
+        pub(crate) use x86_64::p384_vg;
         pub(crate) use x86_64::mlkem::{
             mlkem_ntt,
             mlkem_intt,
@@ -446,6 +515,7 @@ cfg_if::cfg_if! {
         pub(crate) use aarch64::bignum_tomont_p384::bignum_tomont_p384;
         pub(crate) use aarch64::curve25519_x25519::curve25519_x25519;
         pub(crate) use aarch64::curve25519_x25519base::curve25519_x25519base;
+        pub(crate) use aarch64::curve25519_ifma::Curve25519Ifma;
         pub(crate) use aarch64::edwards25519_decode::edwards25519_decode;
         pub(crate) use aarch64::edwards25519_epadd::edwards25519_epadd;
         pub(crate) use aarch64::edwards25519_epdouble::edwards25519_epdouble;
@@ -460,6 +530,9 @@ cfg_if::cfg_if! {
             mldsa_rej_uniform_eta4_vartime,
         };
         pub(crate) use aarch64::mlkem768_vg;
+        pub(crate) use aarch64::p256_vg;
+        pub(crate) use aarch64::pbkdf2_vg;
+        pub(crate) use aarch64::p384_vg;
         pub(crate) use aarch64::mlkem::{
             mlkem_ntt,
             mlkem_intt,
@@ -498,7 +571,6 @@ cfg_if::cfg_if! {
         pub(crate) use aarch64::chacha20;
         pub(crate) use aarch64::chacha20poly1305;
         pub(crate) use generic::mlkem::{mlkem_compress_d4, mlkem_compress_d5, mlkem_compress_d10, mlkem_compress_d11, mlkem_frombytes, mlkem_unpack};
-        pub(crate) use generic::mlkem_sample::mlkem_sample_poly_ntt_8x;
     } else if #[cfg(rind_backend = "arm")] {
         pub(in crate::low) use arm::cpu::{enter_cpu_state, zero_bytes, ct_compare_bytes, ct_compare_16, leave_cpu_state};
         pub(crate) use arm::aes::{AesDecKey, AesKey};
@@ -524,6 +596,9 @@ cfg_if::cfg_if! {
             sha512_compress_blocks,
         };
         pub(crate) use generic::mlkem768_vg;
+        pub(crate) use generic::p256_vg;
+        pub(crate) use generic::p384_vg;
+        pub(crate) use generic::pbkdf2_vg;
         pub(crate) use generic::sha256x8::sha256_finish_x8;
     } else if #[cfg(rind_backend = "portable")] {
         pub(in crate::low) use portable::cpu::{enter_cpu_state, zero_bytes, ct_compare_bytes, ct_compare_16, leave_cpu_state};
@@ -541,6 +616,9 @@ cfg_if::cfg_if! {
             sha512_compress_blocks,
         };
         pub(crate) use generic::mlkem768_vg;
+        pub(crate) use generic::p256_vg;
+        pub(crate) use generic::p384_vg;
+        pub(crate) use generic::pbkdf2_vg;
         pub(crate) use generic::sha256x8::sha256_finish_x8;
     } else {
         compile_error!("build.rs sets rind_backend");

@@ -2,6 +2,8 @@
 
 //! Argon2id, standardized in [RFC 9106](https://datatracker.ietf.org/doc/html/rfc9106).
 
+use alloc::boxed::Box;
+use alloc::vec::Vec;
 use core::fmt;
 
 use crate::Error;
@@ -169,6 +171,11 @@ mod tests {
         Ok(params) => params,
         Err(_) => panic!(),
     };
+
+    #[test]
+    fn debug_shows_no_secret() {
+        assert_eq!(format!("{:?}", Secret::new(b"password")), "Secret(..)");
+    }
 
     #[test]
     fn params() {

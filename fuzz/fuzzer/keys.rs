@@ -4,7 +4,8 @@
 //! which aws-lc lacks: the first byte picks the loader and the rest is its
 //! input. Both must accept and refuse alike, except where an [`Expect`] names
 //! a difference by design, and every key rind loads must re-encode to input
-//! both load again as the same key.
+//! both load again as the same key. `rind::KeyPair::from_pkcs8`, which no
+//! other library has, is checked against each type's own loader instead.
 
 use aws_lc_rs::agreement::ParsedPublicKeyFormat as Format;
 use aws_lc_rs::encoding::{AsBigEndian, AsDer};
@@ -104,6 +105,7 @@ fuzz_target!(|data: &[u8]| {
         58 => slh_dsa_public::<SlhDsaShake128f, slh_dsa::Shake128f>(input),
         59 => slh_dsa_spki::<SlhDsaSha2_128s, slh_dsa::Sha2_128s>(input),
         60 => slh_dsa_spki::<SlhDsaShake128f, slh_dsa::Shake128f>(input),
+        61 => any_pkcs8(input),
         _ => {}
     }
 });
@@ -1028,4 +1030,97 @@ fn slh_dsa_spki<P: our_slh_dsa::ParameterSet, R: slh_dsa::ParameterSet>(input: &
     let again = our_slh_dsa::PublicKey::<P>::from_spki(spki.as_ref()).unwrap();
     assert_eq!(again.as_ref(), ours.as_ref());
     slh_dsa_public::<P, R>(ours.as_ref());
+}
+
+/// `rind::KeyPair::from_pkcs8` takes a key exactly when one type's own loader
+/// does, as that type, so it adds no acceptance of its own.
+fn any_pkcs8(input: &[u8]) {
+    fn public(key: &rind::KeyPair) -> (&'static str, Vec<u8>) {
+        use rind::KeyPair::*;
+        match key {
+            EcdsaP256(key) => ("P-256", key.public_key().as_ref().to_vec()),
+            EcdsaP384(key) => ("P-384", key.public_key().as_ref().to_vec()),
+            EcdsaP521(key) => ("P-521", key.public_key().as_ref().to_vec()),
+            Ed25519(key) => ("Ed25519", key.public_key().as_ref().to_vec()),
+            Rsa(key) => ("RSA", key.public_key().as_ref().to_vec()),
+            MlDsa44(key) => ("ML-DSA-44", key.public_key().as_ref().to_vec()),
+            MlDsa65(key) => ("ML-DSA-65", key.public_key().as_ref().to_vec()),
+            MlDsa87(key) => ("ML-DSA-87", key.public_key().as_ref().to_vec()),
+            other => slh_dsa_public(other).unwrap_or(("other", format!("{other:?}").into_bytes())),
+        }
+    }
+    // A set's own loader refuses another set's OID before it rebuilds a key,
+    // so checking all twelve costs no more than checking one.
+    macro_rules! slh_dsa {
+        ($($set:ident),*) => {
+            fn slh_dsa_public(key: &rind::KeyPair) -> Option<(&'static str, Vec<u8>)> {
+                match key {
+                    $(rind::KeyPair::$set(key) => {
+                        Some((stringify!($set), key.public_key().as_ref().to_vec()))
+                    })*
+                    _ => None,
+                }
+            }
+            fn slh_dsa_own(input: &[u8]) -> [(&'static str, Result<Vec<u8>, rind::Error>); 12] {
+                [$((
+                    stringify!($set),
+                    our_slh_dsa::KeyPair::<our_slh_dsa::$set>::from_pkcs8(input)
+                        .map(|k| k.public_key().as_ref().to_vec()),
+                )),*]
+            }
+        };
+    }
+    slh_dsa!(
+        SlhDsaSha2_128s,
+        SlhDsaSha2_128f,
+        SlhDsaSha2_192s,
+        SlhDsaSha2_192f,
+        SlhDsaSha2_256s,
+        SlhDsaSha2_256f,
+        SlhDsaShake128s,
+        SlhDsaShake128f,
+        SlhDsaShake192s,
+        SlhDsaShake192f,
+        SlhDsaShake256s,
+        SlhDsaShake256f
+    );
+    let ecdsa =
+        |alg| ecdsa::KeyPair::from_pkcs8(alg, input).map(|k| k.public_key().as_ref().to_vec());
+    let own = [
+        ("P-256", ecdsa(&ecdsa::sign::P256_SHA256_ASN1)),
+        ("P-384", ecdsa(&ecdsa::sign::P384_SHA384_ASN1)),
+        ("P-521", ecdsa(&ecdsa::sign::P521_SHA512_ASN1)),
+        (
+            "Ed25519",
+            ed25519::KeyPair::from_pkcs8(input).map(|k| k.public_key().as_ref().to_vec()),
+        ),
+        (
+            "RSA",
+            our_rsa::KeyPair::from_pkcs8(input).map(|k| k.public_key().as_ref().to_vec()),
+        ),
+        (
+            "ML-DSA-44",
+            ml_dsa::KeyPair::<MlDsa44>::from_pkcs8(input).map(|k| k.public_key().as_ref().to_vec()),
+        ),
+        (
+            "ML-DSA-65",
+            ml_dsa::KeyPair::<MlDsa65>::from_pkcs8(input).map(|k| k.public_key().as_ref().to_vec()),
+        ),
+        (
+            "ML-DSA-87",
+            ml_dsa::KeyPair::<MlDsa87>::from_pkcs8(input).map(|k| k.public_key().as_ref().to_vec()),
+        ),
+    ];
+    let accepted: Vec<_> = own
+        .into_iter()
+        .chain(slh_dsa_own(input))
+        .filter_map(|(name, key)| Some((name, key.ok()?)))
+        .collect();
+    match rind::KeyPair::from_pkcs8(input) {
+        Ok(key) if public(&key).0 == "other" => {
+            assert!(accepted.is_empty(), "{key:?} {accepted:?}")
+        }
+        Ok(key) => assert_eq!(accepted, [public(&key)]),
+        Err(err) => assert!(accepted.is_empty(), "{err} {accepted:?}"),
+    }
 }

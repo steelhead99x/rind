@@ -31,7 +31,7 @@ import re
 import subprocess
 import sys
 
-REV = "e7b0fe8a82b7777958e078573771d51415f105bb"
+REV = "0aa40d6c21fd02943fe5b38a5b69b6213d07764d"
 
 ROOT = os.path.join(os.path.dirname(__file__), "..", "rind", "src", "low")
 
@@ -57,6 +57,20 @@ ROOTS = {
         "vg_mlkem768_encaps_h_avx512",
         "vg_mlkem768_keygen_avx512",
         "vg_mlkem768_decaps_avx512",
+        # P-256's public key, ECDH, and ECDSA verification: with BMI2 and
+        # ADX, and with AVX-512 IFMA for ECDH and verification.
+        "vg_ec_p256_public_key_adx",
+        "vg_ecdh_p256_adx",
+        "vg_ecdh_p256_ifma",
+        "vg_ecdsa_p256_verify_adx",
+        "vg_ecdsa_p256_verify_ifma",
+        # X25519 and Ed25519 with AVX512_IFMA: VG's routines for CPUs
+        # without the SHA-512 instructions, as its dispatcher picks on them.
+        "vg_x25519_exchange_ifma",
+        "vg_x25519_base_ifma",
+        "vg_ed25519_key_pair_avx2_ifma",
+        "vg_ed25519_sign_expanded_avx2_ifma",
+        "vg_ed25519_verify_avx2_ifma",
         # RSA's public operation, with AVX512_IFMA for 2048-, 3072-, and
         # 4096-bit moduli and e = 65537 and with ADX for the rest.
         "vg_rsa_public_precomputed_checked_ifma",
@@ -64,8 +78,17 @@ ROOTS = {
         # keys, and its twin for CPUs with two 512-bit multipliers.
         "vg_rsa_private_crt_precomputed_ifma",
         "vg_rsa_private_crt_precomputed_ifma512",
+        # P-384's k·G, for ECDSA's keys and nonces, with BMI2 and ADX and
+        # without, and its ECDSA verification with them.
+        "vg_ec_p384_public_key",
+        "vg_ec_p384_public_key_adx",
+        "vg_ecdsa_p384_verify_adx",
     ],
     "aarch64": [
+        # cipher::ChaCha20 with NEON, and with SVE2.
+        "vg_chacha20_init",
+        "vg_chacha20_apply_neon",
+        "vg_chacha20_apply_sve2",
         # ChaCha20-Poly1305 with SVE2.
         "vg_chacha20_poly1305_seal_sve2",
         "vg_chacha20_poly1305_open_sve2",
@@ -77,6 +100,20 @@ ROOTS = {
         "vg_mlkem768_encaps_x2_sha3_keccak_sha3",
         "vg_mlkem768_encaps_h_x2_sha3",
         "vg_mlkem768_encaps_h_x2_sha3_keccak_sha3",
+        # P-256's public key, ECDH, and ECDSA verification.
+        "vg_ec_p256_public_key",
+        "vg_ecdh_p256",
+        "vg_ecdsa_p256_verify",
+        # PBKDF2 over HMAC-SHA1 and HMAC-SHA256 with the crypto extension,
+        # and over HMAC-SHA384 and HMAC-SHA512 with the SHA-512 instructions.
+        "vg_pbkdf2_hmac_sha1_sha2",
+        "vg_pbkdf2_hmac_sha256_sha2",
+        "vg_pbkdf2_hmac_sha384_sha512",
+        "vg_pbkdf2_hmac_sha512_sha512",
+        # P-384's k·G, for ECDSA's keys and nonces, and its ECDSA
+        # verification.
+        "vg_ec_p384_public_key",
+        "vg_ecdsa_p384_verify",
     ],
 }
 
