@@ -14,6 +14,7 @@ extern int devbench_start(const char *config);
 extern char *devbench_status_json(void);
 extern void devbench_stop(void);
 extern void devbench_free(char *p);
+extern void devbench_setenv(const char *key, const char *value);
 
 static id JSON(char *p) {
   if (!p) return nil;
@@ -119,6 +120,8 @@ static BOOL Reachable(NSString *host, int port, int ms) {
   resultsLbl.font = [UIFont monospacedSystemFontOfSize:12 weight:UIFontWeightRegular];
   [root addArrangedSubview:[self card:@[[self label:@"Status" size:20 weight:UIFontWeightBold color:nil], statusLbl, resultsLbl]]];
   [root addArrangedSubview:[self label:@"An unofficial community tool, not run or endorsed by the rind maintainers." size:12 weight:UIFontWeightRegular color:C_MUTED]];
+  // rind-bench's rustls rows read their certificates while the list is made, not only when timed.
+  devbench_setenv("RIND_BENCH_KEYS_DIR", [NSBundle.mainBundle.resourcePath stringByAppendingPathComponent:@"keys"].UTF8String);
   dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
     NSDictionary *cat = JSON(devbench_catalog_json());
     dispatch_async(dispatch_get_main_queue(), ^{ [self loaded:cat]; });

@@ -143,6 +143,7 @@ public class MainActivity extends Activity {
         if ("full".equals(it.getStringExtra("preset"))) preset.check(101);
         new Thread(() -> {
             String keys = copyKeys();
+            Native.setenv("RIND_BENCH_KEYS_DIR", keys);
             String cat = Native.catalog();
             ui.post(() -> loaded(cat, keys));
         }).start();

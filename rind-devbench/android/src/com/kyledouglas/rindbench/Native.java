@@ -10,4 +10,6 @@ final class Native {
     static native int start(String configJson);
     static native String status();
     static native void stop();
+    /** Before catalog(): rind-bench's rustls rows read RIND_BENCH_KEYS_DIR while listing. */
+    static native void setenv(String key, String value);
 }

@@ -499,6 +499,18 @@ pub unsafe extern "C" fn devbench_start(config: *const c_char) -> i32 {
     }
 }
 
+/// Set an environment variable before the catalog is read (rind-bench's
+/// rustls rows read RIND_BENCH_KEYS_DIR while listing, not only when timed).
+///
+/// # Safety
+/// NUL-terminated UTF-8 strings; call before any run starts.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn devbench_setenv(key: *const c_char, value: *const c_char) {
+    let k = unsafe { CStr::from_ptr(key) }.to_string_lossy().into_owned();
+    let v = unsafe { CStr::from_ptr(value) }.to_string_lossy().into_owned();
+    unsafe { std::env::set_var(k, v) };
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn devbench_status_json() -> *mut c_char {
     to_c(status().to_string())
