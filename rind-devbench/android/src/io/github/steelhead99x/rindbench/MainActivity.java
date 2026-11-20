@@ -1,4 +1,4 @@
-package com.kyledouglas.rindbench;
+package io.github.steelhead99x.rindbench;
 
 import android.app.Activity;
 import android.content.Intent;
@@ -34,7 +34,7 @@ import java.util.*;
  * computer ran `adb reverse tcp:PORT tcp:PORT`), then the LAN address baked in
  * at build time (Collector.java). Results are always saved on the phone too.
  *
- * adb: am start -n com.kyledouglas.rindbench/.MainActivity [--es host H --ei port P]
+ * adb: am start -n io.github.steelhead99x.rindbench/.MainActivity [--es host H --ei port P]
  *      [--es libraries "rind,ring"] [--es sections "AEADs"] [--es preset quick|full] [--ez autostart true]
  */
 public class MainActivity extends Activity {

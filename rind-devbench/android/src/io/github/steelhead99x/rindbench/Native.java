@@ -1,4 +1,4 @@
-package com.kyledouglas.rindbench;
+package io.github.steelhead99x.rindbench;
 
 /** rind-devbench's C core (librind_devbench.so). All JSON. */
 final class Native {

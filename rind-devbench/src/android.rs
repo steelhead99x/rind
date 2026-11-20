@@ -1,4 +1,4 @@
-//! JNI entry points for com.kyledouglas.rindbench.Native.
+//! JNI entry points for io.github.steelhead99x.rindbench.Native.
 use jni::JNIEnv;
 use jni::objects::{JClass, JString};
 use jni::sys::{jint, jstring};
@@ -8,19 +8,19 @@ fn s(env: &mut JNIEnv, v: String) -> jstring {
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_kyledouglas_rindbench_Native_catalog(mut env: JNIEnv, _c: JClass) -> jstring {
+pub extern "system" fn Java_io_github_steelhead99x_rindbench_Native_catalog(mut env: JNIEnv, _c: JClass) -> jstring {
     let v = crate::catalog().to_string();
     s(&mut env, v)
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_kyledouglas_rindbench_Native_device(mut env: JNIEnv, _c: JClass) -> jstring {
+pub extern "system" fn Java_io_github_steelhead99x_rindbench_Native_device(mut env: JNIEnv, _c: JClass) -> jstring {
     let v = crate::device::capabilities().to_string();
     s(&mut env, v)
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_kyledouglas_rindbench_Native_start(mut env: JNIEnv, _c: JClass, cfg: JString) -> jint {
+pub extern "system" fn Java_io_github_steelhead99x_rindbench_Native_start(mut env: JNIEnv, _c: JClass, cfg: JString) -> jint {
     let cfg: String = match env.get_string(&cfg) {
         Ok(v) => v.into(),
         Err(_) => return 2,
@@ -35,13 +35,13 @@ pub extern "system" fn Java_com_kyledouglas_rindbench_Native_start(mut env: JNIE
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_kyledouglas_rindbench_Native_status(mut env: JNIEnv, _c: JClass) -> jstring {
+pub extern "system" fn Java_io_github_steelhead99x_rindbench_Native_status(mut env: JNIEnv, _c: JClass) -> jstring {
     let v = crate::status().to_string();
     s(&mut env, v)
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_kyledouglas_rindbench_Native_setenv(mut env: JNIEnv, _c: JClass, k: JString, v: JString) {
+pub extern "system" fn Java_io_github_steelhead99x_rindbench_Native_setenv(mut env: JNIEnv, _c: JClass, k: JString, v: JString) {
     let k: String = match env.get_string(&k) { Ok(s) => s.into(), Err(_) => return };
     let v: String = match env.get_string(&v) { Ok(s) => s.into(), Err(_) => return };
     // SAFETY: called once at launch, before the catalog or any run reads the environment.
@@ -49,6 +49,6 @@ pub extern "system" fn Java_com_kyledouglas_rindbench_Native_setenv(mut env: JNI
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_kyledouglas_rindbench_Native_stop(_env: JNIEnv, _c: JClass) {
+pub extern "system" fn Java_io_github_steelhead99x_rindbench_Native_stop(_env: JNIEnv, _c: JClass) {
     crate::stop()
 }

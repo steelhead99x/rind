@@ -31,7 +31,7 @@ CAPTURE --out DIR` splits a collector capture into one JSON per run.
 - iOS (Mac, Xcode, rustup 1.98.1 + aarch64-apple-ios): `ios/build-ipa.sh PORT [HOST]`
   (e.g. 9101 for one iPad, 9102 for another; HOST is the collector's LAN address, left out = results stay on the iPad)
   → `ios/out/RindBenchAll-v14.1-<port>.ipa`, **unsigned**.
-  Bundle id `com.kyledouglas.rindbench.all` (installs next to v13, not over it).
+  Bundle id `io.github.steelhead99x.rindbench.all` (installs next to v13, not over it).
   OpenSSL is vendored (built from source) by default; `CARGO_FEATURES= ios/build-ipa.sh` leaves it out.
 - Android (Linux, SDK build-tools 35 + platform 35 + NDK, JDK 17+, rustup aarch64-linux-android):
   `JAVA_HOME=… CARGO_FEATURES="--features __bench_openssl" [COLLECTOR_HOST=<LAN address>] android/build-apk.sh` →
@@ -43,5 +43,5 @@ CAPTURE --out DIR` splits a collector capture into one JSON per run.
   on the collector computer, open "RindBench All", agree, Start.
 - Android: `adb install -r RindBench-android.apk`;
   the collector fills itself in (127.0.0.1:9103 via `adb reverse`, else the LAN address given to build-apk.sh as `COLLECTOR_HOST`); headless:
-  `adb shell am start -n com.kyledouglas.rindbench/.MainActivity --es preset quick --es libraries rind,ring --es sections AEADs --ez autostart true`;
-  results also in `/sdcard/Android/data/com.kyledouglas.rindbench/files/`.
+  `adb shell am start -n io.github.steelhead99x.rindbench/.MainActivity --es preset quick --es libraries rind,ring --es sections AEADs --ez autostart true`;
+  results also in `/sdcard/Android/data/io.github.steelhead99x.rindbench/files/`.

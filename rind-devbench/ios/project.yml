@@ -1,6 +1,6 @@
 name: RindBenchAll
 options:
-  bundleIdPrefix: com.kyledouglas.rindbench
+  bundleIdPrefix: io.github.steelhead99x.rindbench
   projectFormat: xcode15_3
 targets:
   RindBenchAll:
@@ -32,7 +32,7 @@ targets:
         UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.kyledouglas.rindbench.all
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.steelhead99x.rindbench.all
         CODE_SIGN_STYLE: Automatic
         TARGETED_DEVICE_FAMILY: "1,2"
         OTHER_LDFLAGS: ["$(RIND_DEVBENCH_LIB)", "-framework", "Security", "-lc++"]

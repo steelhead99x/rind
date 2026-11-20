@@ -12,5 +12,5 @@ for pf in 9101:devbench-m4 9102:devbench-a17 9103:devbench-android; do
 done
 ADB=$(command -v adb || echo $HOME/.local/bin/adb)
 for s in $($ADB devices 2>/dev/null | awk 'NR>1 && $2=="device"{print $1}'); do
-  $ADB -s $s shell pm path com.kyledouglas.rindbench >/dev/null 2>&1 && $ADB -s $s reverse tcp:9103 tcp:9103 && echo "adb reverse 9103 on $s"
+  $ADB -s $s shell pm path io.github.steelhead99x.rindbench >/dev/null 2>&1 && $ADB -s $s reverse tcp:9103 tcp:9103 && echo "adb reverse 9103 on $s"
 done
