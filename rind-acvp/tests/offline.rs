@@ -19,6 +19,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use aws_lc_rs::aead as aws_aead;
 use aws_lc_rs::agreement;
 use aws_lc_rs::signature as aws_signature;
 use num_bigint::BigUint;
@@ -483,6 +484,7 @@ fn sets() -> Vec<Set> {
     for name in ["ACVP-AES-GCM-1.0", "ACVP-AES-GMAC-1.0"] {
         sets.push(sample(name, |group, _| group["direction"] == "decrypt"));
     }
+    sets.push(gcm_internal_iv());
     // rind draws a scalar by rejection, FIPS 186-5's testing candidates.
     let mut key_gen = generated("ECDSA-KeyGen-FIPS186-5", ecdsa_key_gen);
     let groups = key_gen.prompt["testGroups"].as_array_mut().unwrap();
@@ -768,6 +770,96 @@ fn kda_hkdf() -> Set {
 fn generated(name: &str, validate: fn(&Value, &Value) -> Result<(), String>) -> Set {
     let mut prompt = read(&format!("thirdparty/acvp/{name}.json"));
     strip_answers(&mut prompt);
+    Set {
+        prompt,
+        check: Check::Validate(Box::new(validate)),
+    }
+}
+
+/// AES-GCM sealing with IVs the module generates (`ivGen: internal`): NIST's
+/// samples have none, so this builds groups of tests for each key length,
+/// the tests of a group sharing one key, with payloads and AAD of every
+/// length from 0 to 40 bytes. The answers have no expected bytes: the IV
+/// is the module's random choice, so each is checked to be 12 bytes, never
+/// reused under a key, and to open to the plaintext under its tag.
+fn gcm_internal_iv() -> Set {
+    let mut state = 0x9e37_79b9_7f4a_7c15u64;
+    let mut fill = |len: usize| -> Vec<u8> {
+        (0..len)
+            .map(|_| {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                (state >> 24) as u8
+            })
+            .collect()
+    };
+    let mut tc_id = 0;
+    let groups: Vec<Value> = [16usize, 24, 32]
+        .iter()
+        .enumerate()
+        .map(|(i, &key_len)| {
+            let key = hex::encode_upper(fill(key_len));
+            let tests: Vec<Value> = (0..=40usize)
+                .map(|len| {
+                    tc_id += 1;
+                    json!({
+                        "tcId": tc_id,
+                        "key": key,
+                        "pt": hex::encode_upper(fill(len)),
+                        "aad": hex::encode_upper(fill(40 - len)),
+                    })
+                })
+                .collect();
+            json!({
+                "tgId": i + 1,
+                "testType": "AFT",
+                "direction": "encrypt",
+                "keyLen": key_len * 8,
+                "tagLen": 128,
+                "ivLen": 96,
+                "ivGen": "internal",
+                "ivGenMode": "8.2.2",
+                "tests": tests,
+            })
+        })
+        .collect();
+    let mut prompt = built("ACVP-AES-GCM", None, "1.0", groups);
+    prompt["isSample"] = json!(false);
+    // Every IV the run's seals draw, to refuse a repeat under one key.
+    let seen = std::sync::Mutex::new(std::collections::HashSet::new());
+    let validate = move |prompt: &Value, group: &Value| -> Result<(), String> {
+        for test in tests(group) {
+            let tc = id(test, "tcId");
+            let asked = asked(prompt, test);
+            let (key, iv) = (hex(&asked["key"]), hex(&test["iv"]));
+            if iv.len() != 12 {
+                return Err(format!("tcId {tc}: an IV of {} bytes", iv.len()));
+            }
+            if !seen.lock().unwrap().insert((key.clone(), iv.clone())) {
+                return Err(format!("tcId {tc}: an IV reused under one key"));
+            }
+            let algorithm = match key.len() {
+                16 => &aws_aead::AES_128_GCM,
+                24 => &aws_aead::AES_192_GCM,
+                32 => &aws_aead::AES_256_GCM,
+                len => unreachable!("a sealing prompt with a key of {len} bytes"),
+            };
+            let key = aws_aead::LessSafeKey::new(
+                aws_aead::UnboundKey::new(algorithm, &key).map_err(|e| e.to_string())?,
+            );
+            let mut sealed = [hex(&test["ct"]), hex(&test["tag"])].concat();
+            let nonce =
+                aws_aead::Nonce::try_assume_unique_for_key(&iv).map_err(|e| e.to_string())?;
+            let plaintext = key
+                .open_in_place(nonce, aws_aead::Aad::from(hex(&asked["aad"])), &mut sealed)
+                .map_err(|_| format!("tcId {tc}: the tag does not verify"))?;
+            if plaintext != hex(&asked["pt"]) {
+                return Err(format!("tcId {tc}: another plaintext"));
+            }
+        }
+        Ok(())
+    };
     Set {
         prompt,
         check: Check::Validate(Box::new(validate)),
