@@ -13,6 +13,21 @@ pub(crate) fn seed() -> u64 {
     u64::from_str_radix(&seed, 16).unwrap()
 }
 
+/// Whether the CPU `admin/ct-qemu` runs this test under, `max` or
+/// `cortex-a15`, has the crypto extension: `max` does, so the test requires
+/// the hardware AES, and the Cortex-A15 has only NEON, so it requires that.
+#[cfg(target_arch = "arm")]
+pub(crate) fn crypto_ext() -> bool {
+    match std::env::var("RIND_CT_QEMU_CPU")
+        .expect("run by admin/ct-qemu")
+        .as_str()
+    {
+        "max" => true,
+        "cortex-a15" => false,
+        cpu => panic!("unknown qemu cpu {cpu}"),
+    }
+}
+
 /// Runs `f` between the marks that start and stop the plugin's trace.
 pub(crate) fn traced<T>(f: impl FnOnce() -> T) -> T {
     // SAFETY: an unallocated hint, which executes as a no-op in ARM and A64.

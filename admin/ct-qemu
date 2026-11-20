@@ -97,7 +97,7 @@ def compare(target, exe, name, cpu, tmp, plugin):
         cmd += ["--ignored", "--exact", name, "--test-threads=1", "-q"]
         # The seeds have the same length, so the environment, and so
         # everything above it on the stack, lies at the same addresses.
-        env = dict(os.environ, RIND_CT_QEMU_SEED=seed)
+        env = dict(os.environ, RIND_CT_QEMU_SEED=seed, RIND_CT_QEMU_CPU=cpu)
         log = open(os.path.join(tmp, "log{}".format(i)), "w+")
         proc = subprocess.Popen(cmd, env=env, stdout=log, stderr=log, pass_fds=[w])
         os.close(w)
