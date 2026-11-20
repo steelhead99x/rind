@@ -102,6 +102,17 @@ pub(crate) fn edwards25519_msm(
     }
 }
 
+/// `[scalar]P` in constant time on curve25519-dalek's AVX2 formulas, from
+/// the scalar's signed radix-16 digits and the point's extended coordinates,
+/// or `None` where s2n-bignum's routines run it faster.
+#[inline]
+pub(crate) fn edwards25519_mul_avx2(digits: &[i8; 64], point: &[u64; 16]) -> Option<[u64; 16]> {
+    let token = HaveAvx2::check()?;
+    let mut res = [0; 16];
+    super::edwards25519_msm_avx2::edwards25519_mul(&mut res, digits, point, token);
+    Some(res)
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(super) mod tests {
