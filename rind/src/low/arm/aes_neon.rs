@@ -16,10 +16,11 @@
 //! BoringSSL, and aws-lc, and on rind's tests of it against the portable code,
 //! Wycheproof, and aws-lc-rs.
 
-use super::cpu::HaveNeon;
-use crate::low;
 use core::cell::UnsafeCell;
 use core::sync::atomic::{AtomicU8, Ordering};
+
+use super::cpu::HaveNeon;
+use crate::low;
 
 unsafe extern "C" {
     #[link_name = aws_lc_symbol!("vpaes_set_encrypt_key")]
