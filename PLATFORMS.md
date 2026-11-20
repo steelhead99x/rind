@@ -67,7 +67,9 @@ qemu. iOS devices' code is only built.
   has it. Where
   the CPU has the ARMv8 crypto extension, as most 32-bit Android devices do,
   AES, GHASH, SHA1, and SHA256 run [aws-lc]'s assembly for it instead.
-  Without it, `rind::cpu::has_aes_hardware()` is false, and rind-rustls and
+  With NEON but without it, AES and GHASH run aws-lc's NEON assembly
+  (`vpaes`, `bsaes`, and `ghash-armv4`), and without NEON, portable Rust.
+  Without the extension, `rind::cpu::has_aes_hardware()` is false, and rind-rustls and
   rind-dimpl prefer ChaCha20-Poly1305, which is faster there: ChaCha20 runs
   aws-lc's assembly, and so does Poly1305 where the CPU has NEON. SHA-384,
   SHA-512, and SHA-512/256 always run aws-lc's assembly, with NEON where the

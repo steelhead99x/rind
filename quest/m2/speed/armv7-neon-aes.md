@@ -14,3 +14,7 @@ Decided 2026-11-18 (maintainer, [kixel-ai/rind#619](https://github.com/kixel-ai/
 - Constant time: all three are constant time by construction (bitsliced or vector-permute, no tables indexed by secrets); add ctgrind coverage for each new path under qemu as the armv7 ctgrind job runs.
 - Wycheproof and the aws-lc-rs differential tests cover AES and AES-GCM already; check they run on the NEON tier.
 - Its proof is [armv7's NEON AES and GHASH are proven](/quest/m5/verified-armv7/neon-aes.md).
+
+## Waiting
+
+- Maintainer: close the armv7 NEON gap in `benchmarks/gaps.toml` once a weekly bench run of the armv7 NEON tier shows it closed, then delete that entry and this quest. `admin/bench-report render --check` refuses an entry that covers no gap, so it can go only with the refreshed data.

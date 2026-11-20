@@ -189,8 +189,8 @@ impl AesGcm {
     }
 }
 
-/// aws-lc's bitsliced AES and integer GHASH, for CPUs without the crypto
-/// extension. Both wipe themselves on drop.
+/// aws-lc's bitsliced AES and integer GHASH, for CPUs without NEON. Both wipe
+/// themselves on drop.
 pub(crate) struct Portable {
     key: PortableAesKey,
     table: NohwTable,

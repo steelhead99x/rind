@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
 //! 32-bit ARM: the portable backend, with aws-lc's assembly for ChaCha20,
-//! SHA-512, and RSA's Montgomery multiplication, for Poly1305 and X25519
-//! where the CPU has NEON, and for the ARMv8 crypto extension where the CPU
-//! has it, and OpenSSL's for Keccak-f.
+//! SHA-512, and RSA's Montgomery multiplication, for Poly1305, X25519, AES, and
+//! GHASH where the CPU has NEON, and for the ARMv8 crypto extension where the
+//! CPU has it, and OpenSSL's for Keccak-f.
 
 /// The symbol for an aws-lc routine, qualified by rind's version so two
 /// semver-incompatible copies of rind can link into one binary.
