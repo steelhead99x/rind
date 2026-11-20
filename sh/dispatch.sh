@@ -203,8 +203,13 @@ module deny '(^|/)Cargo\.(toml|lock)$|^deny\.toml$' \
     tools='cargo-deny'
 # .cargo/mutants.toml's exclusions name mutants by file, line, and function,
 # so moving code can leave one matching nothing.
+# admin/mutants has no macOS campaign (see quest/m0/mac-mini-runner.md), and a
+# Mac without Nix has no cargo-mutants, so there it needs only python3 and
+# check:mutants runs the pin check where cargo-mutants is installed.
+mutants_tools='cargo-mutants python3'
+[[ $(uname -s) != Darwin ]] || mutants_tools=python3
 module mutants '^(rind[^/]*/src/|\.cargo/mutants\.toml$|admin/mutants$)' \
-    tools='cargo-mutants python3'
+    tools="$mutants_tools"
 # An adapter's manifest holds both its version and its upstream requirement.
 module versions '^(rind-[^/]+/Cargo\.toml$|sh/adapter-versions\.sh$)' \
     tools='cargo jq'
@@ -610,7 +615,11 @@ step() {
         check:quest) run quest check ;;
         check:license) run bash admin/scan-license ;;
         check:mutants)
-            run admin/mutants --pins
+            if [[ $(uname -s) != Darwin ]] || command -v cargo-mutants >/dev/null 2>&1; then
+                run admin/mutants --pins
+            else
+                echo "mutants: macOS has no mutation campaign and no cargo-mutants here; skipping the pin check, which Linux CI runs." >&2
+            fi
             run admin/mutants --expand-diff-self-test
             ;;
         check:testing) run python3 admin/testing ;;
