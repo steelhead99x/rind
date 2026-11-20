@@ -110,6 +110,13 @@ pub(crate) fn edwards25519_mul_avx2(digits: &[i8; 64], point: &[u64; 16]) -> Opt
     if HaveBmi2Adx::check().is_some() {
         return None;
     }
+    edwards25519_mul_avx2_any(digits, point)
+}
+
+/// `edwards25519_mul_avx2` on any CPU with AVX2, ADX or not, so tests run it
+/// on one with ADX.
+#[inline]
+pub(crate) fn edwards25519_mul_avx2_any(digits: &[i8; 64], point: &[u64; 16]) -> Option<[u64; 16]> {
     let token = HaveAvx2::check()?;
     let mut res = [0; 16];
     super::edwards25519_msm_avx2::edwards25519_mul(&mut res, digits, point, token);

@@ -557,6 +557,11 @@ mod tests {
         for p in &points {
             for s in &scalars {
                 assert_eq!(p.mul(s).to_bytes(), p.mul_s2n_bignum(s).to_bytes());
+                // `mul` runs s2n-bignum's on a CPU with ADX, so run AVX2's too.
+                #[cfg(rind_backend = "x86_64")]
+                if let Some(r) = low::edwards25519_mul_avx2_any(&s.signed_radix_16(), &p.0) {
+                    assert_eq!(Point(r).to_bytes(), p.mul_s2n_bignum(s).to_bytes());
+                }
             }
         }
     }

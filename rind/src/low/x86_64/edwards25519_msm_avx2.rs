@@ -140,7 +140,7 @@ fn mul(digits: &[i8; 64], point: &[[u64; 4]; 4]) -> [[u64; 4]; 4] {
 fn select(table: &[Cached; 8], digit: i8) -> Cached {
     // 0 or -1, by an arithmetic shift, so no branch reads the digit.
     let sign = (digit >> 7) as i32;
-    let magnitude = _mm256_set1_epi32((digit as i32 ^ sign) - sign);
+    let magnitude = _mm256_set1_epi32((digit as i32 ^ sign).wrapping_sub(sign));
 
     let mut out = CACHED_IDENTITY;
     for (i, entry) in table.iter().enumerate() {
@@ -384,13 +384,15 @@ impl Fe4 {
         }
 
         // Each lane's radix 2^51 limbs, as in dalek's `split`.
+        // Wrapping, so a debug build's overflow checks don't branch on the
+        // secret limbs; none of these overflows.
         let mut out = [[0u64; 5]; 4];
         for (i, l) in lanes.iter().enumerate() {
             let l = l.map(u64::from);
-            out[0][i] = l[0] + (l[2] << 26);
-            out[1][i] = l[1] + (l[3] << 26);
-            out[2][i] = l[4] + (l[6] << 26);
-            out[3][i] = l[5] + (l[7] << 26);
+            out[0][i] = l[0].wrapping_add(l[2] << 26);
+            out[1][i] = l[1].wrapping_add(l[3] << 26);
+            out[2][i] = l[4].wrapping_add(l[6] << 26);
+            out[3][i] = l[5].wrapping_add(l[7] << 26);
         }
 
         out.map(|mut l| {
@@ -403,18 +405,18 @@ impl Fe4 {
             for l in &mut l {
                 *l &= MASK;
             }
-            l[0] += 19 * c[4];
+            l[0] = l[0].wrapping_add(c[4].wrapping_mul(19));
             for i in 1..5 {
-                l[i] += c[i - 1];
+                l[i] = l[i].wrapping_add(c[i - 1]);
             }
 
-            let mut q = (l[0] + 19) >> 51;
+            let mut q = l[0].wrapping_add(19) >> 51;
             for l in &l[1..] {
-                q = (l + q) >> 51;
+                q = l.wrapping_add(q) >> 51;
             }
-            l[0] += 19 * q;
+            l[0] = l[0].wrapping_add(q.wrapping_mul(19));
             for i in 0..4 {
-                l[i + 1] += l[i] >> 51;
+                l[i + 1] = l[i + 1].wrapping_add(l[i] >> 51);
                 l[i] &= MASK;
             }
             l[4] &= MASK;
@@ -1945,5 +1947,17 @@ mod tests {
                 lanes
             })
         })
+    }
+
+    // A secret scalar's digits against a secret point, for `admin/ct-sde`.
+    #[test]
+    #[ignore = "admin/ct-sde runs it under Intel SDE"]
+    fn ct_sde_mul() {
+        let mut rng = Rng(super::super::ct_sde::seed());
+        let token = HaveAvx2::check().expect("AVX2");
+        let point = base_mul(&rng.words(253));
+        let digits: [i8; 64] = core::array::from_fn(|_| (rng.next() % 17) as i8 - 8);
+        let mut res = [0; 16];
+        super::super::ct_sde::traced(|| edwards25519_mul(&mut res, &digits, &point, token));
     }
 }
