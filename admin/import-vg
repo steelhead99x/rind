@@ -85,6 +85,10 @@ ROOTS = {
         "vg_ecdsa_p384_verify_adx",
     ],
     "aarch64": [
+        # cipher::ChaCha20 with NEON, and with SVE2.
+        "vg_chacha20_init",
+        "vg_chacha20_apply_neon",
+        "vg_chacha20_apply_sve2",
         # ChaCha20-Poly1305 with SVE2.
         "vg_chacha20_poly1305_seal_sve2",
         "vg_chacha20_poly1305_open_sve2",

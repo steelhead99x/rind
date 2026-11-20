@@ -74,9 +74,9 @@ exclude_re = [
   'rind/src/low/x86_64/chacha20poly1305\.rs:\d+:\d+: replace \| with \^$',
   # Pinned to its line: a `const` has no name to match, and only `AES`'s
   # `1 << 0` survives.
-  'rind/src/low/x86_64/cpu\.rs:444:\d+: replace << with >>$',
+  'rind/src/low/x86_64/cpu\.rs:433:\d+: replace << with >>$',
   'rind/src/low/x86_64/cpu\.rs:\d+:\d+: replace \| with \^$',
-  'rind/src/low/x86_64/cpu\.rs:\d+:\d+: replace \| with \^ in (HaveAdxForVg::check|HaveAesHardware::check|HaveAvx::check|HaveAvx512ForVgMlKem::check|HaveAvxMovbeForAesGcm::check|HaveBmi2Adx::check|HaveIfmaForCurve25519::check|HaveIfmaForVgP256::check|HaveSha1::check|HaveSha256::check|HaveSha512::check|HaveSse41::check|HaveVaesAvx2ForAesGcm::check|detect|detect_once)$',
+  'rind/src/low/x86_64/cpu\.rs:\d+:\d+: replace \| with \^ in (HaveAdxForVg::check|HaveAesHardware::check|HaveAvx::check|HaveAvx512ForVgMlKem::check|HaveAvxMovbeForAesGcm::check|HaveBmi2Adx::check|HaveIfmaForCurve25519::check|HaveIfmaForVgP256::check|HaveSha1::check|HaveSha256::check|HaveSse41::check|HaveVaesAvx2ForAesGcm::check|detect|detect_once)$',
   'rind/src/low/x86_64/edwards25519_msm_avx2\.rs:\d+:\d+: replace \| with \^$',
   'rind/src/low/x86_64/edwards25519_msm_avx2\.rs:\d+:\d+: replace \| with \^ in (Fe4::diff_sum|Fe4::split)$',
   'rind/src/low/x86_64/ghash\.rs:\d+:\d+: replace \| with \^ in Ghash<\x27a>::add_lengths$',
@@ -200,6 +200,7 @@ exclude_re = [
   'rind/src/low/aarch64/aes_gcm\.rs:\d+:\d+: replace <= with > in tagged_from$',
   'rind/src/low/aarch64/aes_gcm\.rs:\d+:\d+: replace \+ with \* in tagged_from$',
   'rind/src/low/aarch64/bignum_copy_row_from_table_mux\.rs:\d+:\d+: replace match guard width\.is_multiple_of\(8\) with false in bignum_copy_row_from_table$',
+  'rind/src/low/aarch64/chacha20\.rs:\d+:\d+: delete match arm .* in ChaCha20::cipher$',
   'rind/src/low/aarch64/cpu\.rs:\d+:\d+: replace prefetch_ro with \(\)$',
   # Invisible to a test: whether the speculation barrier after setting DIT
   # runs, and which one.
@@ -294,7 +295,7 @@ exclude_re = [
   'rind/src/low/x86_64/cpu\.rs:\d+:45: replace \| with &$',
   'rind/src/low/x86_64/cpu\.rs:\d+:52: replace \| with &$',
   # Pinned to its line: `AVX2_KERNELS`'s `|` at the same column is caught.
-  'rind/src/low/x86_64/cpu\.rs:474:31: replace \| with &$',
+  'rind/src/low/x86_64/cpu\.rs:462:31: replace \| with &$',
   'rind/src/low/x86_64/cpu\.rs:\d+:72: replace \| with &$',
   'rind/src/low/x86_64/cpu\.rs:\d+:17: replace \| with & in HaveAvxMovbeForAesGcm::check$',
   'rind/src/low/x86_64/cpu\.rs:\d+:17: replace \| with & in HaveAesHardware::check$',

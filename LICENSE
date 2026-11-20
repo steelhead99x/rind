@@ -219,7 +219,7 @@ OpenSSL <https://github.com/openssl/openssl>
   What: the files under rind/src/low/{x86_64,arm}/openssl, which
   admin/import-openssl takes from OpenSSL at commit
   2f4e3a5fec05394068cfa7379890ab552483a8a6: for x86_64, SHA-256 and
-  SHA-512 on AVX2 and SHA-512 on the SHA512 instructions, generated from
+  SHA-512 on AVX2, generated from
   crypto/sha/asm/sha512-x86_64.pl, written by Andy Polyakov;
   for 32-bit ARM, Keccak-f[1600] in integer code and on NEON, generated from
   crypto/sha/asm/keccak1600-armv4.pl, written by Andy Polyakov.
@@ -244,7 +244,8 @@ pyca/verified-garbage <https://github.com/pyca/verified-garbage>
   sources, at commit 0aa40d6c21fd02943fe5b38a5b69b6213d07764d:
   ChaCha20-Poly1305 on aarch64 with SVE2, and the ChaCha20 and
   Poly1305 routines it calls; ChaCha20 on x86_64 with AVX2 and with
-  AVX-512 VL; X25519 and Ed25519 on x86_64 with AVX-512 IFMA, and the
+  AVX-512 VL, and on aarch64 with NEON and with SVE2; X25519 and
+  Ed25519 on x86_64 with AVX-512 IFMA, and the
   SHA-512 and field and point routines they call; RSA's public
   operation and CRT on x86_64 with AVX-512 IFMA, and the Montgomery
   product they call; ML-KEM-768's encapsulation key check and

@@ -53,11 +53,6 @@ opaque low.x86_64.curve25519_x25519.curve25519_x25519
 
 /-! OpenSSL's and aws-lc's SHA-512 routines, behind their Rust wrappers. -/
 
-opaque low.x86_64.sha512.compress_sha512ext
-  :
-  low.x86_64.cpu.HaveSha512 → Array Std.U64 8#usize → Slice Std.U8 → Result
-    (Array Std.U64 8#usize)
-
 opaque low.x86_64.sha512.compress_avx2
   :
   low.x86_64.cpu.HaveAvx2 → Array Std.U64 8#usize → Slice Std.U8 → Result

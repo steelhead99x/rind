@@ -65,6 +65,7 @@ fn bench(c: &mut Criterion) {
     let mut group = c.benchmark_group("blind-rsa2048-blind");
     group.throughput(Throughput::Elements(1));
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         b.iter(|| black_box(keys.rind_public.blind(MESSAGE).unwrap()));
     });
     group.bench_function("rustcrypto", |b| {
@@ -81,6 +82,7 @@ fn bench(c: &mut Criterion) {
     let mut group = c.benchmark_group("blind-rsa2048-sign");
     group.throughput(Throughput::Elements(1));
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         let (blinded, _) = keys.rind_public.blind(MESSAGE).unwrap();
         b.iter(|| black_box(keys.rind.blind_sign(blinded.as_ref()).unwrap()));
     });
@@ -98,6 +100,7 @@ fn bench(c: &mut Criterion) {
     let mut group = c.benchmark_group("blind-rsa2048-finalize");
     group.throughput(Throughput::Elements(1));
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         b.iter_batched(
             || {
                 let (blinded, blinding) = keys.rind_public.blind(MESSAGE).unwrap();
@@ -130,6 +133,7 @@ fn bench(c: &mut Criterion) {
         .finalize(keys.rind.blind_sign(blinded.as_ref()).unwrap().as_ref())
         .unwrap();
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         b.iter(|| {
             keys.rind_public
                 .verify(MESSAGE, signature.as_ref())

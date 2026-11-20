@@ -16,15 +16,13 @@ Measured on 2026-11-18 from the Actions REST API, hosted job-hours only:
 
 - No PR run was cancelled because its PR merged. Merges waste time another way: 43 hosted hours were still running after their PR had merged, so their results gated nothing: prove 21, x86-cpu 18, ctgrind 4.
 - A newer push to the same branch cancelled 197 hours in 142 runs: x86-cpu 71, prove 66, ctgrind 29, Site 8, PR check 7, regenerate 6, lints 4. 19 of those pushes merged `main` into the branch; the rest were other commits, mostly review fixes. The newer push came a median 28 minutes after the cancelled run started (p25 13, p75 58).
-- 72 of the day's 198 cancelled PR hours were on drafts, which [the draft quest](/quest/m0/ci-speed/draft-skip.md) removes. Hand-cancelled `bench` dispatches (21 hours) and the armv7 debug rows at their 6-hour limit (14 hours, fixed since by [kixel-ai/rind#843](https://github.com/kixel-ai/rind/pull/843)) are out of scope.
+- 72 of the day's 198 cancelled PR hours were on drafts. Since [kixel-ai/rind#906](https://github.com/kixel-ai/rind/pull/906), drafts no longer run the seven heavy workflows, only Site, PR check, regenerate, and lints, so the re-measure shows how much of those 72 hours is left. Hand-cancelled `bench` dispatches (21 hours) and the armv7 debug rows at their 6-hour limit (14 hours, fixed since by [kixel-ai/rind#843](https://github.com/kixel-ai/rind/pull/843)) are out of scope.
 
 Recommendations:
 
 - Re-measure after the cuts this quest requires land, then choose per remaining workflow; many of the cancelled hours go with them.
 - Gate through the merge queue rather than a required context: a path-filtered workflow cannot be a required check, and [kixel-ai/rind#881](https://github.com/kixel-ai/rind/pull/881) adds `sh/queue-checks.sh`, which makes the queue's build wait on hosted checks the group's diff selects. Reuse it. `sde-pr-models.md` ([kixel-ai/rind#893](https://github.com/kixel-ai/rind/pull/893)) already runs every SDE model in the queue. A check moved into the queue slows the gate, so the PR says by how much and why it is worth it. `main`'s ruleset comes from dotfiles' `repo-settings`, so change it there if a required context changes.
-- Once #893 merges, add `sde-pr-models.md` and `prove-pr-cache.md` to Required here.
 
 ## Required
 
-- [Draft PRs skip the heavy checks](/quest/m0/ci-speed/draft-skip.md) - removes the drafts' share of the cancelled hours before this re-measures
-- [x86-cpu builds once](/quest/m0/ci-speed/x86-cpu-build-once.md) - shortens x86-cpu's runs, so fewer are superseded
+- [PRs run three SDE models](/quest/m0/ci-speed/sde-pr-models.md) - cuts x86-cpu's pull-request hours before this re-measures

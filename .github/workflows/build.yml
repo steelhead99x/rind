@@ -8,6 +8,9 @@ on:
   # decides: armv7 and portable on their backends and scripts, the Dart jobs
   # on rind-dart, openmls's suite on rind-openmls. The nightly runs every job.
   pull_request:
+    # A draft skips every job until it is marked ready, and turning a PR back
+    # into a draft cancels its ready run: see CONTRIBUTING.md.
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
     branches: [main]
     paths:
       - rind/src/low/arm/**
@@ -31,6 +34,7 @@ env:
 
 jobs:
   changes:
+    if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     outputs:
       armv7: ${{ steps.match.outputs.armv7 }}

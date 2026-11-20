@@ -98,6 +98,7 @@ fn bench_chacha20poly1305(c: &mut Criterion) {
             b.iter(|| test_rc_chacha(&key, aad, &mut buf[..size]));
         });
         group.bench_function(BenchmarkId::new("rind", size_name), |b| {
+            let _dit = criterion::rind_dit();
             let key = rind::aead::RandomizedNonceKey::new(&key);
             b.iter(|| test_rind_chacha(&key, aad, &mut buf, size));
         });

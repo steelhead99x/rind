@@ -46,11 +46,19 @@ macro_rules! vg_sym_pageoff {
 pub struct Table<const N: usize>(pub [u8; N]);
 
 #[rustfmt::skip]
+pub(crate) mod vg_chacha20_apply_neon;
+#[rustfmt::skip]
+pub(crate) mod vg_chacha20_apply_sve2;
+#[rustfmt::skip]
 pub(crate) mod vg_chacha20_block;
+#[rustfmt::skip]
+pub(crate) mod vg_chacha20_init;
 #[rustfmt::skip]
 pub(crate) mod vg_chacha20_poly1305_open_sve2;
 #[rustfmt::skip]
 pub(crate) mod vg_chacha20_poly1305_seal_sve2;
+#[rustfmt::skip]
+pub(crate) mod vg_chacha20_xor_neon;
 #[rustfmt::skip]
 pub(crate) mod vg_chacha20_xor_sve2;
 #[rustfmt::skip]

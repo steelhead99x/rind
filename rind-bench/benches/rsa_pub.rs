@@ -61,6 +61,7 @@ fn rsa2048_pkcs1_sha256_verify(c: &mut Criterion) {
     });
 
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         use rind::rsa::{PublicKey, verify};
 
         b.iter(|| {
@@ -119,6 +120,7 @@ fn rsa2048_pkcs1_sha256_verify(c: &mut Criterion) {
     });
 
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         use rind::rsa::{PublicKey, verify};
         let peer_public_key = PublicKey::new(public_key).unwrap();
 
@@ -173,6 +175,7 @@ fn rsa1024_pkcs1_sha1_verify(c: &mut Criterion) {
     });
 
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         use rind::rsa::{PublicKey, verify};
 
         b.iter(|| {
@@ -232,6 +235,7 @@ fn rsa2048_pss_sha256_verify(c: &mut Criterion) {
     });
 
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         use rind::rsa::{PublicKey, verify};
 
         b.iter(|| {
@@ -342,6 +346,7 @@ fn rsa2048_oaep_sha256_encrypt(c: &mut Criterion) {
     });
 
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         use rind::rsa::EncryptingKey;
         let key = EncryptingKey::new(&OAEP_SHA256, public_key.as_ref()).unwrap();
 
@@ -450,6 +455,7 @@ fn rsa_pkcs1_sha256_verify_sizes(c: &mut Criterion) {
         });
 
         group.bench_function("rind", |b| {
+            let _dit = criterion::rind_dit();
             use rind::rsa::{PublicKey, verify};
 
             b.iter(|| {

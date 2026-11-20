@@ -42,13 +42,12 @@ opaque low.x86_64.cpu.HaveAvx512ForRsa : Type
 
 /-- The tokens proving the CPU has what each SHA-1, SHA-256, SHA-512, and
 ChaCha20-Poly1305 routine needs: the SHA extensions, AVX and SSSE3, AVX2,
-SSSE3, the SHA512 instructions, and SSE4.1. -/
+SSSE3, and SSE4.1. -/
 opaque low.x86_64.cpu.HaveSha1 : Type
 opaque low.x86_64.cpu.HaveSha256 : Type
 opaque low.x86_64.cpu.HaveAvx : Type
 opaque low.x86_64.cpu.HaveAvx2 : Type
 opaque low.x86_64.cpu.HaveSsse3 : Type
-opaque low.x86_64.cpu.HaveSha512 : Type
 opaque low.x86_64.cpu.HaveSse41 : Type
 
 /-- The tokens proving pyca/verified-garbage's ML-KEM-768 encapsulation, and

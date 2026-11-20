@@ -334,17 +334,6 @@ impl HaveAvx512Vl {
     }
 }
 
-/// Proof that the CPU has the SHA512 instructions, and the AVX2 that
-/// OpenSSL's routine for them also uses.
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct HaveSha512(());
-
-impl HaveSha512 {
-    pub(crate) fn check() -> Option<Self> {
-        has(SHA512 | AVX | AVX2).then_some(Self(()))
-    }
-}
-
 /// Proof that the CPU has AES-NI and PCLMULQDQ, and the SSSE3 and SSE4.1
 /// their kernels also use: rind's AES-GCM and GHASH intrinsics, and aws-lc's
 /// AES-CTR.
@@ -462,7 +451,6 @@ const MOVBE: u32 = 1 << 17;
 const AVX512DQ: u32 = 1 << 18;
 const AVX512IFMA: u32 = 1 << 19;
 const BMI1: u32 = 1 << 20;
-const SHA512: u32 = 1 << 21;
 const AVX512FP16: u32 = 1 << 22;
 const INTEL: u32 = 1 << 30;
 /// What rind's AVX2 kernels use, for [`HaveAvx2`].
@@ -541,7 +529,6 @@ named! {
     AVX512VBMI2: "avx512vbmi2",
     AVX512FP16: "avx512fp16",
     SHA: "sha",
-    SHA512: "sha512",
     MOVBE: "movbe",
 }
 
@@ -574,12 +561,10 @@ struct Registers {
     intel: bool,
     /// Leaf 1's ECX, or zero where the CPU has no leaf 1.
     ecx1: u32,
-    /// Leaf 7's EBX, ECX, and EDX, and subleaf 1's EAX, or zero where the
-    /// CPU has no leaf 7.
+    /// Leaf 7's EBX, ECX, and EDX, or zero where the CPU has no leaf 7.
     ebx7: u32,
     ecx7: u32,
     edx7: u32,
-    eax7_1: u32,
     /// XCR0, or `None` where the OS has not enabled `xgetbv`.
     xcr0: Option<u64>,
 }
@@ -604,9 +589,8 @@ fn registers() -> Registers {
     }
     if leaf0.eax >= 7 {
         // SAFETY: as above.
-        let (leaf7, leaf7_1) = unsafe { (__cpuid_count(7, 0), __cpuid_count(7, 1)) };
-        (found.ebx7, found.ecx7, found.edx7, found.eax7_1) =
-            (leaf7.ebx, leaf7.ecx, leaf7.edx, leaf7_1.eax);
+        let leaf7 = unsafe { __cpuid_count(7, 0) };
+        (found.ebx7, found.ecx7, found.edx7) = (leaf7.ebx, leaf7.ecx, leaf7.edx);
     }
     // XSAVE, and OSXSAVE: the OS has enabled `xgetbv`.
     if found.ecx1 & (1 << 26 | 1 << 27) == 1 << 26 | 1 << 27 {
@@ -649,7 +633,6 @@ fn decode(r: Registers) -> u32 {
     if xcr0 & 0b110 == 0b110 {
         set(bit(r.ecx1, 28), AVX);
         set(bit(r.ebx7, 5), AVX2);
-        set(bit(r.eax7_1, 0), SHA512);
         // And the AVX-512 state. Rust's `avx512f` implies FMA and F16C,
         // which Intel does not promise with it, so `std` requires them.
         let (fma, f16c) = (bit(r.ecx1, 12), bit(r.ecx1, 29));
@@ -765,7 +748,6 @@ mod tests {
         Ebx7,
         Ecx7,
         Edx7,
-        Eax7Sub1,
     }
 
     impl Leaf {
@@ -775,7 +757,6 @@ mod tests {
                 Self::Ebx7 => &mut r.ebx7,
                 Self::Ecx7 => &mut r.ecx7,
                 Self::Edx7 => &mut r.edx7,
-                Self::Eax7Sub1 => &mut r.eax7_1,
             }
         }
     }
@@ -803,7 +784,6 @@ mod tests {
         (Leaf::Ecx7, 9, VAES),
         (Leaf::Ecx7, 10, VPCLMULQDQ),
         (Leaf::Edx7, 23, AVX512FP16),
-        (Leaf::Eax7Sub1, 0, SHA512),
     ];
 
     /// Each feature is read from its own bit, and from no other.
@@ -833,7 +813,6 @@ mod tests {
             ebx7: u32::MAX,
             ecx7: u32::MAX,
             edx7: u32::MAX,
-            eax7_1: u32::MAX,
             xcr0: Some(u64::MAX),
         };
         let named = NAMED.iter().fold(0, |all, &(bit, _)| all | bit);
@@ -848,7 +827,7 @@ mod tests {
             | AVX512VBMI
             | AVX512VBMI2
             | AVX512FP16;
-        let avx = AVX | AVX2 | SHA512 | avx512;
+        let avx = AVX | AVX2 | avx512;
         for xcr0 in [None, Some(0), Some(0b010), Some(0b100), Some(!0b110)] {
             assert_eq!(decode(Registers { xcr0, ..all }), named & !avx, "{xcr0:?}");
         }
@@ -914,7 +893,6 @@ mod tests {
             AVX512DQ,
             AVX512IFMA,
             BMI1,
-            SHA512,
             AVX512FP16,
             INTEL,
             DETECTED,
@@ -1023,10 +1001,6 @@ mod tests {
                     && available!("avx512f", "avx512vl"),
             ),
             (
-                HaveSha512::check().is_some(),
-                available!("sha512", "avx", "avx2"),
-            ),
-            (
                 HaveAesHardware::check().is_some(),
                 available!("aes", "pclmulqdq", "ssse3", "sse4.1"),
             ),
@@ -1083,9 +1057,6 @@ mod tests {
         if let Some(expected) = std::env::var_os("RIND_TEST_X86_SHA") {
             assert_eq!(HaveSha256::check().is_some(), expected == "1");
             assert_eq!(HaveSha1::check().is_some(), expected == "1");
-        }
-        if let Some(expected) = std::env::var_os("RIND_TEST_X86_SHA512") {
-            assert_eq!(HaveSha512::check().is_some(), expected == "1");
         }
         if let Some(expected) = std::env::var_os("RIND_TEST_X86_VAES_AES_GCM") {
             assert_eq!(HaveVaesAvx2ForAesGcm::check().is_some(), expected == "1");
