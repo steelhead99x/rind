@@ -1,8 +1,14 @@
+#[cfg(target_arch = "xtensa")]
+fn main() {}
+
+#[cfg(not(target_arch = "xtensa"))]
 mod criterion;
+#[cfg(not(target_arch = "xtensa"))]
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 
 // Wrapping and unwrapping a 16- and a 32-byte key, each from the KEK's bytes,
 // as pyca and JWE use a KEK: aws-lc-rs's `KeyWrap` consumes its key anyway.
+#[cfg(not(target_arch = "xtensa"))]
 fn bench_key_wrap(c: &mut Criterion) {
     use rind::key_wrap::Mode;
     for (name, mode, padded) in [("kw", Mode::Kw, false), ("kwp", Mode::Kwp, true)] {
@@ -53,6 +59,7 @@ fn bench_key_wrap(c: &mut Criterion) {
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn rind_algorithm(kek_len: usize) -> &'static rind::cipher::Algorithm {
     if kek_len == 16 {
         &rind::key_wrap::AES_128
@@ -61,5 +68,7 @@ fn rind_algorithm(kek_len: usize) -> &'static rind::cipher::Algorithm {
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 criterion_group!(benches, bench_key_wrap);
+#[cfg(not(target_arch = "xtensa"))]
 criterion_main!(benches);

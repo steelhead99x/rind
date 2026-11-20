@@ -334,6 +334,19 @@ impl HaveAvx512Vl {
     }
 }
 
+/// Proof that the CPU has AVX-512 IFMA, with what `HaveAvx512Vl` proves:
+/// what OpenSSL's base 2^44 Poly1305 needs (F, VL, and IFMA, the check
+/// OpenSSL's `poly1305_init` makes), beside verified-garbage's AVX-512 VL
+/// ChaCha20.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct HaveAvx512Ifma(());
+
+impl HaveAvx512Ifma {
+    pub(crate) fn check() -> Option<Self> {
+        has(AVX2_KERNELS | AVX512F | AVX512VL | AVX512IFMA).then_some(Self(()))
+    }
+}
+
 /// Proof that the CPU has AES-NI and PCLMULQDQ, and the SSSE3 and SSE4.1
 /// their kernels also use: rind's AES-GCM and GHASH intrinsics, and aws-lc's
 /// AES-CTR.

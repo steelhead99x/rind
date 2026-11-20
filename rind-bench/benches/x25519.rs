@@ -1,10 +1,18 @@
+#[cfg(target_arch = "xtensa")]
+fn main() {}
+
+#[cfg(not(target_arch = "xtensa"))]
 mod criterion;
+#[cfg(not(target_arch = "xtensa"))]
 use std::hint::black_box;
 
+#[cfg(not(target_arch = "xtensa"))]
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 
+#[cfg(not(target_arch = "xtensa"))]
 const PUBLIC_KEY: &[u8; 32] = b"\xe6\xdb\x68\x67\x58\x30\x30\xdb\x35\x94\xc1\xa4\x24\xb1\x5f\x7c\x72\x66\x24\xec\x26\xb3\x35\x3b\x10\xa9\x03\xa6\xd0\xab\x1c\x4c";
 
+#[cfg(not(target_arch = "xtensa"))]
 fn x25519(c: &mut Criterion) {
     let mut group = c.benchmark_group("x25519-ecdh");
     group.throughput(Throughput::Elements(1));
@@ -136,6 +144,7 @@ fn x25519(c: &mut Criterion) {
 
 // Generate a key and its public key: the fixed-base multiplication alone,
 // where `x25519-ecdh` adds the variable-base one.
+#[cfg(not(target_arch = "xtensa"))]
 fn keygen(c: &mut Criterion) {
     let mut group = c.benchmark_group("x25519-keygen");
     group.throughput(Throughput::Elements(1));
@@ -196,7 +205,11 @@ fn keygen(c: &mut Criterion) {
         })
     });
 
-    #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+    #[cfg(all(
+        feature = "__bench_openssl",
+        target_family = "unix",
+        not(target_arch = "xtensa")
+    ))]
     group.bench_function("openssl", |b| {
         b.iter(|| {
             let key = openssl::pkey::PKey::generate_x25519().unwrap();
@@ -207,6 +220,7 @@ fn keygen(c: &mut Criterion) {
 
 // Agree with a stored key, loaded once, as WebCrypto's `deriveBits` and
 // node's `ECDH` do: the variable-base multiplication alone.
+#[cfg(not(target_arch = "xtensa"))]
 fn stored(c: &mut Criterion) {
     let mut group = c.benchmark_group("x25519-ecdh-stored");
     group.throughput(Throughput::Elements(1));
@@ -249,6 +263,7 @@ fn stored(c: &mut Criterion) {
 
 // Checks verified-garbage's public key and exchange against rind's, from a
 // fixed scalar, before any of its rows times them.
+#[cfg(not(target_arch = "xtensa"))]
 fn vg_agrees_with_rind() {
     use verified_garbage::x25519::{PrivateKey, PublicKey};
     let scalar = [1u8; 32];
@@ -265,5 +280,7 @@ fn vg_agrees_with_rind() {
     );
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 criterion_group!(benches, x25519, keygen, stored);
+#[cfg(not(target_arch = "xtensa"))]
 criterion_main!(benches);

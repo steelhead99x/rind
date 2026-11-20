@@ -99,8 +99,6 @@ pub(crate) mod edwards25519_pdouble;
 pub(crate) mod edwards25519_pdouble_narrow;
 pub(crate) mod edwards25519_scalarmulbase;
 pub(crate) mod edwards25519_scalarmulbase_narrow;
-pub(crate) mod edwards25519_scalarmuldouble;
-pub(crate) mod edwards25519_scalarmuldouble_narrow;
 pub(crate) mod ghash;
 pub(crate) mod ghash_neon_armv8;
 pub(crate) mod mldsa;

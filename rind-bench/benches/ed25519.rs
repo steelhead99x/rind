@@ -1,9 +1,16 @@
+#[cfg(target_arch = "xtensa")]
+fn main() {}
+
+#[cfg(not(target_arch = "xtensa"))]
 mod criterion;
+#[cfg(not(target_arch = "xtensa"))]
 use std::hint::black_box;
 
+#[cfg(not(target_arch = "xtensa"))]
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 
 // Generate a fresh key and make a PKCS8 document of it.
+#[cfg(not(target_arch = "xtensa"))]
 fn keygen(c: &mut Criterion) {
     let mut group = c.benchmark_group("ed25519-keygen");
     group.throughput(Throughput::Elements(1));
@@ -89,7 +96,11 @@ fn keygen(c: &mut Criterion) {
         })
     });
 
-    #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+    #[cfg(all(
+        feature = "__bench_openssl",
+        target_family = "unix",
+        not(target_arch = "xtensa")
+    ))]
     group.bench_function("openssl", |b| {
         b.iter(|| {
             let key = openssl::pkey::PKey::generate_ed25519().unwrap();
@@ -98,6 +109,7 @@ fn keygen(c: &mut Criterion) {
     });
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn verify(c: &mut Criterion) {
     let mut group = c.benchmark_group("ed25519-verify");
     group.throughput(Throughput::Elements(1));
@@ -174,7 +186,11 @@ fn verify(c: &mut Criterion) {
         })
     });
 
-    #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+    #[cfg(all(
+        feature = "__bench_openssl",
+        target_family = "unix",
+        not(target_arch = "xtensa")
+    ))]
     group.bench_function("openssl", |b| {
         use openssl::pkey::{Id, PKey};
         use openssl::sign::Verifier;
@@ -187,6 +203,7 @@ fn verify(c: &mut Criterion) {
     });
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn sign(c: &mut Criterion) {
     let mut group = c.benchmark_group("ed25519-sign");
     group.throughput(Throughput::Elements(1));
@@ -274,7 +291,11 @@ fn sign(c: &mut Criterion) {
         });
     });
 
-    #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+    #[cfg(all(
+        feature = "__bench_openssl",
+        target_family = "unix",
+        not(target_arch = "xtensa")
+    ))]
     group.bench_function("openssl", |b| {
         use openssl::sign::Signer;
         let signing_key = openssl::pkey::PKey::generate_ed25519().unwrap();
@@ -286,5 +307,7 @@ fn sign(c: &mut Criterion) {
     });
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 criterion_group!(benches, keygen, verify, sign);
+#[cfg(not(target_arch = "xtensa"))]
 criterion_main!(benches);

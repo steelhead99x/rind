@@ -20,6 +20,25 @@ macro_rules! aws {
     };
 }
 
+/// Whether the run asks for the low-memory profile, by setting
+/// `RIND_BENCH_LOW_MEMORY` to anything but `0` or the empty string, for a
+/// device with about 1 GB of RAM, where the largest rows crowd out the system.
+/// A bench that honours it leaves these rows out, as it does for a library
+/// that does not build on the target, so a report shows them as not timed:
+///
+/// - `argon2`: the 64 MiB, four-lane row (70 MB resident on armv7).
+/// - `rustls`: the `-threads` rows, which hold one client and server per
+///   logical CPU for the whole row.
+///
+/// It only removes rows. Timing parameters (`--sample-size`, `--warm-up-time`,
+/// `--measurement-time`) stay criterion's own flags; the cheap-run values the
+/// Fire TV hand-off used are `--sample-size 10 --warm-up-time 1
+/// --measurement-time 2`.
+#[allow(dead_code)]
+pub fn low_memory() -> bool {
+    std::env::var("RIND_BENCH_LOW_MEMORY").is_ok_and(|v| !v.is_empty() && v != "0")
+}
+
 /// Message sizes for ciphers and AEADs: a short token, QUIC datagrams at and
 /// near the common 1200- and 1350-byte MTUs, and a full TLS record.
 #[allow(dead_code)]

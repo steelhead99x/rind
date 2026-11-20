@@ -169,8 +169,9 @@ opaque low.x86_64.aes_gcm_vaes.VaesKernel.avx2
 opaque low.generic.zeroise.zeroise_value {T : Type} (ZeroableInst : low.generic.zeroise.Zeroable T) :
   T → Result T
 
-/-! ChaCha20-Poly1305's routines: aws-lc's one-pass seal and open, behind
-their Rust wrapper, whose contract `Rind.X86_64.ChaCha20Poly1305`'s `OnePass`
+/-! ChaCha20-Poly1305's routines: aws-lc's one-pass seal and open, or on a
+CPU with AVX-512 IFMA from 2 KiB the separate vector passes, behind their
+Rust wrapper, whose contract `Rind.X86_64.ChaCha20Poly1305`'s `OnePass`
 states as a hypothesis, and the separate passes CPUs without SSE4.1 run,
 which no theorem is about. -/
 

@@ -2,7 +2,6 @@
 
 use crate::error::{Error, KeyFormatError};
 use crate::low;
-#[cfg(rind_backend = "x86_64")]
 use crate::mid::half_size;
 use crate::mid::sha2::Sha512Context;
 use crate::mid::util;
@@ -224,19 +223,7 @@ impl VerifyingKey {
         };
 
         // Step: rfc8032 5.1.7.3
-        #[cfg(rind_backend = "x86_64")]
-        {
-            commits(point, r_sig.try_into().unwrap(), &k, &s)
-        }
-
-        // aarch64 keeps s2n-bignum's proven full-size multiplication until
-        // the half-size one measures faster there.
-        // Compute `R := [S]B - [k]A`.
-        #[cfg(rind_backend = "aarch64")]
-        {
-            let r = EdwardsPoint::scalarmuldouble(&k, &point.negate(), &s).compress();
-            r_sig == r.0
-        }
+        commits(point, r_sig.try_into().unwrap(), &k, &s)
     }
 
     pub(crate) fn as_bytes(&self) -> [u8; 32] {
@@ -251,7 +238,6 @@ impl VerifyingKey {
 /// Whether `r` encodes `[s]B - [k]A` for the key `point`, checked as
 /// `[v s]B - [v]R - [u]A = O` for the half-size `u ≡ v k (mod 8L)` of
 /// `half_size`, which accepts the same.
-#[cfg(rind_backend = "x86_64")]
 fn commits(point: &EdwardsPoint, r: &[u8; 32], k: &Scalar, s: &Scalar) -> bool {
     // Only a canonical encoding can equal `[s]B - [k]A`'s, so one that
     // does not decode commits to nothing.
@@ -319,16 +305,7 @@ impl EdwardsPoint {
         0x0000000000000000,
     ]);
 
-    /// Compute `A := [scalar]Point + [bscalar]B`.
-    #[cfg(rind_backend = "aarch64")]
-    fn scalarmuldouble(scalar: &Scalar, point: &Self, bscalar: &Scalar) -> Self {
-        let mut out = Self([0u64; 8]);
-        low::edwards25519_scalarmuldouble(&mut out.0, &scalar.0, &point.0, &bscalar.0);
-        out
-    }
-
     /// `(x, y, 1, x y)`, the point in extended coordinates.
-    #[cfg(rind_backend = "x86_64")]
     fn extended(&self) -> [u64; 16] {
         let mut t = [0u64; 4];
         low::bignum_mul_p25519(

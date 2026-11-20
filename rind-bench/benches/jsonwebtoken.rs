@@ -3,22 +3,34 @@
 //! jsonwebtoken builds a signer or verifier from the key on every token, so
 //! `token` is what a caller pays, and `load` is the part spent on the key.
 
+#[cfg(target_arch = "xtensa")]
+fn main() {}
+
+#[cfg(not(target_arch = "xtensa"))]
 mod criterion;
+#[cfg(not(target_arch = "xtensa"))]
 use std::hint::black_box;
 
 #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
+#[cfg(not(target_arch = "xtensa"))]
 use aws_lc_rs::rand::SystemRandom;
 #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
+#[cfg(not(target_arch = "xtensa"))]
 use aws_lc_rs::signature::{
     ECDSA_P256_SHA256_FIXED_SIGNING, ECDSA_P384_SHA384_FIXED_SIGNING, EcdsaKeyPair,
     EcdsaSigningAlgorithm, Ed25519KeyPair, KeyPair,
 };
+#[cfg(not(target_arch = "xtensa"))]
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
+#[cfg(not(target_arch = "xtensa"))]
 use jsonwebtoken::crypto::CryptoProvider;
 #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
+#[cfg(not(target_arch = "xtensa"))]
 use jsonwebtoken::crypto::aws_lc;
+#[cfg(not(target_arch = "xtensa"))]
 use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey};
 
+#[cfg(not(target_arch = "xtensa"))]
 fn providers() -> impl Iterator<Item = (&'static str, &'static CryptoProvider)> {
     #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
     let aws = [("aws-lc-rs", &aws_lc::DEFAULT_PROVIDER)].into_iter();
@@ -28,9 +40,11 @@ fn providers() -> impl Iterator<Item = (&'static str, &'static CryptoProvider)> 
 }
 
 // The header and claims of a typical token, as jsonwebtoken signs them.
+#[cfg(not(target_arch = "xtensa"))]
 const MESSAGE: &[u8] = b"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb290IjoiZGVtbyIsInB1dCI6WyIiXSwiZ2V0IjpbIiJdLCJleHAiOjE3OTI4MTYwMDAsImlhdCI6MTc2MTI4MDAwMH0";
 
 #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
+#[cfg(not(target_arch = "xtensa"))]
 fn ecdsa(signing: &'static EcdsaSigningAlgorithm) -> (EncodingKey, DecodingKey) {
     let pkcs8 = EcdsaKeyPair::generate_pkcs8(signing, &SystemRandom::new()).unwrap();
     let pair = EcdsaKeyPair::from_pkcs8(signing, pkcs8.as_ref()).unwrap();
@@ -43,6 +57,7 @@ fn ecdsa(signing: &'static EcdsaSigningAlgorithm) -> (EncodingKey, DecodingKey) 
 /// PKCS#8 for the private key, and the raw public key rind-jsonwebtoken
 /// parses: an X9.62 uncompressed point, not a SubjectPublicKeyInfo.
 #[cfg(any(target_arch = "xtensa", target_os = "none"))]
+#[cfg(not(target_arch = "xtensa"))]
 fn ecdsa(signing: &'static rind::ecdsa::SigningAlgorithm) -> (EncodingKey, DecodingKey) {
     let pair = rind::ecdsa::KeyPair::generate(signing).unwrap();
     let pkcs8 = pair.to_pkcs8();
@@ -54,6 +69,7 @@ fn ecdsa(signing: &'static rind::ecdsa::SigningAlgorithm) -> (EncodingKey, Decod
 
 // Keys in the forms a JWK becomes: PKCS#8 that carries the public key, and
 // RSA verified from its modulus and exponent.
+#[cfg(not(target_arch = "xtensa"))]
 fn keys() -> Vec<(Algorithm, EncodingKey, DecodingKey)> {
     let secret = b"a shared secret of thirty-two by";
     #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
@@ -118,6 +134,7 @@ fn keys() -> Vec<(Algorithm, EncodingKey, DecodingKey)> {
     ]
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn sign(c: &mut Criterion) {
     for (algorithm, encoding, _) in keys() {
         let mut group = c.benchmark_group(format!("jwt-{algorithm:?}-sign").to_lowercase());
@@ -137,6 +154,7 @@ fn sign(c: &mut Criterion) {
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn verify(c: &mut Criterion) {
     for (algorithm, encoding, decoding) in keys() {
         let mut group = c.benchmark_group(format!("jwt-{algorithm:?}-verify").to_lowercase());
@@ -165,5 +183,7 @@ fn verify(c: &mut Criterion) {
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 criterion_group!(benches, sign, verify);
+#[cfg(not(target_arch = "xtensa"))]
 criterion_main!(benches);

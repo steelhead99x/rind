@@ -61,8 +61,8 @@ mod generic {
     pub(super) mod ct_equal;
     pub(super) mod ctr;
     // Ed25519 verification's multi-scalar multiplication over s2n-bignum's
-    // point routines.
-    #[cfg(rind_backend = "x86_64")]
+    // point routines. x86_64 dispatches it; aarch64 runs this one.
+    #[cfg(any(rind_backend = "x86_64", rind_backend = "aarch64"))]
     pub(crate) mod edwards25519_msm;
     #[cfg(test)]
     pub(crate) mod ghash;
@@ -196,8 +196,11 @@ pub(crate) fn cpu_denied(_id: &str) -> bool {
     false
 }
 
-// Intel's MXCSR mitigation, where the instructions it covers exist: on x86
-// and x86_64 targets with SSE2, outside Miri, which runs no assembly.
+// Intel's MXCSR mitigation, where `stmxcsr` exists: x86 and x86_64 with
+// SSE2, outside Miri, which runs no assembly. `x86_64-unknown-none` leaves
+// SSE2 off, and `stmxcsr` raises `#UD` there when `CR4.OSFXSR` is clear.
+// Enabling SSE2, including the bare-metal lint's `+sse,+sse2,-soft-float`
+// row, selects the real guard.
 #[cfg_attr(
     not(all(
         any(target_arch = "x86_64", target_arch = "x86"),
@@ -298,7 +301,7 @@ pub(crate) use generic::{
         mlkem_basemul_k2, mlkem_basemul_k3, mlkem_basemul_k4, mlkem_intt, mlkem_mulcache_compute,
         mlkem_ntt, mlkem_reduce, mlkem_rej_uniform_vartime, mlkem_tobytes, mlkem_tomont,
     },
-    mlkem_sample::mlkem_sample_poly_ntt_8x,
+    mlkem_sample::{mlkem_sample_poly_ntt_8x, mlkem_shake256_8x},
     // libcrux's P-256 runs 64-bit limbs and recomputes the nonce's point to
     // sign, it exports P-384 only as ECDH, and it has no P-521, so rind
     // composes their arithmetic itself.
@@ -431,6 +434,7 @@ cfg_if::cfg_if! {
         pub(crate) use x86_64::rsaz_avx512::{Operands, RsazAvx512};
         pub(crate) use x86_64::rsa_ifma::{IfmaCrt, RsaIfma};
         pub(crate) use x86_64::mlkem_sample_poly_ntt_8x::mlkem_sample_poly_ntt_8x;
+        pub(crate) use x86_64::mlkem_shake256_8x::mlkem_shake256_8x;
 
         pub(crate) use x86_64::adx_mux::p256_montjadd;
         pub(crate) use x86_64::adx_mux::p256_montjdouble;
@@ -523,7 +527,7 @@ cfg_if::cfg_if! {
         pub(crate) use aarch64::wide_mux::edwards25519_epdouble;
         pub(crate) use aarch64::wide_mux::edwards25519_pdouble;
         pub(crate) use aarch64::wide_mux::edwards25519_scalarmulbase;
-        pub(crate) use aarch64::wide_mux::edwards25519_scalarmuldouble;
+        pub(crate) use generic::edwards25519_msm::edwards25519_msm;
         pub(crate) use aarch64::mldsa::{
             mldsa_ntt, mldsa_intt, mldsa_nttunpack, mldsa_pointwise, mldsa_pointwise_acc,
             mldsa_reduce, mldsa_caddq, mldsa_chknorm, mldsa_decompose_32, mldsa_decompose_88,
@@ -572,7 +576,7 @@ cfg_if::cfg_if! {
         pub(crate) use aarch64::chacha20;
         pub(crate) use aarch64::chacha20poly1305;
         pub(crate) use generic::mlkem::{mlkem_compress_d4, mlkem_compress_d5, mlkem_compress_d10, mlkem_compress_d11, mlkem_frombytes, mlkem_unpack};
-        pub(crate) use generic::mlkem_sample::mlkem_sample_poly_ntt_8x;
+        pub(crate) use generic::mlkem_sample::{mlkem_sample_poly_ntt_8x, mlkem_shake256_8x};
     } else if #[cfg(rind_backend = "arm")] {
         pub(in crate::low) use arm::cpu::{enter_cpu_state, zero_bytes, ct_compare_bytes, ct_compare_16, leave_cpu_state};
         pub(crate) use arm::aes::{AesDecKey, AesKey};
