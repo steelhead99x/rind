@@ -62,6 +62,13 @@ ROOTS = [
     # PBKDF2-HMAC's contracts, over VG's SHA-1, SHA-2, and HMAC specs, which
     # proofs/Rind/VgPbkdf2.lean proves rind's.
     "VerifiedGarbage.Spec.Pbkdf2.Generic",
+    # aarch64 ChaCha20-Poly1305's seal and open: the code (`Prog`) of each
+    # as VG registers it, from VG's `Impl/` and not its proofs, and the
+    # contracts, which proofs/Rind/Aarch64/VgChaCha20Poly1305Ct.lean states
+    # `ConstantTime` of.
+    "VerifiedGarbage.Impl.ChaCha20Poly1305.AArch64.Stitched",
+    "VerifiedGarbage.Impl.StackScratch.AArch64",
+    "VerifiedGarbage.Spec.ChaCha20Poly1305.Contract",
 ]
 
 IMPORT = re.compile(r"^(?:public )?(?:meta )?import (VerifiedGarbage\.[A-Za-z0-9_.]+)\b", re.M)

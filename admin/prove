@@ -485,12 +485,20 @@ vg() {
     mkdir -p "$dir"
     admin/upstream verified-garbage
     admin/import-vg-models --check "$upstream"
+    (cd proofs/verified-garbage && lake build)
+    # The text of each `Prog` rind's axioms about VG's leakage are about, which
+    # `admin/vg-bytes` checks is VG's assembly (so VG's printer is trusted to
+    # print that `Prog` as it does, which it does not check); only aarch64's so far.
+    local progs=()
+    if [[ $arch == aarch64 ]]; then
+        proofs/verified-garbage/.lake/build/bin/vg-print "$arch" >"$dir/progs.txt"
+        progs=(--progs "$dir/progs.txt")
+    fi
     hold scratch
     build_asm "$arch"
     rind_index "$arch" >/dev/null
-    admin/vg-bytes "$upstream" "$arch" "$dir" --rind "$out/asm/$arch-units"/*.rcgu.o
+    admin/vg-bytes "$upstream" "$arch" "$dir" "${progs[@]}" --rind "$out/asm/$arch-units"/*.rcgu.o
     release scratch
-    (cd proofs/verified-garbage && lake build)
     rustc --edition 2024 -O -o "$dir/runner" admin/vg-cosim-runner.rs
     # A case that faults must name its instruction and fail the run, on the
     # CPU and under the emulator.
