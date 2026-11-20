@@ -4184,8 +4184,303 @@ mod independent {
                 }};
             }
             check!(&rind::aead::AES_128_GCM, aes_gcm::Aes128Gcm, &key[..16]);
+            check!(
+                &rind::aead::AES_192_GCM,
+                aes_gcm::AesGcm<aes_gcm::aes::Aes192, aes_gcm::aead::consts::U12>,
+                &key[..24]
+            );
             check!(&rind::aead::AES_256_GCM, aes_gcm::Aes256Gcm, &key[..]);
             check!(&rind::aead::CHACHA20_POLY1305, chacha20poly1305::ChaCha20Poly1305, &key[..]);
+        }
+    }
+
+    proptest! {
+        // rind's sealed message opens under the oracle's XChaCha20-Poly1305
+        // with the nonce rind picked, and the oracle's under rind's.
+        #[test]
+        fn xchacha20_poly1305(
+            key in any::<[u8; 32]>(),
+            aad in vec(any::<u8>(), 0..100),
+            msg in vec(any::<u8>(), 0..1100),
+            flip in any::<Option<Index>>(),
+        ) {
+            use aes_gcm::aead::{AeadInOut, KeyInit};
+
+            let ours = rind::aead::RandomizedNonceKey::new(&key);
+            let mut sealed = msg.clone();
+            let nonce = ours.seal_in_place_append_tag(&aad, &mut sealed).unwrap();
+
+            let theirs = chacha20poly1305::XChaCha20Poly1305::new_from_slice(&key).unwrap();
+            let mut wanted = msg.clone();
+            let tag = theirs
+                .encrypt_inout_detached(
+                    nonce.as_ref().try_into().unwrap(),
+                    &aad,
+                    wanted.as_mut_slice().into(),
+                )
+                .unwrap();
+            wanted.extend_from_slice(&tag);
+            prop_assert_eq!(&sealed, &wanted);
+
+            if let Some(flip) = flip {
+                let bit = flip.index(wanted.len() * 8);
+                wanted[bit / 8] ^= 1 << (bit % 8);
+            }
+            let opened = ours
+                .open_in_place(nonce, &aad, &mut wanted)
+                .map(|plain| plain.to_vec());
+            if flip.is_some() {
+                prop_assert_eq!(opened, Err(rind::Error::DecryptFailed));
+            } else {
+                prop_assert_eq!(opened, Ok(msg));
+            }
+        }
+
+        // Keys of 128, 192, and 256 bits, and counter blocks near a 32-bit
+        // or the 128-bit wrap, against the oracle's 128-bit and 32-bit
+        // big-endian counters.
+        #[test]
+        fn aes_ctr_cbc(
+            key in prop::sample::select(&[16usize, 24, 32][..])
+                .prop_flat_map(|len| vec(any::<u8>(), len)),
+            iv in prop_oneof![
+                any::<[u8; 16]>(),
+                (any::<u128>(), (u32::MAX - 80)..=u32::MAX).prop_map(
+                    |(high, low)| (high & !u128::from(u32::MAX) | u128::from(low)).to_be_bytes()
+                ),
+                ((u128::MAX - 80)..=u128::MAX).prop_map(u128::to_be_bytes),
+            ],
+            msg in vec(any::<u8>(), 0..1100),
+            forged in (1..70usize).prop_flat_map(|n| vec(any::<u8>(), 16 * n)),
+            tail in (0u8..=17, 0u8..=2),
+        ) {
+            use cbc::cipher::{
+                BlockModeDecrypt as _, BlockModeEncrypt as _, KeyIvInit as _, StreamCipher as _,
+                block_padding::Pkcs7,
+            };
+
+            let algorithm = match key.len() {
+                16 => &rind::cipher::AES_128,
+                24 => &rind::cipher::AES_192,
+                _ => &rind::cipher::AES_256,
+            };
+            // The last two bytes of the forged ciphertext's plaintext are
+            // chosen so that well-formed and malformed padding both come up.
+            let mut forged = forged;
+            let len = forged.len();
+            forged[len - 1] = tail.0;
+            forged[len - 2] = if tail.1 == 0 { tail.0 } else { forged[len - 2] };
+
+            macro_rules! check {
+                ($cipher:ty) => {{
+                    let mut ours = msg.clone();
+                    rind::cipher::AesCtr::new(algorithm, &key, 128)
+                        .unwrap()
+                        .apply_keystream(&iv, &mut ours)
+                        .unwrap();
+                    let mut wanted = msg.clone();
+                    ctr::Ctr128BE::<$cipher>::new_from_slices(&key, &iv)
+                        .unwrap()
+                        .apply_keystream(&mut wanted);
+                    prop_assert_eq!(&ours, &wanted);
+
+                    // A 32-bit counter, which wraps within the low word of
+                    // the block instead of carrying into the next one, as
+                    // the blocks near `u32::MAX` of `iv` show.
+                    let mut ours = msg.clone();
+                    rind::cipher::AesCtr::new(algorithm, &key, 32)
+                        .unwrap()
+                        .apply_keystream(&iv, &mut ours)
+                        .unwrap();
+                    let mut wanted = msg.clone();
+                    ctr::Ctr32BE::<$cipher>::new_from_slices(&key, &iv)
+                        .unwrap()
+                        .apply_keystream(&mut wanted);
+                    prop_assert_eq!(&ours, &wanted);
+
+                    let enc = rind::cipher::AesCbcEncryptingKey::new(algorithm, &key).unwrap();
+                    let dec = rind::cipher::AesCbcDecryptingKey::new(algorithm, &key).unwrap();
+                    let mut ours = msg.clone();
+                    enc.encrypt(rind::cipher::CbcIv::assume_unpredictable(iv), &mut ours).unwrap();
+                    let wanted = cbc::Encryptor::<$cipher>::new_from_slices(&key, &iv)
+                        .unwrap()
+                        .encrypt_padded_vec::<Pkcs7>(&msg);
+                    prop_assert_eq!(&ours, &wanted);
+                    prop_assert_eq!(dec.decrypt(&iv, &mut ours).unwrap(), &msg[..]);
+
+                    // Each decrypts or refuses a forged ciphertext as the other does.
+                    let mut ours = forged.clone();
+                    let ours = dec.decrypt(&iv, &mut ours).map(|plain| plain.to_vec());
+                    let theirs = cbc::Decryptor::<$cipher>::new_from_slices(&key, &iv)
+                        .unwrap()
+                        .decrypt_padded_vec::<Pkcs7>(&forged);
+                    match (ours, theirs) {
+                        (Ok(ours), Ok(theirs)) => prop_assert_eq!(ours, theirs),
+                        (Err(rind::Error::DecryptFailed), Err(_)) => {}
+                        (ours, theirs) => prop_assert!(false, "rind {:?}, oracle {:?}", ours, theirs),
+                    }
+                }};
+            }
+            match key.len() {
+                16 => check!(aes::Aes128),
+                24 => check!(aes::Aes192),
+                _ => check!(aes::Aes256),
+            }
+        }
+
+        // RFC 3394 and RFC 5649 wrapping, with both refusing any single bit
+        // of the wrapped key flipped.
+        #[test]
+        fn aes_key_wrap(
+            kek in prop::sample::select(&[16usize, 24, 32][..])
+                .prop_flat_map(|len| vec(any::<u8>(), len)),
+            key in (2..=12usize).prop_flat_map(|n| vec(any::<u8>(), 8 * n)),
+            padded_key in vec(any::<u8>(), 1..100),
+            flip in any::<Index>(),
+        ) {
+            use aes_gcm::aead::KeyInit as _;
+            use rind::key_wrap::Mode;
+
+            let algorithm = match kek.len() {
+                16 => &rind::key_wrap::AES_128,
+                24 => &rind::key_wrap::AES_192,
+                _ => &rind::key_wrap::AES_256,
+            };
+            let ours = rind::key_wrap::AesKek::new(algorithm, &kek).unwrap();
+
+            macro_rules! check {
+                ($kw:ty, $kwp:ty) => {{
+                    let kw = <$kw>::new_from_slice(&kek).unwrap();
+                    let mut wrapped = vec![0u8; key.len() + 8];
+                    ours.wrap_key(Mode::Kw, &key, &mut wrapped).unwrap();
+                    let mut wanted = vec![0u8; key.len() + 8];
+                    prop_assert_eq!(kw.wrap_key(&key, &mut wanted).unwrap(), &wrapped[..]);
+                    let mut unwrapped = vec![0u8; key.len()];
+                    prop_assert_eq!(kw.unwrap_key(&wrapped, &mut unwrapped).unwrap(), &key[..]);
+                    let bit = flip.index(wrapped.len() * 8);
+                    wrapped[bit / 8] ^= 1 << (bit % 8);
+                    prop_assert_eq!(
+                        ours.unwrap_key(Mode::Kw, &wrapped, &mut unwrapped).map(|_| ()),
+                        Err(rind::Error::DecryptFailed)
+                    );
+                    prop_assert!(kw.unwrap_key(&wrapped, &mut unwrapped).is_err());
+
+                    let kwp = <$kwp>::new_from_slice(&kek).unwrap();
+                    let mut wrapped = vec![0u8; padded_key.len().next_multiple_of(8) + 8];
+                    ours.wrap_key(Mode::Kwp, &padded_key, &mut wrapped).unwrap();
+                    let mut wanted = vec![0u8; padded_key.len() + 15];
+                    prop_assert_eq!(kwp.wrap_key(&padded_key, &mut wanted).unwrap(), &wrapped[..]);
+                    let mut theirs = vec![0u8; wrapped.len()];
+                    prop_assert_eq!(kwp.unwrap_key(&wrapped, &mut theirs).unwrap(), &padded_key[..]);
+                    let mut unwrapped = vec![0u8; wrapped.len() - 8];
+                    prop_assert_eq!(
+                        &ours.unwrap_key(Mode::Kwp, &wrapped, &mut unwrapped).unwrap()[..],
+                        &padded_key[..]
+                    );
+                    let bit = flip.index(wrapped.len() * 8);
+                    wrapped[bit / 8] ^= 1 << (bit % 8);
+                    prop_assert_eq!(
+                        ours.unwrap_key(Mode::Kwp, &wrapped, &mut unwrapped).map(|_| ()),
+                        Err(rind::Error::DecryptFailed)
+                    );
+                    prop_assert!(kwp.unwrap_key(&wrapped, &mut theirs).is_err());
+                }};
+            }
+            match kek.len() {
+                16 => check!(aes_kw::KwAes128, aes_kw::KwpAes128),
+                24 => check!(aes_kw::KwAes192, aes_kw::KwpAes192),
+                _ => check!(aes_kw::KwAes256, aes_kw::KwpAes256),
+            }
+        }
+
+        // Salts and keys either side of both block sizes, and lengths up to a
+        // few blocks or either side of each hash's 255-block limit.
+        #[test]
+        fn hkdf_pbkdf2(
+            salt in vec(any::<u8>(), 0..200),
+            ikm in vec(any::<u8>(), 0..200),
+            info in vec(vec(any::<u8>(), 0..100), 0..4),
+            len in 0..200usize,
+            at_limit in any::<bool>(),
+            iterations in 1..20u32,
+            derived in 1..200usize,
+        ) {
+            let info: Vec<&[u8]> = info.iter().map(Vec::as_slice).collect();
+            let iterations_nz = core::num::NonZeroU32::new(iterations).unwrap();
+
+            macro_rules! check {
+                ($hkdf:expr, $pbkdf2:expr, $hash:ty, $hash_len:expr) => {{
+                    let len = if at_limit { 255 * $hash_len + len - 100 } else { len };
+                    let ours = rind::hkdf::Salt::new($hkdf, &salt).extract(&ikm).unwrap();
+                    let theirs = hkdf::Hkdf::<$hash>::new(Some(&salt), &ikm);
+                    let mut ours_out = vec![0u8; len];
+                    let result = ours.fill(&info, &mut ours_out);
+                    let mut theirs_out = vec![0u8; len];
+                    match theirs.expand_multi_info(&info, &mut theirs_out) {
+                        Ok(()) => {
+                            result.unwrap();
+                            prop_assert_eq!(ours_out, theirs_out);
+                        }
+                        Err(_) => prop_assert_eq!(result, Err(rind::Error::WrongLength)),
+                    }
+
+                    let mut wanted = vec![0u8; derived];
+                    pbkdf2::pbkdf2_hmac::<$hash>(&ikm, &salt, iterations, &mut wanted);
+                    let secret = rind::pbkdf2::Secret::new($pbkdf2, &ikm);
+                    let mut got = vec![0u8; derived];
+                    secret.derive(iterations_nz, &salt, &mut got).unwrap();
+                    prop_assert_eq!(got, wanted);
+                }};
+            }
+            check!(&rind::hkdf::HKDF_SHA256, &rind::pbkdf2::PBKDF2_HMAC_SHA256, sha2::Sha256, 32);
+            check!(&rind::hkdf::HKDF_SHA384, &rind::pbkdf2::PBKDF2_HMAC_SHA384, sha2::Sha384, 48);
+            check!(&rind::hkdf::HKDF_SHA512, &rind::pbkdf2::PBKDF2_HMAC_SHA512, sha2::Sha512, 64);
+        }
+    }
+
+    // HACL*'s Curve25519 and Ed25519 through libcrux, which rind runs on no
+    // tier, so it is the oracle on armv7 and the portable backend, where
+    // rind runs dalek.
+    proptest! {
+        #[test]
+        fn ed25519_x25519_libcrux(
+            seed in any::<[u8; 32]>(),
+            peer in any::<[u8; 32]>(),
+            message in vec(any::<u8>(), 0..300),
+            flip in any::<Option<Index>>(),
+        ) {
+            let ours = rind::ed25519::KeyPair::from_seed(&seed).unwrap();
+            let mut public = [0u8; 32];
+            libcrux_ed25519::secret_to_public(&mut public, &seed);
+            prop_assert_eq!(ours.public_key().as_ref(), &public);
+            let signature = libcrux_ed25519::sign(&message, &seed).unwrap();
+            let ours_signature = ours.sign(&message);
+            prop_assert_eq!(ours_signature.as_ref(), &signature);
+            let mut signature = signature;
+            if let Some(flip) = flip {
+                let bit = flip.index(signature.len() * 8);
+                signature[bit / 8] ^= 1 << (bit % 8);
+            }
+            prop_assert_eq!(
+                rind::ed25519::PublicKey::new(&public)
+                    .unwrap()
+                    .verify(&message, &signature)
+                    .is_ok(),
+                libcrux_ed25519::verify(&message, &public, &signature).is_ok()
+            );
+            prop_assert_eq!(libcrux_ed25519::verify(&message, &public, &signature).is_ok(), flip.is_none());
+
+            // Both refuse a low-order peer's all-zero secret.
+            let ours = rind::agreement::PrivateKey::from_scalar(&rind::agreement::X25519, &seed).unwrap();
+            let mut public = [0u8; 32];
+            libcrux_curve25519::secret_to_public(&mut public, &seed);
+            prop_assert_eq!(ours.public_key().as_ref(), &public);
+            let mut shared = [0u8; 32];
+            match (ours.agree(&peer), libcrux_curve25519::ecdh(&mut shared, &peer, &seed)) {
+                (Ok(got), Ok(())) => prop_assert_eq!(got.as_ref(), &shared),
+                (Err(_), Err(_)) => {}
+                (ours, theirs) => prop_assert!(false, "rind ok {}, libcrux ok {}", ours.is_ok(), theirs.is_ok()),
+            }
         }
     }
 
