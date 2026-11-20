@@ -6,6 +6,9 @@
 # CHECK_FAIL_FAST=1 stops every lane at the first failed module, for the merge
 # queue, which ejects a failing group either way and gains nothing from the
 # rest.
+# CHECK_QUEUE=1 makes ci also run the checks GitHub runs on pull requests in
+# workflows of their own, when the diff touches their paths, for the merge
+# queue (see the queue modules below).
 # CHECK_TIMES=FILE also writes each module's wall seconds, CPU milliseconds,
 # and name there, one per line, ending with the whole run's.
 # `--query` prints the selection before CI installs its toolchain and caches.
@@ -77,7 +80,11 @@ fi
 #                      and lanes run concurrently. Cargo's build directory
 #                      lock already serializes builds sharing a target.
 #   fix                `just fix` runs it too; check and ci run every module.
-declare -A scope=() tools=() check_tools=() compiles=() lane=()
+#   queue              Its lane runs beside the CHECK_JOBS others, never in
+#                      one of their slots, since it waits on Lean and
+#                      emulators rather than competing with Cargo. Register
+#                      it first, so it starts at once.
+declare -A scope=() tools=() check_tools=() compiles=() lane=() queue=()
 checks=()
 fixes=()
 module() {
@@ -94,6 +101,7 @@ module() {
             compiles) compiles[$name]=1 ;;
             lane=*) lane[$name]=${option#lane=} ;;
             fix) fixes+=("$name") ;;
+            queue) queue[$name]=1 ;;
             *)
                 echo "error: module $name has an unknown option '$option'" >&2
                 exit 2
@@ -101,6 +109,55 @@ module() {
         esac
     done
 }
+
+# The paths that trigger a workflow on a pull request, as one anchored regex
+# over sh/changed.sh's paths: GitHub's `*` stays within a directory and `**`
+# crosses them. A glob this cannot convert is an error.
+pull_request_paths() {
+    local globs glob regex=
+    globs=$(yq '.on.pull_request.paths[]' ".github/workflows/$1")
+    [[ -n "$globs" ]] || {
+        echo "error: $1 lists no pull_request paths" >&2
+        return 1
+    }
+    while IFS= read -r glob; do
+        [[ "$glob" =~ ^[A-Za-z0-9_./*-]+$ ]] || {
+            echo "error: $1's pull_request path '$glob' uses a pattern sh/dispatch.sh cannot convert" >&2
+            return 1
+        }
+        glob=${glob//./\\.}
+        glob=${glob//\*\*\//$'\1'}
+        glob=${glob//\*\*/$'\2'}
+        glob=${glob//\*/'[^/]*'}
+        glob=${glob//$'\1'/'(.*/)?'}
+        glob=${glob//$'\2'/'.*'}
+        regex+=${regex:+|}$glob
+    done <<<"$globs"
+    echo "^($regex)$"
+}
+
+# The merge queue's build runs the checks GitHub runs on a pull request in a
+# workflow of its own, when the group touches the paths that trigger it there,
+# so two PRs that each pass one alone cannot break it together on main. Each
+# reads its paths from its workflow, so the two selections cannot drift apart.
+# The group's build is the one self-hosted job queue-build.yml runs, on x86_64,
+# so `vg` checks only x86_64's code; `prove`'s arm job and the nightly cover
+# aarch64's. Plain assignments, so a failed read stops the run instead of
+# reading as a repository-wide pattern.
+if [[ "$action" == ci && -n "${CHECK_QUEUE:-}" ]]; then
+    # pyca/verified-garbage's code against its Lean models, as `prove`'s vg
+    # job runs it, with the same fixed seed as a pull request.
+    paths=$(pull_request_paths prove.yml)
+    module vg "$paths" tools='nix yq' queue
+    # Every importer and generator at its pinned upstream revision.
+    paths=$(pull_request_paths regenerate.yml)
+    module regenerate "$paths" tools='nix yq git' queue
+    # The tests under every Intel SDE model x86-cpu.yml runs, when the group
+    # reaches x86_64 code, as x86-cpu.yml selects them (see `check:sde`
+    # below), so a fault on one CPU's dispatch paths cannot land.
+    paths=$(pull_request_paths x86-cpu.yml)
+    module sde "$paths" tools='nix yq' queue
+fi
 
 # sh/select.sh narrows this to the changed crates and their dependents.
 module rs '^(rind[^/]*/|fuzz/|thirdparty/|Cargo\.(toml|lock)$|\.rustfmt(\.unstable)?\.toml$)' \
@@ -195,9 +252,10 @@ module site '' \
 module quest '^(quest/|flake\.lock$)' \
     tools='quest'
 # alert.yml must watch every workflow that runs outside a pull request, every
-# third-party action must be pinned, and every scheduled workflow must run
-# whole when the release check dispatches it.
-module gh '^(\.github/|sh/(alert|pins|release-check)\.sh$)' \
+# third-party action must be pinned, every scheduled workflow must run whole
+# when the release check dispatches it, and every job of a workflow that takes
+# `jobs` must honor it.
+module gh '^(\.github/|sh/(alert|pins|release-check|select-jobs)\.sh$)' \
     tools='actionlint yq jq'
 module shell '' \
     tools='shellcheck'
@@ -275,6 +333,13 @@ for module in "${modules[@]}"; do
         cross_reach=$(reach cross)
         reaches "$cross_reach" aarch64 arm portable || continue
     fi
+    # x86-cpu.yml's scope, over the same whole diff: one that changes the
+    # models' own files, or that sh/backends.sh says reaches x86_64.
+    if [[ "$verb:$module" == check:sde && -z "$all" ]] &&
+        ! grep -qxE '\.github/workflows/x86-cpu\.yml|admin/x86-cpu' "$changed"; then
+        sde_reach=$(sh/backends.sh "$changed")
+        grep -qxE 'all|x86_64' <<<"$sde_reach" || continue
+    fi
     # Selection must not depend on the tools setup has yet to install.
     if [[ -n "$query" ]]; then
         selected+=("$module")
@@ -344,9 +409,11 @@ stop() {
     until wait; do :; done
 }
 
-# Writes the tracked files matching a pathspec to $listed, NUL-separated.
+# Writes the files matching a pathspec to $listed, NUL-separated: untracked
+# ones too, as sh/changed.sh counts them, so a new file is linted before it is
+# staged.
 files() {
-    run git ls-files -z -- "$@" >"$listed"
+    run git ls-files -z --cached --others --exclude-standard -- "$@" >"$listed"
 }
 
 # Whether the Cargo arguments after CRATE, as sh/select.sh prints them, name
@@ -572,6 +639,18 @@ step() {
             fi
             run nix develop .#ct-vartime --command admin/ct-vartime "${targets[@]}"
             ;;
+        check:vg) run nix develop .#vg --command admin/prove vg ;;
+        # Its own target directory, so its release build runs beside rs's
+        # rather than behind Cargo's lock on target/.
+        check:sde) CARGO_TARGET_DIR=target/sde run nix develop .#sde --command admin/x86-cpu all ;;
+        check:regenerate)
+            # admin/regenerate rewrites rind/src/low/, which other modules
+            # build, and .tmp/upstream/, which vg reads, so it runs in a
+            # clone of its own.
+            run git clone -q --shared --no-checkout . "$logs/regenerate"
+            run git -C "$logs/regenerate" checkout -q --detach "$(git rev-parse HEAD)"
+            run nix develop "$logs/regenerate#regenerate" --command "$logs/regenerate/admin/regenerate"
+            ;;
         check:structure) run admin/structure ;;
         check:deny) run cargo deny --locked check ;;
         check:versions) run sh/adapter-versions.sh ;;
@@ -616,6 +695,7 @@ step() {
             run sh/alert.sh check
             run sh/pins.sh
             run sh/release-check.sh --check >/dev/null
+            run sh/select-jobs.sh --check
             ;;
         check:shell)
             files 'sh/*.sh'
@@ -645,6 +725,14 @@ if [[ ! "$limit" =~ ^[1-9][0-9]*$ ]]; then
     echo "error: CHECK_JOBS must be a positive integer, not '$limit'" >&2
     exit 2
 fi
+
+# Lanes stream their output only while one runs at a time, which a queue
+# module's lane beside the others rules out.
+stream=
+((limit > 1)) || stream=1
+for module in "${selected[@]}"; do
+    [[ ! -v "queue[$module]" ]] || stream=
+done
 
 lanes=()
 declare -A members=()
@@ -796,12 +884,15 @@ trap 'exit 143' TERM
 # cancels the running lanes and starts no more.
 set -m
 stopping=
+# How many queue modules' lanes run, each named after its module.
+beside=0
 while true; do
-    while [[ -z "$stopping" ]] && ((next < ${#lanes[@]} && ${#running[@]} < limit)); do
+    while [[ -z "$stopping" ]] && ((next < ${#lanes[@]} && ${#running[@]} - beside < limit)); do
         name=${lanes[next]}
         next=$((next + 1))
+        [[ ! -v "queue[$name]" ]] || beside=$((beside + 1))
         read -ra lane_modules <<<"${members[$name]}"
-        if ((limit == 1)); then
+        if [[ -n "$stream" ]]; then
             run_lane "$logs/$name.times" "${lane_modules[@]}" </dev/null 3>/dev/null &
         else
             run_lane "$logs/$name.times" "${lane_modules[@]}" </dev/null 3>&2 >"$logs/$name.log" 2>&1 &
@@ -814,6 +905,7 @@ while true; do
     wait -n -p pid "${!running[@]}" || status=$?
     name=${running[$pid]}
     unset "running[$pid]"
+    [[ ! -v "queue[$name]" ]] || beside=$((beside - 1))
     if ((status)) && [[ -z "$stopping" ]]; then
         failed+=("$name")
         ((failed_status)) || failed_status=$status
@@ -822,7 +914,7 @@ while true; do
             cancel
         fi
     fi
-    ((limit == 1)) || cat "$logs/$name.log"
+    [[ -n "$stream" ]] || cat "$logs/$name.log"
 done
 
 # Name every failed module after all independent work has completed.

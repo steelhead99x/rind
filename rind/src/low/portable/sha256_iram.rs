@@ -37,11 +37,9 @@
 //! No branch or memory index depends on the message or the state. The
 //! schedule window is indexed by the round number. The rotates and the
 //! byte swap are fixed instruction sequences; the shift distance is a
-//! const generic, not the secret. `l32i`, `ssai`, `src`, and `srli` do
-//! not take a data-dependent number of cycles on this core. The backend
-//! may print the byte swap's 16-bit `srli` as `extui`; that extract does
-//! not read SAR either. A load can
-//! stall until its address is ready. That stall follows register
+//! const generic, not the secret. `l32i`, `ssai`, `src`, and `extui` do
+//! not take a data-dependent number of cycles on this core, and `extui`
+//! does not read SAR. A load can stall until its address is ready. That stall follows register
 //! dependence, not the loaded value.
 //!
 //! `admin/esp32s3-sha256-layout` checks the linked image at opt-level 3,
@@ -183,9 +181,9 @@ fn message_word<const BYTE: usize>(block: &[u8; 64]) -> u32 {
     // header sets the same flags; this probe does not build it, so `l32i`
     // is checked here only for ESP32 and ESP32-S3. It does not trap and
     // does not call a helper when `block` is not word-aligned. The sequence
-    // is a byte swap of that little-endian load: `ssai 8`, shift the high
-    // half down (`srli` in this block; the backend may emit `extui`), then
-    // three `src`. It writes SAR, `a14`, and `y`, and does not use the
+    // is a byte swap of that little-endian load: `ssai 8`, extract the high
+    // half (`extui`: `srli`'s 4-bit shift cannot encode 16), then three
+    // `src`. It writes SAR, `a14`, and `y`, and does not use the
     // stack. The windowed ABI and the call0 ABI both give this
     // function `a14` as a temporary; the operand list names it so the
     // compiler will not assign `p` or `y` there and will not keep a live
@@ -199,7 +197,7 @@ fn message_word<const BYTE: usize>(block: &[u8; 64]) -> u32 {
         core::arch::asm!(
             "l32i a14, {p}, {byte}",
             "ssai 8",
-            "srli {y}, a14, 16",
+            "extui {y}, a14, 16, 16",
             "src {y}, {y}, a14",
             "src {y}, {y}, {y}",
             "src {y}, a14, {y}",

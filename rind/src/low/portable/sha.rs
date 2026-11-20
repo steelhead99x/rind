@@ -1,58 +1,44 @@
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
 //! SHA-1 on rind's portable code in `generic`, as armv7 runs it without the
-//! crypto extension, and SHA-256 on HACL*'s verified `Hacl_Hash_SHA2`, as
-//! libcrux-sha2 ships it, except on ESP-IDF Xtensa. HACL*'s SHA-256 took
-//! 0.67-0.93 of `generic`'s time at 16 KB on x86_64. SHA-384/512 is that
-//! HACL* body on 64-bit targets and the rolled loop in `generic::sha512` on
-//! every other pointer width, where the unrolled body is about 47 KiB and
-//! misses a 16 KiB instruction cache. On ESP-IDF Xtensa, SHA-256 is rind's
-//! own FIPS 180-4 compression in `sha256_iram`: sixteen rounds unrolled, the
-//! schedule body run three times, placed in internal RAM. It is not HACL*
-//! and nothing proves it. A fully rolled SHA-256 was slower than HACL* in
-//! IRAM on an ESP32-S3, which is why this body is unrolled by sixteen.
-//! Measured there at `3aaa3c6a`, long SHA-256 takes about 0.76× the time of
-//! HACL* placed in IRAM and about 0.65–0.74× main. The sha2 image's block
-//! symbol is 4,412 bytes and `.iram0.text` is 4,516 bytes above main. A
-//! standalone object probe of the same tree is smaller (4,256-byte block,
-//! 4,357 bytes of IRAM sections) and is not that firmware image. Other
-//! portable targets keep HACL* at every length, including in tests: a
-//! second body beside that ~12 KiB function made long hashes slower on
-//! that chip. Host tests compile the IRAM body and call it directly, on
-//! the Rust `rotate_right` and `from_be_bytes` fallbacks rather than the
-//! Xtensa asm, and they do not put it in place of the HACL* those hosts
-//! ship.
+//! crypto extension, and the SHA-2 family on HACL*'s verified
+//! `Hacl_Hash_SHA2`, as libcrux-sha2 ships it. HACL*'s SHA-256 took 0.67-0.93
+//! of `generic`'s time at 16 KB on x86_64.
+//!
+//! Two exceptions are for small instruction caches, which HACL*'s unrolled
+//! bodies (about 12 KiB for SHA-256, 47 KiB for SHA-512 in 32-bit codegen)
+//! miss. On 32-bit microcontrollers (ESP-IDF or no OS), SHA-384/512 is the
+//! rolled loop in `generic::sha512`: on a Seeed XIAO ESP32-S3 it took about
+//! 0.033 of HACL*'s time. Hosted 32-bit targets keep HACL*, which took
+//! 0.71-0.78 of the rolled loop's time on i686. On ESP-IDF Xtensa, SHA-256
+//! is rind's own unproven compression in `sha256_iram`, run from internal
+//! RAM, at about 0.65-0.74 of HACL*'s time from flash on that board from
+//! 1200 B to 16 KB. Host tests call that body by name, on its Rust
+//! fallbacks, and ship HACL* in its place.
 
 #[cfg(any(not(all(target_arch = "xtensa", target_os = "espidf")), test))]
 use libcrux_sha2::hacl::sha256_update_nblocks;
-#[cfg(target_pointer_width = "64")]
+#[cfg(not(all(
+    not(target_pointer_width = "64"),
+    any(target_os = "espidf", target_os = "none")
+)))]
 use libcrux_sha2::hacl::sha512_update_nblocks;
 
 pub(crate) use crate::low::generic::sha1::sha1_compress_blocks;
 
 /// HACL* takes a 32-bit length, so longer input goes in pieces of whole
-/// blocks below it. ESP-IDF Xtensa does not call HACL* for either hash:
-/// SHA-256 is the IRAM body and SHA-512 is the rolled loop.
+/// blocks below it. ESP-IDF Xtensa calls HACL* for neither hash.
 #[cfg_attr(all(target_arch = "xtensa", target_os = "espidf"), allow(dead_code))]
 const PIECE: usize = 1 << 31;
 
 // The IRAM body is what ESP-IDF Xtensa ships. Other builds compile it only
-// for the tests below, which call it by name. `sha256_compress_blocks` does
-// not, so a portable `cargo test` still runs the HACL* SHA-256 those
-// targets ship, and ctgrind's portable job checks that body.
+// for the tests below, which call it by name, so their `cargo test` and
+// ctgrind still run the HACL* SHA-256 they ship.
 #[cfg(any(all(target_arch = "xtensa", target_os = "espidf"), test))]
 #[path = "sha256_iram.rs"]
 mod iram;
 
 /// Compresses whole 64-byte `blocks` into `state`.
-///
-/// One loop of HACL*'s `sha256_update_nblocks` on every pointer width,
-/// except ESP-IDF Xtensa, which runs the 16-round body in `sha256_iram`
-/// from internal RAM. 32-bit portable does not keep a second compressor
-/// beside HACL*: on an ESP32-S3 that second body made long hashes slower.
-/// Xtensa replaces HACL* for SHA-256 instead of adding one. The HACL*
-/// proof does not cover the replacement. The predicate is the target, not
-/// `test`: a host test of this function runs the shipped HACL* body.
 pub(crate) fn sha256_compress_blocks(state: &mut [u32; 8], blocks: &[u8]) {
     assert!(blocks.len().is_multiple_of(64));
     #[cfg(all(target_arch = "xtensa", target_os = "espidf"))]
@@ -90,19 +76,20 @@ pub(crate) fn sha256_finish(state: &[u32; 8], message: &[u8], length: [u8; 8]) -
 /// Compresses whole 128-byte `blocks` into `state`.
 pub(crate) fn sha512_compress_blocks(state: &mut [u64; 8], blocks: &[u8]) {
     assert!(blocks.len().is_multiple_of(128));
-    // HACL*'s `sha512_update` is fully unrolled (~47 KiB when the pointer
-    // is 32 bits), which is several times a 16 KiB instruction cache. That
-    // size is a property of the 32-bit codegen, so the switch is the
-    // pointer width and not `rind_limb`: `--cfg rind_limb="32"` on a
-    // 64-bit host still ships this HACL* body, and the rolled loop is in
-    // the 64-bit test binary. A 16-bit target is not a rind platform. The
-    // non-64-bit arm is still the rolled loop, so there is no pointer
-    // width on which this function returns `state` unchanged.
-    #[cfg(not(target_pointer_width = "64"))]
+    // The rolled loop on 32-bit microcontrollers, as the module comment
+    // says. The pointer width, not `rind_limb`, is the switch: HACL*'s size
+    // is a property of the 32-bit codegen.
+    #[cfg(all(
+        not(target_pointer_width = "64"),
+        any(target_os = "espidf", target_os = "none")
+    ))]
     {
         crate::low::generic::sha512::sha512_compress_blocks(state, blocks);
     }
-    #[cfg(target_pointer_width = "64")]
+    #[cfg(not(all(
+        not(target_pointer_width = "64"),
+        any(target_os = "espidf", target_os = "none")
+    )))]
     {
         for piece in blocks.chunks(PIECE) {
             sha512_update_nblocks(piece.len() as u32, piece, state);

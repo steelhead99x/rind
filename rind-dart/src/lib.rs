@@ -1018,7 +1018,7 @@ pub unsafe extern "C" fn rind_dart_hmac_context_sign(
 ) -> isize {
     non_null(context);
     // SAFETY: a handle from `store`, not null, which the caller gives up.
-    let context = unsafe { Box::from_raw(context) };
+    let mut context = unsafe { Box::from_raw(context) };
     run(|| {
         // SAFETY: forwarded from the caller.
         let out = unsafe { output(out, out_len) };

@@ -8,13 +8,15 @@
 # so no Lean module imports both. The aarch64 hand models and its X25519,
 # SHA-512, ChaCha20, Ed25519, SHA-1, SHA-256, HMAC, digest, HKDF, and PBKDF2 proofs are the
 # x86_64 ones with the target renamed, which this writes too, all but each
-# target's own `ShaBlocks.lean` and `HashAxioms.lean`. The portable backend,
+# target's own `ShaBlocks.lean` and `HashAxioms.lean`; aarch64 alone also
+# translates `mid::pbkdf2_vg`, which only its CPUs run, and proves it in its
+# own `Pbkdf2Vg.lean`. The portable backend,
 # translated for x86_64 into `proofs/Rind/Portable/`, takes the hash, HMAC,
 # HKDF, PBKDF2, and ChaCha20 header protection proofs the same way, over
 # HACL*'s SHA-2 instead of aws-lc's. So does armv7, its header-protection model
 # and ChaCha20 proof.
 #
-# Usage: admin/prove [bytes | hol-light [<arch>] | cosim | vg | lean | session <arch> [<file>]]
+# Usage: admin/prove [bytes | hol-light [<arch>] | cosim | vg | lean | session <arch> [<file>] | key <check>]
 #
 # An argument checks only those proofs, `bytes` only that the assembly rind
 # imports is the object code its upstream's proofs checked, and declares
@@ -32,10 +34,21 @@
 # `x86_64` or `aarch64`, which `session` below describes. Run it in the flake's
 # `prove` dev shell: `nix develop .#prove --command admin/prove`, or for the
 # HOL Light proofs, the cosimulation, the bytes alone, or a session, `nix
-# develop .#hol-light --command admin/prove hol-light`.
+# develop .#hol-light --command admin/prove hol-light`. `key`, given
+# `hol-light <arch>` or `cosim`, checks nothing either: it prints the key that
+# check's result is cached under, which `result_key` below describes.
 set -euo pipefail
 
-usage="usage: admin/prove [bytes | hol-light [x86_64 | aarch64 | armv7] | cosim | vg | lean | session <x86_64 | aarch64> [<file>]]"
+usage="usage: admin/prove [bytes | hol-light [x86_64 | aarch64 | armv7] | cosim | vg | lean | session <x86_64 | aarch64> [<file>] | key <hol-light <x86_64 | aarch64 | armv7> | cosim>]"
+key_only=
+if [[ ${1:-} == key ]]; then
+    if [[ ! (($# -eq 3 && $2 == hol-light && $3 != '') || ($# -eq 2 && $2 == cosim)) ]]; then
+        echo "$usage" >&2
+        exit 2
+    fi
+    key_only=1
+    shift
+fi
 case "${1:-}" in
 '' | bytes | cosim | vg | lean) only=${1:-} ;;
 hol-light)
@@ -307,6 +320,43 @@ release() {
     flock -u "${held[$1]}"
 }
 
+# Prints a hash of each file in `paths`, files or directories, one line each,
+# in an order that depends on nothing but the paths.
+files_hash() {
+    find "$@" -type f -print0 | LC_ALL=C sort -z | xargs -0r sha256sum
+}
+
+# Writes to `$out/keys/<name>`, and with `key` prints, the key the prove
+# workflow caches the result of the check `name` under, `<name>-<hash>`. The
+# workflow saves it only from main's nightly and dispatched runs, which read
+# no cached result, once the check passes, and a pull request skips a check
+# whose key main saved. So the hash covers everything the check's result can
+# depend on: `paths`, which hold the program it compiles, with every file that
+# program loads inlined, and each file it reads as it runs; every file of the
+# fork of s2n-bignum, which a program may read too; the functions, lists, and
+# shell options this script runs the check with, which leave out the Lean
+# functions, defined only once every other check has exited; the `hol-light`
+# dev shell, by its derivation, which names every package in it; and the
+# workflow and actions that run it. The inlined program names each file by
+# its path, so a key also depends on where the checkout is, the same on every
+# GitHub runner. A key that misses an input reports a pass for a result never
+# rerun, so where in doubt, this hashes more.
+result_key() {
+    local name=$1 system shell
+    shift
+    system=$(nix eval --impure --raw --expr builtins.currentSystem)
+    shell=$(nix eval --raw ".#devShells.$system.hol-light.drvPath")
+    mkdir -p "$out/keys"
+    {
+        echo "$shell"
+        declare -f
+        declare -p hol_light_proofs hol_light_data hol_light_specs
+        set +o
+        files_hash thirdparty/s2n-bignum .github/workflows/prove.yml .github/actions/nix .github/actions/prove "$@"
+    } | sha256sum | sed "s/^\([0-9a-f]*\) .*/$name-\1/" >"$out/keys/$name"
+    [[ -z $key_only ]] || cat "$out/keys/$name"
+}
+
 # rind's own HOL Light proofs, each of the `asm!` block in a Rust function or
 # of a naked one, on the model, tactics, and specs of rind's fork of
 # s2n-bignum in `thirdparty/s2n-bignum`, which `RIND.md` there describes.
@@ -318,7 +368,6 @@ release() {
 # an axiom beyond HOL Light's.
 hol_light_proofs=(
     "aarch64 bignum_eq.bin rind::low::aarch64::bignum_eq::bignum_eq"
-    "aarch64 sha256_block_data_order_hw.o rind::low::aarch64::sha256::sha256_block_data_order_hw"
     "aarch64 sha512_block_data_order_hw.o rind::low::aarch64::sha512::sha512_block_data_order_hw"
     "aarch64 bn_mul_mont.o rind::low::aarch64::mont::bn_mul_mont"
     "aarch64 ct_compare_bytes.bin rind::low::aarch64::cpu::ct_compare_bytes"
@@ -371,6 +420,9 @@ hol_light() {
     done
     for arch in $arches; do
         printf 'check_axioms ();; Printf.printf "%s: %%.0f s\\n" (Unix.time () -. prove_start);;\n' "$arch" >>"$dir/$arch.ml"
+        hol_light_inline "$dir" "$arch"
+        result_key "hol-light-$arch" "$dir/$arch-inlined.ml" "$dir/$arch"
+        [[ -z $key_only ]] || continue
         hol_light_compile "$dir" "$arch"
         (cd "$dir" && "./$arch.native")
     done
@@ -400,14 +452,23 @@ hol_light_objects() {
     done
 }
 
-# Compiles `dir/name.ml` into `dir/name.native`, as s2n-bignum's
-# `tools/build-proof.sh` compiles each of its proofs, with rind's HOL Light
-# files, what the run generates in `dir/generated`, and rind's fork of
-# s2n-bignum on the load path, in that order.
-hol_light_compile() {
+# Writes to `dir/name-inlined.ml` the program `dir/name.ml` with each file it
+# loads, directly or through another, in place of the `needs`, `loadt`, or
+# `loads` that loads it, as s2n-bignum's `tools/build-proof.sh` does, with
+# rind's HOL Light files, what the run generates in `dir/generated`, and
+# rind's fork of s2n-bignum on the load path, in that order. A compiled
+# program can load nothing as it runs, so this holds all of its OCaml.
+hol_light_inline() {
     local dir=$1 name=$2 root=$PWD
     (cd "$dir" && HOLLIGHT_LOAD_PATH="$root/proofs/hol-light:$root/$dir/generated:$root/thirdparty/s2n-bignum" \
-        ocaml "$HOLLIGHT_DIR/inline_load.ml" "$name.ml" "$name-inlined.ml")
+        ocaml "$HOLLIGHT_DIR/inline_load.ml" "$name.ml" "$name-inlined.ml" >&2)
+}
+
+# Compiles `dir/name-inlined.ml`, which `hol_light_inline` writes, into
+# `dir/name.native`, as s2n-bignum's `tools/build-proof.sh` compiles each of
+# its proofs.
+hol_light_compile() {
+    local dir=$1 name=$2
     OCAMLRUNPARAM=l=2000000000 ocamlopt.byte -pp "$("$HOLLIGHT_DIR/hol.sh" -pp)" \
         -I "$HOLLIGHT_DIR" -I +unix -c hol_lib.cmxa "$dir/$name-inlined.ml" -o "$dir/$name.cmx" -w -a
     ocamlfind ocamlopt -package zarith,unix -linkpkg hol_lib.cmxa -I "$HOLLIGHT_DIR" \
@@ -427,26 +488,32 @@ hol_light_compile() {
 cosim() {
     local dir=$out/cosim root=$PWD sha=0 cases=1000
     local aarch32=thirdparty/s2n-bignum/aarch32/proofs
+    hold cosim
+    rm -rf "$dir"
+    mkdir -p "$dir/tmp" "$dir/generated/x86"
+    echo 'loadt "aarch32/proofs/simulator.ml";;' >"$dir/aarch32.ml"
+    printf 'let iclasses_regreg = [];;\nlet iclasses_simplemem = [];;\n' >"$dir/generated/x86/x86-insns.ml"
+    echo 'loadt "x86/proofs/rind_cosim.ml";;' >"$dir/cosim.ml"
+    hol_light_inline "$dir" aarch32
+    hol_light_inline "$dir" cosim
+    # Whether the SHA extensions' instructions run is part of the result.
+    if grep -qw sha_ni /proc/cpuinfo; then
+        sha=1
+    fi
+    echo "$sha" >"$dir/sha"
+    result_key cosim "$dir/aarch32-inlined.ml" "$dir/cosim-inlined.ml" "$dir/generated" "$dir/sha"
+    [[ -z $key_only ]] || return 0
     if [[ $(uname -m) != x86_64 ]] || ! grep -qw avx2 /proc/cpuinfo; then
         echo "admin/prove: cosim needs an x86_64 CPU with AVX2" >&2
         return 1
     fi
-    if grep -qw sha_ni /proc/cpuinfo; then
-        sha=1
-    fi
-    hold cosim
-    rm -rf "$dir"
-    mkdir -p "$dir/tmp" "$dir/generated/x86"
     armv7-linux-gnueabihf-gcc -O2 -marm -march=armv7-a -ffreestanding -fno-stack-protector \
         -fomit-frame-pointer -nostdlib -static -Wall -Wextra -Werror -Wl,--no-warn-rwx-segments \
         -o "$dir/aarch32-runner" "$aarch32/cosim_runner.c" "$aarch32/cosim_start.S" -lgcc
-    echo 'loadt "aarch32/proofs/simulator.ml";;' >"$dir/aarch32.ml"
     hol_light_compile "$dir" aarch32
     (cd "$dir" && S2N_BIGNUM_SEMATEST_CASES=$cases S2N_BIGNUM_SEMATEST_SECONDS=1200 \
         RIND_AARCH32_EXECUTOR="qemu-arm -cpu cortex-a15 $root/$dir/aarch32-runner" \
         ./aarch32.native) | grep -v -e '^OK: ' -e '^Stepping to state' -e '^CPU time'
-    printf 'let iclasses_regreg = [];;\nlet iclasses_simplemem = [];;\n' >"$dir/generated/x86/x86-insns.ml"
-    echo 'loadt "x86/proofs/rind_cosim.ml";;' >"$dir/cosim.ml"
     hol_light_compile "$dir" cosim
     (cd "$dir" && TMPDIR="$root/$dir/tmp" S2N_BIGNUM_SEMATEST_CASES=1 RIND_COSIM_SHA=$sha \
         S2N_BIGNUM_X86_64_EXECUTOR="$root/thirdparty/s2n-bignum/tools/simulate-persistent x86" \
@@ -462,7 +529,9 @@ cosim() {
 # instruction of VG's code, for `VG_COSIM_CASES` random states each from the
 # seed `VG_COSIM_SEED`, on this CPU, or where it lacks a feature the
 # instruction needs, under Intel SDE or qemu-aarch64, and fails unless every
-# end state is the one VG's model gives. The groups split into a fixed number
+# end state is the one VG's model gives; on aarch64, also each instruction of
+# the functions rind proves in its own extension of that model
+# (`proofs/verified-garbage/RindIsa/`). The groups split into a fixed number
 # of parts, each seeded from its index, so a seed gives the same cases on
 # every machine.
 vg() {
@@ -518,12 +587,70 @@ vg() {
             "$cpu" "$dir/part.$part.cpu" "$emulated" "$dir/part.$part.emu" &
         pids+=($!)
     done
+    # On aarch64, the instructions of the functions rind proves in its own
+    # extension of VG's model too, as one more part.
+    if [[ $arch == aarch64 ]]; then
+        "$cosim" aarch64 --rind "$cases" $((seed * parts + parts)) \
+            "$cpu" "$dir/part.rind.cpu" "$emulated" "$dir/part.rind.emu" &
+        pids+=($!)
+    fi
     for pid in "${pids[@]}"; do
         wait "$pid" || failed=1
     done
-    "$dir/runner" "$dir"/part.??.cpu || failed=1
-    "${emu[@]}" "$dir/runner" "$dir"/part.??.emu || failed=1
+    "$dir/runner" "$dir"/part.*.cpu || failed=1
+    "${emu[@]}" "$dir/runner" "$dir"/part.*.emu || failed=1
     return $failed
+}
+
+# Checks that each function rind proves in its own extension of VG's AArch64
+# model, `proofs/verified-garbage/RindIsa/`, is in rind's build the machine
+# code its theorem is about: `rind-asm` prints each function's words and
+# relocations, from the program the theorem names, and the words each static
+# it reads begins with; this prints the same of rind's release build, from
+# the object `asm_function` writes and the statics `rind_static` writes, and
+# fails unless the two are the same. A relocation must reach the start of the
+# one read-only section `asm_function` keeps, which must be the static the
+# program names.
+rind_isa() {
+    local dir=$out/rind-isa kind a b c n=0 rodata sym
+    local -A statics=()
+    hold scratch
+    rm -rf "$dir"
+    mkdir -p "$dir"
+    (cd proofs/verified-garbage && lake build -q rind-asm)
+    proofs/verified-garbage/.lake/build/bin/rind-asm >"$dir/want"
+    build_asm aarch64
+    # Each static's Rust symbol, to the program's name for it.
+    while read -r kind a b _; do
+        if [[ $kind == static ]]; then
+            read -r _ sym <<<"$(rind_symbol aarch64 "$b")"
+            statics[$sym]=$a
+        fi
+    done <"$dir/want"
+    while read -r kind a b c; do
+        case $kind in
+        function)
+            n=$((n + 1))
+            echo "function $a"
+            asm_function aarch64 "$a" "$dir/$n.o"
+            "$tools/llvm-objcopy" -O binary --only-section=.text "$dir/$n.o" "$dir/$n.text"
+            od -An -v -tx4 -w4 "$dir/$n.text" | awk '{ print "insn " $1 }'
+            rodata=$("$tools/llvm-objdump" -t "$dir/$n.o" | awk '$1 ~ /^0+$/ && $3 == "O" && $4 == ".rodata" { print $NF }')
+            relocations "$dir/$n.o" .text | while read -r off type target; do
+                if [[ $target == .rodata && -n $rodata && -n ${statics[$rodata]:-} ]]; then
+                    target=${statics[$rodata]}
+                fi
+                echo "reloc $((16#$off)) $type $target"
+            done
+            ;;
+        static)
+            rind_static aarch64 "$b" "$dir/static"
+            echo "static $a $b $(od -An -v -tx1 "$dir/static" | tr -d ' \n' | head -c ${#c})"
+            ;;
+        esac
+    done <"$dir/want" >"$dir/got"
+    release scratch
+    diff -u --label rind-asm --label "rind's build" "$dir/want" "$dir/got"
 }
 
 # The file each target's proofs load first, which its session images hold
@@ -532,7 +659,7 @@ declare -A hol_light_base=([x86_64]=x86/proofs/base.ml [aarch64]=arm/proofs/base
 
 # Starts a HOL Light session for `arch` in which a proof in
 # `proofs/hol-light/<arch>/` loads as `admin/prove hol-light` compiles it: the
-# target's base file loaded, on `hol_light_compile`'s load path, in a
+# target's base file loaded, on `hol_light_inline`'s load path, in a
 # directory of its own holding the object code `hol_light_objects` writes for
 # the proofs to read. With `file`, it loads the file and exits, failing if any
 # of it fails; otherwise it reads OCaml from stdin. Loading the base file
@@ -548,7 +675,7 @@ session() {
     session_image "$arch"
     release scratch
     # The image keeps the load path it was built with, so this rebinds it to
-    # this worktree's, in `hol_light_compile`'s order.
+    # this worktree's, in `hol_light_inline`'s order.
     setup="load_path := [\".\"; \"\$\"; $(ocaml_string "$root/proofs/hol-light");"
     setup+=" $(ocaml_string "$root/thirdparty/s2n-bignum")];;"
     setup+=" Sys.chdir $(ocaml_string "$session_dir");;"
@@ -595,7 +722,7 @@ session_image() {
     local arch=$1 base=${hol_light_base[$1]} root=$PWD cache key build lock line images
     local marker="rind: $base loaded"
     # The base file's `loads "update_database.ml"` is skipped, as HOL Light's
-    # `inline_load.ml` skips it for `hol_light_compile`. An error in a file
+    # `inline_load.ml` skips it for `hol_light_inline`. An error in a file
     # `needs` loads only prints and returns unless `use_file_raise_failure` is
     # set, so the marker prints only once the base file has loaded without
     # one. The line this reads is `exit 1;;`, which the toplevel reads instead
@@ -610,7 +737,7 @@ let () = needs \"$base\"; ignore (input_line stdin); Gc.compact (); print_endlin
     local dmtcp kernel fork
     dmtcp=$(command -v dmtcp_restart)
     kernel=$(uname -r)
-    fork=$(cd thirdparty/s2n-bignum && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum)
+    fork=$(cd thirdparty/s2n-bignum && files_hash .)
     key=$(printf '%s\n' "$HOLLIGHT_DIR" "$dmtcp" "$kernel" "$init" "$fork" | sha256sum)
     cache=${XDG_CACHE_HOME:-$HOME/.cache}/rind/hol-light
     image=$cache/$arch-${key:0:16}
@@ -871,6 +998,7 @@ aes_gcm_items() {
 }
 check_quote X86_64/AesGcmModel aes_gcm_items
 check_quote X86_64/TypesExternal items rind/src/low/x86_64/chacha20.rs 'struct VgState('
+check_quote Aarch64/TypesExternal items rind/src/low/aarch64/chacha20.rs 'struct VgState('
 aarch64_aes_gcm_items() {
     items rind/src/low/aarch64/ghash.rs 'macro_rules! mul {' 'macro_rules! reduce {' \
         '    pub(crate) fn add(&mut self, bytes: &[u8]) {' '    fn one_block(' '    fn eight_blocks(' \
@@ -1013,6 +1141,9 @@ only_quoted rind/src/aead.rs "$out/AeadDispatch.rs" '= Algorithm \{'
 # proof assumes, and `proofs/Rind/X86_64/P256Table.lean` what x86_64's
 # Booth driver, which is translated, reads, and each target's `P256Base.lean`
 # that its first row holds G to 32G, which ECDSA verification looks up.
+# P-256's glue around pyca/verified-garbage's routines is translated, down to
+# `low::<arch>::p256_vg`, whose checks and wrappers are opaque and whose
+# routines `VgP256.lean`'s axioms state.
 # P-384's key generation draws through a `dyn RandomSource` too, so it is
 # opaque, and `proofs/Rind/X86_64/P384Dispatch.lean` models it on both
 # targets; its comb tables are translated, which `P384Table.lean` checks.
@@ -1292,9 +1423,6 @@ extract x86_64 X86_64 "${hashes[@]}" "${assembly[@]}" \
     --opaque 'crate::high::curve::_::generate_random_key' \
     --opaque 'crate::mid::p256::_::generate' \
     --opaque 'crate::mid::p256::_::new_random' \
-    --opaque 'crate::mid::p256::_::vg_public_key' \
-    --opaque 'crate::mid::p256::_::vg_diffie_hellman' \
-    --opaque crate::mid::p256::vg_verify \
     --include crate::low::x86_64::adx_mux::p256_montjadd \
     --include crate::low::x86_64::adx_mux::p256_montjdouble \
     --include crate::low::x86_64::adx_mux::p256_montjmixadd \
@@ -1311,8 +1439,10 @@ extract x86_64 X86_64 "${hashes[@]}" "${assembly[@]}" \
     --include crate::low::x86_64::adx_mux::p384_montjdouble \
     --include crate::low::x86_64::adx_mux::p384_montjmixadd \
     --include crate::low::x86_64::adx_mux::p384_montjscalarmul \
+    --opaque crate::low::x86_64::p384_vg \
     --include crate::low::x86_64::adx_mux::curve25519_x25519 \
     --include crate::low::x86_64::adx_mux::curve25519_x25519base \
+    --include 'crate::low::x86_64::curve25519_ifma::_::clone' \
     --include crate::low::x86_64::adx_mux::edwards25519_decode \
     --include crate::low::x86_64::adx_mux::edwards25519_scalarmulbase \
     --include crate::low::x86_64::adx_mux::bignum_madd_n25519 \
@@ -1347,8 +1477,6 @@ extract x86_64 X86_64 "${hashes[@]}" "${assembly[@]}" \
     --opaque 'crate::low::x86_64::chacha20::_::apply_avx2' \
     --opaque 'crate::low::x86_64::chacha20::_::apply_avx512vl' \
     --opaque crate::low::x86_64::chacha20::cipher_ssse3_4x \
-    --opaque crate::low::x86_64::chacha20::cipher_avx2 \
-    --opaque crate::low::generic::chacha20::cipher \
     --include 'crate::mid::aes::_' \
     --include crate::low::x86_64::aes \
     --start-from crate::low::x86_64::aes::AesDecKey::new \
@@ -1444,9 +1572,7 @@ extract aarch64 Aarch64 "${hashes[@]}" "${assembly[@]}" \
     --opaque 'crate::high::curve::_::generate_random_key' \
     --opaque 'crate::mid::p256::_::generate' \
     --opaque 'crate::mid::p256::_::new_random' \
-    --opaque 'crate::mid::p256::_::vg_public_key' \
-    --opaque 'crate::mid::p256::_::vg_diffie_hellman' \
-    --opaque crate::mid::p256::vg_verify \
+    --opaque crate::low::aarch64::p384_vg \
     --include crate::low::aarch64::sha1::sha1_compress_padded \
     --include crate::low::aarch64::sha3_keccak_f1600_mux \
     --include crate::low::aarch64::sha3_keccak4_f1600_mux \
@@ -1473,6 +1599,25 @@ extract aarch64 Aarch64 "${hashes[@]}" "${assembly[@]}" \
     --start-from crate::low::generic::mlkem::mlkem_compress_d11 \
     --start-from crate::low::aarch64::mlkem768_vg::Encaps::check_ek \
     --start-from crate::low::aarch64::mlkem768_vg::Encaps::encaps \
+    --include crate::low::aarch64::pbkdf2_vg \
+    --start-from crate::low::aarch64::pbkdf2_vg::Pbkdf2::sha1 \
+    --start-from crate::low::aarch64::pbkdf2_vg::Pbkdf2::sha256 \
+    --start-from crate::low::aarch64::pbkdf2_vg::Pbkdf2::sha384 \
+    --start-from crate::low::aarch64::pbkdf2_vg::Pbkdf2::sha512 \
+    --start-from 'crate::low::aarch64::pbkdf2_vg::_::derive' \
+    --opaque 'crate::low::aarch64::pbkdf2_vg::_::derive' \
+    --start-from crate::low::aarch64::chacha20poly1305::seal \
+    --start-from crate::low::aarch64::chacha20poly1305::open \
+    --include crate::low::aarch64::chacha20poly1305::seal \
+    --include crate::low::aarch64::chacha20poly1305::open \
+    --start-from crate::mid::chacha20::ChaCha20::apply_keystream \
+    --include crate::low::aarch64::chacha20 \
+    --opaque crate::low::aarch64::chacha20::VgState \
+    --opaque 'crate::low::aarch64::chacha20::_::uninit' \
+    --opaque 'crate::low::aarch64::chacha20::_::init' \
+    --opaque 'crate::low::aarch64::chacha20::_::apply_neon' \
+    --opaque 'crate::low::aarch64::chacha20::_::apply_sve2' \
+    --opaque crate::low::aarch64::chacha20::cipher_neon \
     --start-from crate::mid::aes_gcm::AesGcm::new \
     --start-from crate::mid::aes_gcm::AesGcm::encrypt \
     --start-from crate::mid::aes_gcm::AesGcm::decrypt \
@@ -1494,7 +1639,9 @@ extract aarch64 Aarch64 "${hashes[@]}" "${assembly[@]}" \
 # The AEAD key's conversion is x86_64's alone: the AEAD API's model and proofs
 # are x86_64's, as AES-GCM's are.
 extract_kdf x86_64 X86_64 --start-from '{impl core::convert::From for crate::aead::Key}'
-extract_kdf aarch64 Aarch64
+extract_kdf aarch64 Aarch64 --include crate::mid::pbkdf2_vg \
+    --include 'crate::mid::sha1::_::BLOCK_SZ' --include 'crate::mid::sha1::_::OUTPUT_SZ' \
+    --include 'crate::mid::sha2::_::BLOCK_SZ' --include 'crate::mid::sha2::_::OUTPUT_SZ'
 extract_armv7
 
 # The portable backend, which builds only under the cfg CI's portable jobs
@@ -1529,6 +1676,9 @@ done
 # The AEAD model imports nothing aarch64 has, and no aarch64 translation reaches it.
 sed -i '/Rind.Aarch64.AeadDispatch/d' proofs/Rind/Aarch64/Kdf/TypesExternal.lean
 sed -i '/-- BEGIN aead/,/-- END aead/d' proofs/Rind/Aarch64/Kdf/FunsExternal.lean
+# aarch64 translates `mid::pbkdf2_vg`, which the other targets leave opaque.
+sed -i '/-- BEGIN vg/,/-- END vg/d' proofs/Rind/Aarch64/Kdf/TypesExternal.lean proofs/Rind/Aarch64/Kdf/FunsExternal.lean
+sed -i 's/^public import Rind.Aarch64.HkdfExpand$/&\npublic import Rind.Aarch64.Kdf.VgExternal/' proofs/Rind/Aarch64/Kdf/FunsExternal.lean
 # The portable backend's hash, HMAC, KDF, and header-protection proofs are the
 # x86_64 ones with the target renamed, over its own block functions' contracts
 # in `Hacl.lean` and `ShaBlocks.lean`, and its compares' proof in `CtEqual.lean`.
@@ -1581,6 +1731,8 @@ if [[ -n $untested ]]; then
     echo "admin/prove: no vectors test these intrinsic models:" $untested >&2
     exit 1
 fi
+
+rind_isa
 
 cd proofs
 # Mathlib's cache unpacks a copy into each checkout, so take Mathlib and Aeneas

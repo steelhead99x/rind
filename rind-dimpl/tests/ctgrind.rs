@@ -288,14 +288,17 @@ fn pem_signing() {
 }
 
 /// Refuses a DER key of an unsupported algorithm, intact or with a byte
-/// appended, without reading its secret, including when looking for PEM.
+/// appended, without branching on its secret, including when looking for
+/// PEM.
 #[test]
 fn unsupported_key() {
     let ed25519 = rcgen::KeyPair::generate_for(&rcgen::PKCS_ED25519)
         .unwrap()
         .serialize_der();
-    // RFC 8410's PKCS#8 ends with the 32-byte seed.
-    secret(&ed25519[ed25519.len() - 32..]);
+    // The 32-byte seed follows the same 16-byte header in RFC 8410's v1 and
+    // RFC 5958's v2, which aws-lc-rs writes, so v2's public key follows it.
+    assert_eq!(ed25519[12..16], [0x04, 0x22, 0x04, 0x20]);
+    secret(&ed25519[16..48]);
     let mut appended = ed25519.clone();
     appended.push(0);
     for key in [&ed25519, &appended] {

@@ -39,6 +39,14 @@ opaque low.aarch64.sha3_keccak2_f1600.sha3_keccak2_f1600
   : Array (Array Std.U64 25#usize) 2#usize → Array Std.U64 24#usize →
     Result (Array (Array Std.U64 25#usize) 2#usize)
 
+opaque low.aarch64.sha3_keccak4_f1600.sha3_keccak4_f1600
+  : Array (Array Std.U64 25#usize) 4#usize → Array Std.U64 24#usize →
+    Result (Array (Array Std.U64 25#usize) 4#usize)
+
+opaque low.aarch64.sha3_keccak4_f1600_alt.sha3_keccak4_f1600
+  : Array (Array Std.U64 25#usize) 4#usize → Array Std.U64 24#usize →
+    Result (Array (Array Std.U64 25#usize) 4#usize)
+
 opaque low.aarch64.bignum_eq.bignum_eq
   : Slice Std.U64 → Slice Std.U64 → Result Bool
 
@@ -229,6 +237,12 @@ def low.generic.zeroise.ZeroableRef.new {T : Type} (value : T) :
     Result (low.generic.zeroise.ZeroableRef T) :=
   ok value
 
+/-- `ZeroableRef::get`, which panics only on a wiped value, and only a drop
+wipes one: its value. -/
+def low.generic.zeroise.ZeroableRef.get {T : Type} (r : low.generic.zeroise.ZeroableRef T) :
+    Result T :=
+  ok r
+
 /-! The entry guard and CPU dispatch, which read no input. -/
 
 opaque low.entry.Entry.new_secret : Result low.entry.Entry
@@ -314,6 +328,26 @@ opaque low.aarch64.p384_montjmixadd.p384_montjmixadd
   Array Std.U64 18#usize → Array Std.U64 18#usize → Array Std.U64 12#usize
     → Result (Array Std.U64 18#usize)
 
+/-! Whether the CPU runs pyca/verified-garbage's P-384 `d·G`, for key
+generation and ECDSA's nonces, and its ECDSA verification, which read no
+input, and its routines behind their Rust wrappers, whose contracts
+`Rind.Aarch64.VgP384` states. -/
+
+opaque low.aarch64.p384_vg.MulBase.check
+  : Result (Option low.aarch64.p384_vg.MulBase)
+
+opaque low.aarch64.p384_vg.MulBase.public_key
+  : low.aarch64.p384_vg.MulBase → Array Std.U8 48#usize →
+    Result (Option (Array Std.U8 97#usize))
+
+opaque low.aarch64.p384_vg.Verify.check
+  : Result (Option low.aarch64.p384_vg.Verify)
+
+opaque low.aarch64.p384_vg.Verify.ecdsa_verify
+  :
+  low.aarch64.p384_vg.Verify → Array Std.U8 97#usize → Array Std.U8 48#usize →
+    Array Std.U8 96#usize → Result Bool
+
 opaque low.aarch64.p384_montjscalarmul.p384_montjscalarmul
   :
   Array Std.U64 18#usize → Array Std.U64 6#usize → Array Std.U64 18#usize
@@ -337,24 +371,26 @@ opaque high.curve.P384.Insts.RindHighCurveCurveStaticPrivateKeyVerifyingKeyScala
   {T0 : Type _} (midrngRandomSourceInst : mid.rng.RandomSource T0) :
   T0 → Result ((core.result.Result mid.p384.StaticPrivateKey error.Error) × T0)
 
-/-! Whether the CPU runs pyca/verified-garbage's P-256, and rind's calls of it,
-which the P-256 proofs take as not running: Lean proves VG's routines in that
-project, not here. -/
+/-! Whether the CPU runs pyca/verified-garbage's P-256, which reads no input,
+and its routines behind their Rust wrappers, whose contracts
+`Rind.Aarch64.VgP256` states. -/
 
 opaque low.aarch64.p256_vg.P256.check : Result (Option low.aarch64.p256_vg.P256)
 
 opaque low.aarch64.p256_vg.P256.check_public_key : Result (Option low.aarch64.p256_vg.P256)
 
-opaque mid.p256.PrivateKey.vg_public_key
-  : mid.p256.PrivateKey → low.aarch64.p256_vg.P256 → Result (Array Std.U8 65#usize)
+opaque low.aarch64.p256_vg.P256.public_key
+  : low.aarch64.p256_vg.P256 → Array Std.U8 32#usize → Result (Option (Array Std.U8 65#usize))
 
-opaque mid.p256.PrivateKey.vg_diffie_hellman
-  : mid.p256.PrivateKey → low.aarch64.p256_vg.P256 → mid.p256.PublicKey →
-    Result (core.result.Result mid.p256.SharedSecret error.Error)
+opaque low.aarch64.p256_vg.P256.ecdh
+  :
+  low.aarch64.p256_vg.P256 → Array Std.U8 32#usize → Array Std.U8 65#usize → Result (Option
+    (Array Std.U8 32#usize))
 
-opaque mid.p256.vg_verify
-  : low.aarch64.p256_vg.P256 → mid.p256.AffineMontPoint → mid.p256.Scalar → mid.p256.Scalar →
-    mid.p256.Scalar → Result (core.result.Result Unit error.Error)
+opaque low.aarch64.p256_vg.P256.verify
+  :
+  low.aarch64.p256_vg.P256 → Array Std.U8 65#usize → Array Std.U8 32#usize → Array Std.U8
+    64#usize → Result Bool
 
 /-! The other curves, which X25519's and P-256's results never depend on. -/
 
@@ -421,6 +457,55 @@ opaque low.aarch64.mlkem768_vg.Encaps.encaps
   low.aarch64.mlkem768_vg.Encaps → Array Std.U8 1184#usize → Option (Array
     Std.U8 32#usize) → Array Std.U8 32#usize → Result (Option ((Array
     Std.U8 32#usize) × (Array Std.U8 1088#usize)))
+
+/-- pyca/verified-garbage's PBKDF2 routines, behind their Rust wrapper,
+`Pbkdf2::derive`, whose contracts `Rind.Aarch64.VgPbkdf2` states. The
+iteration count is the `u32` its `NonZeroU32` holds. -/
+opaque low.aarch64.pbkdf2_vg.Pbkdf2.derive
+  : low.aarch64.pbkdf2_vg.Pbkdf2 → Slice Std.U8 → Slice Std.U8 → Std.U32 → Slice Std.U8 →
+    Result (Slice Std.U8)
+/-! ChaCha20-Poly1305's one pass: pyca/verified-garbage's SVE2 routines,
+behind one wrapper each, whose contracts `Rind.Aarch64.VgChaCha20Poly1305`
+restates, and aws-lc's NEON routines, which no proof covers yet. -/
+
+opaque low.aarch64.cpu.HaveSve2.check : Result (Option low.aarch64.cpu.HaveSve2)
+
+opaque low.aarch64.chacha20poly1305.seal_sve2
+  : low.aarch64.cpu.HaveSve2 → Std.Array Std.U8 32#usize → Std.Array Std.U8 12#usize →
+    Slice Std.U8 → Slice Std.U8 → Result ((Std.Array Std.U8 16#usize) × (Slice Std.U8))
+
+opaque low.aarch64.chacha20poly1305.open_sve2
+  : low.aarch64.cpu.HaveSve2 → Std.Array Std.U8 32#usize → Std.Array Std.U8 12#usize →
+    Slice Std.U8 → Slice Std.U8 → Std.Array Std.U8 16#usize → Result (Bool × (Slice Std.U8))
+
+opaque low.aarch64.chacha20poly1305.seal_neon
+  : Std.Array Std.U8 32#usize → Std.Array Std.U8 12#usize → Slice Std.U8 → Slice Std.U8 →
+    Result ((Std.Array Std.U8 16#usize) × (Slice Std.U8))
+
+opaque low.aarch64.chacha20poly1305.open_neon
+  : Std.Array Std.U8 32#usize → Std.Array Std.U8 12#usize → Slice Std.U8 → Slice Std.U8 →
+    Result ((Std.Array Std.U8 16#usize) × (Slice Std.U8))
+
+/-! `cipher::ChaCha20`'s routines: pyca/verified-garbage's, behind one
+wrapper each, whose contracts `Rind.Aarch64.VgChaCha20` restates, and rind's
+NEON code, whose contract it takes as the hypothesis `Neon`. -/
+
+opaque low.aarch64.chacha20.VgState.uninit : Result low.aarch64.chacha20.VgState
+
+opaque low.aarch64.chacha20.VgState.init
+  : low.aarch64.chacha20.VgState → Std.Array Std.U32 8#usize → Std.Array Std.U32 4#usize →
+    Result low.aarch64.chacha20.VgState
+
+opaque low.aarch64.chacha20.VgState.apply_neon
+  : low.aarch64.chacha20.VgState → Slice Std.U8 →
+    Result (Std.U32 × low.aarch64.chacha20.VgState × (Slice Std.U8))
+
+opaque low.aarch64.chacha20.VgState.apply_sve2
+  : low.aarch64.chacha20.VgState → low.aarch64.cpu.HaveSve2 → Slice Std.U8 →
+    Result (Std.U32 × low.aarch64.chacha20.VgState × (Slice Std.U8))
+
+opaque low.aarch64.chacha20.cipher_neon
+  : Std.Array Std.U32 8#usize → Std.Array Std.U32 4#usize → Slice Std.U8 → Result (Slice Std.U8)
 
 /-! MD5, which no proof covers. -/
 

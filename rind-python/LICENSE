@@ -112,8 +112,9 @@ aws-lc <https://github.com/aws/aws-lc>, from OpenSSL and BoringSSL
   rind/src/low/generic/ghash_nohw.rs:
 
   - For 32-bit ARM, aesv8-armx.s (AES), ghashv8-armx.s (GHASH),
-    sha1-armv4-large.s (SHA1), sha256-armv4.s (SHA256), sha512-armv4.s
-    (SHA512), and chacha-armv4.s (ChaCha20); for aarch64 and x86_64, the
+    vpaes-armv7.s and bsaes-armv7.s (AES on NEON), ghash-armv4.s
+    (GHASH on NEON), sha1-armv4-large.s (SHA1), sha256-armv4.s
+    (SHA256), sha512-armv4.s (SHA512), and chacha-armv4.s (ChaCha20); for aarch64 and x86_64, the
     sha512_block_data_order_* routines and the K512 tables of
     sha512-armv8 and sha512-x86_64 (SHA512); for x86_64, the
     sha256_block_data_order_avx, _ssse3, and _nohw routines and the K256
@@ -248,7 +249,8 @@ pyca/verified-garbage <https://github.com/pyca/verified-garbage>
   sources, at commit 0aa40d6c21fd02943fe5b38a5b69b6213d07764d:
   ChaCha20-Poly1305 on aarch64 with SVE2, and the ChaCha20 and
   Poly1305 routines it calls; ChaCha20 on x86_64 with AVX2 and with
-  AVX-512 VL; X25519 and Ed25519 on x86_64 with AVX-512 IFMA, and the
+  AVX-512 VL, and on aarch64 with NEON and with SVE2; X25519 and
+  Ed25519 on x86_64 with AVX-512 IFMA, and the
   SHA-512 and field and point routines they call; RSA's public
   operation and CRT on x86_64 with AVX-512 IFMA, and the Montgomery
   product they call; ML-KEM-768's encapsulation key check and
@@ -258,14 +260,18 @@ pyca/verified-garbage <https://github.com/pyca/verified-garbage>
   extension and over HMAC-SHA384 and HMAC-SHA512 with the SHA-512
   instructions; P-256's public key derivation, ECDH, and ECDSA
   verification on x86_64 with BMI2 and ADX, ECDH and verification
-  also with AVX-512 IFMA, and on aarch64; and the Keccak, hash,
-  arithmetic, and point routines and tables they call.
+  also with AVX-512 IFMA, and on aarch64; P-384's d·G on x86_64 and
+  aarch64, and its ECDSA verification on x86_64 with BMI2 and ADX and
+  on aarch64; and the Keccak, hash, arithmetic, field, scalar, and
+  point routines and tables they call.
   Copyright (c) Individual contributors.
   License: Apache-2.0 OR BSD-3-Clause, which the files keep.
 
-  What: the Lean ISA models, the ML-KEM and SHA-3 specs, and the RSA and
-  ChaCha20 specs and contracts rind's proofs import or restate, under
-  proofs/verified-garbage/VerifiedGarbage, which admin/import-vg-models
+  What: the Lean ISA models, the ML-KEM, SHA-3, SHA-512, X25519, Poly1305, and
+  ChaCha20-Poly1305 specs, and the RSA, ChaCha20, Ed25519, P-256, P-384, and
+  PBKDF2 specs and contracts rind's proofs import or restate, with the MD5, SHA-1,
+  SHA-2, and HMAC specs PBKDF2's import,
+  under proofs/verified-garbage/VerifiedGarbage, which admin/import-vg-models
   copies byte for byte from verified-garbage
   at the same commit, so they carry no SPDX comment; this entry names
   their license.

@@ -37,6 +37,7 @@ mod macros;
 
 pub(crate) mod ct;
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) mod ct_binsec;
 
 #[cfg(rind_vartime_planted)]
@@ -95,12 +96,12 @@ mod generic {
     // key generation and decapsulation, and every operation elsewhere.
     #[cfg(not(rind_backend = "x86_64"))]
     pub(crate) mod mlkem768_vg;
-    // pyca/verified-garbage's P-256 where it does not run: armv7 and the
-    // portable backend.
-    #[cfg(not(rind_backend = "x86_64"))]
-    pub(crate) mod mlkem_sample;
+    // pyca/verified-garbage's P-256 and P-384 where they do not run: armv7
+    // and the portable backend.
     #[cfg(not(any(rind_backend = "x86_64", rind_backend = "aarch64")))]
     pub(crate) mod p256_vg;
+    #[cfg(not(any(rind_backend = "x86_64", rind_backend = "aarch64")))]
+    pub(crate) mod p384_vg;
     // pyca/verified-garbage's PBKDF2 where it does not run: every backend
     // but aarch64's.
     #[cfg(not(rind_backend = "aarch64"))]
@@ -160,12 +161,18 @@ mod generic {
     // SLH-DSA's SHA-256 lanes one at a time, which x86_64 runs with the SHA
     // extensions or without AVX2.
     pub(super) mod sha256x8;
-    // Rolled SHA-512 wherever the pointer is not 64 bits. HACL*'s unrolled
-    // form is about 47 KiB in that codegen and misses a small instruction
-    // cache. 64-bit tests still compile it and check it against FIPS 180-4.
-    // `rind_limb` does not select it: a 64-bit host forced to 32-bit limbs
-    // still ships the 64-bit HACL* body.
-    #[cfg(any(all(rind_backend = "portable", not(target_pointer_width = "64")), test))]
+    // Rolled SHA-512 on 32-bit microcontrollers (ESP-IDF or no OS), whose
+    // small instruction cache HACL*'s ~47 KiB unrolled body misses. Hosted
+    // 32-bit targets keep HACL*, which took 0.71-0.78 of this loop's time
+    // on i686. Tests compile it everywhere and check it against FIPS 180-4.
+    #[cfg(any(
+        all(
+            rind_backend = "portable",
+            not(target_pointer_width = "64"),
+            any(target_os = "espidf", target_os = "none")
+        ),
+        test
+    ))]
     pub(super) mod sha512;
     pub(super) mod zeroise;
 }
@@ -301,7 +308,6 @@ pub(crate) use generic::{
         mlkem_basemul_k2, mlkem_basemul_k3, mlkem_basemul_k4, mlkem_intt, mlkem_mulcache_compute,
         mlkem_ntt, mlkem_reduce, mlkem_rej_uniform_vartime, mlkem_tobytes, mlkem_tomont,
     },
-    mlkem_sample::{mlkem_sample_poly_ntt_8x, mlkem_shake256_8x},
     // libcrux's P-256 runs 64-bit limbs and recomputes the nonce's point to
     // sign, it exports P-384 only as ECDH, and it has no P-521, so rind
     // composes their arithmetic itself.
@@ -409,6 +415,7 @@ cfg_if::cfg_if! {
         pub(crate) use x86_64::mlkem768_vg;
         pub(crate) use x86_64::p256_vg;
         pub(crate) use generic::pbkdf2_vg;
+        pub(crate) use x86_64::p384_vg;
         pub(crate) use x86_64::mlkem::{
             mlkem_ntt,
             mlkem_intt,
@@ -536,6 +543,7 @@ cfg_if::cfg_if! {
         pub(crate) use aarch64::mlkem768_vg;
         pub(crate) use aarch64::p256_vg;
         pub(crate) use aarch64::pbkdf2_vg;
+        pub(crate) use aarch64::p384_vg;
         pub(crate) use aarch64::mlkem::{
             mlkem_ntt,
             mlkem_intt,
@@ -574,17 +582,18 @@ cfg_if::cfg_if! {
         pub(crate) use aarch64::chacha20;
         pub(crate) use aarch64::chacha20poly1305;
         pub(crate) use generic::mlkem::{mlkem_compress_d4, mlkem_compress_d5, mlkem_compress_d10, mlkem_compress_d11, mlkem_frombytes, mlkem_unpack};
-        pub(crate) use generic::mlkem_sample::{mlkem_sample_poly_ntt_8x, mlkem_shake256_8x};
     } else if #[cfg(rind_backend = "arm")] {
         pub(in crate::low) use arm::cpu::{enter_cpu_state, zero_bytes, ct_compare_bytes, ct_compare_16, leave_cpu_state};
         pub(crate) use arm::aes::{AesDecKey, AesKey};
         pub(crate) use arm::aes_cbc;
         pub(crate) use arm::aes_ctr;
         pub(crate) use arm::aesv8_armx::AesHwKey;
-        pub(crate) use arm::cpu::HaveCryptoExt;
+        pub(crate) use arm::cpu::{HaveCryptoExt, HaveNeon};
         #[cfg(test)]
         pub(crate) use arm::ct_qemu;
+        pub(crate) use arm::ghash_armv4::NeonTable;
         pub(crate) use arm::ghashv8_armx::GhashTable;
+        pub(crate) use arm::vpaes_armv7::NeonKey;
         pub(crate) use arm::chacha20;
         pub(crate) use arm::poly1305;
         pub(crate) use arm::curve25519::curve25519_x25519;
@@ -601,6 +610,7 @@ cfg_if::cfg_if! {
         };
         pub(crate) use generic::mlkem768_vg;
         pub(crate) use generic::p256_vg;
+        pub(crate) use generic::p384_vg;
         pub(crate) use generic::pbkdf2_vg;
         pub(crate) use generic::sha256x8::sha256_finish_x8;
     } else if #[cfg(rind_backend = "portable")] {
@@ -620,6 +630,7 @@ cfg_if::cfg_if! {
         };
         pub(crate) use generic::mlkem768_vg;
         pub(crate) use generic::p256_vg;
+        pub(crate) use generic::p384_vg;
         pub(crate) use generic::pbkdf2_vg;
         pub(crate) use generic::sha256x8::sha256_finish_x8;
     } else {

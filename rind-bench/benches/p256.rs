@@ -122,6 +122,7 @@ fn ecdh(c: &mut Criterion) {
     });
 
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         b.iter(|| {
             use rind::agreement::*;
             let our_private_key = PrivateKey::generate(&ECDH_P256).unwrap();
@@ -227,6 +228,7 @@ fn keygen(c: &mut Criterion) {
     });
 
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         b.iter(|| {
             use rind::agreement::*;
             let our_private_key = PrivateKey::generate(&ECDH_P256).unwrap();
@@ -268,6 +270,7 @@ fn ecdsa_keygen(c: &mut Criterion) {
     });
 
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         use rind::ecdsa::{KeyPair, sign};
 
         b.iter(|| {
@@ -328,6 +331,7 @@ fn ecdsa_verify(c: &mut Criterion) {
     });
 
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         use rind::ecdsa::{PublicKey, verify};
 
         b.iter(|| {
@@ -409,6 +413,7 @@ fn ecdsa_verify(c: &mut Criterion) {
     });
 
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         use rind::ecdsa::{PublicKey, verify};
         let public_key = PublicKey::new(&verify::P256_SHA256_FIXED, public_key).unwrap();
 
@@ -436,6 +441,7 @@ fn ecdsa_verify(c: &mut Criterion) {
     });
 
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         use rind::digest;
         use rind::ecdsa::{PublicKey, verify};
         let public_key = PublicKey::new(&verify::P256_SHA256_FIXED, public_key).unwrap();
@@ -527,6 +533,7 @@ fn ecdsa_sign(c: &mut Criterion) {
     });
 
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         use rind::ecdsa::{KeyPair, sign};
         let signing_key = KeyPair::generate(&sign::P256_SHA256_FIXED).unwrap();
 
@@ -620,6 +627,7 @@ fn ecdsa_sign(c: &mut Criterion) {
     });
 
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         use rind::digest;
         use rind::ecdsa::{KeyPair, sign};
         let signing_key = KeyPair::generate(&sign::P256_SHA256_FIXED).unwrap();
@@ -676,6 +684,7 @@ fn stored(c: &mut Criterion) {
     });
 
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         use rind::agreement::*;
         let key = PrivateKey::from_scalar(&ECDH_P256, &scalar).unwrap();
 

@@ -36,8 +36,9 @@ impl KeyPair {
     // rind takes moduli up to 8192 bits of any length; ring refuses the
     // rest, and an exponent below 65537.
     fn new(key: rind::rsa::KeyPair) -> Result<Self, error::KeyRejected> {
+        // rind's encoding of a key it loaded always parses.
         let public = PublicKey::new(key.public_key().as_ref())
-            .map_err(|_| error::KeyRejected::invalid_encoding())?;
+            .or(Err(error::KeyRejected::invalid_encoding()))?;
         let bits = public.modulus_bits();
         if bits < 2048 {
             return Err(error::KeyRejected::too_small());

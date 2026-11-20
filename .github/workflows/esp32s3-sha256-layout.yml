@@ -6,6 +6,9 @@ name: ESP32-S3 SHA-256 layout
 # one the board image uses (esp rustc 1.97.0.0).
 on:
   pull_request:
+    # A draft skips every job until it is marked ready, and turning a PR back
+    # into a draft cancels its ready run: see CONTRIBUTING.md.
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
     paths:
       - rind/src/lib.rs
       - rind/src/low/mod.rs
@@ -27,6 +30,7 @@ concurrency:
 
 jobs:
   layout:
+    if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
