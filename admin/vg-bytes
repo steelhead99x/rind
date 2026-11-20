@@ -201,7 +201,7 @@ def data_symbols(obj, keep=lambda path: True):
     out = {}
     by_section = {}
     for line in run(["llvm-objdump", "-t", "-C", str(obj)]).splitlines():
-        m = re.match(r"^([0-9a-f]+) .{6}O (\S+)\s+([0-9a-f]+) (?:\.hidden )?(.+)$", line)
+        m = re.match(r"^([0-9a-f]+) .{6}O (\S+)\s+([0-9a-f]+) (?:\.(?:hidden|protected|internal) )?(.+)$", line)
         if not m:
             continue
         if int(m.group(1), 16) != 0:
@@ -375,13 +375,16 @@ def compare(arch, name, text, got, want, what, exact=False):
     return lines, got
 
 
-def bind_statics(name, got, got_statics, want, want_statics, bound):
+def bind_statics(name, got, got_statics, want, want_statics, bound, text):
     """Fails unless every static the routine `got` reaches, through its
     relocations and then those of the statics it reaches, is `want`'s, the
     compiled routine's, in size, bytes, and relocations (each a target and
     addend, by the target's name): a relocation's name alone does not say what
     the static it names holds. A static is by its name, which each side
-    has once. Adds each to `bound`."""
+    has once. A target that is no static of either side must be a routine of
+    VG's `text`, which the routine-by-routine comparison covers: a constant
+    pool section or any other symbol fails, since its bytes are bound by
+    nothing. Adds each to `bound`."""
     todo = [r[2] for i in got for r in i.relocs]
     seen = set()
     while todo:
@@ -392,8 +395,10 @@ def bind_statics(name, got, got_statics, want, want_statics, bound):
         if n not in want_statics:
             if n in got_statics:
                 fail(f"{name}: rind's build reaches the static {n}, which VG's does not define")
-            # A function, which the routine-by-routine comparison covers, or
-            # a symbol outside the object.
+            if n not in text:
+                fail(f"{name}: reaches {n}, which is neither a static of either build "
+                     f"nor a routine of VG's text, so nothing binds its bytes")
+            # A routine, which the routine-by-routine comparison covers.
             continue
         if n not in got_statics:
             fail(f"{name}: VG's routine reaches the static {n}, which rind's build does not define")
@@ -403,6 +408,22 @@ def bind_statics(name, got, got_statics, want, want_statics, bound):
                  f"({w.size} bytes): its bytes or relocations differ")
         bound.add(n)
         todo += [r[2] for r in g.relocs]
+
+
+def self_test():
+    """Fails unless `bind_statics` rejects a relocation to a symbol that is
+    no static and no routine of the text, and accepts one to a routine."""
+    def routine(target):
+        i = Insn(0, "", "")
+        i.relocs.append((0, "R_X86_64_PLT32", target, 0))
+        return [i]
+    bind_statics("vg_a", routine("vg_b"), {}, [], {}, set(), {"vg_a": [], "vg_b": []})
+    try:
+        bind_statics("vg_a", routine(".rodata.cst16"), {}, [], {}, set(), {"vg_a": []})
+    except SystemExit as e:
+        if ".rodata.cst16" in str(e):
+            return
+    fail("self-test: a relocation to a symbol outside the text and the statics passed")
 
 
 def groups(arch, lines, insns):
@@ -453,6 +474,7 @@ def main():
                    help="the objects of rind's release build, whose vendored routines to check")
     a = p.parse_args()
     a.vg, a.out = a.vg.resolve(), a.out.resolve()
+    self_test()
     a.out.mkdir(parents=True, exist_ok=True)
 
     text = read_text(a.vg / "crates" / f"verified-garbage-asm-{a.arch}" / "assembly")
@@ -514,7 +536,7 @@ def main():
             if name not in text:
                 fail(f"rind's {name} is not a routine of VG's text at this commit")
             compare(a.arch, name, text[name], insns, compiled[name], "rind's build", exact=True)
-            bind_statics(name, insns, rind_statics, compiled[name], vg_statics, bound)
+            bind_statics(name, insns, rind_statics, compiled[name], vg_statics, bound, text)
             rind_checked += 1
 
     for (t, vg_raw, llvm_raw), k in sorted(ENCODINGS.items()):
