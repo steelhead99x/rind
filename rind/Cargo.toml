@@ -75,8 +75,21 @@ aws-lc-rs = { version = "1.19", default-features = false, features = ["alloc", "
 # rind runs, for the differential tests beside aws-lc-rs. See
 # `tests/crosschecks.rs`'s `independent`.
 aes-gcm = { version = "0.11", default-features = false, features = ["aes", "alloc"] }
+# AES modes, key wrap, and key derivation, from the same family.
+aes = { version = "0.9", default-features = false }
+aes-kw = { version = "0.3", default-features = false }
+cbc = { version = "0.2", default-features = false, features = ["alloc", "block-padding"] }
+ctr = { version = "0.10", default-features = false }
+hkdf = { version = "0.13", default-features = false }
+pbkdf2 = { version = "0.13", default-features = false, features = ["hmac"] }
 chacha20poly1305 = { version = "0.11", default-features = false, features = ["alloc"] }
 hmac = { version = "0.13", default-features = false }
+# HACL*'s Curve25519 and Ed25519, which rind runs on no tier: the oracle where
+# rind runs dalek (armv7 and the portable backend), and a second one beside
+# dalek where it runs s2n-bignum. The versions are ones rind-bench and the
+# lock already hold, so they add no second libcrux train.
+libcrux-curve25519 = { version = "0.0.9", default-features = false }
+libcrux-ed25519 = { version = "0.0.10", default-features = false }
 ml-dsa = { version = "0.1", default-features = false }
 ml-kem = { version = "0.3", default-features = false, features = ["hazmat"] }
 sha2 = { version = "0.11", default-features = false }
@@ -85,18 +98,6 @@ sha3 = { version = "0.12", default-features = false }
 # portable backend run dalek, so the test leaves them out.
 ed25519-dalek = { version = "3", default-features = false }
 x25519-dalek = { version = "3", default-features = false, features = ["static_secrets"] }
-# AES modes, key wrap, and key derivation, from the same family.
-aes = { version = "0.9", default-features = false }
-aes-kw = { version = "0.3", default-features = false }
-cbc = { version = "0.2", default-features = false, features = ["alloc", "block-padding"] }
-ctr = { version = "0.10", default-features = false }
-hkdf = { version = "0.13", default-features = false }
-pbkdf2 = { version = "0.13", default-features = false, features = ["hmac"] }
-# HACL*'s Curve25519 and Ed25519, which rind runs on no tier: the oracle where
-# rind runs dalek (armv7 and the portable backend), and a second one beside
-# dalek where it runs s2n-bignum.
-libcrux-curve25519 = { version = "0.0.10", default-features = false }
-libcrux-ed25519 = { version = "0.0.11", default-features = false }
 # aws-lc's XChaCha20-Poly1305, which aws-lc-rs does not expose.
 aws-lc-sys = { version = "0.47", default-features = false }
 # HPKE, which aws-lc-rs does not expose either; `hazmat` reads its private keys.

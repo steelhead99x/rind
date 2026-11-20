@@ -2883,18 +2883,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "libcrux-curve25519"
-version = "0.0.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "03c041d754efacdaa80814b216e9f4378c80ee8d2d92348f2316db549b5deff7"
-dependencies = [
- "libcrux-hacl-rs 0.0.7",
- "libcrux-macros 0.0.4",
- "libcrux-secrets 0.0.8",
- "libcrux-traits 0.0.10",
-]
-
-[[package]]
 name = "libcrux-ecdh"
 version = "0.0.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2942,17 +2930,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "libcrux-ed25519"
-version = "0.0.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "717c0581e0ac46a8e1f60c38373990c3157deed0c5c9870295bf97252d98a841"
-dependencies = [
- "libcrux-hacl-rs 0.0.7",
- "libcrux-macros 0.0.4",
- "libcrux-sha2 0.0.10",
-]
-
-[[package]]
 name = "libcrux-hacl-rs"
 version = "0.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2966,15 +2943,6 @@ name = "libcrux-hacl-rs"
 version = "0.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "27ce64ead37fc67c1039fdbcf1e8c97044e6a644cb3d1f79060b5c9ac8fdfe0a"
-dependencies = [
- "libcrux-macros 0.0.4",
-]
-
-[[package]]
-name = "libcrux-hacl-rs"
-version = "0.0.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "762189c1588b1b79ebd035cb7685d9c4eb5ecf4a8cd39806e33f3850ac25bc8c"
 dependencies = [
  "libcrux-macros 0.0.4",
 ]
@@ -3260,16 +3228,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "libcrux-secrets"
-version = "0.0.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "38ae376c1514520cad255b2b199f9163c1825822df7d42efb9c835b0332af546"
-dependencies = [
- "crabgrind 0.4.0",
- "hax-lib 0.4.2",
-]
-
-[[package]]
 name = "libcrux-sha2"
 version = "0.0.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3289,17 +3247,6 @@ dependencies = [
  "libcrux-hacl-rs 0.0.6",
  "libcrux-macros 0.0.4",
  "libcrux-traits 0.0.9",
-]
-
-[[package]]
-name = "libcrux-sha2"
-version = "0.0.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "265e84d299a82d5c1ad8dbabff693dbd667ae71bbbeb1af45b1447d95acc2428"
-dependencies = [
- "libcrux-hacl-rs 0.0.7",
- "libcrux-macros 0.0.4",
- "libcrux-traits 0.0.10",
 ]
 
 [[package]]
@@ -3343,16 +3290,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8958bb5c3780eb7c3355aeeb051629b830e47bfefd36befed93c81b53366bbc4"
 dependencies = [
  "libcrux-secrets 0.0.7",
- "rand 0.10.3",
-]
-
-[[package]]
-name = "libcrux-traits"
-version = "0.0.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "14512aa663bde41efb5ec4a709f768530441ec25b7159d3bb8fe4145081c6b3d"
-dependencies = [
- "libcrux-secrets 0.0.8",
  "rand 0.10.3",
 ]
 
@@ -4741,8 +4678,8 @@ dependencies = [
  "hmac 0.13.0",
  "hpke-rs 0.8.0",
  "libc",
- "libcrux-curve25519 0.0.10",
- "libcrux-ed25519 0.0.11",
+ "libcrux-curve25519 0.0.9",
+ "libcrux-ed25519",
  "libcrux-hacl-rs 0.0.6",
  "libcrux-macros 0.0.4",
  "libcrux-poly1305 0.0.7",
@@ -4825,7 +4762,7 @@ dependencies = [
  "libcrux-chacha20poly1305 0.0.10",
  "libcrux-ecdh 0.0.9",
  "libcrux-ecdsa",
- "libcrux-ed25519 0.0.10",
+ "libcrux-ed25519",
  "libcrux-hkdf 0.0.9",
  "libcrux-hmac 0.0.9",
  "libcrux-ml-dsa",

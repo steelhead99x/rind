@@ -3844,8 +3844,8 @@ mod independent {
         }
 
         // Keys of 128, 192, and 256 bits, and counter blocks near a 32-bit
-        // or the 128-bit wrap, which the oracle's 128-bit big-endian counter
-        // wraps the same way.
+        // or the 128-bit wrap, against the oracle's 128-bit and 32-bit
+        // big-endian counters.
         #[test]
         fn aes_ctr_cbc(
             key in prop::sample::select(&[16usize, 24, 32][..])
@@ -3887,6 +3887,20 @@ mod independent {
                         .unwrap();
                     let mut wanted = msg.clone();
                     ctr::Ctr128BE::<$cipher>::new_from_slices(&key, &iv)
+                        .unwrap()
+                        .apply_keystream(&mut wanted);
+                    prop_assert_eq!(&ours, &wanted);
+
+                    // A 32-bit counter, which wraps within the low word of
+                    // the block instead of carrying into the next one, as
+                    // the blocks near `u32::MAX` of `iv` show.
+                    let mut ours = msg.clone();
+                    rind::cipher::AesCtr::new(algorithm, &key, 32)
+                        .unwrap()
+                        .apply_keystream(&iv, &mut ours)
+                        .unwrap();
+                    let mut wanted = msg.clone();
+                    ctr::Ctr32BE::<$cipher>::new_from_slices(&key, &iv)
                         .unwrap()
                         .apply_keystream(&mut wanted);
                     prop_assert_eq!(&ours, &wanted);
@@ -4031,6 +4045,52 @@ mod independent {
         }
     }
 
+    // HACL*'s Curve25519 and Ed25519 through libcrux, which rind runs on no
+    // tier, so it is the oracle on armv7 and the portable backend, where
+    // rind runs dalek.
+    proptest! {
+        #[test]
+        fn ed25519_x25519_libcrux(
+            seed in any::<[u8; 32]>(),
+            peer in any::<[u8; 32]>(),
+            message in vec(any::<u8>(), 0..300),
+            flip in any::<Option<Index>>(),
+        ) {
+            let ours = rind::ed25519::KeyPair::from_seed(&seed).unwrap();
+            let mut public = [0u8; 32];
+            libcrux_ed25519::secret_to_public(&mut public, &seed);
+            prop_assert_eq!(ours.public_key().as_ref(), &public);
+            let signature = libcrux_ed25519::sign(&message, &seed).unwrap();
+            let ours_signature = ours.sign(&message);
+            prop_assert_eq!(ours_signature.as_ref(), &signature);
+            let mut signature = signature;
+            if let Some(flip) = flip {
+                let bit = flip.index(signature.len() * 8);
+                signature[bit / 8] ^= 1 << (bit % 8);
+            }
+            prop_assert_eq!(
+                rind::ed25519::PublicKey::new(&public)
+                    .unwrap()
+                    .verify(&message, &signature)
+                    .is_ok(),
+                libcrux_ed25519::verify(&message, &public, &signature).is_ok()
+            );
+            prop_assert_eq!(libcrux_ed25519::verify(&message, &public, &signature).is_ok(), flip.is_none());
+
+            // Both refuse a low-order peer's all-zero secret.
+            let ours = rind::agreement::PrivateKey::from_scalar(&rind::agreement::X25519, &seed).unwrap();
+            let mut public = [0u8; 32];
+            libcrux_curve25519::secret_to_public(&mut public, &seed);
+            prop_assert_eq!(ours.public_key().as_ref(), &public);
+            let mut shared = [0u8; 32];
+            match (ours.agree(&peer), libcrux_curve25519::ecdh(&mut shared, &peer, &seed)) {
+                (Ok(got), Ok(())) => prop_assert_eq!(got.as_ref(), &shared),
+                (Err(_), Err(_)) => {}
+                (ours, theirs) => prop_assert!(false, "rind ok {}, libcrux ok {}", ours.is_ok(), theirs.is_ok()),
+            }
+        }
+    }
+
     // Each case generates a key, which is slow under emulation.
     proptest! {
         #![proptest_config(ProptestConfig::with_cases(16))]
@@ -4161,52 +4221,6 @@ mod independent {
                     prop_assert_eq!(got.as_ref(), shared.as_bytes());
                 }
                 Err(_) => prop_assert!(!shared.was_contributory()),
-            }
-        }
-    }
-
-    // HACL*'s Curve25519 and Ed25519 through libcrux, which rind runs on no
-    // tier, so it is the oracle on armv7 and the portable backend, where
-    // rind runs dalek.
-    proptest! {
-        #[test]
-        fn ed25519_x25519_libcrux(
-            seed in any::<[u8; 32]>(),
-            peer in any::<[u8; 32]>(),
-            message in vec(any::<u8>(), 0..300),
-            flip in any::<Option<Index>>(),
-        ) {
-            let ours = rind::ed25519::KeyPair::from_seed(&seed).unwrap();
-            let mut public = [0u8; 32];
-            libcrux_ed25519::secret_to_public(&mut public, &seed);
-            prop_assert_eq!(ours.public_key().as_ref(), &public);
-            let signature = libcrux_ed25519::sign(&message, &seed).unwrap();
-            let ours_signature = ours.sign(&message);
-            prop_assert_eq!(ours_signature.as_ref(), &signature);
-            let mut signature = signature;
-            if let Some(flip) = flip {
-                let bit = flip.index(signature.len() * 8);
-                signature[bit / 8] ^= 1 << (bit % 8);
-            }
-            prop_assert_eq!(
-                rind::ed25519::PublicKey::new(&public)
-                    .unwrap()
-                    .verify(&message, &signature)
-                    .is_ok(),
-                libcrux_ed25519::verify(&message, &public, &signature).is_ok()
-            );
-            prop_assert_eq!(libcrux_ed25519::verify(&message, &public, &signature).is_ok(), flip.is_none());
-
-            // Both refuse a low-order peer's all-zero secret.
-            let ours = rind::agreement::PrivateKey::from_scalar(&rind::agreement::X25519, &seed).unwrap();
-            let mut public = [0u8; 32];
-            libcrux_curve25519::secret_to_public(&mut public, &seed);
-            prop_assert_eq!(ours.public_key().as_ref(), &public);
-            let mut shared = [0u8; 32];
-            match (ours.agree(&peer), libcrux_curve25519::ecdh(&mut shared, &peer, &seed)) {
-                (Ok(got), Ok(())) => prop_assert_eq!(got.as_ref(), &shared),
-                (Err(_), Err(_)) => {}
-                (ours, theirs) => prop_assert!(false, "rind ok {}, libcrux ok {}", ours.is_ok(), theirs.is_ok()),
             }
         }
     }
