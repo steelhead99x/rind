@@ -177,9 +177,12 @@ fn measure(f: &mut dyn FnMut(&mut Bencher<'_, WallTime>), warm_ms: u64, sample_m
     let mut iters = 1u64;
     let warm_start = Instant::now();
     let mut per_iter;
+    let mut wall_per_iter;
     loop {
         let mut b = Bencher { iters, elapsed: Duration::ZERO, ran: false, _m: std::marker::PhantomData };
+        let call = Instant::now();
         f(&mut b);
+        wall_per_iter = call.elapsed().as_nanos() as f64 / iters as f64;
         if !b.ran {
             return Err("bench closure never called iter".into());
         }
@@ -192,7 +195,14 @@ fn measure(f: &mut dyn FnMut(&mut Bencher<'_, WallTime>), warm_ms: u64, sample_m
         }
         iters = iters.saturating_mul(2);
     }
-    let target = (sample_ms as f64 * 1e6 / per_iter.max(1.0)).max(1.0) as u64;
+    // Size samples by the timed routine, but never let one sample's wall time
+    // (which includes untimed iter_batched setup) pass 4x sample_ms: a cheap
+    // routine behind an expensive setup (spake2plus verifier-finish: a ~50 ns
+    // compare after ~ms of untimed key exchange) would otherwise ask for
+    // millions of setups and run for hours.
+    let by_timed = sample_ms as f64 * 1e6 / per_iter.max(1.0);
+    let by_wall = 4.0 * sample_ms as f64 * 1e6 / wall_per_iter.max(1.0);
+    let target = by_timed.min(by_wall).max(1.0) as u64;
     let mut out = Vec::with_capacity(samples);
     for _ in 0..samples {
         if stopping() {
