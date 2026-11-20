@@ -18,3 +18,4 @@ Decided 2026-11-18 (maintainer, [kixel-ai/rind#619](https://github.com/kixel-ai/
 ## Waiting
 
 - Maintainer: close the armv7 NEON gap in `benchmarks/gaps.toml` once a weekly bench run of the armv7 NEON tier shows it closed, then delete that entry and this quest. `admin/bench-report render --check` refuses an entry that covers no gap, so it can go only with the refreshed data.
+- Maintainer: the NEON key converts its bsaes schedule at first use and keeps it, not at key setup as the Plan says (`aes_neon.rs`'s `Bsaes` cell), so a key that only does single blocks never pays for it; say if you want the eager form.

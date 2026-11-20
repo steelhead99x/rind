@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: ISC
 
 //! GHASH in integer code alone, for x86_64 CPUs without SSSE3 and for
-//! AES-GCM from any IV on armv7 without the crypto extension and on the
+//! AES-GCM from any IV on armv7 without NEON and on the
 //! portable backend: aws-lc's `crypto/fipsmodule/modes/gcm_nohw.c` at commit
 //! 5ed12cce0fd4453f2f63300d44325ed14f845d6f, in Rust, in its 64-bit
 //! configuration on 64-bit targets and its 32-bit one on 32-bit targets.

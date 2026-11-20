@@ -57,7 +57,6 @@
 
 
 
-.syntax	unified 	@ ARMv7-capable assembler is expected to handle this
 
 .type	_bsaes_decrypt8,%function
 .align	4

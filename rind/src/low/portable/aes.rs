@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
-//! AES for the portable backend and armv7 without the crypto extension:
+//! AES for the portable backend and armv7 without NEON:
 //! aws-lc's bitsliced AES, several blocks a pass, with the round keys held
 //! bitsliced so each call skips that step.
 

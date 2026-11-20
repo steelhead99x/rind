@@ -857,7 +857,7 @@ def import_arm(aws_lc):
                 i = source_index(lines, piece)
                 lines = lines[:i] + lines[i + len(piece) :]
             dropped = {" ".join(d.split()) for d in spec.get("drops", [])}
-            lines = [line for line in lines if " ".join(line.split()) not in dropped]
+            lines = [line for line in lines if " ".join(line.split("@")[0].split()) not in dropped]
             text = "\n".join(lines).strip("\n").split("\n")
         else:
             # In aws-lc's order, which keeps each routine's `adr` and literal
