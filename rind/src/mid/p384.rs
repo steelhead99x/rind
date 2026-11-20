@@ -85,10 +85,10 @@ impl VerifyingKey {
     /// key too; rind's over the multiples it keeps measured faster for a
     /// reused key on aarch64.
     pub(crate) fn raw_ecdsa_verify(&self, r: &Scalar, s: &Scalar, e: &Scalar) -> Result<(), Error> {
-        if let Some(vg) = low::p384_vg::Verify::check() {
-            if self.vg_takes() {
-                return self.vg_ecdsa_verify(vg, r, s, e);
-            }
+        if let Some(vg) = low::p384_vg::Verify::check()
+            && self.vg_takes()
+        {
+            return self.vg_ecdsa_verify(vg, r, s, e);
         }
         self.rind_ecdsa_verify(r, s, e)
     }
