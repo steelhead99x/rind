@@ -4029,9 +4029,9 @@ mod independent {
         target_endian = "little",
         not(rind_portable)
     ))]
-    /// Any scalar of the curve's length that is a private key: P-521's
-    /// leading byte keeps its nine bits, and a value of n or more is
-    /// vanishingly rare.
+    /// A scalar of the curve's length: P-521's leading byte keeps its nine
+    /// bits. It may still be zero, or n or more, which no private key is, so
+    /// the test screens it.
     fn scalar(len: usize, bytes: &[u8]) -> Vec<u8> {
         let mut scalar = bytes[..len].to_vec();
         if len == 66 {
@@ -4359,9 +4359,19 @@ mod independent {
 
                     let curve = &$curve;
                     let (d, peer) = (scalar(curve.len, &bytes), scalar(curve.len, &bytes[66..]));
-                    let ours = rind::agreement::PrivateKey::from_scalar(curve.ecdh, &d).unwrap();
-                    let secret = $theirs::SecretKey::from_slice(&d).unwrap();
-                    let peer_secret = $theirs::SecretKey::from_slice(&peer).unwrap();
+                    // Zero and n or more are no private key, and proptest
+                    // weights the bytes that make them (all zero, all ones):
+                    // both sides must refuse them alike, and the rest of the
+                    // case needs two keys.
+                    let ours = rind::agreement::PrivateKey::from_scalar(curve.ecdh, &d);
+                    let ours_peer = rind::agreement::PrivateKey::from_scalar(curve.ecdh, &peer);
+                    let secret = $theirs::SecretKey::from_slice(&d);
+                    let peer_secret = $theirs::SecretKey::from_slice(&peer);
+                    prop_assert_eq!(ours.is_ok(), secret.is_ok());
+                    prop_assert_eq!(ours_peer.is_ok(), peer_secret.is_ok());
+                    prop_assume!(secret.is_ok() && peer_secret.is_ok());
+                    let (ours, ours_peer) = (ours.unwrap(), ours_peer.unwrap());
+                    let (secret, peer_secret) = (secret.unwrap(), peer_secret.unwrap());
                     let public = secret.public_key();
                     let peer_public = peer_secret.public_key();
                     prop_assert_eq!(ours.public_key().as_ref(), &public.to_sec1_bytes()[..]);
@@ -4373,7 +4383,6 @@ mod independent {
                     );
                     let agreed = ours.agree(&peer_public.to_sec1_bytes()).unwrap();
                     prop_assert_eq!(agreed.as_ref(), &shared.raw_secret_bytes()[..]);
-                    let ours_peer = rind::agreement::PrivateKey::from_scalar(curve.ecdh, &peer).unwrap();
                     let agreed = ours_peer.agree(ours.public_key().as_ref()).unwrap();
                     prop_assert_eq!(agreed.as_ref(), &shared.raw_secret_bytes()[..]);
 

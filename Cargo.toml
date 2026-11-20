@@ -47,9 +47,13 @@ debug = true
 [profile.dev.package.fiat-crypto]
 overflow-checks = false
 
-# The tests' schoolbook P-384 and P-521 reference divides at every point
-# operation, which is slow unoptimized.
+# The independent oracles' big integers run in every test build: the curve
+# oracle's schoolbook P-384 and P-521 reference divides at every point
+# operation, and RSA's private operations take seconds, both slow unoptimized.
 [profile.dev.package.num-bigint]
+opt-level = 3
+
+[profile.dev.package.crypto-bigint]
 opt-level = 3
 
 [profile.dev.package.base64ct]
