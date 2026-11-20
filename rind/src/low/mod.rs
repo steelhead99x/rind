@@ -394,6 +394,9 @@ cfg_if::cfg_if! {
         pub(crate) use x86_64::adx_mux::edwards25519_pdouble;
         pub(crate) use x86_64::adx_mux::edwards25519_scalarmulbase;
         pub(crate) use x86_64::adx_mux::edwards25519_msm;
+        pub(crate) use x86_64::adx_mux::edwards25519_mul_avx2;
+        #[cfg(test)]
+        pub(crate) use x86_64::adx_mux::edwards25519_mul_avx2_any;
         pub(crate) use x86_64::ghash;
         pub(crate) use x86_64::mldsa::{
             mldsa_ntt, mldsa_intt, mldsa_nttunpack, mldsa_pointwise, mldsa_pointwise_acc,

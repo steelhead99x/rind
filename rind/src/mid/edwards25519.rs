@@ -7,6 +7,8 @@
 //! Each field and point routine is HOL Light-proven in s2n-bignum. What this
 //! module composes from them (the ladder, the square root of a ratio, the
 //! inversion, and the signed recoding) is rind's own, covered by tests only.
+//! On x86_64 CPUs with AVX2 but without ADX the multiplication instead runs a
+//! port of curve25519-dalek's AVX2 formulas, which nothing proves.
 
 use crate::error::Error;
 use crate::low;
@@ -281,7 +283,18 @@ impl Point {
         self.0[..12].try_into().unwrap()
     }
 
-    /// `[scalar]self`, in constant time.
+    /// `[scalar]self`, in constant time: on x86_64 CPUs with AVX2 but without
+    /// ADX, curve25519-dalek's AVX2 formulas, which measured faster there (and
+    /// slower with ADX), and elsewhere `mul_s2n_bignum`.
+    pub(crate) fn mul(&self, scalar: &Scalar) -> Self {
+        #[cfg(rind_backend = "x86_64")]
+        if let Some(r) = low::edwards25519_mul_avx2(&scalar.signed_radix_16(), &self.0) {
+            return Self(r);
+        }
+        self.mul_s2n_bignum(scalar)
+    }
+
+    /// `[scalar]self` over s2n-bignum's point routines, in constant time.
     ///
     /// A fixed window of four bits over signed digits: a table of
     /// `0 * self ..= 8 * self`, then for each digit from the top, sixteen
@@ -289,7 +302,7 @@ impl Point {
     /// negated for a negative digit. It does the work of s2n-bignum's
     /// `edwards25519_scalarmuldouble` without the base point's half, and
     /// stays in extended coordinates, so ristretto255 never inverts `Z`.
-    pub(crate) fn mul(&self, scalar: &Scalar) -> Self {
+    fn mul_s2n_bignum(&self, scalar: &Scalar) -> Self {
         let mut table = [Self::IDENTITY.0; 9];
         table[1] = self.0;
         for i in 2..table.len() {
@@ -501,6 +514,67 @@ mod tests {
         // d * 121666 = -121665
         let n = |x| Fe([x, 0, 0, 0]);
         assert_eq!(Fe::D.mul(&n(121666)).0, n(121665).neg().0);
+    }
+
+    /// The AVX2 multiplication agrees with s2n-bignum's on every digit the
+    /// recoding yields (-8 to 7), at the scalars' edges and at the identity
+    /// and a point of order two. It checks nothing on a CPU without AVX2.
+    #[test]
+    fn mul_paths_agree() {
+        let order_minus_one = Scalar([Scalar::ORDER[0] - 1, Scalar::ORDER[1], 0, Scalar::ORDER[3]]);
+        // Every nibble 0..=15, so each digit from -8 to 7 occurs, with and
+        // without a carry in.
+        let nibbles = Scalar([
+            0xfedc_ba98_7654_3210,
+            0x0123_4567_89ab_cdef,
+            0x7777_8888_0f0f_f0f0,
+            0x0808_0808_0808_0808,
+        ]);
+        let mut scalars = vec![
+            Scalar([0; 4]),
+            Scalar([1, 0, 0, 0]),
+            order_minus_one,
+            nibbles,
+        ];
+        let mut x = 0x2545_f491_4f6c_dd1du64;
+        for _ in 0..16 {
+            let mut words = [0u64; 4];
+            for w in &mut words {
+                x ^= x << 13;
+                x ^= x >> 7;
+                x ^= x << 17;
+                *w = x;
+            }
+            let mut wide = [0u64; 8];
+            wide[..4].copy_from_slice(&words);
+            let mut s = Scalar([0; 4]);
+            low::bignum_mod_n25519(&mut s.0, &wide);
+            scalars.push(s);
+        }
+
+        // The identity, a point of order two (0, -1), and multiples of B.
+        let order_two = Point::from_coordinates(&Fe::ZERO, &Fe::ONE.neg(), &Fe::ONE, &Fe::ZERO);
+        let mut points = vec![Point::IDENTITY, order_two];
+        points.extend(scalars.iter().map(Point::mul_base));
+        for p in &points {
+            for s in &scalars {
+                assert_eq!(p.mul(s).to_bytes(), p.mul_s2n_bignum(s).to_bytes());
+                // `mul` runs s2n-bignum's on a CPU with ADX, so run AVX2's too.
+                #[cfg(rind_backend = "x86_64")]
+                {
+                    // The digits and the point are secret to ctgrind, which
+                    // then checks AVX2's multiplication on a runner with ADX,
+                    // where `mul` runs s2n-bignum's; the product is
+                    // declassified, as a public key is.
+                    let digits = low::ct::into_secret(s.signed_radix_16());
+                    let point = low::ct::into_secret(p.0);
+                    if let Some(r) = low::edwards25519_mul_avx2_any(&digits, &point) {
+                        let r = low::ct::into_public(r);
+                        assert_eq!(Point(r).to_bytes(), p.mul_s2n_bignum(s).to_bytes());
+                    }
+                }
+            }
+        }
     }
 
     #[test]

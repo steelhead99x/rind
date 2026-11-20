@@ -9,7 +9,11 @@
 //! multiples, with a second for `[2^128]B`. The loop is
 //! `low::generic::edwards25519_msm`'s, over the same non-adjacent forms.
 //!
-//! The scalars and the points are public, so this runs in variable time.
+//! The scalars and the points are public, so that runs in variable time.
+//! [`edwards25519_mul`] runs the same formulas in constant time for one
+//! secret scalar and point, as curve25519-dalek's variable-base multiplication
+//! does: a fixed window of four bits over signed digits, with each digit's
+//! table entry read through masks.
 //!
 //! Each `Fe4` holds four field elements (lanes A, B, C, D) in radix
 //! 2^25.5: ten limbs, alternately 26 and 25 bits, each limb pair's four
@@ -80,6 +84,78 @@ fn msm(base: &[u64; 4], scalars: &[[u64; 4]; 2], points: &[[[u64; 4]; 4]; 2]) ->
 
     let [x, y, z, _] = q.0.split();
     [x, y, z]
+}
+
+/// Computes `res := [scalar]P` in constant time, from the scalar's signed
+/// radix-16 digits (each in `-8..=8`, least significant first) and the
+/// point's reduced extended coordinates `(X, Y, Z, T)`, as reduced extended
+/// coordinates.
+pub(crate) fn edwards25519_mul(
+    res: &mut [u64; 16],
+    digits: &[i8; 64],
+    point: &[u64; 16],
+    _token: HaveAvx2,
+) {
+    let coordinates: [[u64; 4]; 4] =
+        core::array::from_fn(|i| point[4 * i..4 * i + 4].try_into().unwrap());
+    // SAFETY: `_token` proves the `avx` and `avx2` cpu features
+    let q = unsafe { mul(digits, &coordinates) };
+    for (out, coordinate) in res.as_chunks_mut::<4>().0.iter_mut().zip(q) {
+        out.copy_from_slice(&coordinate);
+    }
+}
+
+/// `[scalar]P`: the table of `P ..= 8P`, then for each digit from the top,
+/// sixteen times the sum so far plus the digit's entry.
+#[target_feature(enable = "avx,avx2")]
+fn mul(digits: &[i8; 64], point: &[[u64; 4]; 4]) -> [[u64; 4]; 4] {
+    // The operands are secret: `vpmuludq` runs under Intel's MXCSR
+    // mitigation, as in `msm`.
+    let _mcdt = crate::low::Mcdt::enter();
+    let p1 = Extended(Fe4::new(point));
+    let mut extended = [p1; 8];
+    let mut table = [Cached::from(p1); 8];
+    for i in 1..8 {
+        // Entry `i` is `(i + 1) * P`.
+        extended[i] = match i % 2 {
+            1 => extended[i / 2].double(),
+            _ => extended[i - 1].add(&table[0]),
+        };
+        table[i] = Cached::from(extended[i]);
+    }
+
+    let mut q = Extended(Fe4(EXTENDED_IDENTITY)).add(&select(&table, digits[63]));
+    for digit in digits[..63].iter().rev() {
+        for _ in 0..4 {
+            q = q.double();
+        }
+        q = q.add(&select(&table, *digit));
+    }
+    q.0.split()
+}
+
+/// `[digit]P` as a [`Cached`] point, from `table`'s `P ..= 8P`, for
+/// `-8 <= digit <= 8`, in constant time.
+#[target_feature(enable = "avx,avx2")]
+fn select(table: &[Cached; 8], digit: i8) -> Cached {
+    // 0 or -1, by an arithmetic shift, so no branch reads the digit.
+    let sign = (digit >> 7) as i32;
+    let magnitude = _mm256_set1_epi32((digit as i32 ^ sign).wrapping_sub(sign));
+
+    let mut out = CACHED_IDENTITY;
+    for (i, entry) in table.iter().enumerate() {
+        let hit = _mm256_cmpeq_epi32(magnitude, _mm256_set1_epi32(i as i32 + 1));
+        for (out, entry) in out.iter_mut().zip(entry.0.0) {
+            *out = _mm256_blendv_epi8(*out, entry, hit);
+        }
+    }
+
+    let negated = Cached(Fe4(out)).neg();
+    let negative = _mm256_set1_epi32(sign);
+    for (out, negated) in out.iter_mut().zip(negated.0.0) {
+        *out = _mm256_blendv_epi8(*out, negated, negative);
+    }
+    Cached(Fe4(out))
 }
 
 /// `[P, 3P, 5P, ..., 15P]`, the odd multiples a width-5 form's digits take.
@@ -201,6 +277,16 @@ const fn v(x: [u32; 8]) -> __m256i {
 
 const ZERO: [__m256i; 5] = [v([0; 8]); 5];
 
+/// The identity as a [`Cached`] point: `(Y - X, Y + X, 2Z, 2dT)` scaled by
+/// 121666 is `(121666, 121666, 2 * 121666, 0)`.
+const CACHED_IDENTITY: [__m256i; 5] = [
+    v([121666, 121666, 0, 0, 2 * 121666, 0, 0, 0]),
+    v([0; 8]),
+    v([0; 8]),
+    v([0; 8]),
+    v([0; 8]),
+];
+
 /// `(0, 1, 1, 0)`, the identity.
 const EXTENDED_IDENTITY: [__m256i; 5] = [
     v([0, 1, 0, 0, 1, 0, 0, 0]),
@@ -298,13 +384,15 @@ impl Fe4 {
         }
 
         // Each lane's radix 2^51 limbs, as in dalek's `split`.
+        // Wrapping, so a debug build's overflow checks don't branch on the
+        // secret limbs; none of these overflows.
         let mut out = [[0u64; 5]; 4];
         for (i, l) in lanes.iter().enumerate() {
             let l = l.map(u64::from);
-            out[0][i] = l[0] + (l[2] << 26);
-            out[1][i] = l[1] + (l[3] << 26);
-            out[2][i] = l[4] + (l[6] << 26);
-            out[3][i] = l[5] + (l[7] << 26);
+            out[0][i] = l[0].wrapping_add(l[2] << 26);
+            out[1][i] = l[1].wrapping_add(l[3] << 26);
+            out[2][i] = l[4].wrapping_add(l[6] << 26);
+            out[3][i] = l[5].wrapping_add(l[7] << 26);
         }
 
         out.map(|mut l| {
@@ -317,18 +405,18 @@ impl Fe4 {
             for l in &mut l {
                 *l &= MASK;
             }
-            l[0] += 19 * c[4];
+            l[0] = l[0].wrapping_add(c[4].wrapping_mul(19));
             for i in 1..5 {
-                l[i] += c[i - 1];
+                l[i] = l[i].wrapping_add(c[i - 1]);
             }
 
-            let mut q = (l[0] + 19) >> 51;
+            let mut q = l[0].wrapping_add(19) >> 51;
             for l in &l[1..] {
-                q = (l + q) >> 51;
+                q = l.wrapping_add(q) >> 51;
             }
-            l[0] += 19 * q;
+            l[0] = l[0].wrapping_add(q.wrapping_mul(19));
             for i in 0..4 {
-                l[i + 1] += l[i] >> 51;
+                l[i + 1] = l[i + 1].wrapping_add(l[i] >> 51);
                 l[i] &= MASK;
             }
             l[4] &= MASK;
@@ -1859,5 +1947,17 @@ mod tests {
                 lanes
             })
         })
+    }
+
+    // A secret scalar's digits against a secret point, for `admin/ct-sde`.
+    #[test]
+    #[ignore = "admin/ct-sde runs it under Intel SDE"]
+    fn ct_sde_mul() {
+        let mut rng = Rng(super::super::ct_sde::seed());
+        let token = HaveAvx2::check().expect("AVX2");
+        let point = base_mul(&rng.words(253));
+        let digits: [i8; 64] = core::array::from_fn(|_| (rng.next() % 17) as i8 - 8);
+        let mut res = [0; 16];
+        super::super::ct_sde::traced(|| edwards25519_mul(&mut res, &digits, &point, token));
     }
 }
