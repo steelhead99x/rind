@@ -70,8 +70,8 @@ HOSTS = {
         "note": "The maintainer's MacBook, in daily use. Its cores have DIT, and this run timed rind two ways. "
         "The AES-GCM, ChaCha20-Poly1305, header protection, SHA-2, HMAC, and HKDF rows hold "
         "`rind::cpu::Dit::hold()` across calls, as MoQ does and as the report's rind column assumes. rind's other "
-        "rows set DIT around each call. In the other primitive rows that toggle cost 20 to 120 ns a call in the "
-        "run before, so their times overstate rind's. In the rustls rows, holding DIT would also run rustls' own "
+        "rows set DIT around each call. In the run before, rows timed both ways paid 20 to 120 ns a call for that "
+        "toggle, so the other primitive rows likely overstate rind's time until re-measured holding DIT. In the rustls rows, holding DIT would also run rustls' own "
         "code with it on, a cost not yet measured, so which way they would move is open.",
     },
     "ovh-iad": {
