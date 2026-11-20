@@ -5,11 +5,11 @@ open Aeneas Aeneas.Std Result rind.spec
 /-!
 # SHA-1 and SHA-256's block functions on the portable backend
 
-No proof covers SHA-256's block function on 64-bit targets,
+No proof covers SHA-256's block function on x86_64,
 `low::generic::sha256`, aws-lc's portable C ported, or SHA-1's,
 `low::generic::sha1`, so the SHA-256 and SHA-1 theorems take `Sha256Blocks` and
 `Sha1Blocks`, their contracts, as on x86_64 and aarch64. Nothing here covers
-the 32-bit targets, which run HACL*'s.
+the other targets, which run HACL*'s.
 `Rind.X86_64.ShaBlocks` states the same names for x86_64.
 -/
 

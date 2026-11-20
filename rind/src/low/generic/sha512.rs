@@ -2,7 +2,7 @@
 
 //! A rolled SHA-512 compression, for 32-bit portable microcontrollers.
 //!
-//! The 32-bit portable backend otherwise calls HACL*'s fully unrolled
+//! Other portable backends call HACL*'s fully unrolled
 //! `sha512_update`, about 47 KiB in 32-bit codegen: several times an
 //! ESP32-S3's 16 KiB instruction cache, so every block streams its code
 //! from flash. This runs one 16-word window and an 80-round loop, a few

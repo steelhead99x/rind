@@ -130,10 +130,10 @@ mod generic {
         all(test, any(rind_backend = "arm", rind_backend = "x86_64"))
     ))]
     pub(super) mod sha1;
-    // The 64-bit portable backend's SHA-256 (aws-lc's C ported), and the
+    // The x86_64 portable backend's SHA-256 (aws-lc's C ported), and the
     // reference armv7 and x86_64 tests check their assembly against.
     #[cfg(any(
-        all(rind_backend = "portable", target_pointer_width = "64"),
+        all(rind_backend = "portable", target_arch = "x86_64"),
         all(
             test,
             any(
@@ -149,7 +149,7 @@ mod generic {
     // reader, so the table stays out: clippy denies an unused static.
     #[cfg(any(
         all(target_arch = "xtensa", target_os = "espidf"),
-        all(rind_backend = "portable", target_pointer_width = "64"),
+        all(rind_backend = "portable", target_arch = "x86_64"),
         all(
             test,
             any(
@@ -163,12 +163,12 @@ mod generic {
     // SLH-DSA's SHA-256 lanes one at a time, which x86_64 runs with the SHA
     // extensions or without AVX2.
     pub(super) mod sha256x8;
-    // The 64-bit portable backend's SHA-512 (aws-lc's C ported), and the
+    // The x86_64 portable backend's SHA-512 (aws-lc's C ported), and the
     // table it shares with the rolled loop below.
-    #[cfg(any(all(rind_backend = "portable", target_pointer_width = "64"), test))]
+    #[cfg(any(all(rind_backend = "portable", target_arch = "x86_64"), test))]
     pub(super) mod sha512_awslc;
     #[cfg(any(
-        all(rind_backend = "portable", target_pointer_width = "64"),
+        all(rind_backend = "portable", target_arch = "x86_64"),
         all(
             rind_backend = "portable",
             not(target_pointer_width = "64"),

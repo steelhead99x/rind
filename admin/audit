@@ -67,7 +67,7 @@ CRATES = {
     "libcrux-hacl-rs": "the runtime of the HACL\\* ChaCha20 rounds rind copied",
     "libcrux-macros": "the same",
     "libcrux-poly1305": "HACL\\*'s Poly1305, on 32-bit portable targets",
-    "libcrux-sha2": "HACL\\*'s SHA-2 block functions, on 32-bit portable targets",
+    "libcrux-sha2": "HACL\\*'s SHA-2 block functions, on portable targets other than x86_64",
 }
 
 

@@ -34,9 +34,9 @@ libcrux-hacl-rs = { version = "0.0.6", features = ["alloc"] }
 libcrux-macros = "0.0.4"
 libcrux-poly1305 = { version = "0.0.7", features = ["expose-hacl"] }
 
-# HACL*'s SHA-2 on 32-bit portable targets, which armv7 builds too, though it
-# runs aws-lc's assembly for SHA-512. 64-bit targets run aws-lc's C, ported.
-[target.'cfg(all(any(rind_portable, target_endian = "big", all(target_arch = "aarch64", not(target_feature = "neon")), all(target_arch = "x86_64", not(target_feature = "sse2")), not(any(target_arch = "x86_64", target_arch = "aarch64"))), not(target_pointer_width = "64")))'.dependencies]
+# HACL*'s SHA-2 on portable targets but x86_64, which armv7 builds too, though
+# it runs aws-lc's assembly for SHA-512. x86_64 runs aws-lc's C, ported.
+[target.'cfg(all(any(rind_portable, target_endian = "big", all(target_arch = "aarch64", not(target_feature = "neon")), all(target_arch = "x86_64", not(target_feature = "sse2")), not(any(target_arch = "x86_64", target_arch = "aarch64"))), not(target_arch = "x86_64")))'.dependencies]
 libcrux-sha2 = { version = "0.0.9", features = ["expose-hacl"] }
 
 # Reads the AArch32 crypto extension's HWCAP2 bits.

@@ -14,7 +14,7 @@ what each theorem takes as a hypothesis.
 
 namespace rind.portable
 
-/-! SHA-256's and SHA-512's block functions on 64-bit targets, whose contracts
+/-! SHA-256's and SHA-512's block functions on x86_64, whose contracts
 `Rind.Portable.ShaBlocks` and `Rind.Portable.Sha512Entry` state as hypotheses. -/
 
 opaque low.generic.sha256.sha256_compress_blocks

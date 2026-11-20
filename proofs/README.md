@@ -1232,7 +1232,7 @@ written for it with the target renamed, as for aarch64, over what differs:
 - `Rind/Portable/ShaBlocks.lean`: `Sha256Blocks`, the entry checks and the
   contract of SHA-256's block function, `low::generic::sha256` (aws-lc's
   portable C, ported), and `Sha1Blocks`, as on the other targets the contract
-  of SHA-1's, `low::generic::sha1`, which no proof covers here. The 32-bit
+  of SHA-1's, `low::generic::sha1`, which no proof covers here. The other
   targets run HACL*'s SHA-2 instead, which these proofs do not translate, so
   its F* proofs are theirs alone;
   [the SHA-2 proof quest](/quest/m4/verified/portable-sha2-lean.md) plans
@@ -1252,7 +1252,7 @@ these quests prove its code, whose proofs then run on this translation:
   which `Rind/Portable/Keccak.lean` proves,
   [the construction](/quest/m4/verified/mlkem-construction.md), and
   [the portable arithmetic](/quest/m4/verified/mlkem-portable.md);
-- SHA-256 and SHA-512 on 64-bit targets:
+- SHA-256 and SHA-512 on x86_64's portable backend:
   [their block functions' proof](/quest/m4/verified/portable-sha2-lean.md);
 - ChaCha20-Poly1305:
   [Graviola's Poly1305 and the separate-pass glue](/quest/m5/verified/chacha20-poly1305-portable.md);

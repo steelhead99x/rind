@@ -16,7 +16,7 @@ namespace rind.portable
 
 /-- rind's SHA-512 has no CPU dispatch here, so this assumes that its entry
 guard and the debug build's check that one is held pass, and that its block
-function, `low::generic::sha512_awslc` on 64-bit targets, which no proof
+function, `low::generic::sha512_awslc` on x86_64, which no proof
 covers yet, computes FIPS 180-4's. None reads an input. -/
 def RunsSha512 : Prop :=
   ((∃ e, low.entry.Entry.new_secret = ok e) ∧ low.entry.Entry.assert_held = ok ()) ∧

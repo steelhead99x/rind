@@ -57,8 +57,9 @@
 # x86_64 with AES-NI but no VAES, whose Rust, key setup and by-8 kernels
 # included, `proofs/` proves against Vale's specs, and with AVX and MOVBE
 # against Vale's theorems for its routines. On the portable backend, ChaCha20
-# header protection, but not SHA-2: its 64-bit block functions are aws-lc's C
-# ported, which nothing proves yet, so HMAC and HKDF over them do not earn it. On AMD's x86_64 CPUs without AVX2, rind runs aws-lc's
+# header protection, but not SHA-2: its x86_64 block functions are aws-lc's C
+# ported, which nothing proves yet, so HMAC and HKDF over them do not earn it
+# there, and the other targets run HACL*, which the proofs do not translate. On AMD's x86_64 CPUs without AVX2, rind runs aws-lc's
 # unproven scalar SHA-512, which is faster there, so SHA-512 does not earn the
 # ✓ there, nor does Ed25519 unless the CPU has AVX-512 IFMA. CPUs with the
 # SHA512 instructions run the proven AVX2 routine when they have its whole

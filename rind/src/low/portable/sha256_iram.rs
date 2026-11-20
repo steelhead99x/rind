@@ -6,7 +6,7 @@
 
 //! SHA-256 compression in internal RAM on ESP-IDF Xtensa.
 //!
-//! The 32-bit portable backend otherwise calls HACL*'s unrolled
+//! Other portable backends call HACL*'s unrolled
 //! `sha256_update` through libcrux-sha2. That body is about 12 KiB, so on an ESP32-S3 it
 //! fills most of the 16 KiB flash instruction cache. This is FIPS 180-4
 //! §4.1.2's functions and §6.2.2's schedule and rounds. The first sixteen
