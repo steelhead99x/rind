@@ -66,6 +66,7 @@ exclude_re = [
   'rind/src/low/generic/p384_mul32\.rs:\d+:\d+: replace \| with \^ in sqr_wide$',
   'rind/src/low/generic/p521\.rs:\d+:\d+: replace \| with \^ in (booth_w5|nonzero_u8|select_words)$',
   'rind/src/low/generic/poly1305\.rs:\d+:\d+: replace \| with \^ in (add|full_reduce|mul)$',
+  'rind/src/low/generic/poly1305_32\.rs:\d+:\d+: replace \| with \^ in Poly1305::(blocks|finish)$',
   'rind/src/low/posint\.rs:\d+:\d+: replace \| with \^ in (PosInt<N>::from_bytes|PosInt<N>::pub_montifier|mul_word_mod)$',
   'rind/src/low/(portable|x86_64)/\.\./generic/aes_nohw\.rs:\d+:\d+: replace \| with \^ in word::(compact_block|rotate_rows_down|rotate_rows_twice|uncompact_block)$',
   'rind/src/low/(portable|x86_64)/\.\./generic/ghash_nohw\.rs:\d+:\d+: replace \| with \^ in (NohwTable::ghash|gcm_mul32_nohw)$',
@@ -296,7 +297,7 @@ exclude_re = [
   # Pinned to its line: the `cpu_denied` of a release build or one without
   # an OS, which tests never are. The debug build's, under the same name, is
   # caught.
-  'rind/src/low/mod\.rs:196:\d+: replace cpu_denied -> bool with true$',
+  'rind/src/low/mod\.rs:236:\d+: replace cpu_denied -> bool with true$',
   # The FIPS module's `SystemRandom`, compiled only under `--cfg rind_fips`,
   # which no mutation run sets; `fips_rng`'s tests cover what it calls.
   # Pinned to its line: the other `fill`, under the same name, is caught.
@@ -340,7 +341,7 @@ exclude_re = [
   'rind/src/low/entry\.rs:\d+:\d+: replace - with \+ in <impl Drop for Entry>::drop$',
   'rind/src/low/entry\.rs:\d+:\d+: replace Entry::assert_held with \(\)$',
   # Pinned to its line: the other branch's `*`, at the same column, is caught.
-  'rind/src/low/generic/blockwise\.rs:195:24: replace \* with / in pad$',
+  'rind/src/low/generic/blockwise\.rs:179:24: replace \* with / in pad$',
   'rind/src/mid/rsa_priv/exponents\.rs:\d+:\d+: replace >= with < in Exponents::derive$',
   'rind/src/mid/rsa_priv/exponents\.rs:\d+:36: replace \* with \+ in Exponents::derive$',
   'rind/src/mid/rsa_priv/generate\.rs:\d+:\d+: delete ! in MillerRabinParams<\x27a>::check_base$',

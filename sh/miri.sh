@@ -104,6 +104,8 @@ slow=(
     high::vrf::tests::refuses_altered_proofs
     low::generic::ct_equal::tests::matches_eq
     low::generic::mldsa_poly::tests::backend_matches_port
+    low::generic::mul16::tests::matches_the_wide_product
+    low::generic::poly1305_32::tests::matches_hacl_and_generic
     low::posint::tests::aws_lc_mod_exp
     low::posint::tests::aws_lc_mod_mul
     low::posint::tests::mont_exp_matches_square_and_multiply
