@@ -111,6 +111,9 @@ jobs:
     needs: scope
     if: needs.scope.outputs.run == 'true'
     runs-on: ubuntu-latest
+    # With `check` after it, a merge group's build and models share the queue's
+    # 90-minute window: 20 and 60 minutes leave room for the hosted-runner wait.
+    timeout-minutes: ${{ github.event_name == 'merge_group' && 20 || 360 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -145,8 +148,9 @@ jobs:
     needs: [scope, build]
     runs-on: ubuntu-latest
     # A merge group's models report inside the queue's 90-minute window, which
-    # the wait for a hosted runner also spends, or the group expires unreported.
-    timeout-minutes: ${{ github.event_name == 'merge_group' && 75 || 360 }}
+    # the wait for a hosted runner and `build` also spend, or the group expires
+    # unreported.
+    timeout-minutes: ${{ github.event_name == 'merge_group' && 60 || 360 }}
     strategy:
       fail-fast: false
       matrix:
@@ -247,15 +251,24 @@ jobs:
   # A merge group's gate: every model and the ACVP run, or a pass when the
   # group's diff misses x86_64 and they skip. On any other event it is
   # `x86-cpu gate (queue)`, skipped, so that it never claims the required name
-  # behind `needs`, where a cancelled model would report it cancelled.
+  # behind `needs`, where a cancelled model would report it cancelled. `build`
+  # is a need because `check` skips when it fails: a skip counts only when
+  # `scope` found nothing to run.
   gate:
     name: ${{ github.event_name == 'merge_group' && 'x86-cpu gate' || 'x86-cpu gate (queue)' }}
     if: always() && github.event_name == 'merge_group'
-    needs: [scope, check, acvp]
+    needs: [scope, build, check, acvp]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Every model passed or was out of scope
         env:
           NEEDS: ${{ toJSON(needs) }}
-        run: jq -e 'to_entries | all(.value.result == "success" or .value.result == "skipped")' <<<"$NEEDS"
+        run: |
+          jq -e '
+            .scope.result == "success" and
+            (if .scope.outputs.run == "false"
+             then [.build, .check, .acvp] | all(.result == "skipped")
+             else [.build, .check, .acvp] | all(.result == "success")
+             end)
+          ' <<<"$NEEDS"
