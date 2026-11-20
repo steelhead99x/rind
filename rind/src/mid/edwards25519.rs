@@ -561,8 +561,17 @@ mod tests {
                 assert_eq!(p.mul(s).to_bytes(), p.mul_s2n_bignum(s).to_bytes());
                 // `mul` runs s2n-bignum's on a CPU with ADX, so run AVX2's too.
                 #[cfg(rind_backend = "x86_64")]
-                if let Some(r) = low::edwards25519_mul_avx2_any(&s.signed_radix_16(), &p.0) {
-                    assert_eq!(Point(r).to_bytes(), p.mul_s2n_bignum(s).to_bytes());
+                {
+                    // The digits and the point are secret to ctgrind, which
+                    // then checks AVX2's multiplication on a runner with ADX,
+                    // where `mul` runs s2n-bignum's; the product is
+                    // declassified, as a public key is.
+                    let digits = low::ct::into_secret(s.signed_radix_16());
+                    let point = low::ct::into_secret(p.0);
+                    if let Some(r) = low::edwards25519_mul_avx2_any(&digits, &point) {
+                        let r = low::ct::into_public(r);
+                        assert_eq!(Point(r).to_bytes(), p.mul_s2n_bignum(s).to_bytes());
+                    }
                 }
             }
         }
