@@ -26,14 +26,17 @@ crabgrind = { version = "0.4", optional = true }
 # no C or intrinsics features enabled, fiat-crypto's for the NIST curves, and
 # curve25519-dalek's for X25519 and Ed25519. The cfg is build.rs's choice of
 # the arm or portable backend (or portable for aarch64 without NEON), which a
-# manifest cannot read, so armv7 builds libcrux-sha2 too, though it runs
-# aws-lc's assembly for SHA-512.
+# manifest cannot read.
 [target.'cfg(any(rind_portable, target_endian = "big", all(target_arch = "aarch64", not(target_feature = "neon")), all(target_arch = "x86_64", not(target_feature = "sse2")), not(any(target_arch = "x86_64", target_arch = "aarch64"))))'.dependencies]
 curve25519-dalek = { version = "5", default-features = false, features = ["precomputed-tables"] }
 fiat-crypto = { version = "0.3", default-features = false }
 libcrux-hacl-rs = { version = "0.0.6", features = ["alloc"] }
 libcrux-macros = "0.0.4"
 libcrux-poly1305 = { version = "0.0.7", features = ["expose-hacl"] }
+
+# HACL*'s SHA-2 on 32-bit portable targets, which armv7 builds too, though it
+# runs aws-lc's assembly for SHA-512. 64-bit targets run aws-lc's C, ported.
+[target.'cfg(all(any(rind_portable, target_endian = "big", all(target_arch = "aarch64", not(target_feature = "neon")), all(target_arch = "x86_64", not(target_feature = "sse2")), not(any(target_arch = "x86_64", target_arch = "aarch64"))), not(target_pointer_width = "64")))'.dependencies]
 libcrux-sha2 = { version = "0.0.9", features = ["expose-hacl"] }
 
 # Reads the AArch32 crypto extension's HWCAP2 bits.

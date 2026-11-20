@@ -130,20 +130,26 @@ mod generic {
         all(test, any(rind_backend = "arm", rind_backend = "x86_64"))
     ))]
     pub(super) mod sha1;
-    #[cfg(all(
-        test,
-        any(
-            rind_backend = "arm",
-            rind_backend = "portable",
-            rind_backend = "x86_64"
+    // The 64-bit portable backend's SHA-256 (aws-lc's C ported), and the
+    // reference armv7 and x86_64 tests check their assembly against.
+    #[cfg(any(
+        all(rind_backend = "portable", target_pointer_width = "64"),
+        all(
+            test,
+            any(
+                rind_backend = "arm",
+                rind_backend = "portable",
+                rind_backend = "x86_64"
+            )
         )
     ))]
     pub(super) mod sha256;
     // FIPS 180-4 §4.2.2, one copy. The ESP-IDF Xtensa compressor and the
-    // test compressor above both read it. aarch64 tests compile neither
+    // compressor above both read it. aarch64 tests compile neither
     // reader, so the table stays out: clippy denies an unused static.
     #[cfg(any(
         all(target_arch = "xtensa", target_os = "espidf"),
+        all(rind_backend = "portable", target_pointer_width = "64"),
         all(
             test,
             any(
@@ -157,6 +163,20 @@ mod generic {
     // SLH-DSA's SHA-256 lanes one at a time, which x86_64 runs with the SHA
     // extensions or without AVX2.
     pub(super) mod sha256x8;
+    // The 64-bit portable backend's SHA-512 (aws-lc's C ported), and the
+    // table it shares with the rolled loop below.
+    #[cfg(any(all(rind_backend = "portable", target_pointer_width = "64"), test))]
+    pub(super) mod sha512_awslc;
+    #[cfg(any(
+        all(rind_backend = "portable", target_pointer_width = "64"),
+        all(
+            rind_backend = "portable",
+            not(target_pointer_width = "64"),
+            any(target_os = "espidf", target_os = "none")
+        ),
+        test
+    ))]
+    pub(super) mod sha512_k;
     // Rolled SHA-512 on 32-bit microcontrollers (ESP-IDF or no OS), whose
     // small instruction cache HACL*'s ~47 KiB unrolled body misses. Hosted
     // 32-bit targets keep HACL*, which took 0.71-0.78 of this loop's time

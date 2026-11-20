@@ -13,7 +13,7 @@
 # own `Pbkdf2Vg.lean`. The portable backend,
 # translated for x86_64 into `proofs/Rind/Portable/`, takes the hash, HMAC,
 # HKDF, PBKDF2, and ChaCha20 header protection proofs the same way, over
-# HACL*'s SHA-2 instead of aws-lc's. So does armv7, its header-protection model
+# aws-lc's portable SHA-2 instead of its assembly. So does armv7, its header-protection model
 # and ChaCha20 proof.
 #
 # Usage: admin/prove [bytes | hol-light [<arch>] | cosim | vg | lean | session <arch> [<file>] | key <check>]
@@ -1577,9 +1577,9 @@ extract_kdf aarch64 Aarch64 --include crate::mid::pbkdf2_vg \
 extract_armv7
 
 # The portable backend, which builds only under the cfg CI's portable jobs
-# build with, here on x86_64: the hashes, down to HACL*'s SHA-2 block
-# functions, which are opaque (see UPSTREAM.md, "Charon panics on HACL*'s
-# unrolled SHA-2"), and the Keccak-f. `proofs/Rind/Portable/Compare.lean`
+# build with, here on x86_64: the hashes, down to the SHA-1 and SHA-2 block
+# functions, which are opaque (their contracts are the proofs' hypotheses), and
+# the Keccak-f. `proofs/Rind/Portable/Compare.lean`
 # models its constant-time compares, which read through raw pointers and
 # `black_box`. The error type and `into_public`, which the other targets reach
 # through their curves, are start points of their own here.

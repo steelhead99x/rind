@@ -1,39 +1,46 @@
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
 //! SHA-1 on rind's portable code in `generic`, as armv7 runs it without the
-//! crypto extension, and the SHA-2 family on HACL*'s verified
-//! `Hacl_Hash_SHA2`, as libcrux-sha2 ships it. HACL*'s SHA-256 took 0.67-0.93
-//! of `generic`'s time at 16 KB on x86_64.
+//! crypto extension, and the SHA-2 family on aws-lc's portable C, ported to
+//! Rust in `generic::sha256` and `generic::sha512_awslc`, on 64-bit targets.
+//! It measured 0.86-0.93 of HACL*'s SHA-256 and 0.77-0.86 of its SHA-512 on
+//! x86_64's forced portable backend, from 32 B to 16 KB, and within 4% of
+//! aws-lc's C compiled without assembly for SHA-512, where Graviola's rolled
+//! SHA-256 took 1.07-1.19 of HACL*'s.
 //!
-//! Two exceptions are for small instruction caches, which HACL*'s unrolled
-//! bodies (about 12 KiB for SHA-256, 47 KiB for SHA-512 in 32-bit codegen)
-//! miss. On 32-bit microcontrollers (ESP-IDF or no OS), SHA-384/512 is the
-//! rolled loop in `generic::sha512`: on a Seeed XIAO ESP32-S3 it took about
-//! 0.033 of HACL*'s time. Hosted 32-bit targets keep HACL*, which took
-//! 0.71-0.78 of the rolled loop's time on i686. On ESP-IDF Xtensa, SHA-256
-//! is rind's own unproven compression in `sha256_iram`, run from internal
-//! RAM, at about 0.65-0.74 of HACL*'s time from flash on that board from
-//! 1200 B to 16 KB. Host tests call that body by name, on its Rust
-//! fallbacks, and ship HACL* in its place.
+//! 32-bit targets keep what they ran, which no measurement here replaced:
+//! HACL*'s verified `Hacl_Hash_SHA2`, as libcrux-sha2 ships it, which took
+//! 0.67-0.93 of the rolled SHA-256's time at 16 KB on x86_64. Two exceptions
+//! are for small instruction caches, which HACL*'s unrolled bodies (about
+//! 12 KiB for SHA-256, 47 KiB for SHA-512 in 32-bit codegen) miss. On 32-bit
+//! microcontrollers (ESP-IDF or no OS), SHA-384/512 is the rolled loop in
+//! `generic::sha512`: on a Seeed XIAO ESP32-S3 it took about 0.033 of
+//! HACL*'s time. Hosted 32-bit targets keep HACL*, which took 0.71-0.78 of
+//! the rolled loop's time on i686. On ESP-IDF Xtensa, SHA-256 is rind's own
+//! unproven compression in `sha256_iram`, run from internal RAM, at about
+//! 0.65-0.74 of HACL*'s time from flash on that board from 1200 B to 16 KB.
+//! Host tests call that body by name, on its Rust fallbacks, and ship the
+//! 64-bit body in its place.
 
-#[cfg(any(not(all(target_arch = "xtensa", target_os = "espidf")), test))]
-use libcrux_sha2::hacl::sha256_update_nblocks;
-#[cfg(not(all(
+#[cfg(all(
     not(target_pointer_width = "64"),
-    any(target_os = "espidf", target_os = "none")
-)))]
+    any(not(all(target_arch = "xtensa", target_os = "espidf")), test)
+))]
+use libcrux_sha2::hacl::sha256_update_nblocks;
+#[cfg(not(any(target_pointer_width = "64", target_os = "espidf", target_os = "none")))]
 use libcrux_sha2::hacl::sha512_update_nblocks;
 
 pub(crate) use crate::low::generic::sha1::sha1_compress_blocks;
 
 /// HACL* takes a 32-bit length, so longer input goes in pieces of whole
 /// blocks below it. ESP-IDF Xtensa calls HACL* for neither hash.
+#[cfg(not(target_pointer_width = "64"))]
 #[cfg_attr(all(target_arch = "xtensa", target_os = "espidf"), allow(dead_code))]
 const PIECE: usize = 1 << 31;
 
 // The IRAM body is what ESP-IDF Xtensa ships. Other builds compile it only
 // for the tests below, which call it by name, so their `cargo test` and
-// ctgrind still run the HACL* SHA-256 they ship.
+// ctgrind still run the SHA-256 they ship.
 #[cfg(any(all(target_arch = "xtensa", target_os = "espidf"), test))]
 #[path = "sha256_iram.rs"]
 mod iram;
@@ -45,7 +52,17 @@ pub(crate) fn sha256_compress_blocks(state: &mut [u32; 8], blocks: &[u8]) {
     {
         iram::sha256_update_nblocks(state, blocks);
     }
-    #[cfg(not(all(target_arch = "xtensa", target_os = "espidf")))]
+    #[cfg(all(
+        target_pointer_width = "64",
+        not(all(target_arch = "xtensa", target_os = "espidf"))
+    ))]
+    {
+        crate::low::generic::sha256::sha256_compress_blocks(state, blocks);
+    }
+    #[cfg(all(
+        not(target_pointer_width = "64"),
+        not(all(target_arch = "xtensa", target_os = "espidf"))
+    ))]
     {
         for piece in blocks.chunks(PIECE) {
             sha256_update_nblocks(piece.len() as u32, piece, state);
@@ -86,10 +103,11 @@ pub(crate) fn sha512_compress_blocks(state: &mut [u64; 8], blocks: &[u8]) {
     {
         crate::low::generic::sha512::sha512_compress_blocks(state, blocks);
     }
-    #[cfg(not(all(
-        not(target_pointer_width = "64"),
-        any(target_os = "espidf", target_os = "none")
-    )))]
+    #[cfg(target_pointer_width = "64")]
+    {
+        crate::low::generic::sha512_awslc::sha512_compress_blocks(state, blocks);
+    }
+    #[cfg(not(any(target_pointer_width = "64", target_os = "espidf", target_os = "none")))]
     {
         for piece in blocks.chunks(PIECE) {
             sha512_update_nblocks(piece.len() as u32, piece, state);
@@ -157,7 +175,7 @@ mod tests {
         // FIPS 180-4 SHA-256: the empty message, "abc", and the 56-byte
         // message whose padding fills a second block. The message is secret
         // so ctgrind checks this IRAM body. Host builds compile it only in
-        // tests and do not ship it in place of HACL*.
+        // tests and do not ship it.
         let cases: [(&[u8], &str); 3] = [
             (
                 b"",
@@ -212,11 +230,14 @@ mod tests {
                 }
                 let mut generic = state;
                 crate::low::generic::sha256::sha256_compress_blocks(&mut generic, input);
+                #[cfg(not(target_pointer_width = "64"))]
                 let mut hacl = state;
+                #[cfg(not(target_pointer_width = "64"))]
                 sha256_update_nblocks(input.len() as u32, input, &mut hacl);
                 let got = ct::into_public(got);
                 assert_eq!(got, ct::into_public(split), "split {case}, {count}");
                 assert_eq!(got, ct::into_public(generic), "generic {case}, {count}");
+                #[cfg(not(target_pointer_width = "64"))]
                 assert_eq!(got, ct::into_public(hacl), "HACL* {case}, {count}");
             }
         }
@@ -227,7 +248,7 @@ mod tests {
     fn iram_digest_matches_aws_lc() {
         // Both padding boundaries and updates across them go through the
         // IRAM body, with a secret message. Off Xtensa the production
-        // finish stays on HACL*, so this calls the IRAM driver by name.
+        // finish is another body, so this calls the IRAM driver by name.
         let message: [u8; 1200] = core::array::from_fn(|i| i.wrapping_mul(197) as u8);
         ct::secret_slice(&message);
         for len in [
