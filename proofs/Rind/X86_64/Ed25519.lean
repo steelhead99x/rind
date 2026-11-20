@@ -12,9 +12,8 @@ returns, in terms of `Rind.Ed25519`'s spec, and SHA-512 as
 theorems are about its translation, with no hand model. `admin/prove` writes
 the aarch64 proof from this file by renaming the target.
 
-Verification is proven only on aarch64, in `Rind.Aarch64.Ed25519Verify`:
-x86_64's checks a multiple of the equation with half-size scalars, which
-nothing proves yet.
+Verification checks a multiple of the equation with half-size scalars on
+x86_64 and aarch64, which nothing proves yet.
 -/
 
 namespace rind.x86_64

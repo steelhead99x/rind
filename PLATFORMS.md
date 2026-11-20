@@ -23,7 +23,15 @@ qemu. iOS devices' code is only built.
   secret-dependent code runs with data-independent timing (DIT), set and
   cleared in each call unless `rind::cpu::Dit::hold()` holds it across a batch
   of calls. rind sets no DIT on other aarch64 platforms, where Arm says it
-  changes nothing on current cores.
+  changes nothing on current cores. On Linux, the public-key arithmetic
+  runs s2n-bignum's narrow-multiplier schedules when `MIDR_EL1` names
+  Cortex-A72, Cortex-A76, or Neoverse N1, and its `_alt` schedules
+  everywhere else (see [ALGORITHMS.md](ALGORITHMS.md)). The register is read
+  on whichever core makes the first such call, and the choice is cached for
+  the process, as aws-lc does. On a chip that mixes core types, such as
+  Cortex-A76 with Cortex-A55, every core then runs the schedule that first
+  core picked: correct and constant time on each, only slower on the cores
+  it was not picked for.
 - `x86_64` runs on every x86_64 CPU. It needs a target that enables SSE2,
   as every one with an OS does; `x86_64-unknown-none` and
   `x86_64-unknown-uefi` disable it and run the portable backend. Without `aes` and `pclmulqdq`, as on
@@ -71,7 +79,8 @@ qemu. iOS devices' code is only built.
   SHA-512, and SHA-512/256 always run aws-lc's assembly, with NEON where the
   CPU has it, as do SHA-1 and SHA-256 without the crypto extension, and with
   NEON, X25519's shared secret runs [BoringSSL]'s assembly. SHA-3's, ML-KEM's,
-  and ML-DSA's Keccak-f runs [OpenSSL]'s assembly, on NEON where the CPU has it.
+  and ML-DSA's Keccak-f runs [OpenSSL]'s assembly, on NEON where the CPU has it,
+  and so do P-256's field multiplication, squaring, addition, and subtraction.
   That assembly is A32 on every target, but `armv7-linux-androideabi` and
   the `thumbv7` targets build Rust as Thumb-2, the inline assembly of the
   constant-time compares included, so the compares' proofs (see
@@ -163,6 +172,48 @@ qemu. iOS devices' code is only built.
   compile-only: its tests need a JavaScript host. Constant time is unchecked on
   wasm: ctgrind and the trace checks inspect native code, and a wasm engine
   compiles rind again, so its JIT may turn a select into a branch.
+  Bare-metal targets (`target_os = "none"`) build the library without std, on
+  `alloc`: the program supplies a global allocator and a getrandom backend.
+  `just check` lints them in debug and release (`just bare-metal`) whenever a
+  change reaches the portable or x86_64 backend: `thumbv6m-none-eabi` and
+  `riscv32imc-unknown-none-elf`, which lack compare-and-swap and so keep no
+  reuse cache, `thumbv7em-none-eabihf`, `armv7a-none-eabi`,
+  `armv7r-none-eabihf`, `aarch64-unknown-none`,
+  `aarch64-unknown-none-softfloat`, and `x86_64-unknown-none`. Every one but
+  `x86_64-unknown-none` runs the portable backend: the aarch64 and 32-bit ARM
+  assembly loads and stores unaligned words, which these strict-align targets
+  fault on when the MMU is off or alignment checking is on.
+  `x86_64-unknown-none` is soft-float and does not enable SSE2, so it stays on
+  the portable backend, which leaves out `stmxcsr` (that raises `#UD` when
+  `CR4.OSFXSR` is clear), and needs `--cfg curve25519_dalek_backend="serial"`
+  or `"fiat"`, since dalek's default `simd` backend does not compile there.
+  Built with `-C target-feature=+sse,+sse2,-soft-float`, it runs the x86_64
+  backend, which reads CPUID; the lint builds that too, so its `global_asm`
+  is assembled. SSE2 alone leaves soft-float set, and LLVM then aborts while
+  splitting vector results; rustc warns that clearing soft-float this way
+  will become an error
+  ([rust-lang/rust#116344](https://github.com/rust-lang/rust/issues/116344)).
+  AVX, AVX2, SHA512, VAES, VPCLMULQDQ, and AVX-512 run only when the build
+  enables those target features, since XCR0 does not show that an interrupt
+  saves YMM or ZMM. curve25519-dalek follows the same opt-in: its default on
+  x86_64 is the simd backend, or avx512 when `avx512ifma` and `avx512vl` are
+  enabled, and cpufeatures reports AVX2 and AVX-512 on this os only when they
+  are target features. An explicit `simd` or `avx512` cfg selects the same
+  code. `Dit::hold` does nothing on these targets: there is no thread-local
+  count, and these backends set no CPU state there.
+  The ESP32's Xtensa targets are tier 3, on Espressif's toolchain, so they
+  are not part of that Nix lint. They use Espressif's 1.98.1.0, the release of
+  the dev shell's rustc, since 1.97's Clippy does not know every lint rind
+  names. `just xtensa` and `.github/workflows/xtensa.yml`
+  clippy `xtensa-esp32-none-elf`, `xtensa-esp32s2-none-elf` (no compare-and-swap),
+  and `xtensa-esp32s3-none-elf` the same four ways, check the ESP-IDF library
+  (`xtensa-esp32s3-espidf`, which has std and getrandom's own backend) the
+  same four ways, and check `rind-bench`'s bench targets there. Those
+  benches are empty programs on Xtensa: criterion does not build against
+  ESP-IDF's libc, and ring and OpenSSL have no Xtensa port, so those paths
+  are `cfg`'d out. The check compiles the empty programs. A name inside that
+  `cfg` is not typechecked. None of these targets runs a test or a
+  constant-time check.
   RSA and the NIST curves run on 64-bit limbs on 64-bit targets and on
   `wasm32` built with `-C target-feature=+wide-arithmetic` (stable from Rust
   1.101), whose 128-bit products take one or two multiply instructions, and

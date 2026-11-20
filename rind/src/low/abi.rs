@@ -964,6 +964,11 @@ mod tests {
             "a test, whose assembly only reads DIT",
         ),
         (
+            "aarch64/cpu.rs",
+            "read_midr",
+            "one `mrs` into a register the compiler allocates, which no ABI governs",
+        ),
+        (
             "aarch64/aes_cbc.rs",
             "aese_chained",
             "one `aese` on registers the compiler allocates, which no ABI governs",
