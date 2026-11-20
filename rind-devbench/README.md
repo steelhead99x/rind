@@ -1,6 +1,6 @@
 # rind-devbench — RindBench "All" for iPad/iPhone and Android
 
-Local work (branch `devbench/all-libs-app` on rind `cce3272`); not pushed.
+A standalone crate (own `[workspace]`), not a member of rind's workspace.
 
 rind-bench's own bench files (`../rind-bench/benches/*.rs`) compiled unchanged
 as modules of one library, with `criterion` replaced by a tiny shim
@@ -8,7 +8,7 @@ as modules of one library, with `criterion` replaced by a tiny shim
 the app times **every library × every operation bench-report has**, under the
 same IDs (`ed25519-verify/aws-lc-rs`, `aes128-gcm/rind/16KB`, …), and gains any
 row rind-bench adds with no app change. The op list (`src/ops.rs`) is
-generated from `admin/bench-report` by `tools/gen-ops.py` (`--check` in CI).
+generated from `admin/bench-report` by `tools/gen-ops.py` (`--check` reports drift; not wired into CI yet).
 
 Data-driven: the app asks the core for its catalog (rows → op, section,
 library), shows libraries and sections as switches, and passes the picks back
@@ -29,7 +29,7 @@ CAPTURE --out DIR` splits a collector capture into one JSON per run.
 
 ## Build
 - iOS (Mac, Xcode, rustup 1.98.1 + aarch64-apple-ios): `ios/build-ipa.sh 9101`
-  (M4) / `ios/build-ipa.sh 9102` (A17 mini) → `ios/out/RindBenchAll-v14-<port>.ipa`, **unsigned**.
+  (M4) / `ios/build-ipa.sh 9102` (A17 mini) → `ios/out/RindBenchAll-v14.1-<port>.ipa`, **unsigned**.
   Bundle id `com.kyledouglas.rindbench.all` (installs next to v13, not over it).
   OpenSSL is vendored (built from source) by default; `CARGO_FEATURES= ios/build-ipa.sh` leaves it out.
 - Android (Linux, SDK build-tools 35 + platform 35 + NDK, JDK 17+, rustup aarch64-linux-android):
@@ -40,7 +40,7 @@ CAPTURE --out DIR` splits a collector capture into one JSON per run.
 ## Run
 - iPad: sign + install with plumesign (Apple ID + 2FA), start `tools/listen-devbench.sh`
   on the Alienware, open "RindBench All", agree, Start.
-- Android: `adb install -r RindBench-android.apk`; optional
+- Android: `adb install -r RindBench-android.apk`;
   the collector fills itself in (127.0.0.1:9103 via `adb reverse`, else the LAN address baked in by build-apk.sh); headless:
   `adb shell am start -n com.kyledouglas.rindbench/.MainActivity --es preset quick --es libraries rind,ring --es sections AEADs --ez autostart true`;
   results also in `/sdcard/Android/data/com.kyledouglas.rindbench/files/`.
