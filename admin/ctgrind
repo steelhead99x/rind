@@ -197,6 +197,16 @@ if [ "$suite" = fips ]; then
 fi
 }
 
+# The narrow pass below also runs single-state Keccak-f on Cortex-A72's
+# kernel, `_alt2`, which detection cannot pick under valgrind either, so the
+# two passes cover both scalar kernels, and `RIND_TEST_ARM_KECCAK_ALT2` makes
+# `detects_the_expected_cpu` check each. A caller that sets either
+# `keccak_alt2` variable keeps it in every pass, which then asserts nothing
+# about Keccak-f; otherwise a value left from a native run is dropped. The
+# FIPS module forces nothing, so its passes do not ask.
+keccak_requested=${RIND_CPU_DISABLE_keccak_alt2+set}${RIND_CPU_FORCE_keccak_alt2+set}
+[ -n "$keccak_requested" ] || unset RIND_TEST_ARM_KECCAK_ALT2
+
 # The aarch64 multiplier schedule each pass runs. Detection cannot see the
 # core under valgrind, which hides `HWCAP_CPUID` (UPSTREAM.md, "Valgrind
 # hides HWCAP_CPUID from aarch64 programs"), so it always picks `_alt`, the
@@ -252,15 +262,21 @@ else
         set -e
         # shellcheck disable=SC2030 # each pass's variables end with it
         export RIND_CPU_FORCE_wide_mul=1 RIND_TEST_ARM_WIDE_MUL=1
+        # shellcheck disable=SC2030 # as above
+        [ -n "$keccak_requested" ] || export RIND_TEST_ARM_KECCAK_ALT2=0
         run_suites "$@"
     )
 fi
 wide=$?
-echo "ctgrind: narrow multiplier (RIND_CPU_DISABLE_wide_mul=1)" >&2
+echo "ctgrind: narrow multiplier (RIND_CPU_DISABLE_wide_mul=1), Keccak-f _alt2" >&2
 (
     set -e
     # shellcheck disable=SC2031 # as above
     export RIND_CPU_DISABLE_wide_mul=1 RIND_TEST_ARM_WIDE_MUL=0
+    if [ "$suite" != fips ] && [ -z "$keccak_requested" ]; then
+        # shellcheck disable=SC2031 # as above
+        export RIND_CPU_FORCE_keccak_alt2=1 RIND_TEST_ARM_KECCAK_ALT2=1
+    fi
     run_suites "$@"
 )
 narrow=$?

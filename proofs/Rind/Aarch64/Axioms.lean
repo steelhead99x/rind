@@ -601,6 +601,7 @@ A change here is a change to the trust base.
 /-- info: 'rind.aarch64.sha3_family_digest' depends on axioms: [propext,
  Classical.choice,
  Quot.sound,
+ sha3_keccak_f1600_alt2_spec,
  sha3_keccak_f1600_alt_spec,
  sha3_keccak_f1600_spec] -/
 #guard_msgs in
@@ -609,6 +610,7 @@ A change here is a change to the trust base.
 /-- info: 'rind.aarch64.sha3_family_context' depends on axioms: [propext,
  Classical.choice,
  Quot.sound,
+ sha3_keccak_f1600_alt2_spec,
  sha3_keccak_f1600_alt_spec,
  sha3_keccak_f1600_spec] -/
 #guard_msgs in
@@ -625,6 +627,7 @@ A change here is a change to the trust base.
 /-- info: 'rind.aarch64.sponge_absorb_spec' depends on axioms: [propext,
  Classical.choice,
  Quot.sound,
+ sha3_keccak_f1600_alt2_spec,
  sha3_keccak_f1600_alt_spec,
  sha3_keccak_f1600_spec] -/
 #guard_msgs in
@@ -637,6 +640,7 @@ A change here is a change to the trust base.
 /-- info: 'rind.aarch64.squeezing_squeeze_spec' depends on axioms: [propext,
  Classical.choice,
  Quot.sound,
+ sha3_keccak_f1600_alt2_spec,
  sha3_keccak_f1600_alt_spec,
  sha3_keccak_f1600_spec] -/
 #guard_msgs in
@@ -648,6 +652,7 @@ A change here is a change to the trust base.
  sha3_keccak2_f1600_spec,
  sha3_keccak4_f1600_alt_spec,
  sha3_keccak4_f1600_spec,
+ sha3_keccak_f1600_alt2_spec,
  sha3_keccak_f1600_alt_spec,
  sha3_keccak_f1600_spec] -/
 #guard_msgs in
@@ -659,6 +664,7 @@ A change here is a change to the trust base.
  sha3_keccak2_f1600_spec,
  sha3_keccak4_f1600_alt_spec,
  sha3_keccak4_f1600_spec,
+ sha3_keccak_f1600_alt2_spec,
  sha3_keccak_f1600_alt_spec,
  sha3_keccak_f1600_spec] -/
 #guard_msgs in
@@ -670,6 +676,7 @@ A change here is a change to the trust base.
  sha3_keccak2_f1600_spec,
  sha3_keccak4_f1600_alt_spec,
  sha3_keccak4_f1600_spec,
+ sha3_keccak_f1600_alt2_spec,
  sha3_keccak_f1600_alt_spec,
  sha3_keccak_f1600_spec] -/
 #guard_msgs in

@@ -232,7 +232,7 @@ link = "https://github.com/kixel-ai/rind/blob/main/proofs/Rind/X86_64/Sha3.lean"
 library = "rind"
 operations = ["sha3-256/*", "sha3-512/*"]
 arch = "aarch64"
-proof = "rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch Aeneas cannot translate, of its digest API's SHA3-256, SHA3-384, and SHA3-512, padding included, down to s2n-bignum's sha3_keccak_f1600_alt, which rind runs on Apple targets, and sha3_keccak_f1600 otherwise, against FIPS 202 as SymCrypt's Lean spec states it, composed with s2n-bignum's HOL Light proofs of those routines, of s2n-bignum's own object code, which rind transliterates"
+proof = "rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch Aeneas cannot translate, of its digest API's SHA3-256, SHA3-384, and SHA3-512, padding included, down to s2n-bignum's sha3_keccak_f1600_alt, which rind runs on Apple targets, sha3_keccak_f1600_alt2, which it runs on Cortex-A72 for a lone state, and sha3_keccak_f1600 otherwise, against FIPS 202 as SymCrypt's Lean spec states it, composed with s2n-bignum's HOL Light proofs of those routines, of s2n-bignum's own object code, which rind transliterates"
 link = "https://github.com/kixel-ai/rind/blob/main/proofs/Rind/X86_64/Sha3.lean"
 
 [[verified]]

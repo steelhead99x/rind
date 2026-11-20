@@ -198,6 +198,24 @@ pub(crate) fn wide_multiplier() -> bool {
     }
 }
 
+/// Whether single-state Keccak-f runs s2n-bignum's `sha3_keccak_f1600_alt2`
+/// rather than `sha3_keccak_f1600`, on a core without the SHA3 Keccak path.
+///
+/// `_alt2` is scalar base Armv8, compiled for Cortex-A72, and holds the
+/// state in registers. It runs only for a core whose `MIDR_EL1` names
+/// Cortex-A72. On the Pi 4 it takes 0.67x the time of `sha3_keccak_f1600`,
+/// and on Cortex-A76 and Cortex-A78AE 1.24x and 1.14x, so no feature or
+/// multiplier class picks it. Both are correct and constant time on every
+/// core. The part is read on the first call, as [`wide_multiplier`] does.
+#[inline]
+pub(crate) fn keccak_alt2() -> bool {
+    match KECCAK.load(Ordering::Relaxed) {
+        PICK_UNSET => detect_keccak_once(),
+        PICK_ON => true,
+        _ => false,
+    }
+}
+
 static FEATURES: AtomicU8 = AtomicU8::new(0);
 /// Separate from [`FEATURES`], so an AES or SHA check does not read the
 /// part. `0` means the choice has not been made.
@@ -205,6 +223,11 @@ static WIDE: AtomicU8 = AtomicU8::new(WIDE_UNSET);
 const WIDE_UNSET: u8 = 0;
 const WIDE_NARROW: u8 = 1;
 const WIDE_ALT: u8 = 2;
+/// [`keccak_alt2`]'s choice, cached as [`WIDE`] is.
+static KECCAK: AtomicU8 = AtomicU8::new(PICK_UNSET);
+const PICK_UNSET: u8 = 0;
+const PICK_OFF: u8 = 1;
+const PICK_ON: u8 = 2;
 
 /// The detected features, read once. Inlined, so a check is a load and a
 /// test, with the first call's detection out of line.
@@ -288,6 +311,45 @@ fn detect_wide_once() -> bool {
     wide
 }
 
+/// `RIND_CPU_DISABLE_keccak_alt2` and `RIND_CPU_FORCE_keccak_alt2`, read as
+/// [`wide_toggle`] reads its pair. `_alt2` is scalar base Armv8, so forcing
+/// it cannot fault.
+fn keccak_toggle(detected: bool) -> bool {
+    !crate::low::cpu_denied("keccak_alt2") && (detected || cpu_forced("keccak_alt2"))
+}
+
+#[cold]
+#[inline(never)]
+fn detect_keccak_once() -> bool {
+    let alt2 = keccak_toggle(detect_keccak_alt2());
+    KECCAK.store(if alt2 { PICK_ON } else { PICK_OFF }, Ordering::Relaxed);
+    alt2
+}
+
+/// Whether `MIDR_EL1` names Cortex-A72, read as [`detect_wide_multiplier`]
+/// reads it. A core with no part to read runs `sha3_keccak_f1600`, as it did
+/// before, and so does valgrind, which hides `HWCAP_CPUID`; `admin/ctgrind`
+/// forces `_alt2` in its narrow pass.
+fn detect_keccak_alt2() -> bool {
+    #[cfg(all(rind_std, target_os = "linux"))]
+    {
+        #[cfg(all(any(debug_assertions, rind_cpu_disable), not(rind_fips)))]
+        if let Some(midr) = midr_fixture() {
+            return midr.is_some_and(cortex_a72);
+        }
+        read_midr().is_some_and(cortex_a72)
+    }
+    #[cfg(not(all(rind_std, target_os = "linux")))]
+    false
+}
+
+/// Whether `midr` names Cortex-A72 (implementer `0x41`, part `0xd08`), the
+/// Pi 4's core, of any variant or revision.
+#[cfg(any(all(rind_std, target_os = "linux"), test))]
+fn cortex_a72(midr: u64) -> bool {
+    (midr >> 24) & 0xff == 0x41 && (midr >> 4) & 0xfff == 0xd08
+}
+
 /// Apple's cores are wide. On Linux, so is every part except the known
 /// narrow ones.
 ///
@@ -327,8 +389,9 @@ fn detect_wide_multiplier() -> bool {
     true
 }
 
-/// `RIND_TEST_MIDR=narrow|wide|none` stands in for `MIDR_EL1`: a
-/// Cortex-A76 r4p1, a Neoverse V1 r1p1, or a kernel without `HWCAP_CPUID`.
+/// `RIND_TEST_MIDR=a72|narrow|wide|none` stands in for `MIDR_EL1`: a
+/// Cortex-A72 r0p3, a Cortex-A76 r4p1, a Neoverse V1 r1p1, or a kernel
+/// without `HWCAP_CPUID`.
 /// Not in the FIPS module, where no variable names the part.
 #[cfg(all(
     rind_std,
@@ -338,6 +401,7 @@ fn detect_wide_multiplier() -> bool {
 ))]
 fn midr_fixture() -> Option<Option<u64>> {
     let midr = match std::env::var("RIND_TEST_MIDR").ok().as_deref() {
+        Some("a72") => Some(0x410f_d083),
         Some("narrow") => Some(0x414f_d0b1),
         Some("wide") => Some(0x411f_d401),
         Some("none") => None,
@@ -604,6 +668,9 @@ mod tests {
         if let Some(expected) = std::env::var_os("RIND_TEST_ARM_WIDE_MUL") {
             assert_eq!(wide_multiplier(), expected == "1");
         }
+        if let Some(expected) = std::env::var_os("RIND_TEST_ARM_KECCAK_ALT2") {
+            assert_eq!(keccak_alt2(), expected == "1");
+        }
         if let Some(expected) = std::env::var_os("RIND_TEST_ARM_SVE2") {
             assert_eq!(HaveSve2::check().is_some(), expected == "1");
         }
@@ -646,6 +713,83 @@ mod tests {
         assert!(wide_from_midr(0));
         assert!(wide_from_midr(0x4100_000b));
         assert!(wide_from_midr(0x41d0_b000));
+    }
+
+    #[test]
+    fn midr_selects_cortex_a72_for_keccak() {
+        // Cortex-A72 of any variant and revision, with the reserved upper
+        // bits set or not.
+        for variant in 0..16u64 {
+            for revision in 0..16u64 {
+                let midr = 0x410f_d080 | (variant << 20) | revision;
+                assert!(cortex_a72(midr), "{midr:#x}");
+                assert!(cortex_a72(midr | (u64::MAX << 32)), "{midr:#x}");
+            }
+        }
+        // Cortex-A76, Neoverse N1, Cortex-A78AE (the Jetson Orin), N2, V1,
+        // and Apple M1, which `_alt2` does not speed up or was not measured
+        // on.
+        for midr in [
+            0x414f_d0b1,
+            0x413f_d0c1,
+            0x410f_d421,
+            0x410f_d490,
+            0x411f_d401,
+            0x610f_0230,
+        ] {
+            assert!(!cortex_a72(midr), "{midr:#x}");
+        }
+        // Part `0xd08` from other implementers, and shifted out of the part
+        // field.
+        for implementer in [0x00, 0x42, 0x51, 0x61, 0xc0] {
+            assert!(!cortex_a72((implementer << 24) | 0x000f_d080));
+        }
+        assert!(!cortex_a72(0));
+        assert!(!cortex_a72(0x4100_0d08));
+        assert!(!cortex_a72(0x41d0_8000));
+    }
+
+    // Disable wins over force, as for `wide_mul`.
+    #[cfg(any(debug_assertions, rind_cpu_disable))]
+    #[test]
+    fn keccak_alt2_env_overrides() {
+        const CHILD: &str = "RIND_TEST_KECCAK_TOGGLE";
+        if let Some(mode) = std::env::var_os(CHILD) {
+            assert_eq!(keccak_alt2(), mode == "alt2");
+            println!("{CHILD} done");
+            return;
+        }
+        let cases: &[(&str, bool, bool)] = if cfg!(rind_fips) {
+            &[("scalar", true, true), ("scalar", true, false)]
+        } else {
+            &[
+                ("scalar", true, true),
+                ("alt2", false, true),
+                ("scalar", true, false),
+            ]
+        };
+        for &(mode, disable, force) in cases {
+            let mut cmd = reexec();
+            let test = concat!(module_path!(), "::keccak_alt2_env_overrides");
+            let test = test.split_once("::").unwrap().1;
+            cmd.args([test, "--exact", "--nocapture"])
+                .env(CHILD, mode)
+                .env_remove("RIND_CPU_DISABLE_keccak_alt2")
+                .env_remove("RIND_CPU_FORCE_keccak_alt2");
+            if disable {
+                cmd.env("RIND_CPU_DISABLE_keccak_alt2", "1");
+            }
+            if force {
+                cmd.env("RIND_CPU_FORCE_keccak_alt2", "1");
+            }
+            let output = cmd.output().unwrap();
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            assert!(
+                output.status.success() && stdout.contains(&format!("{CHILD} done")),
+                "{mode} (disable {disable}, force {force}):\n{stdout}{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
     }
 
     // The override is process-wide, so each case is a child. Disable wins
@@ -711,6 +855,7 @@ mod tests {
             #[cfg(rind_fips)]
             let _ = missing_cpu_feature();
             assert_eq!(WIDE.load(Ordering::Relaxed), WIDE_UNSET);
+            assert_eq!(KECCAK.load(Ordering::Relaxed), PICK_UNSET);
             println!("{CHILD} done");
             return;
         }
@@ -822,8 +967,9 @@ mod tests {
         }
     }
 
-    /// The register and `detect_wide_multiplier` name the same schedule, and
-    /// the register is one of the cores Linux lists. A mutant that returns a
+    /// The register and `detect_wide_multiplier` name the same schedule,
+    /// `detect_keccak_alt2` the same Keccak-f kernel, and the register is one
+    /// of the cores Linux lists. A mutant that returns a
     /// constant survives on a host with that answer;
     /// [`midr_fixture_selects_the_schedule`] has both answers.
     #[cfg(target_os = "linux")]
@@ -834,8 +980,10 @@ mod tests {
         // the detection agree.
         let midr = read_midr();
         let detected = detect_wide_multiplier();
+        let alt2 = detect_keccak_alt2();
         if read_midr() == midr {
             assert_eq!(detected, midr.is_none_or(wide_from_midr));
+            assert_eq!(alt2, midr.is_some_and(cortex_a72));
         }
         // qemu-user shows the host's sysfs, which has no aarch64 registers,
         // so this part runs only on an aarch64 kernel that lists them.
@@ -855,8 +1003,8 @@ mod tests {
         }
     }
 
-    /// `narrow` is Cortex-A76, `wide` is Neoverse V1, `none` has no
-    /// `HWCAP_CPUID`.
+    /// `a72` is Cortex-A72, `narrow` is Cortex-A76, `wide` is Neoverse V1,
+    /// `none` has no `HWCAP_CPUID`. Only `a72` runs `_alt2`.
     #[cfg(all(
         target_os = "linux",
         any(debug_assertions, rind_cpu_disable),
@@ -868,11 +1016,12 @@ mod tests {
         if std::env::var_os(CHILD).is_some() {
             let mode = std::env::var("RIND_TEST_MIDR").unwrap();
             let wide = detect_wide_multiplier();
-            assert_eq!(wide, mode != "narrow", "{mode}");
+            assert_eq!(wide, mode != "narrow" && mode != "a72", "{mode}");
+            assert_eq!(detect_keccak_alt2(), mode == "a72", "{mode}");
             println!("{CHILD} {mode}");
             return;
         }
-        for mode in ["narrow", "wide", "none"] {
+        for mode in ["a72", "narrow", "wide", "none"] {
             let stdout = run_child(
                 concat!(module_path!(), "::midr_fixture_selects_the_schedule"),
                 &[(CHILD, "1"), ("RIND_TEST_MIDR", mode)],
@@ -897,9 +1046,11 @@ mod tests {
             };
             assert_eq!(WIDE.load(Ordering::Relaxed), WIDE_UNSET);
             let expected = read_midr().is_none_or(wide_from_midr);
+            let expected_alt2 = read_midr().is_some_and(cortex_a72);
             match install_openat_filter(action) {
                 Ok(()) => {
                     let wide = wide_multiplier();
+                    let alt2 = keccak_alt2();
                     let _ = HaveCryptoExt::check();
                     let mut out = [0; 4];
                     super::super::wide_mux::curve25519_x25519(
@@ -910,6 +1061,7 @@ mod tests {
                     assert_ne!(out, [0; 4]);
                     // Disable and force still apply on top of detection.
                     assert_eq!(wide, wide_toggle(expected));
+                    assert_eq!(alt2, keccak_toggle(expected_alt2));
                     println!("{CHILD} done");
                 }
                 Err(err) if seccomp_unavailable(&err) => {
