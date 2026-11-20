@@ -187,11 +187,12 @@ for this CPU's target:
   out, and an encoding that differs but disassembles the same is reported;
   each static a vendored routine reaches, through its relocations and those of
   the statics it reaches, has VG's size, bytes, and relocations;
-- on aarch64, that the text of each `Prog` the ChaCha20-Poly1305 leakage axioms
-  are about (`Cosim/Progs.lean`), and of each function it calls, which
-  `vg-print` prints, is VG's assembly for it: `admin/vg-bytes --progs`
-  compares them, so VG's vendored printer is trusted to print a `Prog` as the
-  text of the code it builds, which is not checked;
+- that the text of each `Prog` the leakage axioms are about (aarch64's
+  ChaCha20-Poly1305 in `Cosim/Progs.lean`, x86_64's ML-KEM-768 in
+  `Cosim/ProgsX86_64.lean`), and of each function it calls, which `vg-print`
+  prints, is VG's assembly for it: `admin/vg-bytes --progs` compares them, so
+  VG's vendored printer is trusted to print a `Prog` as the text of the code
+  it builds, which is not checked;
 - that each distinct instruction of VG's code ends, from random states, in
   the state VG's model gives. `Cosim/` parses each instruction's text back to
   every instruction of the model that prints as exactly that text, runs the
@@ -278,9 +279,17 @@ for the ML-KEM-768 routines rind runs as one axiom per wrapper in
 `low::<arch>::mlkem768_vg`. Each states only what the wrapper returns,
 not VG's wipe of its scratch or what the routine may leak. The contracts
 they restate, VG's `Spec/MlKem/Contract.lean` and `Spec/MlKem/EncapsH.lean`,
-are not vendored, so a re-pin compares them at VG's new commit. No theorem rests
+are vendored by `admin/import-vg-models` with the modules of VG's `Impl/` the
+x86_64 leakage axioms below need, so a re-pin that changes them fails
+`admin/import-vg-models --check`. No theorem rests
 on them yet: the ✓ also needs rind's glue in `mid/mlkem.rs` proven, and its
-fallback to rind's arithmetic.
+fallback to rind's arithmetic. The ten axioms in
+`Rind/X86_64/VgMlKem768Ct.lean` state `VG.ConstantTime` of x86_64's key
+generation and decapsulation with AVX-512 and of encapsulation, with `H(ek)`
+given or not, at each of its four widths, over `Cosim.ProgsX86_64`, VG's own
+`Prog` terms (the routine and the scrub VG appends), which `vg-print` and
+`admin/vg-bytes --progs` bind to VG's assembly text; no theorem about rind's
+wrappers uses them.
 
 `Rind/Aarch64/VgChaCha20Poly1305.lean` restates VG's theorems about the
 aarch64 SVE2 ChaCha20-Poly1305 routines rind runs, `seal_framed` and
@@ -1368,7 +1377,9 @@ proof after those.
   `Rind/Aarch64/VgChaCha20Poly1305.lean`, the aarch64 one pass over its SVE2
   routines, and `Rind/Aarch64/VgChaCha20Poly1305Ct.lean`, the two axioms that
   state the leakage of those routines over `verified-garbage/Cosim/Progs.lean`
-  (`Cosim/PrintMain.lean`'s `vg-print` prints them for `admin/vg-bytes`).
+  (`Cosim/PrintMain.lean`'s `vg-print` prints them for `admin/vg-bytes`), and
+  `Rind/X86_64/VgMlKem768Ct.lean`, the ten that state ML-KEM-768's over
+  `Cosim/ProgsX86_64.lean`.
 - `Rind/Rsa.lean` and `Rind/RsaLemmas.lean`: RFC 8017's verification,
   transliterated, and its lemmas; `Rind/X86_64/{RsaBytes,RsaMont,RsaPublic,RsaKey,RsaVerify,RsaPss}.lean`:
   the RSA verification proof, on x86_64 alone, and

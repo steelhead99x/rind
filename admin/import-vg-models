@@ -69,6 +69,20 @@ ROOTS = [
     "VerifiedGarbage.Impl.ChaCha20Poly1305.AArch64.Stitched",
     "VerifiedGarbage.Impl.StackScratch.AArch64",
     "VerifiedGarbage.Spec.ChaCha20Poly1305.Contract",
+    # x86_64 ML-KEM-768's key generation, encapsulation, and decapsulation with
+    # AVX-512: the code (`Prog`) of each as VG registers it, from VG's `Impl/`
+    # (the wrappers that call the body and wipe the scratch, the zeroizer, and
+    # the scrub the registration appends), the contracts, and `ScrubChecks`,
+    # which holds `Taint.clobbers`, the one definition the scrub's registers
+    # need that is not in `Impl/`, and imports only the trusted base. The
+    # contracts are what proofs/Rind/X86_64/VgMlKem768Ct.lean states
+    # `ConstantTime` of.
+    "VerifiedGarbage.Impl.MlKem.X86_64.Wipe",
+    "VerifiedGarbage.Impl.Scrub.X86_64",
+    "VerifiedGarbage.Impl.Zeroize.X86_64",
+    "VerifiedGarbage.Spec.MlKem.Contract",
+    "VerifiedGarbage.Spec.MlKem.EncapsH",
+    "VerifiedGarbage.Proof.Framework.X86_64.ScrubChecks",
 ]
 
 IMPORT = re.compile(r"^(?:public )?(?:meta )?import (VerifiedGarbage\.[A-Za-z0-9_.]+)\b", re.M)
