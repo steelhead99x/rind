@@ -221,6 +221,9 @@ impl Suite {
     /// `map_to_curve_simple_swu` (section 6.6.2), with `A = -3`.
     fn map_to_curve(&self, u: &BigUint) -> (BigUint, BigUint) {
         let p = &self.p;
+        // The field element `u` stands for, so `sgn0` below reads its
+        // canonical form, as the RFC's `sgn0` does, whatever the caller passes.
+        let u = &(u % p);
         let a = self.neg(&BigUint::from(3u8));
         let z = self.neg(&BigUint::from(self.z));
         let u2 = u * u % p;
@@ -288,5 +291,18 @@ impl Suite {
     pub(crate) fn map_to_curve_bytes(&self, u: &BigUint) -> Vec<u8> {
         let (x, y) = self.map_to_curve(u);
         [&[4][..], &self.be(&x), &self.be(&y)].concat()
+    }
+}
+
+/// The map takes a field element, so `u + p` is `u`, whatever its parity.
+#[test]
+fn map_to_curve_reduces_its_input() {
+    for suite in [Suite::p256(), Suite::p384(), Suite::p521()] {
+        for u in [BigUint::from(2u8), BigUint::from(3u8)] {
+            assert_eq!(
+                suite.map_to_curve_bytes(&(&u + &suite.p)),
+                suite.map_to_curve_bytes(&u)
+            );
+        }
     }
 }

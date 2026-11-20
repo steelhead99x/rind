@@ -77,8 +77,9 @@ chacha20poly1305 = { version = "0.11", default-features = false, features = ["al
 hmac = { version = "0.13", default-features = false }
 ml-dsa = { version = "0.1", default-features = false }
 ml-kem = { version = "0.3", default-features = false, features = ["hazmat"] }
-# The reference for hashing to P-256, P-384, and P-521 and to their scalars:
-# RFC 9380 on big integers, in `test::h2c`.
+# The independent oracles' big integers: RFC 9380's hash to curve
+# (`test::h2c`), RSA's raw modular exponentiation, and the curve oracle's
+# schoolbook affine arithmetic.
 num-bigint = "0.5"
 sha2 = { version = "0.11", default-features = false }
 sha3 = { version = "0.12", default-features = false }
