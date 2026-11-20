@@ -242,12 +242,14 @@ impl NeonKey {
         if !head.is_empty() {
             let mut scratch = Schedule::ZERO;
             let key = self.bsaes.get(&self.vpaes, &mut scratch, convert_encrypt);
+            let p = head.as_mut_ptr().cast::<u8>();
             // SAFETY: `head` is `head.len()` readable and writable blocks,
-            // which aws-lc allows to alias, and `key` is `self`'s.
+            // which aws-lc allows to alias, both pointers derive from the one
+            // mutable borrow, and `key` is `self`'s.
             unsafe {
                 asm_call!(unsafe extern "C" bsaes_ctr32_encrypt_blocks(
-                    head.as_ptr().cast(),
-                    head.as_mut_ptr().cast(),
+                    p,
+                    p,
                     head.len(),
                     key,
                     ivec,
@@ -259,11 +261,12 @@ impl NeonKey {
             let mut next = *ivec;
             let counter = u32::from_be_bytes([next[12], next[13], next[14], next[15]]);
             next[12..].copy_from_slice(&counter.wrapping_add(bsaes as u32).to_be_bytes());
+            let p = tail.as_mut_ptr().cast::<u8>();
             // SAFETY: as above.
             unsafe {
                 asm_call!(unsafe extern "C" vpaes_ctr32_encrypt_blocks(
-                    tail.as_ptr().cast(),
-                    tail.as_mut_ptr().cast(),
+                    p,
+                    p,
                     tail.len(),
                     &self.vpaes,
                     &next,
@@ -278,11 +281,11 @@ impl NeonKey {
         let mut prev = u128::from_ne_bytes(*iv);
         for block in blocks {
             *block = (u128::from_ne_bytes(*block) ^ prev).to_ne_bytes();
+            let p = block.as_mut_ptr();
             // SAFETY: `block` is one readable and writable block, which
-            // aws-lc allows to alias. Only a `HaveNeon` token builds `self`.
-            unsafe {
-                asm_call!(unsafe extern "C" vpaes_encrypt(block.as_ptr(), block.as_mut_ptr(), &self.vpaes))
-            };
+            // aws-lc allows to alias, and both pointers derive from the one
+            // mutable borrow. Only a `HaveNeon` token builds `self`.
+            unsafe { asm_call!(unsafe extern "C" vpaes_encrypt(p, p, &self.vpaes)) };
             prev = u128::from_ne_bytes(*block);
         }
     }
@@ -322,11 +325,11 @@ impl NeonDecKey {
 
     /// Decrypts one block in place.
     pub(crate) fn decrypt_block(&self, inout: &mut [u8; 16]) {
+        let p = inout.as_mut_ptr();
         // SAFETY: `inout` is one readable and writable block, which aws-lc
-        // allows to alias. Only a `HaveNeon` token builds `self`.
-        unsafe {
-            asm_call!(unsafe extern "C" vpaes_decrypt(inout.as_ptr(), inout.as_mut_ptr(), &self.vpaes))
-        }
+        // allows to alias, and both pointers derive from the one mutable
+        // borrow. Only a `HaveNeon` token builds `self`.
+        unsafe { asm_call!(unsafe extern "C" vpaes_decrypt(p, p, &self.vpaes)) }
     }
 
     /// Decrypts whole blocks in place in CBC mode, the first chained from
@@ -344,12 +347,14 @@ impl NeonDecKey {
         if !head.is_empty() {
             let mut scratch = Schedule::ZERO;
             let key = self.bsaes.get(&self.vpaes, &mut scratch, convert_decrypt);
+            let p = head.as_mut_ptr().cast::<u8>();
             // SAFETY: `head` is `16 * head.len()` readable and writable bytes,
-            // which aws-lc allows to alias, and `key` is `self`'s.
+            // which aws-lc allows to alias, both pointers derive from the one
+            // mutable borrow, and `key` is `self`'s.
             unsafe {
                 asm_call!(unsafe extern "C" bsaes_cbc_encrypt(
-                    head.as_ptr().cast(),
-                    head.as_mut_ptr().cast(),
+                    p,
+                    p,
                     16 * head.len(),
                     key,
                     &mut ivec,
