@@ -62,8 +62,8 @@ mod generic {
     pub(super) mod ct_equal;
     pub(super) mod ctr;
     // Ed25519 verification's multi-scalar multiplication over s2n-bignum's
-    // point routines.
-    #[cfg(rind_backend = "x86_64")]
+    // point routines. x86_64 dispatches it; aarch64 runs this one.
+    #[cfg(any(rind_backend = "x86_64", rind_backend = "aarch64"))]
     pub(crate) mod edwards25519_msm;
     #[cfg(test)]
     pub(crate) mod ghash;
@@ -96,10 +96,12 @@ mod generic {
     // key generation and decapsulation, and every operation elsewhere.
     #[cfg(not(rind_backend = "x86_64"))]
     pub(crate) mod mlkem768_vg;
-    // pyca/verified-garbage's P-256 where it does not run: armv7 and the
-    // portable backend.
+    // pyca/verified-garbage's P-256 and P-384 where they do not run: armv7
+    // and the portable backend.
     #[cfg(not(any(rind_backend = "x86_64", rind_backend = "aarch64")))]
     pub(crate) mod p256_vg;
+    #[cfg(not(any(rind_backend = "x86_64", rind_backend = "aarch64")))]
+    pub(crate) mod p384_vg;
     // pyca/verified-garbage's PBKDF2 where it does not run: every backend
     // but aarch64's.
     #[cfg(not(rind_backend = "aarch64"))]
@@ -201,8 +203,11 @@ pub(crate) fn cpu_denied(_id: &str) -> bool {
     false
 }
 
-// Intel's MXCSR mitigation, where the instructions it covers exist: on x86
-// and x86_64 targets with SSE2, outside Miri, which runs no assembly.
+// Intel's MXCSR mitigation, where `stmxcsr` exists: x86 and x86_64 with
+// SSE2, outside Miri, which runs no assembly. `x86_64-unknown-none` leaves
+// SSE2 off, and `stmxcsr` raises `#UD` there when `CR4.OSFXSR` is clear.
+// Enabling SSE2, including the bare-metal lint's `+sse,+sse2,-soft-float`
+// row, selects the real guard.
 #[cfg_attr(
     not(all(
         any(target_arch = "x86_64", target_arch = "x86"),
@@ -410,6 +415,7 @@ cfg_if::cfg_if! {
         pub(crate) use x86_64::mlkem768_vg;
         pub(crate) use x86_64::p256_vg;
         pub(crate) use generic::pbkdf2_vg;
+        pub(crate) use x86_64::p384_vg;
         pub(crate) use x86_64::mlkem::{
             mlkem_ntt,
             mlkem_intt,
@@ -434,6 +440,7 @@ cfg_if::cfg_if! {
         pub(crate) use x86_64::rsaz_avx512::{Operands, RsazAvx512};
         pub(crate) use x86_64::rsa_ifma::{IfmaCrt, RsaIfma};
         pub(crate) use x86_64::mlkem_sample_poly_ntt_8x::mlkem_sample_poly_ntt_8x;
+        pub(crate) use x86_64::mlkem_shake256_8x::mlkem_shake256_8x;
 
         pub(crate) use x86_64::adx_mux::p256_montjadd;
         pub(crate) use x86_64::adx_mux::p256_montjdouble;
@@ -525,7 +532,7 @@ cfg_if::cfg_if! {
         pub(crate) use aarch64::wide_mux::edwards25519_epdouble;
         pub(crate) use aarch64::wide_mux::edwards25519_pdouble;
         pub(crate) use aarch64::wide_mux::edwards25519_scalarmulbase;
-        pub(crate) use aarch64::wide_mux::edwards25519_scalarmuldouble;
+        pub(crate) use generic::edwards25519_msm::edwards25519_msm;
         pub(crate) use aarch64::mldsa::{
             mldsa_ntt, mldsa_intt, mldsa_nttunpack, mldsa_pointwise, mldsa_pointwise_acc,
             mldsa_reduce, mldsa_caddq, mldsa_chknorm, mldsa_decompose_32, mldsa_decompose_88,
@@ -536,6 +543,7 @@ cfg_if::cfg_if! {
         pub(crate) use aarch64::mlkem768_vg;
         pub(crate) use aarch64::p256_vg;
         pub(crate) use aarch64::pbkdf2_vg;
+        pub(crate) use aarch64::p384_vg;
         pub(crate) use aarch64::mlkem::{
             mlkem_ntt,
             mlkem_intt,
@@ -600,6 +608,7 @@ cfg_if::cfg_if! {
         };
         pub(crate) use generic::mlkem768_vg;
         pub(crate) use generic::p256_vg;
+        pub(crate) use generic::p384_vg;
         pub(crate) use generic::pbkdf2_vg;
         pub(crate) use generic::sha256x8::sha256_finish_x8;
     } else if #[cfg(rind_backend = "portable")] {
@@ -619,6 +628,7 @@ cfg_if::cfg_if! {
         };
         pub(crate) use generic::mlkem768_vg;
         pub(crate) use generic::p256_vg;
+        pub(crate) use generic::p384_vg;
         pub(crate) use generic::pbkdf2_vg;
         pub(crate) use generic::sha256x8::sha256_finish_x8;
     } else {

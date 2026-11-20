@@ -334,6 +334,19 @@ impl HaveAvx512Vl {
     }
 }
 
+/// Proof that the CPU has AVX-512 IFMA, with what `HaveAvx512Vl` proves:
+/// what OpenSSL's base 2^44 Poly1305 needs (F, VL, and IFMA, the check
+/// OpenSSL's `poly1305_init` makes), beside verified-garbage's AVX-512 VL
+/// ChaCha20.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct HaveAvx512Ifma(());
+
+impl HaveAvx512Ifma {
+    pub(crate) fn check() -> Option<Self> {
+        has(AVX2_KERNELS | AVX512F | AVX512VL | AVX512IFMA).then_some(Self(()))
+    }
+}
+
 /// Proof that the CPU has AES-NI and PCLMULQDQ, and the SSSE3 and SSE4.1
 /// their kernels also use: rind's AES-GCM and GHASH intrinsics, and aws-lc's
 /// AES-CTR.
@@ -403,11 +416,11 @@ impl HaveBmi2Adx {
 }
 
 /// Proof that the CPU has what pyca/verified-garbage's BMI2 and ADX P-256
-/// routines run: BMI2, ADX, AVX, and AVX2.
+/// routines and P-384 `d·G` run: BMI2, ADX, AVX, and AVX2.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct HaveAdxForVgP256(());
+pub(crate) struct HaveAdxForVg(());
 
-impl HaveAdxForVgP256 {
+impl HaveAdxForVg {
     pub(crate) fn check() -> Option<Self> {
         has(BMI2 | ADX | AVX | AVX2).then_some(Self(()))
     }
@@ -415,7 +428,7 @@ impl HaveAdxForVgP256 {
 
 /// Proof that the CPU has what pyca/verified-garbage's AVX-512 IFMA P-256
 /// ECDH and ECDSA verification run: AVX-512 F, VL, and IFMA, with what
-/// [`HaveAdxForVgP256`] proves.
+/// [`HaveAdxForVg`] proves.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct HaveIfmaForVgP256(());
 
@@ -1009,7 +1022,7 @@ mod tests {
             (HaveSse41::check().is_some(), available!("ssse3", "sse4.1")),
             (HaveBmi2Adx::check().is_some(), available!("bmi2") && adx),
             (
-                HaveAdxForVgP256::check().is_some(),
+                HaveAdxForVg::check().is_some(),
                 adx && available!("bmi2", "avx", "avx2"),
             ),
             (

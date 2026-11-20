@@ -1,13 +1,22 @@
+#[cfg(target_arch = "xtensa")]
+fn main() {}
+
+#[cfg(not(target_arch = "xtensa"))]
 #[macro_use]
 mod criterion;
+#[cfg(not(target_arch = "xtensa"))]
 use std::hint::black_box;
 
+#[cfg(not(target_arch = "xtensa"))]
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+#[cfg(not(target_arch = "xtensa"))]
 use hmac::{KeyInit, Mac};
 
 /// A library's one-shot MAC: key, then message.
+#[cfg(not(target_arch = "xtensa"))]
 type OneShot = fn(&[u8], &[u8]);
 
+#[cfg(not(target_arch = "xtensa"))]
 fn rc<M: KeyInit + Mac>(key: &[u8], data: &[u8]) {
     let mut ctx = <M as KeyInit>::new_from_slice(key).unwrap();
     ctx.update(data);
@@ -15,13 +24,19 @@ fn rc<M: KeyInit + Mac>(key: &[u8], data: &[u8]) {
 }
 
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+#[cfg(not(target_arch = "xtensa"))]
 fn graviola<H: graviola::hashing::Hash>(key: &[u8], data: &[u8]) {
     let mut ctx = graviola::hashing::hmac::Hmac::<H>::new(key);
     ctx.update(data);
     black_box(ctx.finish());
 }
 
-#[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+#[cfg(all(
+    feature = "__bench_openssl",
+    target_family = "unix",
+    not(target_arch = "xtensa")
+))]
+#[cfg(not(target_arch = "xtensa"))]
 fn openssl(md: openssl::hash::MessageDigest, key: &[u8], data: &[u8]) {
     let key = openssl::pkey::PKey::hmac(key).unwrap();
     let mut signer = openssl::sign::Signer::new(md, &key).unwrap();
@@ -31,6 +46,7 @@ fn openssl(md: openssl::hash::MessageDigest, key: &[u8], data: &[u8]) {
 
 // Each row keys HMAC per message, as a one-off MAC does; the `reused-key`
 // rows sign with a long-lived key, such as a STUN or SRTP session's.
+#[cfg(not(target_arch = "xtensa"))]
 fn bench<V: verified_garbage::hmac::HmacHash>(
     c: &mut Criterion,
     name: &str,
@@ -73,11 +89,10 @@ fn bench<V: verified_garbage::hmac::HmacHash>(
                 b.iter(|| mac(key, input))
             });
         }
-        for (lib, _dit) in criterion::rind_rows() {
-            group.bench_with_input(BenchmarkId::new(lib, size_name), &input, |b, input| {
-                b.iter(|| black_box(rind::hmac::sign(&rind::hmac::Key::new(ours, key), input)))
-            });
-        }
+        group.bench_with_input(BenchmarkId::new("rind", size_name), &input, |b, input| {
+            let _dit = criterion::rind_dit();
+            b.iter(|| black_box(rind::hmac::sign(&rind::hmac::Key::new(ours, key), input)))
+        });
         assert_eq!(
             verified_garbage::hmac::Hmac::<V>::mac(key, &input).as_ref(),
             rind::hmac::sign(&rind::hmac::Key::new(ours, key), &input).as_ref()
@@ -112,7 +127,10 @@ fn bench<V: verified_garbage::hmac::HmacHash>(
         group.bench_with_input(
             BenchmarkId::new("rind/reused-key", size_name),
             &input,
-            |b, input| b.iter(|| black_box(rind::hmac::sign(&rind_key, input))),
+            |b, input| {
+                let _dit = criterion::rind_dit();
+                b.iter(|| black_box(rind::hmac::sign(&rind_key, input)))
+            },
         );
         // Its keyed state, cloned per message, is the key schedule reused.
         let vg_key = verified_garbage::hmac::Hmac::<V>::new(key);
@@ -130,6 +148,7 @@ fn bench<V: verified_garbage::hmac::HmacHash>(
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn hmac(c: &mut Criterion) {
     let sha1: Vec<(&str, OneShot)> = vec![("rustcrypto", rc::<hmac::Hmac<sha1::Sha1>>)];
     let sha256: Vec<(&str, OneShot)> = vec![
@@ -160,7 +179,11 @@ fn hmac(c: &mut Criterion) {
             with(sha384, graviola::<Sha384>),
         )
     };
-    #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+    #[cfg(all(
+        feature = "__bench_openssl",
+        target_family = "unix",
+        not(target_arch = "xtensa")
+    ))]
     let (sha1, sha256, sha384) = {
         use openssl::hash::MessageDigest;
         let with = |mut rows: Vec<(&'static str, OneShot)>, mac: OneShot| {
@@ -207,5 +230,7 @@ fn hmac(c: &mut Criterion) {
     );
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 criterion_group!(benches, hmac);
+#[cfg(not(target_arch = "xtensa"))]
 criterion_main!(benches);

@@ -150,11 +150,6 @@ opaque low.aarch64.edwards25519_scalarmulbase.edwards25519_scalarmulbase
   Array Std.U64 8#usize → Array Std.U64 4#usize → Result (Array Std.U64
     8#usize)
 
-opaque low.aarch64.edwards25519_scalarmuldouble.edwards25519_scalarmuldouble
-  :
-  Array Std.U64 8#usize → Array Std.U64 4#usize → Array Std.U64 8#usize →
-    Array Std.U64 4#usize → Result (Array Std.U64 8#usize)
-
 opaque low.aarch64.bignum_madd_n25519.bignum_madd_n25519
   :
   Array Std.U64 4#usize → Array Std.U64 4#usize → Array Std.U64 4#usize →
@@ -170,6 +165,15 @@ opaque low.aarch64.bignum_neg_p25519.bignum_neg_p25519
 
 opaque low.aarch64.bignum_cmp_lt.bignum_cmp_lt
   : Slice Std.U64 → Slice Std.U64 → Result Std.U64
+
+/-! Ed25519 verification's half-size check, which no theorem covers yet:
+the multi-scalar multiplication it needs. -/
+
+opaque low.generic.edwards25519_msm.edwards25519_msm
+  :
+  Array Std.U64 12#usize → Array Std.U64 4#usize → Array (Array Std.U64
+    4#usize) 2#usize → Array (Array Std.U64 16#usize) 2#usize → Result
+    (Array Std.U64 12#usize)
 
 /-! P-256's ECDSA key generation, which the signing theorems model, and its
 PKCS#8 OID, which none states. -/
@@ -329,6 +333,30 @@ opaque low.aarch64.p384_montjmixadd.p384_montjmixadd
   :
   Array Std.U64 18#usize → Array Std.U64 18#usize → Array Std.U64 12#usize
     → Result (Array Std.U64 18#usize)
+
+/-- Whether pyca/verified-garbage's P-384 `d·G` runs on this CPU, which
+`admin/prove` leaves opaque, as it does the routines it calls: they are VG's
+assembly. -/
+opaque low.aarch64.p384_vg.MulBase.check
+  : Result (Option low.aarch64.p384_vg.MulBase)
+
+/-- pyca/verified-garbage's `d·G` for key generation and ECDSA's nonces,
+opaque as `low.aarch64.p384_vg.MulBase.check` is. -/
+opaque low.aarch64.p384_vg.MulBase.public_key
+  : low.aarch64.p384_vg.MulBase → Array Std.U8 48#usize →
+    Result (Option (Array Std.U8 97#usize))
+
+/-- Whether pyca/verified-garbage's P-384 ECDSA verification runs on this
+CPU, opaque as `low.aarch64.p384_vg.MulBase.check` is. -/
+opaque low.aarch64.p384_vg.Verify.check
+  : Result (Option low.aarch64.p384_vg.Verify)
+
+/-- pyca/verified-garbage's P-384 ECDSA verification, opaque as
+`low.aarch64.p384_vg.MulBase.check` is. -/
+opaque low.aarch64.p384_vg.Verify.ecdsa_verify
+  :
+  low.aarch64.p384_vg.Verify → Array Std.U8 97#usize → Array Std.U8 48#usize →
+    Array Std.U8 96#usize → Result Bool
 
 opaque low.aarch64.p384_montjscalarmul.p384_montjscalarmul
   :
@@ -611,7 +639,6 @@ abbrev low.aarch64.wide_mux.edwards25519_epadd := @low.aarch64.edwards25519_epad
 abbrev low.aarch64.wide_mux.edwards25519_epdouble := @low.aarch64.edwards25519_epdouble.edwards25519_epdouble
 abbrev low.aarch64.wide_mux.edwards25519_pdouble := @low.aarch64.edwards25519_pdouble.edwards25519_pdouble
 abbrev low.aarch64.wide_mux.edwards25519_scalarmulbase := @low.aarch64.edwards25519_scalarmulbase.edwards25519_scalarmulbase
-abbrev low.aarch64.wide_mux.edwards25519_scalarmuldouble := @low.aarch64.edwards25519_scalarmuldouble.edwards25519_scalarmuldouble
 abbrev low.aarch64.wide_mux.p256_montjmixadd := @low.aarch64.p256_montjmixadd.p256_montjmixadd
 abbrev low.aarch64.wide_mux.p256_scalarmul := @low.aarch64.p256_scalarmul.p256_scalarmul
 abbrev low.aarch64.wide_mux.p256_scalarmulbase := @low.aarch64.p256_scalarmulbase.p256_scalarmulbase

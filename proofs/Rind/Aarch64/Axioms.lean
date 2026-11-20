@@ -7,7 +7,6 @@ import Rind.Aarch64.Pbkdf2Vg
 import Rind.Aarch64.P256
 import Rind.Aarch64.ChaCha20
 import Rind.Aarch64.Ed25519
-import Rind.Aarch64.Ed25519Verify
 import Rind.Aarch64.Sha3
 import Rind.Aarch64.P256Signature
 import Rind.Aarch64.P384Signature
@@ -390,32 +389,6 @@ A change here is a change to the trust base.
 /-- info: 'rind.aarch64.ed25519_key_pair_public_key' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
 #print axioms ed25519_key_pair_public_key
-
-/-- info: 'rind.aarch64.ed25519_key_pair_verify' depends on axioms: [propext,
- Classical.choice,
- Quot.sound,
- bignum_cmp_lt_spec,
- bignum_mod_n25519_spec,
- bignum_neg_p25519_spec,
- compress_nohw_spec,
- edwards25519_scalarmuldouble_spec,
- sha512_block_data_order_hw_spec] -/
-#guard_msgs in
-#print axioms ed25519_key_pair_verify
-
-/-- info: 'rind.aarch64.ed25519_public_key_new' depends on axioms: [propext,
- Classical.choice,
- Quot.sound,
- bignum_cmp_lt_spec,
- bignum_eq_spec,
- bignum_mod_n25519_spec,
- bignum_neg_p25519_spec,
- compress_nohw_spec,
- edwards25519_decode_spec,
- edwards25519_scalarmuldouble_spec,
- sha512_block_data_order_hw_spec] -/
-#guard_msgs in
-#print axioms ed25519_public_key_new
 
 /-- info: 'rind.aarch64.p256_ecdsa_generate' depends on axioms: [propext,
  Classical.choice,

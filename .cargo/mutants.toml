@@ -74,9 +74,9 @@ exclude_re = [
   'rind/src/low/x86_64/chacha20poly1305\.rs:\d+:\d+: replace \| with \^$',
   # Pinned to its line: a `const` has no name to match, and only `AES`'s
   # `1 << 0` survives.
-  'rind/src/low/x86_64/cpu\.rs:433:\d+: replace << with >>$',
+  'rind/src/low/x86_64/cpu\.rs:446:\d+: replace << with >>$',
   'rind/src/low/x86_64/cpu\.rs:\d+:\d+: replace \| with \^$',
-  'rind/src/low/x86_64/cpu\.rs:\d+:\d+: replace \| with \^ in (HaveAdxForVgP256::check|HaveAesHardware::check|HaveAvx::check|HaveAvx512ForVgMlKem::check|HaveAvxMovbeForAesGcm::check|HaveBmi2Adx::check|HaveIfmaForCurve25519::check|HaveIfmaForVgP256::check|HaveSha1::check|HaveSha256::check|HaveSse41::check|HaveVaesAvx2ForAesGcm::check|detect|detect_once)$',
+  'rind/src/low/x86_64/cpu\.rs:\d+:\d+: replace \| with \^ in (HaveAdxForVg::check|HaveAesHardware::check|HaveAvx::check|HaveAvx512ForVgMlKem::check|HaveAvxMovbeForAesGcm::check|HaveBmi2Adx::check|HaveIfmaForCurve25519::check|HaveIfmaForVgP256::check|HaveSha1::check|HaveSha256::check|HaveSse41::check|HaveVaesAvx2ForAesGcm::check|detect|detect_once)$',
   'rind/src/low/x86_64/edwards25519_msm_avx2\.rs:\d+:\d+: replace \| with \^$',
   'rind/src/low/x86_64/edwards25519_msm_avx2\.rs:\d+:\d+: replace \| with \^ in (Fe4::diff_sum|Fe4::split)$',
   'rind/src/low/x86_64/ghash\.rs:\d+:\d+: replace \| with \^ in Ghash<\x27a>::add_lengths$',
@@ -201,6 +201,7 @@ exclude_re = [
   'rind/src/low/aarch64/aes_gcm\.rs:\d+:\d+: replace <= with > in tagged_from$',
   'rind/src/low/aarch64/aes_gcm\.rs:\d+:\d+: replace \+ with \* in tagged_from$',
   'rind/src/low/aarch64/bignum_copy_row_from_table_mux\.rs:\d+:\d+: replace match guard width\.is_multiple_of\(8\) with false in bignum_copy_row_from_table$',
+  'rind/src/low/aarch64/chacha20\.rs:\d+:\d+: delete match arm .* in ChaCha20::cipher$',
   'rind/src/low/aarch64/cpu\.rs:\d+:\d+: replace prefetch_ro with \(\)$',
   # Invisible to a test: whether the speculation barrier after setting DIT
   # runs, and which one.
@@ -265,8 +266,16 @@ exclude_re = [
   # Run only on AVX-512 CPUs, which no campaign's runner is: the x86_64
   # campaign skips the files only they run, and these are the rest.
   # x86-cpu.yml's SDE tiers test them.
-  'rind/src/low/x86_64/(aes|aes_gcm|aes_gcm_vaes|cpu|ghash)\.rs:\d+:\d+: (replace (HwKey::round_keys_512|RoundKeys512::split|_cipher_avx512|Counter512::\w+|VaesKernel::avx512|HaveAvx512(For\w+|Vl)::check|GhashTableAvx512::\w+|_mul16|_mul_tail)( -> .*)? with .*|.* in (_cipher_avx512|HaveAvx512(For\w+|Vl)::check|_mul_tail))$',
+  'rind/src/low/x86_64/(aes|aes_gcm|aes_gcm_vaes|cpu|ghash)\.rs:\d+:\d+: (replace (HwKey::round_keys_512|RoundKeys512::split|_cipher_avx512|Counter512::\w+|VaesKernel::avx512|HaveAvx512(For\w+|Vl|Ifma)::check|GhashTableAvx512::\w+|_mul16|_mul_tail)( -> .*)? with .*|.* in (_cipher_avx512|HaveAvx512(For\w+|Vl|Ifma)::check|_mul_tail))$',
   'rind/src/low/x86_64/aes_gcm\.rs:\d+:45: replace \* with (\+|/)$',
+  # The IFMA passes, and `one_pass`'s choice of them, which only AVX-512
+  # IFMA CPUs take: on any other CPU each of these is the one pass.
+  'rind/src/low/x86_64/chacha20poly1305\.rs:\d+:\d+: (replace ifma_passes -> \[u8; 16\] with .*|replace match guard .* with (true|false) in one_pass|replace >= with < in one_pass)$',
+  # Equivalent: each batch of ML-KEM's PRF only adds outputs no polynomial
+  # reads, so taking eight at once for four or fewer or for ML-KEM-768, four
+  # for one to three, or the second four again, yields the same samples; only
+  # the time differs.
+  'rind/src/mid/mlkem\.rs:\d+:\d+: (delete match arm \(3, _\) \|\(_, 1\.\.= 4\) in sample_poly_cbd2|delete match arm [0-3] in shake256_fours|replace \* with / in shake256_fours)$',
   'rind/src/low/posint\.rs:\d+:\d+: (replace PosInt<N>::mod_exp_pair_rsaz -> .*|.* in PosInt<N>::mod_exp_pair_rsaz)$',
   # Compiled only for armv7, which no campaign runs: the portable AES-GCM's
   # crypto-extension half.
@@ -299,7 +308,7 @@ exclude_re = [
   'rind/src/low/x86_64/cpu\.rs:\d+:45: replace \| with &$',
   'rind/src/low/x86_64/cpu\.rs:\d+:52: replace \| with &$',
   # Pinned to its line: `AVX2_KERNELS`'s `|` at the same column is caught.
-  'rind/src/low/x86_64/cpu\.rs:462:31: replace \| with &$',
+  'rind/src/low/x86_64/cpu\.rs:475:31: replace \| with &$',
   'rind/src/low/x86_64/cpu\.rs:\d+:72: replace \| with &$',
   'rind/src/low/x86_64/cpu\.rs:\d+:17: replace \| with & in HaveAvxMovbeForAesGcm::check$',
   'rind/src/low/x86_64/cpu\.rs:\d+:17: replace \| with & in HaveAesHardware::check$',
@@ -307,7 +316,7 @@ exclude_re = [
   # Pinned to its line: the `cpu_denied` of a release build or one without
   # an OS, which tests never are. The debug build's, under the same name, is
   # caught.
-  'rind/src/low/mod\.rs:201:\d+: replace cpu_denied -> bool with true$',
+  'rind/src/low/mod\.rs:203:\d+: replace cpu_denied -> bool with true$',
   # The FIPS module's `SystemRandom`, compiled only under `--cfg rind_fips`,
   # which no mutation run sets; `fips_rng`'s tests cover what it calls.
   # Pinned to its line: the other `fill`, under the same name, is caught.
@@ -393,4 +402,11 @@ exclude_re = [
   # only the time differs.
   'rind/src/low/(x86_64|aarch64)/p256_vg\.rs:\d+:\d+: replace P256::(check|check_public_key) -> Option<Self> with None$',
   'rind/src/low/x86_64/p256_vg\.rs:\d+:\d+: replace \|\| with && in P256::check_public_key$',
+  # Either verification gives the same verdict, as `vg_verify_matches_rind`
+  # checks; which one a reused key takes changes only the time.
+  'rind/src/mid/p384\.rs:\d+:\d+: replace \|\| with && in VerifyingKey::raw_ecdsa_verify$',
+  # Refusing VG's P-384 runs rind's own, which computes the same result, as
+  # `vg_public_key_matches_comb` and `vg_verify_matches_rind` check; only the
+  # time differs.
+  'rind/src/low/(x86_64|aarch64)/p384_vg\.rs:\d+:\d+: replace (MulBase|Verify)::check -> Option<Self> with None$',
 ]

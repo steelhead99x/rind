@@ -116,24 +116,6 @@ pub(crate) fn edwards25519_scalarmulbase(res: &mut [u64; 8], scalar: &[u64; 4]) 
 }
 
 #[inline]
-pub(crate) fn edwards25519_scalarmuldouble(
-    res: &mut [u64; 8],
-    scalar: &[u64; 4],
-    point: &[u64; 8],
-    bscalar: &[u64; 4],
-) {
-    if super::cpu::wide_multiplier() {
-        super::edwards25519_scalarmuldouble::edwards25519_scalarmuldouble(
-            res, scalar, point, bscalar,
-        )
-    } else {
-        super::edwards25519_scalarmuldouble_narrow::edwards25519_scalarmuldouble(
-            res, scalar, point, bscalar,
-        )
-    }
-}
-
-#[inline]
 pub(crate) fn p256_montjmixadd(p3: &mut [u64; 12], p1: &[u64; 12], p2: &[u64; 8]) {
     if super::cpu::wide_multiplier() {
         super::p256_montjmixadd::p256_montjmixadd(p3, p1, p2)

@@ -884,12 +884,14 @@ mod aead {
             check(ours, theirs, &key, nonce, &aad, &msg, flip)?;
         }
 
+        // Long messages too, which x86_64 CPUs with AVX-512 IFMA take in
+        // separate passes, across their 16 KB chunks.
         #[test]
         fn chacha20_poly1305(
             key in any::<[u8; 32]>(),
             nonce in any::<[u8; 12]>(),
             aad in vec(any::<u8>(), 0..100),
-            msg in vec(any::<u8>(), 0..1100),
+            msg in prop_oneof![vec(any::<u8>(), 0..1100), vec(any::<u8>(), 1100..40000)],
             flip in any::<Option<Index>>(),
         ) {
             check(&CHACHA20_POLY1305, &theirs::CHACHA20_POLY1305, &key, nonce, &aad, &msg, flip)?;

@@ -461,6 +461,15 @@ by cases before s2n-bignum's `p384_montjadd` and `p384_montjmixadd`, whose
 contracts exclude them, and the theorems assume `Drbg`, `Fills`, `Held`, and
 P-384's `Cached`, its keys' caches.
 
+Every P-384 theorem that derives a public key, key generation's and signing's
+included, assumes `NoVgP384`: the CPU does not run pyca/verified-garbage's
+`d·G`, which rind takes on every x86_64 and aarch64 CPU, and whose Lean proof
+lives in that project, not here. So those theorems cover no CPU until
+[their quest](/quest/m2/verified-garbage/p384-proof.md) imports VG's theorems.
+Verification's assume only `NoVgP384Verify`: the CPU does not run VG's
+verification, which rind takes on x86_64 with BMI2 and ADX and on every
+aarch64 CPU, so they cover x86_64 CPUs without those features.
+
 rind computes k·G with its own comb in Rust, aws-lc's layout: 77 Booth-recoded
 5-bit windows added from 20 tables of 1 to 16 times 2^(20j)·G, with five
 doublings between the four teeth. `Rind/P384Comb.lean` proves the windows'
@@ -656,7 +665,8 @@ The hash is cryptol-specs' FIPS 180-4 SHA-512, in `Rind/Sha2.lean`, with its
 block compression `processBlock_Common` transliterated from FIPS 180-4 and
 checked by `Rind/Sha2Test.lean` against its examples. Each theorem assumes
 `RunsSha512`: on x86_64 that rind picks aws-lc's AVX routine, on an Intel CPU
-with AVX but without AVX2, or OpenSSL's AVX2 routine, on a CPU with AVX2,
+with AVX but without the feature set below, or OpenSSL's AVX2 routine, on a
+CPU with AVX2, BMI1, BMI2, POPCNT, and SSSE3,
 whose proof is rind's HOL Light proof above,
 which `Rind/X86_64/AwsLc.lean` restates as the axiom
 `sha512_block_data_order_avx2_spec`; on aarch64 only that rind's checks pass,
@@ -758,12 +768,11 @@ Fujisaki-Okamoto transform, the samplers, and the other encodings are the
 quest's.
 
 Ed25519 on x86_64 and aarch64, from the signature API's `ed25519::KeyPair`
-and `ed25519::PublicKey` to s2n-bignum's routines and the SHA-512 proof above, in
-`Rind/X86_64/Ed25519.lean`, which `admin/prove` also writes for aarch64, and
-for aarch64's verification in `Rind/Aarch64/Ed25519Verify.lean`. x86_64's
-verification checks a multiple of RFC 8032's equation with half-size
-scalars, which nothing proves yet, so the last two are aarch64's only. On
-x86_64 these assume `NoCurveIfma`, that the CPU lacks AVX-512 IFMA:
+to s2n-bignum's routines and the SHA-512 proof above, in
+`Rind/X86_64/Ed25519.lean`, which `admin/prove` also writes for aarch64.
+Verification, which on both checks a multiple of RFC 8032's equation with
+half-size scalars, is [not proven yet](/quest/m4/verified/ed25519-half-scalar.md).
+On x86_64 these assume `NoCurveIfma`, that the CPU lacks AVX-512 IFMA:
 
 - `ed25519_generate`: the key pair's seed is the 32 drawn bytes, and a failed
   draw is refused;
@@ -773,25 +782,14 @@ x86_64 these assume `NoCurveIfma`, that the CPU lacks AVX-512 IFMA:
 - `ed25519_sign`: the signature's bytes are RFC 8032's PureEd25519 signature
   of the message under the seed;
 - `ed25519_key_pair_public_key`: the public key's bytes are RFC 8032's public
-  key of the seed;
-- `ed25519_public_key_new`: a public key is refused unless it is 32 bytes,
-  refused if its low 255 bits are one of libsodium's seven small-order
-  y-coordinates, refused unless it encodes a point of the group, and
-  otherwise its `verify` accepts exactly the signatures RFC 8032 verifies with
-  that point: 64 bytes, S below L, and R the encoding of SB - kA;
-- `ed25519_key_pair_verify`: a key pair's public key verifies the same way,
-  with its point the base point times its secret scalar, for a scalar whose
-  multiple is a point of the group.
+  key of the seed.
 
 The spec, in `Rind/Ed25519.lean`, is RFC 8032 over HOL Light's
 `edwards25519_group`, whose multiplication and power stay opaque, with
 s2n-bignum's `ed25519_encode` and `ed25519_decode` of its points. Each theorem
 assumes `Runs` and `RunsSha512`, and each with a message bounds it at
-2^64 - 64 bytes. The two that verify also assume `RunsDouble`, which
-holds on every aarch64 CPU. That a multiple of the base point is a point of
-the group, which `ed25519_key_pair_verify` assumes, is the group's theory,
-which these theorems do not import. The `ed25519` module calls no function
-pointer, so these theorems are about its translation, with no hand model.
+2^64 - 64 bytes. The `ed25519` module calls no function pointer, so these
+theorems are about its translation, with no hand model.
 
 Ed25519 on x86_64 CPUs with AVX-512 IFMA, from the same API to
 pyca/verified-garbage's key-pair derivation, signing, and verification, in

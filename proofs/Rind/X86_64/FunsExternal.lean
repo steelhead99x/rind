@@ -169,8 +169,9 @@ opaque low.x86_64.aes_gcm_vaes.VaesKernel.avx2
 opaque low.generic.zeroise.zeroise_value {T : Type} (ZeroableInst : low.generic.zeroise.Zeroable T) :
   T → Result T
 
-/-! ChaCha20-Poly1305's routines: aws-lc's one-pass seal and open, behind
-their Rust wrapper, whose contract `Rind.X86_64.ChaCha20Poly1305`'s `OnePass`
+/-! ChaCha20-Poly1305's routines: aws-lc's one-pass seal and open, or on a
+CPU with AVX-512 IFMA from 2 KiB the separate vector passes, behind their
+Rust wrapper, whose contract `Rind.X86_64.ChaCha20Poly1305`'s `OnePass`
 states as a hypothesis, and the separate passes CPUs without SSE4.1 run,
 which no theorem is about. -/
 
@@ -475,6 +476,30 @@ opaque low.x86_64.p384_montjmixadd_alt.p384_montjmixadd_alt
   :
   Array Std.U64 18#usize → Array Std.U64 18#usize → Array Std.U64 12#usize
     → Result (Array Std.U64 18#usize)
+
+/-- Whether pyca/verified-garbage's P-384 `d·G` runs on this CPU, which
+`admin/prove` leaves opaque, as it does the routines it calls: they are VG's
+assembly. -/
+opaque low.x86_64.p384_vg.MulBase.check
+  : Result (Option low.x86_64.p384_vg.MulBase)
+
+/-- pyca/verified-garbage's `d·G` for key generation and ECDSA's nonces,
+opaque as `low.x86_64.p384_vg.MulBase.check` is. -/
+opaque low.x86_64.p384_vg.MulBase.public_key
+  : low.x86_64.p384_vg.MulBase → Array Std.U8 48#usize →
+    Result (Option (Array Std.U8 97#usize))
+
+/-- Whether pyca/verified-garbage's P-384 ECDSA verification runs on this
+CPU, opaque as `low.x86_64.p384_vg.MulBase.check` is. -/
+opaque low.x86_64.p384_vg.Verify.check
+  : Result (Option low.x86_64.p384_vg.Verify)
+
+/-- pyca/verified-garbage's P-384 ECDSA verification, opaque as
+`low.x86_64.p384_vg.MulBase.check` is. -/
+opaque low.x86_64.p384_vg.Verify.ecdsa_verify
+  :
+  low.x86_64.p384_vg.Verify → Array Std.U8 97#usize → Array Std.U8 48#usize →
+    Array Std.U8 96#usize → Result Bool
 
 opaque low.x86_64.p384_montjscalarmul.p384_montjscalarmul
   :

@@ -15,8 +15,4 @@ The interview gave the maintainer a stronger reason than the code supports. It s
 - Record which OpenSSL it compares against in its host data, since each distribution ships its own.
 - Zen 5 does not lower its clock for 512-bit vectors, so this host cannot measure what [the 256-bit rule](/quest/m2/speed/avoid-zmm.md) is about. Say so in its section.
 - Its first run is a `collect` on this host alone, added to the report the refresh left. Ask the maintainer then whether the other hosts rerun with it: rind 0.4 waits for more now than when the refresh was planned, so the report may be due another before the release anyway.
-- A gap it shows that nobody decided is triaged as [the refresh](/quest/m2/bench/report-refresh.md)'s Plan sets out.
-
-## Required
-
-- [Benchmark report refresh, before rind 0.4](/quest/m2/bench/report-refresh.md) - the report without `nixos2`, which this adds a host to
+- Triage each gap it shows that nobody decided, an operation where another library beats rind by more than 10%, with an entry in `benchmarks/gaps.toml`: a speed quest that switches to the faster source, plus a proof quest for what then runs, wherever AGENTS.md's source rule says the faster source should run; otherwise a recorded reason it stays. Add each new quest as a follow-up in the PR body and name it in the entry once it exists, as the 0.4 refresh did ([kixel-ai/rind#619](https://github.com/kixel-ai/rind/pull/619)).

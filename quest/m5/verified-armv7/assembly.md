@@ -12,6 +12,7 @@ Runs, each in `low/arm/`, in rough order of use:
 - aws-lc's `chacha-armv4` (integer below 192 bytes, NEON above) and its NEON Poly1305, under rind's port of `poly1305_arm.c`;
 - aws-lc's `aesv8-armx` and `ghashv8-armx`, under rind's AES-GCM composition;
 - OpenSSL's `keccak1600-armv4`, integer and NEON, under ML-KEM and SHA-3;
+- OpenSSL's `ecp_nistz256-armv4` (`ecp_nistz256_mul_mont`, `_sqr_mont`, `_add`, and `_sub`), under P-256's field arithmetic and so its ECDH and ECDSA;
 - aws-lc's `bn_mul8x_mont_neon` and `bn_mul_mont_nohw`, under RSA;
 - rind's constant-time compare, whose blocks `proofs/hol-light/armv7/ct_compare_*.ml` already prove where the target builds A32, leaving the axioms that restate them in armv7's Lean translation. `armv7-linux-androideabi` and the `thumbv7` targets build those `asm!` blocks as Thumb-2, and rustc refuses `#[instruction_set(arm::a32)]` on armv7's Linux and Android targets, while a naked function's symbol is Thumb there too. So move both compares into a `.code 32` `global_asm!`, as the other routines are, and prove them as functions once the model has `BX`, which covers every target's copy without a T32 model.
 

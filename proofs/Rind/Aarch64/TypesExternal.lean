@@ -23,6 +23,13 @@ opaque low.aarch64.p256_vg.P256 : Type
 /-- x86_64's AVX-512 IFMA X25519 and Ed25519 token, which no aarch64 CPU
 builds. -/
 opaque low.aarch64.curve25519_ifma.Curve25519Ifma : Type
+/-- The token proving the CPU runs pyca/verified-garbage's P-384 `d·G`, which
+no proof here covers. -/
+opaque low.aarch64.p384_vg.MulBase : Type
+
+/-- The token proving the CPU runs pyca/verified-garbage's P-384 ECDSA
+verification, which no proof here covers. -/
+opaque low.aarch64.p384_vg.Verify : Type
 
 /-- The token proving the CPU has the SHA-512 instructions. -/
 opaque low.aarch64.cpu.HaveSha3 : Type

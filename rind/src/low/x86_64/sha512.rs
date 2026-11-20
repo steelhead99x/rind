@@ -9,11 +9,8 @@
 //! OpenSSL's AVX2 routine, as rind builds it; nothing verifies the scalar one.
 //!
 //! CPUs with the SHA512 instructions, from Arrow Lake and Lunar Lake on, run
-//! the AVX2 routine too, though OpenSSL's routine for those instructions is
-//! faster: Intel's data-independent-timing list omits `VSHA512RNDS2`,
-//! `VSHA512MSG1`, and `VSHA512MSG2`, so nothing bounds their timing on the
-//! secrets HMAC keys and Ed25519 nonces hash, and `admin/ct-vartime` refuses
-//! them.
+//! the AVX2 routine too. Intel's data-independent-timing list omits
+//! `VSHA512RNDS2`, `VSHA512MSG1`, and `VSHA512MSG2`.
 
 use super::cpu::{HaveAvx, HaveAvx2, is_intel};
 

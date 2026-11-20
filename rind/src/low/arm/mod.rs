@@ -3,7 +3,7 @@
 //! 32-bit ARM: the portable backend, with aws-lc's assembly for ChaCha20,
 //! SHA-512, and RSA's Montgomery multiplication, for Poly1305 and X25519
 //! where the CPU has NEON, and for the ARMv8 crypto extension where the CPU
-//! has it, and OpenSSL's for Keccak-f.
+//! has it, and OpenSSL's for Keccak-f and P-256's field multiplication.
 
 /// The symbol for an aws-lc routine, qualified by rind's version so two
 /// semver-incompatible copies of rind can link into one binary.
@@ -33,6 +33,7 @@ pub(crate) mod cpu;
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) mod ct_qemu;
 pub(crate) mod curve25519;
+pub(crate) mod ecp_nistz256;
 pub(crate) mod ghashv8_armx;
 pub(crate) mod keccak1600_armv4;
 pub(crate) mod mont;

@@ -77,9 +77,11 @@ fi
 # compiles the two SHA-256 files outside rind. These lines are what keep
 # that feature, and the round-constant table, on the crate the firmware
 # builds. Dropping either would otherwise leave this script green.
-grep -F '#![cfg_attr(target_arch = "xtensa", feature(asm_experimental_arch))]' \
-  "$root/rind/src/lib.rs" >/dev/null || {
-  printf 'esp32s3-sha256-layout: rind/src/lib.rs no longer enables asm_experimental_arch on Xtensa\n' >&2
+# rustfmt wraps the attribute, so compare it with whitespace removed.
+tr -d ' \n' <"$root/rind/src/lib.rs" |
+  grep -F '#![cfg_attr(all(target_arch="xtensa",target_os="espidf"),feature(asm_experimental_arch))]' \
+    >/dev/null || {
+  printf 'esp32s3-sha256-layout: rind/src/lib.rs no longer enables asm_experimental_arch on ESP-IDF Xtensa\n' >&2
   exit 1
 }
 grep -F 'all(target_arch = "xtensa", target_os = "espidf")' \

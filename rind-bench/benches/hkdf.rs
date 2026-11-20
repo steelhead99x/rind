@@ -1,19 +1,29 @@
+#[cfg(target_arch = "xtensa")]
+fn main() {}
+
+#[cfg(not(target_arch = "xtensa"))]
 #[macro_use]
 mod criterion;
+#[cfg(not(target_arch = "xtensa"))]
 use std::hint::black_box;
 
+#[cfg(not(target_arch = "xtensa"))]
 use criterion::measurement::WallTime;
+#[cfg(not(target_arch = "xtensa"))]
 use criterion::{BenchmarkGroup, Criterion, criterion_group, criterion_main};
 
+#[cfg(not(target_arch = "xtensa"))]
 struct Len(usize);
 
 #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
+#[cfg(not(target_arch = "xtensa"))]
 impl aws_lc_rs::hkdf::KeyType for Len {
     fn len(&self) -> usize {
         self.0
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 impl ring::hkdf::KeyType for Len {
     fn len(&self) -> usize {
         self.0
@@ -22,6 +32,7 @@ impl ring::hkdf::KeyType for Len {
 
 // A 32-byte key for one label, from a PRK extracted once: what a QUIC token
 // or an e2ee track key derives from a long-lived secret.
+#[cfg(not(target_arch = "xtensa"))]
 fn bench<V: verified_garbage::hmac::HmacHash>(
     c: &mut Criterion,
     name: &str,
@@ -63,19 +74,18 @@ fn bench<V: verified_garbage::hmac::HmacHash>(
             black_box(out)
         })
     });
-    for (lib, _dit) in criterion::rind_rows() {
-        group.bench_function(format!("extract-expand/{lib}"), |b| {
-            b.iter(|| {
-                let mut out = [0u8; 32];
-                rind::hkdf::Salt::new(ours, b"salt")
-                    .extract(&secret)
-                    .unwrap()
-                    .fill(&info, &mut out)
-                    .unwrap();
-                black_box(out)
-            })
-        });
-    }
+    group.bench_function("extract-expand/rind", |b| {
+        let _dit = criterion::rind_dit();
+        b.iter(|| {
+            let mut out = [0u8; 32];
+            rind::hkdf::Salt::new(ours, b"salt")
+                .extract(&secret)
+                .unwrap()
+                .fill(&info, &mut out)
+                .unwrap();
+            black_box(out)
+        })
+    });
 
     let prk = ring::hkdf::Salt::new(ring, b"salt").extract(&secret);
     group.bench_function("expand/ring", |b| {
@@ -123,16 +133,16 @@ fn bench<V: verified_garbage::hmac::HmacHash>(
     let prk = rind::hkdf::Salt::new(ours, b"salt")
         .extract(&secret)
         .unwrap();
-    for (lib, _dit) in criterion::rind_rows() {
-        group.bench_function(format!("expand/{lib}"), |b| {
-            b.iter(|| {
-                let mut out = [0u8; 32];
-                prk.fill(&info, &mut out).unwrap();
-                black_box(out)
-            })
-        });
-    }
+    group.bench_function("expand/rind", |b| {
+        let _dit = criterion::rind_dit();
+        b.iter(|| {
+            let mut out = [0u8; 32];
+            prk.fill(&info, &mut out).unwrap();
+            black_box(out)
+        })
+    });
     group.bench_function("expand-aes-256-gcm-key/rind", |b| {
+        let _dit = criterion::rind_dit();
         b.iter(|| {
             black_box(rind::aead::Key::from(
                 prk.expand(&info, &rind::aead::AES_256_GCM).unwrap(),
@@ -148,11 +158,16 @@ fn bench<V: verified_garbage::hmac::HmacHash>(
     }
     libcrux(&mut group, hash, &secret, info[0]);
     vg::<V>(&mut group, ours, &secret, info[0]);
-    #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+    #[cfg(all(
+        feature = "__bench_openssl",
+        target_family = "unix",
+        not(target_arch = "xtensa")
+    ))]
     openssl(&mut group, hash, &secret, info[0]);
 }
 
 #[derive(Clone, Copy)]
+#[cfg(not(target_arch = "xtensa"))]
 enum Hash {
     Sha1,
     Sha256,
@@ -160,6 +175,7 @@ enum Hash {
     Sha512,
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn rustcrypto<H: hkdf::HmacImpl>(
     group: &mut BenchmarkGroup<'_, WallTime>,
     secret: &[u8],
@@ -186,6 +202,7 @@ fn rustcrypto<H: hkdf::HmacImpl>(
 
 // verified-garbage has no HKDF, so this is RFC 5869 over its HMAC, as rind's
 // glue would run it.
+#[cfg(not(target_arch = "xtensa"))]
 fn vg_expand<V: verified_garbage::hmac::HmacHash>(prk: &[u8], info: &[u8], out: &mut [u8]) {
     let mut previous: Option<V::Output> = None;
     for (counter, chunk) in (1u8..).zip(out.chunks_mut(V::OUTPUT_SIZE)) {
@@ -201,6 +218,7 @@ fn vg_expand<V: verified_garbage::hmac::HmacHash>(prk: &[u8], info: &[u8], out: 
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn vg<V: verified_garbage::hmac::HmacHash>(
     group: &mut BenchmarkGroup<'_, WallTime>,
     ours: &'static rind::hkdf::Algorithm,
@@ -238,6 +256,7 @@ fn vg<V: verified_garbage::hmac::HmacHash>(
     });
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn libcrux(group: &mut BenchmarkGroup<'_, WallTime>, hash: Hash, secret: &[u8], info: &[u8]) {
     use libcrux_hkdf::{Algorithm, expand, extract, hkdf};
     let (algorithm, prk_len) = match hash {
@@ -265,7 +284,12 @@ fn libcrux(group: &mut BenchmarkGroup<'_, WallTime>, hash: Hash, secret: &[u8], 
     });
 }
 
-#[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+#[cfg(all(
+    feature = "__bench_openssl",
+    target_family = "unix",
+    not(target_arch = "xtensa")
+))]
+#[cfg(not(target_arch = "xtensa"))]
 fn openssl(group: &mut BenchmarkGroup<'_, WallTime>, hash: Hash, secret: &[u8], info: &[u8]) {
     use openssl::md::Md;
     use openssl::pkey::Id;
@@ -312,6 +336,7 @@ fn openssl(group: &mut BenchmarkGroup<'_, WallTime>, hash: Hash, secret: &[u8], 
     });
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn hkdf(c: &mut Criterion) {
     bench::<verified_garbage::hashes::sha1::Sha1>(
         c,
@@ -347,5 +372,7 @@ fn hkdf(c: &mut Criterion) {
     );
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 criterion_group!(benches, hkdf);
+#[cfg(not(target_arch = "xtensa"))]
 criterion_main!(benches);
