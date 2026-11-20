@@ -129,6 +129,10 @@ struct Bsaes {
 // which the winner stores with `Release` once it has written it.
 unsafe impl Sync for Bsaes {}
 
+// A panic cannot leave a half-converted schedule readable: a call reads one
+// only after the state says it is whole, and the conversion cannot panic.
+impl core::panic::RefUnwindSafe for Bsaes {}
+
 impl Bsaes {
     fn new() -> Self {
         Self {
