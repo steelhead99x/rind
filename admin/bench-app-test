@@ -92,8 +92,8 @@ class Verdict(unittest.TestCase):
         status, _, clean = app.verdict(rounds([100, 100.5, 99.6, 100.2, 99.9, 100.1, 130]))
         self.assertEqual((status, clean), ("ok", list(range(6))))
 
-    def test_the_msi_run_keeps_six_rounds(self):
-        # p256-ecdsa-sign's control on the MSI laptop: one round 2.2% slow.
+    def test_one_slow_control_round_is_dropped(self):
+        # p256-ecdsa-sign's control on a laptop: one round 2.2% slow.
         status, _, clean = app.verdict(rounds([1.000, 1.004, 0.998, 1.010, 1.022, 0.997, 0.997]))
         self.assertEqual((status, clean), ("ok", [0, 1, 2, 3, 5, 6]))
 
@@ -177,12 +177,15 @@ class RoundTrip(unittest.TestCase):
             "results": app.results_of(data, list(range(5))),
         }
         with tempfile.TemporaryDirectory() as tmp:
-            subprocess.run(
-                f"git -C {ROOT} ls-files -z admin/bench-report BENCHMARKS.md README.md flake.nix benchmarks quest"
-                f" | xargs -0 -I@ cp --parents @ {tmp}",
-                shell=True,
+            listed = subprocess.run(
+                ["git", "-C", ROOT, "ls-files", "-z", "admin/bench-report", "BENCHMARKS.md", "README.md", "flake.nix", "benchmarks", "quest"],
+                capture_output=True,
                 check=True,
-            )
+            ).stdout
+            for name in filter(None, listed.decode().split("\0")):
+                dest = os.path.join(tmp, name)
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                shutil.copy2(os.path.join(ROOT, name), dest)
             incoming = os.path.join(tmp, ".tmp", "in")
             os.makedirs(incoming)
             with open(os.path.join(incoming, "test-cpu.json"), "w") as f:
