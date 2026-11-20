@@ -17,8 +17,8 @@ targets:
       path: Info.plist
       properties:
         CFBundleDisplayName: RindBench All
-        CFBundleShortVersionString: "14.0"
-        CFBundleVersion: "14"
+        CFBundleShortVersionString: "14.1"
+        CFBundleVersion: "15"
         UILaunchScreen: {}
         UIUserInterfaceStyle: Dark
         UIFileSharingEnabled: true
