@@ -25,8 +25,9 @@ jobs:
     if: github.event_name == 'merge_group'
     runs-on: [self-hosted, rind-queue]
     # Below the queue's 90-minute response window, so a hung build reports
-    # before the group expires.
-    timeout-minutes: 60
+    # before the group expires: the build step's 60 minutes (this job's whole
+    # limit before) plus the slow SDE models step's 25, which leaves 5.
+    timeout-minutes: 85
     env:
       BASE: ${{ github.event.merge_group.base_sha }}
       # A failure ejects the group whatever else fails, so stop at the first.
@@ -42,8 +43,27 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
       - name: Check and test the merge group
+        timeout-minutes: 60
         # Every group waits on this build, so it waits only for memory, never
         # behind the host's agent load.
         env:
           QUEST_GATE_PRIORITY: 1
         run: nix develop --command quest gate just ci "$BASE"
+      # The SDE models x86-cpu.yml's merge-group jobs leave out, `slow` in
+      # admin/x86-cpu, run one after the other when the group reaches x86_64.
+      # Not required: this host is not confirmed to run Intel SDE (its
+      # bubblewrap sandbox needs unprivileged user namespaces), so a failure,
+      # a missing SDE, or the 25-minute timeout leaves the job green, and the
+      # build above alone decides `Queue build / Build`. The failure shows in
+      # this step's log and annotation. Drop `continue-on-error` once the host
+      # is confirmed and the models' time on it is measured.
+      - name: Slow SDE models (not required)
+        continue-on-error: true
+        timeout-minutes: 25
+        run: |
+          changed=$(sh/changed.sh "$BASE")
+          if ! grep -qE '^(\.github/workflows/x86-cpu\.yml|admin/x86-cpu)$' <<<"$changed"; then
+            reach=$(sh/backends.sh - <<<"$changed")
+            grep -qxE 'all|x86_64' <<<"$reach" || { echo "The group reaches no x86_64 code."; exit 0; }
+          fi
+          nix develop .#sde --command admin/x86-cpu queue-slow

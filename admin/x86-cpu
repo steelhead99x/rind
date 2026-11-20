@@ -10,6 +10,8 @@ import subprocess, json, os, sys, glob, tarfile
 #   admin/x86-cpu markdown-table
 #   admin/x86-cpu archive
 #   admin/x86-cpu test SDE_MODEL [TEST_ARGS...]
+#   admin/x86-cpu matrix pr|all|queue|slow
+#   admin/x86-cpu queue-slow
 #
 # `archive` builds the release tests x86-cpu.yml runs into ARCHIVE, and `test`
 # runs them under `sde SDE_MODEL --`, passing each binary TEST_ARGS, so every
@@ -72,6 +74,14 @@ KNOWN_CPUS = [
 # `pr` marks the models a pull request runs; the merge queue and the weekly run
 # run every one. Until main's ruleset requires `x86-cpu gate`, which only the
 # queue runs, a pull request runs every model.
+#
+# `slow` marks the models the merge queue runs in queue-build.yml, on its
+# self-hosted runner, rather than on a hosted runner, whose wait and the model
+# would not fit the queue's 90-minute window. It is an explicit list: the models
+# whose measured time exceeds 40 minutes on a hosted runner (run 44626485250,
+# 2026-11-19: Granite Rapids 50.8, Cannon Lake 46.7; the next, Granite Rapids
+# 256VL, took 36.1). `matrix queue` is every other model, which the queue's
+# hosted jobs run; `matrix all`, the weekly run, still runs every model hosted.
 MODELS = [
     # Prescott, a Pentium 4, lacks SSSE3, so it runs every slowest path:
     # aws-lc's SSE2 AES and integer GHASH, SHA-1, and SHA-256, HACL*'s
@@ -277,6 +287,7 @@ MODELS = [
         model="Cannon Lake",
         sde="cnl",
         pr=True,
+        slow=True,
         paths=dict(
             SSSE3=1,
             SSE41=1,
@@ -368,6 +379,7 @@ MODELS = [
         model="Granite Rapids",
         sde="gnr",
         pr=True,
+        slow=True,
         paths=dict(
             SSSE3=1,
             SSE41=1,
@@ -410,8 +422,8 @@ MODELS = [
 
 
 def matrix(which):
-    """The x86-cpu.yml matrix for `pr` or `all`, one entry per SDE model."""
-    assert which in ("pr", "all"), which
+    """The matrix for `pr`, `all`, `queue` (all but the slow models), or `slow`."""
+    assert which in ("pr", "all", "queue", "slow"), which
     flags = {flag for flag, _ in KNOWN_CPUS}
     keys = {tuple(m["paths"]) for m in MODELS}
     assert len(keys) == 1, "every model sets the same paths"
@@ -419,10 +431,14 @@ def matrix(which):
     for m in MODELS:
         assert "-" + m["sde"] in flags, m["sde"] + " is not an SDE CPU"
     assert {m["sde"] for m in MODELS if m["pr"]} >= {"p4p", "skx", "dmr"}, "stage 2 needs p4p, skx, dmr"
+    assert {m["sde"] for m in MODELS if m.get("slow")} == {"cnl", "gnr"}, "the slow set is listed"
     return [
         dict(model=m["model"], sde=m["sde"], paths=m["paths"])
         for m in MODELS
-        if which == "all" or m["pr"]
+        if which == "all"
+        or (which == "pr" and m["pr"])
+        or (which == "queue" and not m.get("slow"))
+        or (which == "slow" and m.get("slow"))
     ]
 
 
@@ -443,7 +459,7 @@ if mode == "sde-scan":
             open("admin/x86-cpus/intel-{:02d}{}.json".format(i + 1, flag), "w"),
         )
 elif mode == "matrix":
-    # A job's matrix, `pr` or `all`: `admin/x86-cpu matrix pr`.
+    # A job's matrix: `admin/x86-cpu matrix pr`.
     json.dump(matrix(sys.argv[2]), sys.stdout, separators=(",", ":"))
     print()
 elif mode == "markdown-table":
@@ -543,5 +559,22 @@ elif mode == "test":
             failed.append(exe)
     if failed:
         sys.exit("Failed: " + " ".join(failed))
+elif mode == "queue-slow":
+    # The slow models, one after the other, as queue-build.yml runs them: build
+    # once, then each model with its paths asserted as x86-cpu.yml's jobs do.
+    # Every model runs before it fails, so one report names all that failed.
+    subprocess.run([sys.argv[0], "archive"], check=True)
+    failed = []
+    for m in matrix("slow"):
+        env = dict(os.environ)
+        env.update({f"RIND_TEST_X86_{k}": str(v) for k, v in m["paths"].items()})
+        print(f"== {m['model']}", flush=True)
+        run = subprocess.run(
+            [sys.argv[0], "test", "-" + m["sde"], "--skip", "large_digest"], env=env
+        )
+        if run.returncode != 0:
+            failed.append(m["model"])
+    if failed:
+        sys.exit("Failed models: " + ", ".join(failed))
 else:
     sys.exit(f"unknown mode {mode}")

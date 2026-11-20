@@ -95,6 +95,8 @@ jobs:
             run=false
           elif [ "$GITHUB_EVENT_NAME" = pull_request ] || [ "$GITHUB_EVENT_NAME" = merge_group ]; then
             if [ "$GITHUB_EVENT_NAME" = pull_request ]; then models='pr'; fi
+            # The slow models run in queue-build.yml, not on a hosted runner.
+            if [ "$GITHUB_EVENT_NAME" = merge_group ]; then models='queue'; fi
             changed=$(sh/changed.sh "${BASE:-origin/$GITHUB_BASE_REF}")
             if ! grep -qE '^(\.github/workflows/x86-cpu\.yml|admin/x86-cpu)$' <<<"$changed"; then
               reach=$(sh/backends.sh - <<<"$changed")
@@ -111,10 +113,13 @@ jobs:
     needs: scope
     if: needs.scope.outputs.run == 'true'
     runs-on: ubuntu-latest
-    # These timeouts only catch a hang: 20 for `build` and 60 for `check` run
-    # one after the other and leave 10 of the queue's 90 minutes for both
-    # hosted-runner waits, which at p90 exceed it (quest/m0/ci-speed/sde-pr-models.md).
-    # 20 is not a measured build time; the slowest model measured 50.8 minutes.
+    # A merge group runs the hosted models without the slow ones (`matrix
+    # queue`; the slow ones run in queue-build.yml). `build` (20, not a
+    # measured time) and `check` (45, over the slowest remaining model's 36.1
+    # measured minutes) run one after the other and leave 25 of the queue's 90
+    # minutes for both hosted-runner waits. Those waits were 46 to 84 minutes at
+    # p90, so a group can still expire: these catch a hang, they do not make
+    # the hosted jobs fit (quest/m0/ci-speed/sde-pr-models.md).
     timeout-minutes: ${{ github.event_name == 'merge_group' && 20 || 360 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -151,8 +156,8 @@ jobs:
     runs-on: ubuntu-latest
     # A merge group's models report inside the queue's 90-minute window, which
     # the wait for a hosted runner and `build` also spend, or the group expires
-    # unreported.
-    timeout-minutes: ${{ github.event_name == 'merge_group' && 60 || 360 }}
+    # unreported. See `build`'s timeout for the arithmetic.
+    timeout-minutes: ${{ github.event_name == 'merge_group' && 45 || 360 }}
     strategy:
       fail-fast: false
       matrix:
