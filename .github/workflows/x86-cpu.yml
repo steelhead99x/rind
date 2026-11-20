@@ -225,24 +225,31 @@ jobs:
         env:
           RIND_ACVP_WRAPPER_RUNNER: "sde -dmr --"
 
-  # The result main's ruleset can require, `x86-cpu gate`, in two jobs of that
-  # name. On a pull request `gate-pr` reports skipped, and so passed, when the
-  # run starts: it has no `needs`, as queue-build.yml's Build job has none, so
-  # it neither waits for the models nor is cancelled with them. That is what
-  # lets GitHub admit the PR to the queue. No event is named 'never' (actionlint
-  # rejects a constant false), so it always skips and `gate` is the only one
-  # that ever runs.
+  # The result main's ruleset can require, `x86-cpu gate`, in two jobs, each
+  # named so that only one claims that name on an event. A job whose `if:` is
+  # false still reports a skipped check run on every event, merge_group
+  # included, so a `gate-pr` also named `x86-cpu gate` on the queue's group
+  # would satisfy the requirement when the group starts, before any model ran.
+  # On a pull request `gate-pr` is `x86-cpu gate`, reported skipped, and so
+  # passed, when the run starts: it has no `needs`, as queue-build.yml's Build
+  # job has none, so it neither waits for the models nor is cancelled with
+  # them. That is what lets GitHub admit the PR to the queue. On a merge group
+  # it is `x86-cpu gate (pr)`, and the required name stays pending until `gate`
+  # reports. No event is named 'never' (actionlint rejects a constant false),
+  # so `gate-pr` always skips and `gate` is the only one that ever runs.
   gate-pr:
-    name: x86-cpu gate
+    name: ${{ github.event_name == 'merge_group' && 'x86-cpu gate (pr)' || 'x86-cpu gate' }}
     if: github.event_name == 'never'
     runs-on: ubuntu-latest
     steps:
       - run: "true"
 
   # A merge group's gate: every model and the ACVP run, or a pass when the
-  # group's diff misses x86_64 and they skip.
+  # group's diff misses x86_64 and they skip. On any other event it is
+  # `x86-cpu gate (queue)`, skipped, so that it never claims the required name
+  # behind `needs`, where a cancelled model would report it cancelled.
   gate:
-    name: x86-cpu gate
+    name: ${{ github.event_name == 'merge_group' && 'x86-cpu gate' || 'x86-cpu gate (queue)' }}
     if: always() && github.event_name == 'merge_group'
     needs: [scope, check, acvp]
     runs-on: ubuntu-latest
