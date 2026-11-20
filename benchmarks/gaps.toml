@@ -56,12 +56,12 @@ reason = "Fix in place on x86_64, unconfirmed: the x86_64 portable backend now r
 [[gap]]
 operations = ["aes*", "quic-header-protection/aes*", "rustls-bulk/aes*", "hpke-*-aes128-gcm-*"]
 on = ["armv7 NEON"]
-quest = "/quest/m2/speed/armv7-neon-aes.md"
+reason = "The weekly data predates [kixel-ai/rind#913](https://github.com/kixel-ai/rind/pull/913), which moved these to aws-lc's NEON assembly: on this tier in [run 44702869568](https://github.com/kixel-ai/rind/actions/runs/44702869568), at its head, rind ran them in 0.28 to 1.09× aws-lc-rs's time, CTR and CBC decryption from 1200 B in 0.28 to 0.37× on bitsliced AES, which aws-lc-rs's one-shot cipher keys do not take. The first refresh after it drops this entry."
 
 [[gap]]
 operations = ["aes*-kw-unwrap/*/16B", "aes*-kwp-unwrap/*/16B"]
 on = ["x86_64", "no AVX2"]
-reason = "Unwrapping a 16-byte key takes 35 to 55 ns more than aws-lc-rs's 280 to 400 ns on the EPYC runners of [run 43646114817](https://github.com/kixel-ai/rind/actions/runs/43646114817), 1.11 to 1.20× its time; wrapping, every longer key, and the other x86_64 tiers are within 10%, armv7 NEON unwraps it in about 2.02× and has its own decision above, and aarch64 unwraps in 0.68× aws-lc-rs's time. Key wrap is rare and runs once per stored key, so the fixed cost stays without a quest; the next refresh rechecks it."
+reason = "Unwrapping a 16-byte key takes 35 to 55 ns more than aws-lc-rs's 280 to 400 ns on the EPYC runners of [run 43646114817](https://github.com/kixel-ai/rind/actions/runs/43646114817), 1.11 to 1.20× its time; wrapping, every longer key, and the other x86_64 tiers are within 10%, armv7 NEON's entry above covers that tier, and aarch64 unwraps in 0.68× aws-lc-rs's time. Key wrap is rare and runs once per stored key, so the fixed cost stays without a quest; the next refresh rechecks it."
 
 [[gap]]
 operations = ["mlkem768-keygen"]

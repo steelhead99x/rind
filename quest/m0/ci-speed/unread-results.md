@@ -21,8 +21,4 @@ Measured on 2026-11-18 from the Actions REST API, hosted job-hours only:
 Recommendations:
 
 - Re-measure after the cuts this quest requires land, then choose per remaining workflow; many of the cancelled hours go with them.
-- Gate through the merge queue rather than a required context: a path-filtered workflow cannot be a required check, and [kixel-ai/rind#881](https://github.com/kixel-ai/rind/pull/881) adds `sh/queue-checks.sh`, which makes the queue's build wait on hosted checks the group's diff selects. Reuse it. `sde-pr-models.md` ([kixel-ai/rind#893](https://github.com/kixel-ai/rind/pull/893)) already runs every SDE model in the queue. A check moved into the queue slows the gate, so the PR says by how much and why it is worth it. `main`'s ruleset comes from dotfiles' `repo-settings`, so change it there if a required context changes.
-
-## Required
-
-- [PRs run three SDE models](/quest/m0/ci-speed/sde-pr-models.md) - cuts x86-cpu's pull-request hours before this re-measures
+- Gate through the merge queue rather than a required context: a path-filtered workflow cannot be a required check, and [kixel-ai/rind#881](https://github.com/kixel-ai/rind/pull/881) runs a workflow's check inside the queue's self-hosted build when the group's diff touches its `pull_request` paths (`CHECK_QUEUE` in `sh/dispatch.sh`), since hosted runners' queue waits would run into the group's timeout. Reuse it. [kixel-ai/rind#911](https://github.com/kixel-ai/rind/pull/911) already runs every SDE path set in the queue that way. A check moved into the queue slows the gate, so the PR says by how much and why it is worth it. `main`'s ruleset comes from dotfiles' `repo-settings`, so change it there if a required context changes.

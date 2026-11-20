@@ -149,17 +149,17 @@ theorem vg_public_key_spec (h : Runs) (vg : low.x86_64.p256_vg.P256) (k : mid.p2
     rcases Nat.eq_zero_or_pos (wordsNat k.scalar.val) with h0 | h0
     · rw [h0] at hq; simp [p256Pow, nist.pow] at hq
     · exact h0
-  obtain ⟨x', y', hpk, hpow⟩ := vgP256.publicKey_eq _ hk0 hk
+  obtain ⟨x', y', hpk, hpow⟩ := vgNist.publicKey_eq vgP256.curve_matches _ hk0 hk
+  change p256Pow p256G _ = _ at hpow
   rw [hq, Option.some.injEq, Prod.mk.injEq] at hpow
   obtain ⟨rfl, rfl⟩ := hpow
   unfold mid.p256.PrivateKey.vg_public_key mid.p256.Scalar.as_bytes low.ct.into_public
   step with u64x4_to_be_spec k.scalar as ⟨a, ha⟩
   step with vg_p256_public_key_spec vg a as ⟨o, ho⟩
-  simp only [vgBytes, vgP256.ofBytes_bv, ha, hpk] at ho
+  simp only [vgBytes, vgNist.ofBytes_bv, ha, hpk] at ho
   obtain ⟨out, rfl, hout⟩ := ho
-  obtain ⟨h4, hx, hy⟩ := vgP256.encode_affine x' y' out.val hout
-  have hxy : x962Coords out.val = (x'.val, y'.val) := by
-    simp only [x962Coords, hx, hy]
+  obtain ⟨h4, hx, hy⟩ := vgNist.encode_affine vgP256.curve_matches x' y' out.val hout
+  have hxy : x962Coords out.val = (x'.val, y'.val) := Prod.ext hx hy
   step as ⟨s, hs⟩
   step with from_x962_spec h s as ⟨r, hr⟩
   have hsl : s.length = 65 := by simp [hs]

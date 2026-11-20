@@ -597,10 +597,12 @@ cfg_if::cfg_if! {
         pub(crate) use arm::aes_cbc;
         pub(crate) use arm::aes_ctr;
         pub(crate) use arm::aesv8_armx::AesHwKey;
-        pub(crate) use arm::cpu::HaveCryptoExt;
+        pub(crate) use arm::cpu::{HaveCryptoExt, HaveNeon};
         #[cfg(test)]
         pub(crate) use arm::ct_qemu;
+        pub(crate) use arm::ghash_armv4::NeonTable;
         pub(crate) use arm::ghashv8_armx::GhashTable;
+        pub(crate) use arm::vpaes_armv7::NeonKey;
         pub(crate) use arm::chacha20;
         pub(crate) use arm::poly1305;
         pub(crate) use arm::curve25519::curve25519_x25519;

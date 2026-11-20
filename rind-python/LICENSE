@@ -112,8 +112,9 @@ aws-lc <https://github.com/aws/aws-lc>, from OpenSSL and BoringSSL
   rind/src/low/generic/ghash_nohw.rs:
 
   - For 32-bit ARM, aesv8-armx.s (AES), ghashv8-armx.s (GHASH),
-    sha1-armv4-large.s (SHA1), sha256-armv4.s (SHA256), sha512-armv4.s
-    (SHA512), and chacha-armv4.s (ChaCha20); for aarch64 and x86_64, the
+    vpaes-armv7.s and bsaes-armv7.s (AES on NEON), ghash-armv4.s
+    (GHASH on NEON), sha1-armv4-large.s (SHA1), sha256-armv4.s
+    (SHA256), sha512-armv4.s (SHA512), and chacha-armv4.s (ChaCha20); for aarch64 and x86_64, the
     sha512_block_data_order_* routines and the K512 tables of
     sha512-armv8 and sha512-x86_64 (SHA512); for x86_64, the
     sha256_block_data_order_avx, _ssse3, and _nohw routines and the K256
@@ -263,8 +264,8 @@ pyca/verified-garbage <https://github.com/pyca/verified-garbage>
   License: Apache-2.0 OR BSD-3-Clause, which the files keep.
 
   What: the Lean ISA models, the ML-KEM, SHA-3, SHA-512, X25519, Poly1305, and
-  ChaCha20-Poly1305 specs, and the RSA, ChaCha20, Ed25519, P-256, and PBKDF2
-  specs and contracts rind's proofs import or restate, with the MD5, SHA-1,
+  ChaCha20-Poly1305 specs, and the RSA, ChaCha20, Ed25519, P-256, P-384, and
+  PBKDF2 specs and contracts rind's proofs import or restate, with the MD5, SHA-1,
   SHA-2, and HMAC specs PBKDF2's import,
   under proofs/verified-garbage/VerifiedGarbage, which admin/import-vg-models
   copies byte for byte from verified-garbage

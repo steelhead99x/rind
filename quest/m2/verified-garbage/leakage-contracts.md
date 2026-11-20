@@ -11,7 +11,3 @@ Follow-up from the 2026-11-18 /quest-plan on independence and Lean, which settle
 - A contract's declared leakage, such as a rejection-sampling count, must be public in rind's call too. Check each against the Rust that calls the routine, and keep the harness for any routine whose declared leakage rind's caller treats as secret.
 - The theorems need the cosimulation that the ✓ needs, which `admin/prove vg` already runs for these instructions. The stack-slot model gap recorded in [the epic](/quest/m2/verified-garbage/README.md) holds back only the routines it holds back there.
 - Where rind's Rust feeds a VG routine, ctgrind and BINSEC still check that Rust. An SDE or QEMU harness also traces the wrapper on a path valgrind cannot run and BINSEC does not decode (AVX-512, SVE2), so before retiring one, give that wrapper a retained trace check, such as a BINSEC region over it with the VG routine stubbed by its contract, and say which in the PR. Retire a BINSEC region only when it covers VG code alone.
-
-## Related
-
-- [aarch64 SHA-256 on the SHA-2 instructions is proven in Lean, constant time included](/quest/m2/lean-assembly-trial.md) - the same retirement rule, for rind's own Lean proofs

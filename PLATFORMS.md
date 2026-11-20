@@ -66,7 +66,8 @@ qemu. iOS devices' code is only built.
   Montgomery multiplication runs [aws-lc]'s assembly, with NEON where the CPU
   has it. Where
   the CPU has the ARMv8 crypto extension, as most 32-bit Android devices do,
-  AES, GHASH, SHA1, and SHA256 run [aws-lc]'s assembly for it instead.
+  AES, GHASH, SHA1, and SHA256 run [aws-lc]'s assembly for it instead, and
+  without it AES and GHASH run aws-lc's NEON assembly where the CPU has NEON.
   Without it, `rind::cpu::has_aes_hardware()` is false, and rind-rustls and
   rind-dimpl prefer ChaCha20-Poly1305, which is faster there: ChaCha20 runs
   aws-lc's assembly, and so does Poly1305 where the CPU has NEON. SHA-384,

@@ -476,25 +476,21 @@ opaque low.x86_64.p384_montjmixadd_alt.p384_montjmixadd_alt
   Array Std.U64 18#usize → Array Std.U64 18#usize → Array Std.U64 12#usize
     → Result (Array Std.U64 18#usize)
 
-/-- Whether pyca/verified-garbage's P-384 `d·G` runs on this CPU, which
-`admin/prove` leaves opaque, as it does the routines it calls: they are VG's
-assembly. -/
+/-! Whether the CPU runs pyca/verified-garbage's P-384 `d·G`, for key
+generation and ECDSA's nonces, and its ECDSA verification, which read no
+input, and its routines behind their Rust wrappers, whose contracts
+`Rind.X86_64.VgP384` states. -/
+
 opaque low.x86_64.p384_vg.MulBase.check
   : Result (Option low.x86_64.p384_vg.MulBase)
 
-/-- pyca/verified-garbage's `d·G` for key generation and ECDSA's nonces,
-opaque as `low.x86_64.p384_vg.MulBase.check` is. -/
 opaque low.x86_64.p384_vg.MulBase.public_key
   : low.x86_64.p384_vg.MulBase → Array Std.U8 48#usize →
     Result (Option (Array Std.U8 97#usize))
 
-/-- Whether pyca/verified-garbage's P-384 ECDSA verification runs on this
-CPU, opaque as `low.x86_64.p384_vg.MulBase.check` is. -/
 opaque low.x86_64.p384_vg.Verify.check
   : Result (Option low.x86_64.p384_vg.Verify)
 
-/-- pyca/verified-garbage's P-384 ECDSA verification, opaque as
-`low.x86_64.p384_vg.MulBase.check` is. -/
 opaque low.x86_64.p384_vg.Verify.ecdsa_verify
   :
   low.x86_64.p384_vg.Verify → Array Std.U8 97#usize → Array Std.U8 48#usize →

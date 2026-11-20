@@ -41,7 +41,9 @@ IFMA, pyca/verified-garbage's Lean proof of its routine, which
 `Rind.X86_64.VgRsa` restates; pyca/verified-garbage's for ChaCha20's
 `apply_keystream` in `Rind.X86_64.VgChaCha20`, for X25519 and Ed25519 on
 AVX-512 IFMA in `Rind.X86_64.VgCurve25519`, and for P-256's public key, ECDH,
-and ECDSA verification in `Rind.X86_64.VgP256`; and nothing else.
+and ECDSA verification in `Rind.X86_64.VgP256`, and for P-384's `d·G`,
+which key generation and each ECDSA signature's nonce point take, and its
+ECDSA verification, in `Rind.X86_64.VgP384`; and nothing else.
 ChaCha20-Poly1305's theorems also take aws-lc's one-pass routines as the
 hypothesis `RunsChaCha20Poly1305`, which no axiom states. ChaCha20's
 `apply_keystream` on a CPU without AVX2 takes aws-lc's SSSE3 routine as the
@@ -181,7 +183,8 @@ change to the trust base.
  p384_montjdouble_alt_spec,
  p384_montjdouble_spec,
  p384_montjmixadd_alt_spec,
- p384_montjmixadd_spec] -/
+ p384_montjmixadd_spec,
+ vg_p384_public_key_spec] -/
 #guard_msgs in
 #print axioms p384_generate
 
@@ -205,7 +208,8 @@ change to the trust base.
  p384_montjdouble_alt_spec,
  p384_montjdouble_spec,
  p384_montjmixadd_alt_spec,
- p384_montjmixadd_spec] -/
+ p384_montjmixadd_spec,
+ vg_p384_public_key_spec] -/
 #guard_msgs in
 #print axioms p384_from_scalar
 
@@ -801,7 +805,8 @@ change to the trust base.
  p384_montjdouble_alt_spec,
  p384_montjdouble_spec,
  p384_montjmixadd_alt_spec,
- p384_montjmixadd_spec] -/
+ p384_montjmixadd_spec,
+ vg_p384_public_key_spec] -/
 #guard_msgs in
 #print axioms p384_ecdsa_generate
 
@@ -825,7 +830,8 @@ change to the trust base.
  p384_montjdouble_alt_spec,
  p384_montjdouble_spec,
  p384_montjmixadd_alt_spec,
- p384_montjmixadd_spec] -/
+ p384_montjmixadd_spec,
+ vg_p384_public_key_spec] -/
 #guard_msgs in
 #print axioms p384_ecdsa_from_scalar_and_public_key
 
@@ -855,7 +861,8 @@ change to the trust base.
  p384_montjdouble_spec,
  p384_montjmixadd_alt_spec,
  p384_montjmixadd_spec,
- sha512_block_data_order_avx2_spec] -/
+ sha512_block_data_order_avx2_spec,
+ vg_p384_public_key_spec] -/
 #guard_msgs in
 #print axioms p384_ecdsa_sign
 
@@ -888,7 +895,8 @@ change to the trust base.
  p384_montjdouble_spec,
  p384_montjmixadd_alt_spec,
  p384_montjmixadd_spec,
- sha512_block_data_order_avx2_spec] -/
+ sha512_block_data_order_avx2_spec,
+ vg_p384_verify_spec] -/
 #guard_msgs in
 #print axioms p384_ecdsa_key_pair_verify
 
@@ -918,7 +926,8 @@ change to the trust base.
  p384_montjdouble_spec,
  p384_montjmixadd_alt_spec,
  p384_montjmixadd_spec,
- sha512_block_data_order_avx2_spec] -/
+ sha512_block_data_order_avx2_spec,
+ vg_p384_verify_spec] -/
 #guard_msgs in
 #print axioms p384_ecdsa_public_key_new
 

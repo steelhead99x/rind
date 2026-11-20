@@ -1,6 +1,6 @@
 import Rind.X86_64.ChaCha20
 import Rind.X86_64.ChaCha20Poly1305
-import Rind.VgChaCha20
+import Rind.VgChaCha20Glue
 open Aeneas Aeneas.Std Result rind.spec
 open VG.Spec.ChaCha20 (bytesAt keyAt leftAt restAt keystreamOf wordLE)
 
@@ -42,8 +42,7 @@ namespace rind.x86_64
 
 open low.x86_64.chacha20 (VgState)
 
-/-- Words as memory holds them: each one's little-endian bytes. -/
-def wordBytes (ws : List U32) : List (BitVec 8) := (ws.map (·.bv)).flatMap BitVec.toLEBytes
+export vg (wordBytes length_wordBytes wordBytes_drop_one wordLE_wordBytes)
 
 /-! ## verified-garbage's routines, restated
 
@@ -112,31 +111,6 @@ axiom vg_chacha20_apply_avx512vl_spec (st : VgState) (t : low.x86_64.cpu.HaveAvx
         else
           r.val = 0 ∧ bvs data'.val = bvs data.val ∧ restAt m' p = restAt m p ⦄
 
-/-! ## Words and bytes -/
-
-theorem length_wordBytes (ws : List U32) : (wordBytes ws).length = 4 * ws.length := by
-  rw [wordBytes, vg.length_flatMap_toLEBytes, List.length_map]
-
-theorem wordBytes_drop_one (ws : List U32) : (wordBytes ws).drop 4 = wordBytes (ws.drop 1) := by
-  cases ws with
-  | nil => simp [wordBytes]
-  | cons w ws =>
-    simp only [wordBytes, List.map_cons, List.flatMap_cons, List.drop_one, List.tail_cons]
-    rw [List.drop_append_of_le_length (by simp [BitVec.toLEBytes_length]),
-      List.drop_eq_nil_of_le (by simp [BitVec.toLEBytes_length]), List.nil_append]
-
-theorem wordLE_wordBytes (ws : List U32) (h : 0 < ws.length) : wordLE (wordBytes ws) 0 = ws[0]!.bv := by
-  rw [wordBytes, vg.wordLE_flatMap _ 0 (by simpa using h)]
-  cases ws with
-  | nil => simp at h
-  | cons w ws => rfl
-
-/-- Words read from bytes, as `Rind.Spec`'s `words` reads them, written back
-out are those bytes. -/
-theorem wordBytes_of_words (ws : List U32) (b : List (BitVec 8)) (n : Nat) (hb : b.length = 4 * n)
-    (hw : ws.map (·.bv) = chacha20.words b) : wordBytes ws = b := by
-  rw [wordBytes, hw, vg.flatMap_words b n hb]
-
 /-! ## Composing the routines, `cipher_vg` -/
 
 /-- The kernel's contract, which `Rind.X86_64.ChaCha20Avx2`'s `kernel`
@@ -149,30 +123,6 @@ def Kernel : Prop :=
     low.x86_64.chacha20.cipher_avx2 key counter_nonce buffer ⦃ r =>
       bvs r.val = chacha20.encrypt (wordBytes key.val) counter_nonce.val[0]!.bv
         (wordBytes (counter_nonce.val.drop 1)) (bvs buffer.val) ⦄
-
-/-- What a state `init` started holds, for a buffer the keystream covers. -/
-theorem leftAt_init (m : VG.Mem) (p : VG.Addr) (key : Std.Array U32 8#usize)
-    (counter_nonce : Std.Array U32 4#usize)
-    (hr : restAt m p = keystreamOf (wordBytes key.val) (wordBytes counter_nonce.val)) (n : Nat)
-    (hl : counter_nonce.val[0]!.val + (n + 63) / 64 ≤ 2 ^ 32) : n ≤ leftAt m p := by
-  rw [← vg.length_restAt, hr, vg.length_keystreamOf _ _ (by simp [length_wordBytes])
-    (by simp [length_wordBytes]), wordLE_wordBytes _ (by simp)]
-  simp only [UScalar.bv_toNat]
-  omega
-
-/-- The keystream `init` sets up, XORed into a buffer it covers. -/
-theorem keystream_encrypt (key : Std.Array U32 8#usize) (counter_nonce : Std.Array U32 4#usize)
-    (msg : List (BitVec 8)) (hl : counter_nonce.val[0]!.val + (msg.length + 63) / 64 ≤ 2 ^ 32) :
-    List.zipWith (· ^^^ ·) msg
-        ((keystreamOf (wordBytes key.val) (wordBytes counter_nonce.val)).take msg.length) =
-      chacha20.encrypt (wordBytes key.val) counter_nonce.val[0]!.bv
-        (wordBytes (counter_nonce.val.drop 1)) msg := by
-  have hk : (wordBytes key.val).length = 32 := by simp [length_wordBytes]
-  have hn : (wordBytes counter_nonce.val).length = 16 := by simp [length_wordBytes]
-  rw [vg.keystreamOf_encrypt _ _ _ hk hn, wordLE_wordBytes _ (by simp), wordBytes_drop_one]
-  rw [vg.length_keystreamOf _ _ hk hn, wordLE_wordBytes _ (by simp)]
-  simp only [UScalar.bv_toNat]
-  omega
 
 /-- VG's routines XOR RFC 8439's keystream for the key and the counter and
 nonce into a buffer, for as many blocks as remain before the block counter
@@ -189,14 +139,10 @@ theorem cipher_vg_spec (hu : ∃ s, VgState.uninit = ok s) (v : low.x86_64.chach
   unfold low.x86_64.chacha20.cipher_vg
   simp only [hs, bind_ok]
   step as ⟨st, hst⟩
-  -- VG's theorems hold for any memory holding the state: take memory holding
-  -- only it, from address 0.
-  have hm : ∀ x : VgState, bytesAt (vg.mem (bvs x.val)) 0 768 = bvs x.val := fun x => by
-    have hx : (bvs x.val).length = 768 := by simp [bvs]
-    simpa [hx] using vg.bytesAt_mem (bvs x.val) (by rw [hx]; decide)
+  have hm := vg.bytesAt_mem_state
   obtain ⟨-, hr⟩ := hst _ 0 (hm st)
-  have hn := leftAt_init _ _ key counter_nonce hr buffer.length hl
-  have he := keystream_encrypt key counter_nonce (bvs buffer.val) (by rw [bvs_length]; exact hl)
+  have hn := vg.leftAt_init _ _ key counter_nonce hr buffer.length hl
+  have he := vg.keystream_encrypt key counter_nonce (bvs buffer.val) (by rw [bvs_length]; exact hl)
   rw [bvs_length] at he
   cases v <;>
   · step as ⟨r, hlen, happ⟩
@@ -210,17 +156,6 @@ theorem cipher_vg_spec (hu : ∃ s, VgState.uninit = ok s) (v : low.x86_64.chach
     step*
 
 /-! ## The key and the counter and nonce as words, `ChaCha20::new` -/
-
-/-- Setting each index of a list from `k` on to `f`'s value there. -/
-theorem foldl_set_range' {α : Type} (f : Nat → α) (a : List α) (k m : Nat) (h : k + m = a.length) :
-    (List.range' k m).foldl (fun l i => l.set i (f i)) a = a.take k ++ (List.range' k m).map f := by
-  induction m generalizing k a with
-  | zero => simp [List.take_of_length_le (by omega : a.length ≤ k)]
-  | succ m ih =>
-    have hk : k < a.length := by omega
-    rw [List.range'_succ, List.foldl_cons, ih _ (k + 1) (by simp; omega), List.map_cons, List.take_add_one,
-      List.take_set_of_le (Nat.le_refl k), List.getElem?_set_self hk]
-    simp
 
 theorem words_loop_spec {B W : Usize} (bytes : Std.Array U8 B) (iter : core.ops.range.Range Usize)
     (ws : Std.Array U32 W) (F : List (BitVec 32)) (hB : B.val = 4 * W.val) (hs : iter.start.val ≤ W.val)
@@ -269,7 +204,7 @@ theorem words_spec {B : Usize} (W : Usize) (bytes : Std.Array U8 B) (hB : B.val 
   have hw : (chacha20.words (bvs bytes.val)).length = W.val := by simp [chacha20.words, hb]
   step*
   apply words_loop_spec bytes _ _ _ hB (by simp) (by simp)
-  rw [foldl_set_range' _ _ _ _ (by simp)]
+  rw [vg.foldl_set_range' _ _ _ _ (by simp)]
   apply List.ext_getElem (by simp [hw])
   intro i h1 h2
   simp [List.getElem_range', List.getElem?_eq_getElem h2]
@@ -288,8 +223,8 @@ theorem new_spec (key : Std.Array U8 32#usize) (counter_nonce : Std.Array U8 16#
   simp only [ha, hb, hs, bind_ok]
   step with words_spec 8#usize key (by simp) as ⟨k, hk⟩
   step with words_spec 4#usize counter_nonce (by simp) as ⟨cn, hcn⟩
-  have e1 := wordBytes_of_words _ _ 8 (by simp [bvs]) hk
-  have e2 := wordBytes_of_words _ _ 4 (by simp [bvs]) hcn
+  have e1 := vg.wordBytes_of_words _ _ 8 (by simp [bvs]) hk
+  have e2 := vg.wordBytes_of_words _ _ 4 (by simp [bvs]) hcn
   rcases a with _ | a <;> rcases b with _ | b <;> simp [e1, e2]
 
 /-! ## The cipher's VG path, `ChaCha20::cipher` -/
