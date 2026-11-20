@@ -937,17 +937,19 @@ on CPUs without AVX and for what Vale's routines do not take, in
   `key_to_round_keys_LE` lays them out, and the GHASH key powers Vale's
   `hkeys_reqs_pub` requires of `E_K(0)`, or by-8's table of its first eight
   powers;
-- `aes_gcm_seal`: for AAD under 2^61 bytes and messages up to 2^36 - 32
-  bytes, the lengths rind takes, the ciphertext in place and the tag are
-  Vale's `gcm_encrypt_LE` of the key, nonce, message, and AAD;
-- `aes_gcm_seal_append_tag`: the same for a seal that appends the tag to any
-  buffer: the ciphertext lands in the view its `as_mut` gives, and the call
+- `aes_gcm_seal`: AAD of 2^61 bytes or more, or a message past 2^36 - 32
+  bytes, is refused with `WrongLength`, the message left as it is; for the
+  lengths rind takes, the ciphertext in place and the tag are Vale's
+  `gcm_encrypt_LE` of the key, nonce, message, and AAD;
+- `aes_gcm_seal_append_tag`: the same, refusal included, for a seal that
+  appends the tag to any buffer: the ciphertext lands in the view its `as_mut` gives, and the call
   returns what its `extend` makes of that, handed the tag; and
   `aes_gcm_seal_append_tag_vec`: a `Vec<u8>` with room for the tag becomes
   the ciphertext followed by the tag, through `Rind/Core.lean`'s models of
   std's impls, which view the whole vector and append the tag as
   `extend_from_slice` does;
-- `aes_gcm_open_separate_tag` and `aes_gcm_open`: for the same lengths, the
+- `aes_gcm_open_separate_tag` and `aes_gcm_open`: refused past the same
+  lengths, the message left as it is, and for the lengths rind takes the
   call succeeds exactly when Vale's `gcm_decrypt_LE` accepts the tag, leaving
   its plaintext in place, and otherwise fails, leaving zeros.
 
@@ -955,7 +957,10 @@ Vale's `gcm_encrypt_LE` and `gcm_decrypt_LE` bound the AAD and message under
 2^32 bytes, so `Rind/Vale.lean` transliterates them without it. Vale's
 routines run seals of 129 bytes and more and AAD and messages under 2^32
 bytes (`aes_gcm_encrypt_vale`, `aes_gcm_decrypt_vale` in
-`Rind/X86_64/AesGcm.lean`), and by-8 the rest. `Rind/X86_64/AesGcmBy8.lean`
+`Rind/X86_64/AesGcm.lean`), and by-8 the rest. `aes_gcm_encrypt_spec` and `aes_gcm_decrypt_spec` state
+the refusal of AAD of 2^61 bytes or more and messages past 2^36 - 32 bytes
+(`WrongLength`, the buffer and tag left as they were) for both tiers; Vale's
+lengths are under 2^32, so its own two theorems never meet it. `Rind/X86_64/AesGcmBy8.lean`
 proves by-8, as `Rind/X86_64/AesGcmModel.lean` models it by hand, is Vale's `gctr_encrypt_LE` and `ghash_LE` without their bound:
 its counter is the block's 64-bit halves swapped, which `PADDD` steps as
 `inc32` does, its rounds FIPS 197's, and its GHASH the Horner rule on the
@@ -1020,16 +1025,17 @@ and the AEAD API above `tagged` remain to prove.
 hand model over `AeadDispatch` that quotes `rind/src/aead/gcm.rs`. Its `new`
 for AES-128, AES-192, or AES-256 holds the `aead::Key` for the algorithm,
 which refuses a key of another length (`gcm_key_new`). For an IV of 1 to
-2^61 - 1 bytes and the same AAD and message lengths, its
-`seal_in_place_separate_tag` leaves AES-GCM's ciphertext and returns the
+2^61 - 1 bytes, its `seal_in_place_separate_tag` refuses AAD and messages
+past the same lengths, leaving the buffer as it was, and otherwise leaves AES-GCM's ciphertext and returns the
 first `tag_len` bytes of its tag (`gcm_key_seal`), and
 `seal_in_place_append_tag` returns what its `extend` makes of that, handed
 the tag (`gcm_key_seal_append_tag`), and `open_in_place` and
 `open_in_place_separate_tag` succeed exactly when the tag is those bytes,
 leaving the plaintext, and otherwise fail (`gcm_key_open`,
 `gcm_key_open_separate_tag`). Only an authentication failure clears the
-ciphertext to zeros; a refusal, of an input shorter than the tag or a
-separate tag that is not the key's length, leaves the buffer unchanged. SP 800-38D's MSB_t truncation is the first bytes of Vale's tag, which
+ciphertext to zeros; a refusal, of an input shorter than the tag, a
+separate tag that is not the key's length, or AAD or a message past GCM's
+bounds, leaves the buffer unchanged. SP 800-38D's MSB_t truncation is the first bytes of Vale's tag, which
 `gcmDecryptTrunc` compares. A seal under a 12-byte IV runs `aead::Key`'s path
 and truncates its tag, and an open runs that path only under a 12-byte IV
 with a 16-byte tag; the model's other arms run `AesGcm::encrypt_any` and `decrypt_any`, which

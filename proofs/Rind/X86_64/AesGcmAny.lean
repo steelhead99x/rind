@@ -69,12 +69,6 @@ theorem try_from_ne (N : Usize) (s : Slice U8) (h : s.length ≠ N.val) :
 
 /-! ## The refusals -/
 
-theorem usize_lt (n : Usize) : n.val < 2 ^ 64 := by
-  have := n.hmax
-  rcases System.Platform.numBits_eq with h | h
-  · simp_all [UScalarTy.Usize_numBits_eq]; omega
-  · simp_all [UScalarTy.Usize_numBits_eq]
-
 /-- `check_gcm_iv` refuses an empty IV or one of 2^61 bytes or more. -/
 theorem check_gcm_iv_spec (iv : Slice U8) :
     mid.aes.check_gcm_iv iv ⦃ r =>
@@ -89,46 +83,6 @@ theorem check_gcm_iv_spec (iv : Slice U8) :
     have h2 : i2.val = 2 ^ 61 := by rw [i2_post]; simp [Nat.shiftLeft_eq, U64.size, U64.numBits]
   · rw [ite_eq_left (Or.inr (by scalar_tac))]
   · rw [ite_eq_right (by simp_all)]
-
-/-- From block 2, past the tag's, the 32-bit block counter covers 2^36 - 32
-bytes. -/
-theorem gcm_check_counter_spec (len : Usize) :
-    mid.aes.check_counter 2#u32 len ⦃ r =>
-      r = if len.val ≤ 2 ^ 36 - 32 then .Ok () else .Err .WrongLength ⦄ := by
-  unfold mid.aes.check_counter core.num.Usize.div_ceil
-  simp only [lift, bind_ok, show ¬ (16#usize : Usize).val = 0 by decide, ↓reduceDIte]
-  have h1 : (core.convert.num.FromU64U32.from 2#u32 : U64).val = 2 := rfl
-  have hb := usize_lt len
-  have hm : (len.val + 16 - 1) / 16 % 2 ^ UScalarTy.U64.numBits = (len.val + 15) / 16 := by
-    rw [UScalarTy.U64_numBits_eq]; apply Nat.mod_eq_of_lt; omega
-  step*
-  all_goals simp only [h1, UScalar.cast_val_eq, UScalar.ofNatCore_val_eq] at *
-  all_goals simp only [hm] at *
-  all_goals first
-    | scalar_tac
-    | (have h4 : i4.val = 2 ^ 32 := by rw [i4_post]; simp [Nat.shiftLeft_eq, U64.size, U64.numBits]
-       first
-        | (rw [ite_eq_right (by intro; scalar_tac)])
-        | (rw [ite_eq_left (by scalar_tac)]))
-
-/-- `check_gcm_lengths` refuses AAD of 2^61 bytes or more, and messages past
-2^36 - 32 bytes. -/
-theorem check_gcm_lengths_eq (aad msg : Usize) :
-    mid.aes.check_gcm_lengths aad msg ⦃ r =>
-      r = if 2 ^ 61 ≤ aad.val ∨ 2 ^ 36 - 32 < msg.val then .Err .WrongLength else .Ok () ⦄ := by
-  have hb := usize_lt aad
-  unfold mid.aes.check_gcm_lengths
-  step*
-  all_goals
-    have hc : i.val = aad.val := by
-      rw [i_post, UScalar.cast_val_eq, UScalarTy.U64_numBits_eq, Nat.mod_eq_of_lt hb]
-    have h2 : i1.val = 2 ^ 61 := by rw [i1_post]; simp [Nat.shiftLeft_eq, U64.size, U64.numBits]
-  · rw [ite_eq_left (Or.inl (by scalar_tac))]
-  · apply WP.spec_mono (gcm_check_counter_spec msg)
-    rintro r rfl
-    by_cases hm : msg.val ≤ 2 ^ 36 - 32
-    · rw [ite_eq_left hm, ite_eq_right (by scalar_tac)]
-    · rw [ite_eq_right hm, ite_eq_left (Or.inr (by omega))]
 
 /-! ## The counter block -/
 
