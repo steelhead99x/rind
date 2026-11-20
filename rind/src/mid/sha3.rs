@@ -899,6 +899,79 @@ mod tests {
         check::<32>(&inputs);
     }
 
+    /// The eight-way kernel through `shake256_x8` and `shake256_xn`, forced
+    /// on wherever the CPU has AVX-512 VL, Intel's cores and Intel SDE's
+    /// models included, since `sha3_keccak8x_available` otherwise leaves it to
+    /// other vendors' cores: five to eight lanes of every length class (empty,
+    /// one byte, short, the longest that fits a block, one rate, over) give
+    /// what the one-state sponge gives, `outputs` past the lanes are left
+    /// alone, and the eight-way path is the one taken.
+    #[test]
+    #[cfg(rind_backend = "x86_64")]
+    fn shake256_x8_matches_single_forced() {
+        let _entry = Entry::new_secret();
+        let data: [u8; 400] = core::array::from_fn(|i| (i * 7 + 3) as u8);
+        crate::low::with_keccak8x_forced(|| {
+            // Without AVX-512 VL there is no eight-way path to check.
+            if !crate::low::sha3_keccak8x_available() {
+                return;
+            }
+            for total in [0, 1, 31, 32, 33, 40, 100, 134, 135, 136, 137, 300] {
+                for lanes in 5..=8 {
+                    let inputs: Vec<[&[u8]; 1]> =
+                        (0..lanes).map(|n| [&data[n * 3..n * 3 + total]]).collect();
+                    for out in [16usize, 32] {
+                        let mut outputs = [[0xA5u8; 32]; 8];
+                        let mut small = [[0xA5u8; 16]; 8];
+                        let took = if out == 32 {
+                            shake256_x8(&inputs, &mut outputs)
+                        } else {
+                            shake256_x8(&inputs, &mut small)
+                        };
+                        assert_eq!(
+                            took,
+                            total < SHAKE_256_R_BYTES,
+                            "{total} bytes, {lanes} lanes"
+                        );
+                        if !took {
+                            continue;
+                        }
+                        for (n, input) in inputs.iter().enumerate() {
+                            let mut single = [0u8; 32];
+                            shake::<SHAKE_256_R_BYTES>(input[0]).read(&mut single);
+                            if out == 32 {
+                                assert_eq!(outputs[n], single, "{total} bytes, lane {n}");
+                            } else {
+                                assert_eq!(small[n], single[..16], "{total} bytes, lane {n}");
+                            }
+                        }
+                        // Lanes past the inputs stay as they were.
+                        assert!(outputs[lanes..].iter().all(|o| *o == [0xA5; 32]) || out != 32);
+                        assert!(small[lanes..].iter().all(|o| *o == [0xA5; 16]) || out == 32);
+                    }
+                }
+            }
+            // Over 32 bytes out, and a block or more in, it declines.
+            let inputs: Vec<[&[u8]; 1]> = (0..8).map(|n| [&data[n..n + 10]]).collect();
+            assert!(!shake256_x8(&inputs, &mut [[0u8; 40]; 8]));
+            // Through `shake256_xn`, the same digests as the one-state sponge.
+            for total in [0, 1, 40, 135] {
+                for lanes in 1..=8 {
+                    let inputs: Vec<[&[u8]; 1]> =
+                        (0..lanes).map(|n| [&data[n..n + total]]).collect();
+                    let mut outputs = [[0u8; 32]; 8];
+                    shake256_xn(&inputs, &mut outputs);
+                    for (input, output) in inputs.iter().zip(&outputs) {
+                        let mut single = [0u8; 32];
+                        shake::<SHAKE_256_R_BYTES>(input[0]).read(&mut single);
+                        assert_eq!(*output, single, "{total} bytes, {lanes} lanes");
+                    }
+                }
+            }
+            std::eprintln!("shake256_x8: the eight-way path matched the one-state sponge");
+        });
+    }
+
     const SEED: &[u8; 32] = b"Damn right its better than yours";
 
     #[test]

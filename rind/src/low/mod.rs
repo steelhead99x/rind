@@ -224,6 +224,8 @@ pub(crate) use generic::ct_copy::{ct_copy, ct_select_i16};
 pub(crate) use generic::ct_equal::ct_equal;
 #[cfg(all(test, any(rind_backend = "arm", rind_backend = "portable")))]
 pub(crate) use generic::ghash::gcm_model;
+#[cfg(all(test, rind_backend = "x86_64"))]
+pub(crate) use generic::keccak4x::with_keccak8x_forced;
 pub(crate) use generic::keccak4x::{
     sha3_keccak4x_f1600, sha3_keccak4x_hash_blocks, sha3_keccak8x_available,
     sha3_keccak8x_hash_blocks,

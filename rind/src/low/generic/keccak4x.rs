@@ -39,10 +39,43 @@ pub(crate) fn sha3_keccak8x_available() -> bool {
     #[cfg(rind_backend = "x86_64")]
     {
         use super::super::x86_64::cpu;
-        cpu::HaveAvx512Vl::check().is_some() && !cpu::is_intel()
+        cpu::HaveAvx512Vl::check().is_some() && (!cpu::is_intel() || forced_for_test())
     }
     #[cfg(not(rind_backend = "x86_64"))]
     false
+}
+
+#[cfg(all(test, rind_backend = "x86_64"))]
+std::thread_local! {
+    static FORCED: core::cell::Cell<bool> = const { core::cell::Cell::new(false) };
+}
+
+/// Whether a test on this thread has [`with_keccak8x_forced`], so the eight-way
+/// path runs on an Intel core too, as under Intel SDE's models, which are all
+/// Intel's. Never true outside a test build, so the selection rule above is
+/// what ships.
+#[cfg(rind_backend = "x86_64")]
+#[inline(always)]
+fn forced_for_test() -> bool {
+    #[cfg(test)]
+    return FORCED.with(core::cell::Cell::get);
+    #[cfg(not(test))]
+    false
+}
+
+/// Runs `f` with [`sha3_keccak8x_available`] true wherever the CPU has AVX-512
+/// VL, Intel's cores included, for the tests that check the eight-way path
+/// against the interleaved one under SDE.
+#[cfg(all(test, rind_backend = "x86_64"))]
+pub(crate) fn with_keccak8x_forced<R>(f: impl FnOnce() -> R) -> R {
+    struct Reset(bool);
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            FORCED.with(|forced| forced.set(self.0));
+        }
+    }
+    let _reset = Reset(FORCED.with(|forced| forced.replace(true)));
+    f()
 }
 
 /// Eight states that each absorb one block, `blocks[j]` (the padded SHAKE256
