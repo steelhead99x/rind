@@ -25,8 +25,8 @@
 //! the unrolled body and runs `rolled` there too, with `K` in flash
 //! `.rodata`: the unrolled body is about 18 KiB, which a 16 KiB
 //! instruction cache cannot hold, and measured 11.3 to 13.1 times slower
-//! than the rolled loop when it ran from flash (steelhead99x/rind-results,
-//! `results/diag/esp32s3-pr94-pr87-pr85-2026-11-18`).
+//! than the rolled loop when it ran from flash (board run, 2026-11-18; the
+//! raw logs are in the PR discussion that introduced the placement).
 //! The driver `sha512_compress_blocks` stays in ordinary flash text, so
 //! the update path is not a cache-off API. `admin/esp32s3-sha512-layout`
 //! checks, at opt-level 3, s, and z, that the IRAM block loads nothing

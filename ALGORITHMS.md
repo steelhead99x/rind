@@ -263,8 +263,8 @@ with portable Rust in place of the assembly armv7 runs regardless.
   placement against the rolled loop, which `esp32s3-sha512-flash`
   selects, was measured on the board: 0.911 to 0.918 of its cycles for
   SHA-512 and HMAC-SHA384. The unrolled body from flash was 11.3 to 13.1
-  times slower than that loop. The numbers are in steelhead99x/rind-results
-  `results/diag/esp32s3-pr94-pr87-pr85-2026-11-18`. Host FIPS
+  times slower than that loop. The raw logs are in the PR discussion
+  that introduced the placement. Host FIPS
   180-4 vectors cover both Rust bodies. The Xtensa load is not in the host ctgrind binary:
   its instructions and shift distance are fixed. The synthetic link is not
   a full ESP-IDF image.
