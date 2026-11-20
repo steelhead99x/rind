@@ -18,10 +18,12 @@ on:
     - cron: "23 8 * * 0"
   workflow_dispatch:
   pull_request:
+    # A draft skips every job until it is marked ready, and turning a PR back
+    # into a draft cancels its ready run: see CONTRIBUTING.md. `edited` covers
+    # a PR retargeted to main, which needs the context too; `scope` runs no
+    # model for an edit that is not a retarget.
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft, edited]
     branches: [main]
-    # `edited` covers a PR retargeted to main, which needs the context too.
-    # `scope` runs no model for an edit that is not a retarget.
-    types: [opened, synchronize, reopened, edited]
   merge_group:
     types: [checks_requested]
 
@@ -52,6 +54,7 @@ jobs:
   # queue's ref, `gh-readonly-queue/main/pr-<number>-<sha>`; the queue builds
   # one PR a group (queue.yml), so that is the group's PR.
   scope:
+    if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -102,6 +105,33 @@ jobs:
           echo "run=$run" | tee -a "$GITHUB_OUTPUT"
           echo "matrix=$(python3 admin/x86-cpu matrix "$models")" | tee -a "$GITHUB_OUTPUT"
 
+  # The release tests, built once for every model's job to run: a model
+  # changes only which paths the same binaries take.
+  build:
+    needs: scope
+    if: needs.scope.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/nix
+
+      - uses: ./.github/actions/rust-cache
+        with:
+          shell: .#sde
+
+      - name: Build (release)
+        run: nix develop .#sde --command admin/x86-cpu archive
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: x86-cpu-tests
+          path: target/x86-cpu-tests.tar
+          retention-days: 1
+          if-no-files-found: error
+
   # One job per SDE model, from admin/x86-cpu's MODELS: one for each distinct
   # set of dispatch paths that `rind/src/low/x86_64/cpu.rs` picks from cpuid,
   # each asserting its set with `RIND_TEST_X86_*`.
@@ -112,8 +142,7 @@ jobs:
   # single job for every model past four hours.
   check:
     name: check (${{ matrix.model }})
-    needs: scope
-    if: needs.scope.outputs.run == 'true'
+    needs: [scope, build]
     runs-on: ubuntu-latest
     # A merge group's models report inside the queue's 90-minute window, which
     # the wait for a hosted runner also spends, or the group expires unreported.
@@ -140,24 +169,20 @@ jobs:
       - name: Host CPU
         run: grep -m1 'model name' /proc/cpuinfo
 
-      # Every model's job builds the same workspace, so they share one cache.
-      - uses: ./.github/actions/rust-cache
+      # The build job's tests, which still read their vector files from the
+      # checkout.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          shell: .#sde
-
-      # rind-fips is left out: its module refuses CPUs below its baseline,
-      # as most of these models are.
-      - name: Build (release)
-        run: nix develop .#sde --command cargo build --release --tests --workspace --exclude rind-fips
+          name: x86-cpu-tests
+          path: target
 
       # This skips aws-lc-rs's `large_digest` tests, which hash 8 GiB per
       # hash and took 21 to 28 minutes per SHA model under SDE. They check the
       # length counter, which no CPU path changes, and run natively in
       # build.yml.
       - name: Check ${{ matrix.model }}
-        run: nix develop .#sde --command cargo test --release --workspace --exclude rind-fips -- --skip large_digest
+        run: nix develop .#sde --command admin/x86-cpu test -${{ matrix.sde }} --skip large_digest
         env:
-          CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER: "sde -${{ matrix.sde }} --"
           RIND_TEST_X86_SSSE3: ${{ matrix.paths.SSSE3 }}
           RIND_TEST_X86_SSE41: ${{ matrix.paths.SSE41 }}
           RIND_TEST_X86_AES_HARDWARE: ${{ matrix.paths.AES_HARDWARE }}

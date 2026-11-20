@@ -1,9 +1,26 @@
 #!/usr/bin/env python3
 
-import subprocess, json, os, sys, glob
+import subprocess, json, os, sys, glob, tarfile
 
-# Run `sde-scan` in `nix develop .#sde`, which has the Intel SDE build
-# x86-cpu.yml runs.
+# Run it at the workspace root in `nix develop .#sde`, which has the Intel SDE
+# build x86-cpu.yml runs.
+#
+# Usage:
+#   admin/x86-cpu sde-scan
+#   admin/x86-cpu markdown-table
+#   admin/x86-cpu archive
+#   admin/x86-cpu test SDE_MODEL [TEST_ARGS...]
+#
+# `archive` builds the release tests x86-cpu.yml runs into ARCHIVE, and `test`
+# runs them under `sde SDE_MODEL --`, passing each binary TEST_ARGS, so every
+# model's job runs one build. Not nextest: its process per test starts SDE,
+# and re-instruments the code, for each of the workspace's tests, which made
+# rind's library tests over three times slower under SDE than one process
+# for the binary, as `cargo test` runs it.
+ARCHIVE = "target/x86-cpu-tests.tar"
+# Each test binary in ARCHIVE, a tab, and its package's directory, which
+# `cargo test` runs it in and where it finds its vector files.
+TESTS = "target/x86-cpu-tests.tsv"
 
 # excludes 32-bit only parts
 KNOWN_CPUS = [
@@ -456,3 +473,64 @@ elif mode == "markdown-table":
                 detail(d["result"]["cpuid"]),
             )
         )
+elif mode == "archive":
+    # rind-fips is left out: its module refuses CPUs below its baseline, as
+    # most of SDE's models are. `cargo test` also runs the doc tests, which
+    # this leaves to the native runs: none asserts a CPU path, and each path
+    # they reach, the unit tests check on every model.
+    out = subprocess.run(
+        ["cargo", "test", "--release", "--workspace", "--exclude", "rind-fips"]
+        + ["--locked", "--no-run", "--message-format=json-render-diagnostics"],
+        stdout=subprocess.PIPE,
+        check=True,
+        encoding="utf-8",
+    ).stdout
+    tests, libraries = [], []
+    for line in out.splitlines():
+        message = json.loads(line)
+        if message["reason"] != "compiler-artifact":
+            continue
+        if message["profile"]["test"]:
+            tests.append(
+                (
+                    os.path.relpath(message["executable"]),
+                    os.path.relpath(os.path.dirname(message["manifest_path"])),
+                )
+            )
+        # A workspace crate's shared library, which its tests load from
+        # beside them, as rind-openssl's do.
+        elif (
+            message["package_id"].startswith("path+file:")
+            and "cdylib" in message["target"]["kind"]
+        ):
+            libraries += [f for f in message["filenames"] if f.endswith(".so")]
+    with open(TESTS, "w") as f:
+        f.writelines(f"{exe}\t{package}\n" for exe, package in tests)
+    with tarfile.open(ARCHIVE, "w") as tar:
+        tar.add(TESTS)
+        for path in [exe for exe, _ in tests] + libraries:
+            tar.add(os.path.relpath(path))
+    print(
+        f"Archived {len(tests)} test binaries and {len(libraries)} libraries in {ARCHIVE}"
+    )
+elif mode == "test":
+    model, *args = sys.argv[2:]
+    with tarfile.open(ARCHIVE) as tar:
+        tar.extractall(filter="tar")
+    # Each test's CARGO_TARGET_TMPDIR, which cargo creates before a test run.
+    # The binaries hold it and their CARGO_MANIFEST_DIR as absolute paths,
+    # which hold because x86-cpu.yml's jobs check out to the same path.
+    os.makedirs("target/tmp", exist_ok=True)
+    failed = []
+    for line in open(TESTS):
+        exe, package = line.rstrip("\n").split("\t")
+        print(f"Running {exe} in {package}", flush=True)
+        run = subprocess.run(
+            ["sde", model, "--", os.path.abspath(exe)] + args, cwd=package
+        )
+        if run.returncode != 0:
+            failed.append(exe)
+    if failed:
+        sys.exit("Failed: " + " ".join(failed))
+else:
+    sys.exit(f"unknown mode {mode}")
