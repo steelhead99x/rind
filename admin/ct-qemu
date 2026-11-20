@@ -9,7 +9,9 @@
 # kernels. Each rind test named `ct_qemu...` derives its secrets from a seed
 # and marks the calls it checks. This runs each one whose name contains
 # `filter` twice under qemu-arm's or qemu-aarch64's `max` CPU, which has
-# those features, with different seeds, and fails unless
+# those features, with different seeds, and armv7's AES tests, named
+# `ct_qemu_aes...`, also under the Cortex-A15, which has NEON but not the
+# crypto extension, so that the NEON AES and GHASH run, and fails unless
 # `admin/ct-qemu-plugin.c` traces the same instruction and memory addresses
 # in the same order between the marks. The traces stream through pipes and
 # are compared as they arrive, so no run stores one. It cannot see
@@ -30,13 +32,16 @@ SEEDS = ["0123456789abcdef", "fedcba9876543210"]
 QEMU = {"armv7-unknown-linux-gnueabihf": "qemu-arm", "aarch64-unknown-linux-gnu": "qemu-aarch64"}
 # The plugin's records: a kind, a size, padding, and a 64-bit address.
 RECORD = struct.Struct("<cBxxQ")
+# The CPUs under which armv7's AES tests also run: the Cortex-A15 is ARMv7
+# with NEON but without the crypto extension.
+AES_CPUS = {"armv7-unknown-linux-gnueabihf": ["max", "cortex-a15"], "aarch64-unknown-linux-gnu": ["max"]}
 # Records compared at a time.
 CHUNK = 1 << 16
 
 
-def qemu(target):
-    """qemu-user for `target`'s `max` CPU, without address randomization."""
-    return ["setarch", platform.machine(), "-R", QEMU[target], "-cpu", "max"]
+def qemu(target, cpu="max"):
+    """qemu-user for `target`'s `cpu`, without address randomization."""
+    return ["setarch", platform.machine(), "-R", QEMU[target], "-cpu", cpu]
 
 
 def build(target):
@@ -77,7 +82,7 @@ def describe(record):
     return "{} {} {:#014x}".format(kind.decode(), size, addr)
 
 
-def compare(target, exe, name, tmp, plugin):
+def compare(target, exe, name, cpu, tmp, plugin):
     """Traces `name` once for each seed, and returns where the traces differ,
     with the records before it, or None, and how many records they agreed
     on."""
@@ -87,7 +92,7 @@ def compare(target, exe, name, tmp, plugin):
         # A pipe rather than a named one, so that if qemu fails, the trace
         # ends rather than waits for qemu to open it.
         r, w = os.pipe()
-        cmd = qemu(target)
+        cmd = qemu(target, cpu)
         cmd += ["-plugin", "{},out=/dev/fd/{}".format(plugin, w), exe]
         cmd += ["--ignored", "--exact", name, "--test-threads=1", "-q"]
         # The seeds have the same length, so the environment, and so
@@ -124,7 +129,7 @@ def compare(target, exe, name, tmp, plugin):
             proc.kill()
         elif proc.wait() != 0:
             log.seek(0)
-            sys.exit("ct-qemu: {} failed under qemu:\n{}".format(name, log.read()))
+            sys.exit("ct-qemu: {} failed under qemu {}:\n{}".format(name, cpu, log.read()))
     for f in files:
         f.close()
     for proc, _ in procs:
@@ -151,10 +156,17 @@ def main():
         sys.exit("ct-qemu: no ct_qemu test matches {!r}".format(filter))
 
     failed = False
-    for name in names:
+    # Only the AES tests, and no planted leak, run on each CPU.
+    runs = [
+        (n, cpu)
+        for n in names
+        for cpu in (AES_CPUS[target] if n.split("::")[-1].startswith("ct_qemu_aes") else ["max"])
+    ]
+    for name, cpu in runs:
         with tempfile.TemporaryDirectory() as tmp:
-            diff, records = compare(target, exe, name, tmp, plugin)
-        planted = is_planted(name)
+            diff, records = compare(target, exe, name, cpu, tmp, plugin)
+        name = "{} ({})".format(name, cpu)
+        planted = is_planted(name.split()[0])
         if records == 0:
             print("FAIL {}: traced nothing".format(name))
             failed = True

@@ -491,14 +491,16 @@ mod tests {
         }
     }
 
-    // armv7's AES-CBC on the crypto extension, which valgrind hides, for each
-    // key size, with a secret key and message, for `admin/ct-qemu`. The
-    // message's 7 blocks take the decryption's 3-block loop and its tail.
+    // armv7's AES-CBC on the crypto extension, which valgrind hides, or on
+    // NEON, for each key size, with a secret key and message, for
+    // `admin/ct-qemu`. The message's 10 blocks take the crypto extension's
+    // decryption's 3-block loop and its tail, and bitsliced AES's batch of
+    // eight and its tail.
     #[cfg(rind_backend = "arm")]
     #[test]
     #[ignore = "admin/ct-qemu runs it under qemu-arm"]
     fn ct_qemu_aes_cbc() {
-        use crate::low::ct_qemu;
+        use crate::low::{HaveCryptoExt, ct_qemu};
 
         let seed = ct_qemu::seed().to_le_bytes();
         let bytes = |n| seed.iter().cycle().take(n).copied().collect::<Vec<u8>>();
@@ -506,10 +508,18 @@ mod tests {
             let key = bytes(algorithm.key_len);
             let enc = ct_qemu::traced(|| AesCbcEncryptingKey::new(algorithm, &key).unwrap());
             let dec = ct_qemu::traced(|| AesCbcDecryptingKey::new(algorithm, &key).unwrap());
-            assert!(matches!(enc.key, AesKey::Hw(_)), "the crypto extension");
+            // The tier `admin/ct-qemu`'s CPU has: the crypto extension, or NEON.
+            assert!(
+                if HaveCryptoExt::check().is_some() {
+                    matches!(enc.key, AesKey::Hw(_))
+                } else {
+                    matches!(enc.key, AesKey::Neon(_))
+                },
+                "the CPU's tier"
+            );
 
             let iv = bytes(16).try_into().unwrap();
-            let mut msg = bytes(6 * 16 + 5);
+            let mut msg = bytes(9 * 16 + 5);
             ct_qemu::traced(|| enc.encrypt(CbcIv::assume_unpredictable(iv), &mut msg)).unwrap();
             ct_qemu::traced(|| dec.decrypt(&iv, &mut msg)).unwrap();
         }

@@ -151,8 +151,22 @@ mod tests {
                 let nonce = bytes(12, seed).try_into().unwrap();
                 for counter in [0, 1, u32::MAX - 3, u32::MAX] {
                     for len in [
-                        1, 15, 16, 17, 127, 128, 129, 300, 16 * 6 - 1, 16 * 6, 16 * 7, 16 * 8,
-                        16 * 8 + 16 * 5, 16 * 8 + 16 * 6, 16 * 15, 16 * 16 + 3,
+                        1,
+                        15,
+                        16,
+                        17,
+                        127,
+                        128,
+                        129,
+                        300,
+                        16 * 6 - 1,
+                        16 * 6,
+                        16 * 7,
+                        16 * 8,
+                        16 * 8 + 16 * 5,
+                        16 * 8 + 16 * 6,
+                        16 * 15,
+                        16 * 16 + 3,
                     ] {
                         let mut want = bytes(len, counter);
                         let mut got = want.clone();

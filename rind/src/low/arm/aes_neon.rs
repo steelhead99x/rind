@@ -127,9 +127,7 @@ impl NeonKey {
         // aws-lc refuses only a null pointer or another key size.
         assert_eq!(ret, 0);
         // SAFETY: as above, and `vpaes` is the schedule just made.
-        unsafe {
-            asm_call!(unsafe extern "C" vpaes_encrypt_key_to_bsaes(&mut r.bsaes, &r.vpaes))
-        };
+        unsafe { asm_call!(unsafe extern "C" vpaes_encrypt_key_to_bsaes(&mut r.bsaes, &r.vpaes)) };
         r
     }
 
@@ -203,13 +201,15 @@ impl NeonKey {
     /// Encrypts whole blocks in place in CBC mode, the first chained from
     /// `iv`.
     pub(crate) fn cbc_encrypt(&self, iv: &[u8; 16], blocks: &mut [[u8; 16]]) {
-        let mut prev = *iv;
+        let mut prev = u128::from_ne_bytes(*iv);
         for block in blocks {
-            for (b, p) in block.iter_mut().zip(prev) {
-                *b ^= p;
-            }
-            *block = self.encrypt_block(block);
-            prev = *block;
+            *block = (u128::from_ne_bytes(*block) ^ prev).to_ne_bytes();
+            // SAFETY: `block` is one readable and writable block, which
+            // aws-lc allows to alias. Only a `HaveNeon` token builds `self`.
+            unsafe {
+                asm_call!(unsafe extern "C" vpaes_encrypt(block.as_ptr(), block.as_mut_ptr(), &self.vpaes))
+            };
+            prev = u128::from_ne_bytes(*block);
         }
     }
 }
@@ -244,9 +244,7 @@ impl NeonDecKey {
         // aws-lc refuses only a null pointer or another key size.
         assert_eq!(ret, 0);
         // SAFETY: as above, and `vpaes` is the schedule just made.
-        unsafe {
-            asm_call!(unsafe extern "C" vpaes_decrypt_key_to_bsaes(&mut r.bsaes, &r.vpaes))
-        };
+        unsafe { asm_call!(unsafe extern "C" vpaes_decrypt_key_to_bsaes(&mut r.bsaes, &r.vpaes)) };
         r
     }
 

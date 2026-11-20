@@ -557,7 +557,7 @@ mod tests {
         }
     }
 
-    // The crypto extension's key setup, GHASH, and AES-CTR, both ways, for
+    // The crypto extension's, or NEON's, key setup, GHASH, and AES-CTR, both ways, for
     // each key size, with a secret key, nonce or IV, AAD, and message, for
     // `admin/ct-qemu`. The message spans a GHASH chunk, then 5 blocks, which
     // take the CTR routine's 3-block loop and 2-block tail, and a partial
@@ -573,7 +573,15 @@ mod tests {
         for key_len in [16, 24, 32] {
             let key = bytes(key_len);
             let gcm = ct_qemu::traced(|| AesGcm::new(&key));
-            assert!(matches!(gcm, AesGcm::Hw(_)), "the crypto extension");
+            // The tier `admin/ct-qemu`'s CPU has: the crypto extension, or NEON.
+            assert!(
+                if HaveCryptoExt::check().is_some() {
+                    matches!(gcm, AesGcm::Hw(_))
+                } else {
+                    matches!(gcm, AesGcm::Neon(_))
+                },
+                "the CPU's tier"
+            );
 
             let nonce = bytes(12).try_into().unwrap();
             let aad = bytes(300);

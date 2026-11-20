@@ -626,16 +626,21 @@ mod tests {
     #[test]
     #[ignore = "admin/ct-qemu runs it under qemu-arm"]
     fn ct_qemu_aes_kw() {
-        use crate::low::ct_qemu;
+        use crate::low::{HaveCryptoExt, ct_qemu};
 
         let seed = ct_qemu::seed().to_le_bytes();
         let bytes = |n| seed.iter().cycle().take(n).copied().collect::<Vec<u8>>();
         for algorithm in [&AES_128, &AES_192, &AES_256] {
             let kek_bytes = bytes(algorithm.key_len);
             let kek = ct_qemu::traced(|| AesKek::new(algorithm, &kek_bytes).unwrap());
+            // The tier `admin/ct-qemu`'s CPU has: the crypto extension, or NEON.
             assert!(
-                matches!(AesDecKey::new(kek.key()), AesDecKey::Hw(_)),
-                "the crypto extension"
+                if HaveCryptoExt::check().is_some() {
+                    matches!(AesDecKey::new(kek.key()), AesDecKey::Hw(_))
+                } else {
+                    matches!(AesDecKey::new(kek.key()), AesDecKey::Neon(_))
+                },
+                "the CPU's tier"
             );
 
             let key = bytes(32);

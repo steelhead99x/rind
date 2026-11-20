@@ -539,14 +539,16 @@ mod tests {
     }
 
     // armv7's AES block and AES-CTR on the crypto extension, which valgrind
-    // hides, for each key size, with a secret key, block, and message, for
-    // `admin/ct-qemu`. The message's 5 blocks take the CTR routine's 3-block
-    // loop and 2-block tail, then its partial block a 1-block call.
+    // hides, or on NEON, for each key size, with a secret key, block, and
+    // message, for `admin/ct-qemu`. The message's 11 blocks take the crypto
+    // extension's 3-block loop and 2-block tail, or bitsliced AES's batch of
+    // eight and `vpaes`'s remaining three, then its partial block a 1-block
+    // call.
     #[cfg(rind_backend = "arm")]
     #[test]
     #[ignore = "admin/ct-qemu runs it under qemu-arm"]
     fn ct_qemu_aes() {
-        use crate::low::ct_qemu;
+        use crate::low::{HaveCryptoExt, ct_qemu};
 
         let seed = ct_qemu::seed().to_le_bytes();
         let bytes = |n| seed.iter().cycle().take(n).copied().collect::<Vec<u8>>();
@@ -554,13 +556,21 @@ mod tests {
             let key = bytes(algorithm.key_len);
             let aes = ct_qemu::traced(|| Aes::new(algorithm, &key).unwrap());
             let ctr = ct_qemu::traced(|| AesCtr::new(algorithm, &key, 32).unwrap());
-            assert!(matches!(aes.0, AesKey::Hw(_)), "the crypto extension");
+            // The tier `admin/ct-qemu`'s CPU has: the crypto extension, or NEON.
+            assert!(
+                if HaveCryptoExt::check().is_some() {
+                    matches!(aes.0, AesKey::Hw(_))
+                } else {
+                    matches!(aes.0, AesKey::Neon(_))
+                },
+                "the CPU's tier"
+            );
 
             let mut block = bytes(16).try_into().unwrap();
             ct_qemu::traced(|| aes.encrypt_block(&mut block));
             let mut counter_block: [u8; 16] = bytes(16).try_into().unwrap();
             counter_block[12..].copy_from_slice(&7u32.to_be_bytes());
-            let mut msg = bytes(5 * 16 + 8);
+            let mut msg = bytes(11 * 16 + 8);
             ct_qemu::traced(|| ctr.apply_keystream(&counter_block, &mut msg)).unwrap();
         }
     }
