@@ -8,6 +8,8 @@ import VerifiedGarbage.Spec.Ecdsa.Verify
 import VerifiedGarbage.Spec.P384
 open Aeneas Aeneas.Std rind.spec VG.Spec.Weierstrass
 
+set_option exponentiation.threshold 400
+
 /-!
 # pyca/verified-garbage's P-384 spec is rind's
 
@@ -28,10 +30,12 @@ namespace rind.spec.vgP384
 abbrev C : Curve := VG.Spec.P384.curve
 
 theorem p_eq : C.p = p384 := by
-  simp only [C, VG.Spec.P384.curve, VG.Spec.P384.p, p384]
+  show VG.Spec.P384.p = p384
+  decide +kernel
 
 theorem n_eq : C.n = n384 := by
-  simp only [C, VG.Spec.P384.curve, VG.Spec.P384.n, n384]
+  show VG.Spec.P384.n = n384
+  decide +kernel
 
 /-! ## VG's field elements in `ZMod p384` -/
 
@@ -358,7 +362,7 @@ theorem nBits_eq : VG.Spec.Ecdsa.nBits C = 384 := by
   unfold VG.Spec.Ecdsa.nBits
   rw [Nat.log2_eq_iff (by simp [C, VG.Spec.P384.curve, VG.Spec.P384.n]) |>.mpr]
   simp only [C, VG.Spec.P384.curve, VG.Spec.P384.n]
-  constructor <;> norm_num
+  constructor <;> decide +kernel
 
 /-- VG's integer of a 48-byte hash is its bytes'. -/
 theorem hashToInt_48 (b : List U8) (hl : b.length = 48) :
