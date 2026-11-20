@@ -15,7 +15,7 @@ Decided 2026-11-18 (maintainer, [kixel-ai/rind#619](https://github.com/kixel-ai/
 
 ## Waiting
 
-- steelhead99x: dispatch the weekly bench for the portable tier (`gh workflow run bench --repo steelhead99x/rind --ref claude/q-portable-sha2 -f benches='sha2 hmac hkdf'`), then close the gap in `benchmarks/gaps.toml` once it shows x86_64's portable SHA-2 within 10% of aws-lc's C at every size. `admin/bench-report render --check` refuses a stale entry.
-- steelhead99x: measure aarch64 without NEON, riscv64 and s390x on native hardware with the three `target_arch = "x86_64"` gates changed to `target_pointer_width = "64"`, and widen them only where the ports are no slower than HACL* at every size.
+- kixel-ai/rind: the weekly bench's portable tier (`sha2 hmac hkdf`) runs on x86_64's ports, then close the gap in `benchmarks/gaps.toml` once it shows x86_64's portable SHA-2 within 10% of aws-lc's C at every size. `admin/bench-report render --check` refuses a stale entry.
+- Maintainer: measure aarch64 without NEON, riscv64 and s390x on native hardware with the three `target_arch = "x86_64"` gates changed to `target_pointer_width = "64"`, and widen them only where the ports are no slower than HACL* at every size.
 - Maintainer: decide the 32-bit hosted targets (i686, wasm32, ARM before ARMv7), which keep HACL*: keep until measured, move to the ports, or move only those with 16 or more registers.
 - Maintainer: delete this quest once every 64-bit portable target runs the fastest source or keeps HACL* on a measurement, and the gap is closed.

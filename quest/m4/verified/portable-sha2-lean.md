@@ -6,7 +6,7 @@ The portable backend's SHA-256 and SHA-512 block functions on x86_64, `low::gene
 
 ## Plan
 
-The PR that finished and deleted the portable SHA-2 speed quest replaced HACL*'s verified block functions on x86_64's portable backend with these, which measured faster on one x86_64 core (`ALGORITHMS.md`, "portable, x86_64"), so the portable SHA-2 ✓ went, no theorem covers them, and the portable theorems take their contracts as hypotheses, as SHA-1's do.
+The PR for [the portable SHA-2 speed quest](/quest/m2/speed/portable-sha2.md) replaced HACL*'s verified block functions on x86_64's portable backend with these, which measured faster on one x86_64 core (`ALGORITHMS.md`, "portable, x86_64"), so the portable SHA-2 ✓ went, no theorem covers them, and the portable theorems take their contracts as hypotheses, as SHA-1's do.
 
 Decided 2026-11-20 (owner): ✅ this lands before [kixel-ai/rind#794](https://github.com/kixel-ai/rind/pull/794)'s replacement, and ✅ only x86_64 runs the ports until aarch64 without NEON, riscv64 and s390x are measured (rejected: every 64-bit portable target). Those, and the 32-bit targets, keep HACL*.
 
