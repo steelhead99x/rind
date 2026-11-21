@@ -403,32 +403,35 @@ fn encrypt_words<const LAST: usize>(rkeys: &[u32; 120], words: [u32; 8]) -> [u32
 
     add_round_key(&mut state, &rkeys[..8]);
 
+    // Every round but the last, unrolled: in RustCrypto's loop of four the
+    // state had to sit in the same registers at each turn, and on
+    // riscv32imac an AES-128-GCM seal ran 3% more instructions, 40% more
+    // stores, and twice the loads used by the next instruction.
     let mut rk_off = 8;
-    loop {
-        sub_bytes(&mut state);
-        mix_columns_1(&mut state);
-        add_round_key(&mut state, &rkeys[rk_off..(rk_off + 8)]);
-        rk_off += 8;
-
-        if rk_off == LAST {
-            break;
-        }
-
-        sub_bytes(&mut state);
-        mix_columns_2(&mut state);
-        add_round_key(&mut state, &rkeys[rk_off..(rk_off + 8)]);
-        rk_off += 8;
-
-        sub_bytes(&mut state);
-        mix_columns_3(&mut state);
-        add_round_key(&mut state, &rkeys[rk_off..(rk_off + 8)]);
-        rk_off += 8;
-
-        sub_bytes(&mut state);
-        mix_columns_0(&mut state);
-        add_round_key(&mut state, &rkeys[rk_off..(rk_off + 8)]);
-        rk_off += 8;
+    macro_rules! round {
+        ($mix_columns:ident) => {
+            sub_bytes(&mut state);
+            $mix_columns(&mut state);
+            add_round_key(&mut state, &rkeys[rk_off..(rk_off + 8)]);
+            rk_off += 8;
+        };
     }
+    round!(mix_columns_1);
+    round!(mix_columns_2);
+    round!(mix_columns_3);
+    round!(mix_columns_0);
+    round!(mix_columns_1);
+    round!(mix_columns_2);
+    round!(mix_columns_3);
+    round!(mix_columns_0);
+    round!(mix_columns_1);
+    if LAST == 112 {
+        round!(mix_columns_2);
+        round!(mix_columns_3);
+        round!(mix_columns_0);
+        round!(mix_columns_1);
+    }
+    debug_assert_eq!(rk_off, LAST);
 
     shift_rows_2(&mut state);
 
