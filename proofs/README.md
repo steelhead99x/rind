@@ -95,8 +95,11 @@ those inputs, in any worktree, restores in under a second.
   `BN_MUL_MONT_MUL4X_SUBROUTINE_CORRECT` for a multiple of four, through
   `__bn_mul4x_mont` in `8k + 160` bytes, except a multiple of eight with
   `x = y`; and `BN_MUL_MONT_SQR8X_SUBROUTINE_CORRECT` for that case, the
-  squarings `__bn_sqr8x_mont` runs in `16k + 128` bytes. No axiom in `Rind/`
-  restates any of them yet. The function has no relocations.
+  squarings `__bn_sqr8x_mont` runs in `16k + 128` bytes.
+  `Rind/Aarch64/RsaMont.lean` restates the joined theorem as an axiom on the
+  wrapper `low::aarch64::mont::mul_mont`, and proves rind's `mont_mul` and
+  `mont_sqr` return their products from it at every width from two words.
+  The function has no relocations.
 - `x86_64/bn_mul_mont_nohw.ml`: `BN_MUL_MONT_NOHW_SUBROUTINE_CORRECT`, rind's
   proof that the naked function `low::x86_64::mont::bn_mul_mont_nohw`,
   aws-lc's word-serial Montgomery multiplication, writes the Montgomery
@@ -1202,8 +1205,10 @@ with BMI2 and ADX, from s2n-bignum's theorems, and from `AwsLcMont`, that
 aws-lc's unproven routines return theirs, at every other width and CPU.
 `PublicKey::verify` reaches each algorithm's verification through a function
 pointer, and every loader encodes the key through `Buffer::write`, which
-`Rind/X86_64/RsaDispatch.lean` models for these two algorithms. On aarch64 the products are aws-lc's, so these proofs are not
-copied there yet.
+`Rind/X86_64/RsaDispatch.lean` models for these two algorithms. On aarch64 the
+products are aws-lc's, which `Rind/Aarch64/RsaMont.lean`'s `mont_products`
+proves at every width from two words for `MontArgs`'s inputs, from the axiom
+restating `BN_MUL_MONT_SUBROUTINE_CORRECT`; the RSA proofs are not copied there yet.
 
 `admin/prove` fails if a hand model's quote no longer matches the source, if
 the source names `Ops`, builds a `Masker`, or writes its `mask` outside the

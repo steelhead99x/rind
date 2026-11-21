@@ -18,6 +18,7 @@ import Rind.Aarch64.MlKemCoding
 import Rind.Aarch64.GhashPmull
 import Rind.Aarch64.AesGcm
 import Rind.Aarch64.VgChaCha20Poly1305
+import Rind.Aarch64.RsaMont
 open rind.aarch64
 
 /-!
@@ -44,6 +45,12 @@ ML-KEM's decompression and message coding rest on no axiom.
 ChaCha20-Poly1305's one pass on SVE2 rests on the axioms restating
 pyca/verified-garbage's theorems for its routines in
 `Rind.Aarch64.VgChaCha20Poly1305`.
+RSA's Montgomery products rest on the axiom restating rind's HOL Light proof of
+aws-lc's `bn_mul_mont` in `Rind.Aarch64.RsaMont`, which trusts, as the
+axiom's statement over slices drops it, that a slice of at least 32 bytes does
+not end at the top of the address space, so the 4x path's `x + 32` and
+`m + 32` do not wrap. The axiom holds for the Linux build's object only:
+Apple's `bn_mul_mont.apple.s` is not covered (quest `rsa-aarch64`).
 A change here is a change to the trust base.
 -/
 
@@ -847,3 +854,15 @@ A change here is a change to the trust base.
  vg_chacha20_poly1305_open_sve2_spec] -/
 #guard_msgs in
 #print axioms chacha20_poly1305_open_sve2_spec
+
+/-- info: 'rind.aarch64.mont_mul_spec' depends on axioms: [propext, Classical.choice, Quot.sound, mul_mont_spec] -/
+#guard_msgs in
+#print axioms mont_mul_spec
+
+/-- info: 'rind.aarch64.mont_sqr_spec' depends on axioms: [propext, Classical.choice, Quot.sound, mul_mont_spec] -/
+#guard_msgs in
+#print axioms mont_sqr_spec
+
+/-- info: 'rind.aarch64.mont_products' depends on axioms: [propext, Classical.choice, Quot.sound, mul_mont_spec] -/
+#guard_msgs in
+#print axioms mont_products

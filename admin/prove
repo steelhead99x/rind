@@ -1517,6 +1517,10 @@ extract aarch64 Aarch64 "${hashes[@]}" "${assembly[@]}" \
     --include crate::low::aarch64::sha3_keccak_f1600_mux \
     --include crate::low::aarch64::sha3_keccak4_f1600_mux \
     --include crate::low::aarch64::sha3_keccak_nof4_f1600 \
+    --start-from crate::low::aarch64::mont::mont_mul \
+    --start-from crate::low::aarch64::mont::mont_sqr \
+    --include crate::low::aarch64::mont::mont_mul \
+    --include crate::low::aarch64::mont::mont_sqr \
     --include crate::low::aarch64::sha256 \
     --opaque crate::low::aarch64::sha256::compress_hw \
     --opaque crate::low::aarch64::sha256::compress_nohw \
