@@ -79,6 +79,28 @@ class Scrub(unittest.TestCase):
         self.assertEqual(app.scrub(kept, ["pi", "bench"]), kept)
         self.assertEqual(app.leaks(kept, ["pi", "bench"]), [])
 
+    def test_schema_keys_survive_an_account_named_bench(self):
+        result = {"host": "test-cpu", "bench_app": {"control_spread": 0.01}, "user": "bench"}
+        hidden = ["bench"]
+        keep = app.schema_keys(result)
+        scrubbed = app.scrub(result, hidden, keep)
+        self.assertEqual(scrubbed["bench_app"], {"control_spread": 0.01})
+        self.assertEqual(scrubbed["user"], app.REDACTED)
+        self.assertEqual(app.leaks(scrubbed, hidden, keep), [])
+        # Without the kept keys the schema key is rewritten, which is the bug.
+        self.assertIn("<redacted>_app", app.scrub(result, hidden))
+
+    def test_host_equal_to_the_hostname_is_replaced_in_name_and_file(self):
+        hidden = ["devbox-7", "alice"]
+        self.assertEqual(app.safe_host("test-cpu", hidden, "intel-x"), ("test-cpu", False))
+        for identifying in ["devbox-7", "alice", "alice-laptop", "192.0.2.7"]:
+            name, replaced = app.safe_host(identifying, hidden, "intel-x")
+            self.assertEqual((name, replaced), ("intel-x", True), identifying)
+            self.assertEqual(app.scrub_text(name, hidden), name)
+            self.assertRegex(name, r"[A-Za-z0-9][A-Za-z0-9._-]*")
+        self.assertEqual(app.safe_host("devbox-7", hidden, None), (None, True))
+        self.assertEqual(app.safe_host("devbox-7", hidden, "alice"), (None, True))
+
     def test_short_values_match_whole_words(self):
         self.assertEqual(app.scrub_text("Raspberry Pi; user pi; spake2plus", ["pi"]), "Raspberry Pi; user <redacted>; spake2plus")
 

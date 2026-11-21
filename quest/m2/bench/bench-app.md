@@ -2,7 +2,7 @@
 
 ## Goal
 
-`admin/bench-app` gives a contributor one command that times rind against aws-lc-rs and ring on their own machine, in interleaved rounds, scrubs the result, and writes a host JSON that `admin/bench-report render` imports, so a new machine reaches `BENCHMARKS.md` the same way the report's hosts do. It is a command line tool only: the web bench and leaderboard at moq-bench.dev are separate tooling in steelhead99x/moq-bench-game, not part of this quest.
+`admin/bench-app` gives a contributor one command that times rind against aws-lc-rs and ring on their own machine, in interleaved rounds, scrubs the result, and writes a host JSON that `admin/bench-report render` imports, so a new machine reaches `BENCHMARKS.md` the same way the report's hosts do. It is a command line tool only; no web bench or leaderboard is part of this quest.
 
 ## Plan
 

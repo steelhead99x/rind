@@ -153,7 +153,8 @@ class Probe:
 
     def read(self):
         state = {"governor": read(self.governor_path) if self.governor_path else None}
-        temps = [int(read(p)) / 1000 for p in self.zones if (read(p) or "").lstrip("-").isdigit()]
+        raws = [read(p) or "" for p in self.zones]
+        temps = [int(raw) / 1000 for raw in raws if raw.lstrip("-").isdigit()]
         state["temp_c"] = round(max(temps), 1) if temps else None
         if self.throttle == "vcgencmd":
             state["throttle"] = parse_vcgencmd(br.output(["vcgencmd", "get_throttled"]))
@@ -215,20 +216,52 @@ def scrub_text(text, secrets):
     return text
 
 
-def scrub(value, secrets):
-    """`value` with every string in it, keys included, scrubbed."""
+def scrub(value, secrets, keep=frozenset()):
+    """`value` with every string in it scrubbed. Keys are scrubbed too, except
+    those in `keep`: the fixed schema keys this tool wrote itself, which an
+    account named `bench` must not turn into `<redacted>_app`."""
     if isinstance(value, str):
         return scrub_text(value, secrets)
     if isinstance(value, list):
-        return [scrub(v, secrets) for v in value]
+        return [scrub(v, secrets, keep) for v in value]
     if isinstance(value, dict):
-        return {scrub_text(k, secrets): scrub(v, secrets) for k, v in value.items()}
+        return {(k if k in keep else scrub_text(k, secrets)): scrub(v, secrets, keep) for k, v in value.items()}
     return value
 
 
-def leaks(value, secrets):
+def schema_keys(value):
+    """Every dict key in `value`."""
+    if isinstance(value, list):
+        return set().union(set(), *(schema_keys(v) for v in value))
+    if isinstance(value, dict):
+        return set(value).union(*(schema_keys(v) for v in value.values()))
+    return set()
+
+
+def without_keys(value, keep):
+    """`value` with the keys in `keep` renamed to a placeholder, so `leaks`
+    looks at them no more than `scrub` does."""
+    if isinstance(value, list):
+        return [without_keys(v, keep) for v in value]
+    if isinstance(value, dict):
+        return {("k" if k in keep else k): without_keys(v, keep) for k, v in value.items()}
+    return value
+
+
+def safe_host(host, hidden, fallback):
+    """The host name the result and its file both use. A name that scrubbing
+    would change (the machine's hostname, its username, an address) is
+    replaced by `fallback`, the CPU slug, when that is not identifying itself.
+    Returns the name and whether it was replaced; None when neither is safe."""
+    for name, replaced in ((host, False), (fallback, True)):
+        if name and scrub_text(name, hidden) == name and not leaks(name, hidden):
+            return name, replaced
+    return None, True
+
+
+def leaks(value, secrets, keep=frozenset()):
     """What scrubbing should have removed from `value` and did not."""
-    text = json.dumps(value, ensure_ascii=False)
+    text = json.dumps(without_keys(value, keep), ensure_ascii=False)
     found = [v for v in secrets if literal(v).search(text)]
     found += [m.group(0) for pattern, _ in PATTERNS for m in pattern.finditer(text)]
     return found
@@ -371,12 +404,21 @@ def run(args):
         fail("this machine has no machine id, so a name made from its CPU could be another machine's: pass --host NAME")
     cpu_info = br.cpu_metadata()
     host = br.resolve_host(args.host, cpu_info["model"])
+    hidden = secrets()
+    # One name for the result's `host` and for its file, that scrubbing leaves
+    # alone: an identifying --host would otherwise differ between the two.
+    named, replaced = safe_host(host, hidden, br.cpu_slug(cpu_info["model"]) if tag else None)
+    if named is None:
+        fail("the host name is the same as this machine's hostname, user, or address; pass a different --host NAME")
+    if replaced:
+        print(f"bench-app: the host name identifies this machine, so the result is named {named}", file=sys.stderr)
+        br.check_host_name(named)
+    host = named
     cpu = args.cpu if args.cpu is not None else fastest_cpu()
     if cpu is not None and not hasattr(os, "sched_setaffinity"):
         fail("--cpu needs an OS that can pin a process to a core")
     if cpu is not None and cpu not in os.sched_getaffinity(0):
         fail(f"--cpu {cpu} is not a core this process may run on")
-    hidden = secrets()
 
     env = dict(os.environ, CARGO_TERM_COLOR="never")
     env["CARGO_TARGET_DIR"] = os.path.abspath(args.target_dir)
@@ -432,8 +474,9 @@ def run(args):
     )
     if reason:
         result["reason"] = reason
-    result = scrub(result, hidden)
-    left = leaks(result, hidden)
+    keep = schema_keys(result)
+    result = scrub(result, hidden, keep)
+    left = leaks(result, hidden, keep)
     if left:
         fail(f"scrubbing left {len(left)} identifying value(s) in the result; nothing was written")
     if status == "ok" and br.unmeasured(result):
