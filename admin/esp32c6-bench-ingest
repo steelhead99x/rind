@@ -153,6 +153,8 @@ def parse(text):
     for b in blocks[1:]:
         if b != first:
             raise Refused("the log's summaries disagree: the board reset or ran different firmware")
+    if not first["rows"]:
+        raise Refused("the summary holds no benchmark rows")
     names = [k for k, _ in first["kat"]]
     if len(set(names)) != len(names):
         raise Refused("a known-answer check is repeated in one summary")
@@ -267,6 +269,7 @@ def selftest():
     refuses(first_row + first_row, "no complete")
     refuses(whole.replace("kats=1", "kats=2"), "no complete")
     refuses(whole + good, "mixes")
+    refuses("RIND-FW v1 done failed=0 cpu_mhz=160 rounds=7 kats=1 rows=0\nRIND-KAT v1 sha256 ok\n", "no benchmark rows")
     refuses(whole + whole.replace("cpu_mhz=160", "cpu_mhz=80"), "disagree")
     # A copy that declares more rows than it holds is cut off, not a disagreement.
     assert len(parse(whole + whole.replace("rows=2", "rows=3"))["results"]) == 2
