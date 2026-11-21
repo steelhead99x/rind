@@ -1,0 +1,226 @@
+#!/usr/bin/env python3
+"""Tests admin/bench-app's scrubbing, verdict, and throttle parsing, and that
+its result round-trips through admin/bench-report render.
+
+Usage: admin/bench-app-test
+"""
+
+import importlib.machinery
+import importlib.util
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import unittest
+
+sys.dont_write_bytecode = True
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+loader = importlib.machinery.SourceFileLoader("bench_app", os.path.join(HERE, "bench-app"))
+spec = importlib.util.spec_from_loader("bench_app", loader)
+app = importlib.util.module_from_spec(spec)
+loader.exec_module(app)
+
+SECRETS = ["devbox-7", "alice", "Home Net 5G"]
+
+
+def rounds(control, rind=100.0, throttled=None):
+    """Rounds with the given aws-lc-rs times on one operation, rind steady."""
+    out = []
+    for i, ns in enumerate(control):
+        out.append(
+            {
+                "ns": {"x25519-ecdh/aws-lc-rs": ns, "x25519-ecdh/rind": rind, "x25519-ecdh/ring": 120.0},
+                "throttled": throttled[i] if throttled else False,
+            }
+        )
+    return out
+
+
+class Scrub(unittest.TestCase):
+    def test_planted_leaks_are_removed(self):
+        planted = {
+            "os": "Ubuntu 24.04 (Linux 6.8.0) on devbox-7 as alice",
+            "path": "/home/user/rind/target/release/deps/x25519-0123",
+            "mac_path": "/Users/user/src/rind",
+            "win_path": "C:\\Users\\alice\\rind",
+            "root": "/root/.cargo/bin",
+            "addresses": ["192.0.2.20", "fe80::1c2b:3aff:fe4d:5e6f", "2001:0db8:0000:0000:0000:ff00:0042:8329", "02:00:00:aa:bb:cc"],
+            "email": "alice@example.org",
+            "wifi": "joined Home Net 5G",
+            "tokens": ["ghp_" + "A" * 36, "github_pat_" + "b" * 30, "xoxb-1234567890-abcdef", "AKIA" + "Q" * 16],
+            "uuid": "123e4567-e89b-12d3-a456-426614174000",
+            "udid": "00000000-0000000000000000",
+            "alice": "a key that is a username",
+        }
+        scrubbed = app.scrub(planted, SECRETS)
+        self.assertEqual(app.leaks(scrubbed, SECRETS), [])
+        text = json.dumps(scrubbed)
+        for value in ["devbox-7", "alice", "Home Net 5G", "192.0.2", "fe80", "02:00:00", "example.org", "ghp_", "AKIA", "123e4567", "00000000-0000"]:
+            self.assertNotIn(value, text)
+        self.assertEqual(scrubbed["path"], "~/rind/target/release/deps/x25519-0123")
+        self.assertEqual(scrubbed["root"], "~/.cargo/bin")
+
+    def test_leaks_finds_what_survives(self):
+        self.assertEqual(app.leaks({"host": "devbox-7"}, SECRETS), ["devbox-7"])
+        self.assertEqual(app.leaks({"ip": "192.0.2.7"}, SECRETS), ["192.0.2.7"])
+
+    def test_report_fields_survive(self):
+        kept = {
+            "commit": "0123456789abcdef0123456789abcdef01234567",
+            "started": "2026-11-19T20:46:33+00:00",
+            "cpu": {"model": "Raspberry Pi 5 Model B Rev 1.0", "slug": "cortex-a76"},
+            "toolchain": {"rustc": "rustc 1.95.0 (59807616e 2026-04-14)"},
+            "id": "aes128-gcm/aws-lc-rs/1350B",
+            "machine": "0a1b2c3d",
+        }
+        self.assertEqual(app.scrub(kept, ["pi", "bench"]), kept)
+        self.assertEqual(app.leaks(kept, ["pi", "bench"]), [])
+
+    def test_schema_keys_survive_an_account_named_bench(self):
+        result = {"host": "test-cpu", "bench_app": {"control_spread": 0.01}, "user": "bench"}
+        hidden = ["bench"]
+        keep = app.schema_keys(result)
+        scrubbed = app.scrub(result, hidden, keep)
+        self.assertEqual(scrubbed["bench_app"], {"control_spread": 0.01})
+        self.assertEqual(scrubbed["user"], app.REDACTED)
+        self.assertEqual(app.leaks(scrubbed, hidden, keep), [])
+        # Without the kept keys the schema key is rewritten, which is the bug.
+        self.assertIn("<redacted>_app", app.scrub(result, hidden))
+
+    def test_host_equal_to_the_hostname_is_replaced_in_name_and_file(self):
+        hidden = ["devbox-7", "alice"]
+        self.assertEqual(app.safe_host("test-cpu", hidden, "intel-x"), ("test-cpu", False))
+        for identifying in ["devbox-7", "alice", "alice-laptop", "192.0.2.7"]:
+            name, replaced = app.safe_host(identifying, hidden, "intel-x")
+            self.assertEqual((name, replaced), ("intel-x", True), identifying)
+            self.assertEqual(app.scrub_text(name, hidden), name)
+            self.assertRegex(name, r"[A-Za-z0-9][A-Za-z0-9._-]*")
+        self.assertEqual(app.safe_host("devbox-7", hidden, None), (None, True))
+        self.assertEqual(app.safe_host("devbox-7", hidden, "alice"), (None, True))
+
+    def test_short_values_match_whole_words(self):
+        self.assertEqual(app.scrub_text("Raspberry Pi; user pi; spake2plus", ["pi"]), "Raspberry Pi; user <redacted>; spake2plus")
+
+
+class Verdict(unittest.TestCase):
+    def test_steady_run_is_ok(self):
+        status, reason, clean = app.verdict(rounds([100, 100.5, 99.6, 100.2, 99.9, 100.1, 100.3]))
+        self.assertEqual((status, reason, clean), ("ok", "", list(range(7))))
+
+    def test_outlier_round_is_dropped(self):
+        status, _, clean = app.verdict(rounds([100, 100.5, 99.6, 100.2, 99.9, 100.1, 130]))
+        self.assertEqual((status, clean), ("ok", list(range(6))))
+
+    def test_one_slow_control_round_is_dropped(self):
+        # p256-ecdsa-sign's control on a laptop: one round 2.2% slow.
+        status, _, clean = app.verdict(rounds([1.000, 1.004, 0.998, 1.010, 1.022, 0.997, 0.997]))
+        self.assertEqual((status, clean), ("ok", [0, 1, 2, 3, 5, 6]))
+
+    def test_throttled_rounds_are_not_clean(self):
+        status, reason, clean = app.verdict(rounds([100] * 7, throttled=[True, True, True, False, False, False, False]))
+        self.assertEqual(status, "noisy")
+        self.assertIn("4 of 7 rounds clean", reason)
+        self.assertEqual(clean, [3, 4, 5, 6])
+
+    def test_unknown_throttle_counts_as_clean(self):
+        self.assertEqual(app.verdict(rounds([100] * 5, throttled=[None] * 5))[0], "ok")
+
+    def test_rounds_are_dropped_until_the_spread_fits(self):
+        # 100.999 / 99.001 is over 1.02, so the furthest round goes first.
+        status, _, clean = app.verdict(rounds([99.001, 99.5, 100, 100.5, 100.999, 100.2]))
+        self.assertEqual((status, clean), ("ok", [1, 2, 3, 4, 5]))
+
+    def test_a_scattered_control_is_noisy(self):
+        status, reason, clean = app.verdict(rounds([90, 95, 100, 105, 110, 115, 120]))
+        self.assertEqual(status, "noisy")
+        self.assertIn("rounds clean, fewer than 5", reason)
+        self.assertLess(len(clean), 5)
+
+    def test_no_control_is_noisy(self):
+        only = [{"ns": {"x25519-ecdh/rind": 1.0}, "throttled": False}] * 5
+        self.assertEqual(app.verdict(only)[0], "noisy")
+
+    def test_results_take_the_clean_median(self):
+        data = rounds([100, 100.5, 99.6, 100.2, 99.9, 100.1, 130])
+        data[6]["ns"]["x25519-ecdh/rind"] = 500.0
+        rows = {r["library"]: r for r in app.results_of(data, list(range(6)))}
+        self.assertEqual(rows["rind"]["ns"], 100.0)
+        self.assertEqual(rows["rind"]["rounds_ns"][-1], 500.0)
+        self.assertEqual(rows["aws-lc-rs"]["ns_high"], 100.5)
+
+
+class Throttle(unittest.TestCase):
+    def test_vcgencmd(self):
+        self.assertEqual(app.parse_vcgencmd("throttled=0x50005\n"), 0x50005)
+        self.assertFalse(app.vc_throttled(0x50000, 0x50000))
+        self.assertTrue(app.vc_throttled(0x0, 0x40000))
+        self.assertTrue(app.vc_throttled(0x0, 0x4))
+        with self.assertRaises(SystemExit):
+            app.parse_vcgencmd("error=1")
+
+    def test_pmset(self):
+        self.assertFalse(app.parse_pmset("Note: No thermal warning level has been recorded\n"))
+        self.assertTrue(app.parse_pmset("CPU_Scheduler_Limit \t= 100\nCPU_Speed_Limit \t= 72\n"))
+        self.assertTrue(app.parse_pmset("Thermal Warning Level = 2\n"))
+
+
+class Suite(unittest.TestCase):
+    def test_regex_matches_only_suite_rows(self):
+        import re
+
+        pattern = re.compile(app.suite_regex())
+        self.assertTrue(pattern.match("aes128-gcm/ring/1350B"))
+        self.assertTrue(pattern.match("mlkem768-decaps/rind"))
+        self.assertFalse(pattern.match("aes128-gcm/openssl/1350B"))
+        self.assertFalse(pattern.match("aes128-gcm/rind/16KB"))
+        self.assertFalse(pattern.match("x25519-ecdh/rind-dit-held"))
+
+
+class RoundTrip(unittest.TestCase):
+    def test_render_imports_and_checks_a_result(self):
+        """A copy of the report's inputs takes a bench-app result with
+        `render --from`, after which `render --check` passes."""
+        data = rounds([100, 100.5, 99.6, 100.2, 99.9])
+        result = {
+            "schema": 1,
+            "host": "test-cpu",
+            "machine": "0a1b2c3d",
+            "commit": "0123456789abcdef0123456789abcdef01234567",
+            "started": "2026-11-19T20:46:33+00:00",
+            "status": "ok",
+            "cpu": {"model": "Test CPU", "slug": "test-cpu", "arch": "x86_64", "logical_cpus": 4},
+            "os": "Test Linux (Linux 6.8)",
+            "toolchain": {"rustc": "rustc 1.95.0"},
+            "rind_cpu": {"cpuid": {}},
+            "load": {"noisy": False},
+            "results": app.results_of(data, list(range(5))),
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            listed = subprocess.run(
+                ["git", "-C", ROOT, "ls-files", "-z", "admin/bench-report", "BENCHMARKS.md", "README.md", "flake.nix", "benchmarks", "quest"],
+                capture_output=True,
+                check=True,
+            ).stdout
+            for name in filter(None, listed.decode().split("\0")):
+                dest = os.path.join(tmp, name)
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                shutil.copy2(os.path.join(ROOT, name), dest)
+            incoming = os.path.join(tmp, ".tmp", "in")
+            os.makedirs(incoming)
+            with open(os.path.join(incoming, "test-cpu.json"), "w") as f:
+                json.dump(app.scrub(result, SECRETS), f)
+            script = os.path.join(tmp, "admin", "bench-report")
+            imported = subprocess.run([sys.executable, script, "render", "--from", incoming], capture_output=True, text=True)
+            self.assertEqual(imported.returncode, 0, imported.stderr)
+            self.assertTrue(os.path.exists(os.path.join(tmp, "benchmarks", "data", "test-cpu.json")))
+            with open(os.path.join(tmp, "BENCHMARKS.md")) as f:
+                self.assertIn("test-cpu", f.read())
+            checked = subprocess.run([sys.executable, script, "render", "--check"], capture_output=True, text=True)
+            self.assertEqual(checked.returncode, 0, checked.stderr)
+
+
+if __name__ == "__main__":
+    unittest.main()
