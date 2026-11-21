@@ -2,10 +2,23 @@
 
 //! AES for the portable backend and armv7 without the crypto extension:
 //! aws-lc's bitsliced AES, several blocks a pass, with the round keys held
-//! bitsliced so each call skips that step.
+//! bitsliced so each call skips that step. 32-bit portable targets run
+//! RustCrypto's fixsliced AES instead, which takes about a third fewer
+//! instructions there (`aes_fixslice32`).
 
-use super::aes_nohw::{NohwKey, Schedule};
+#[cfg(all(rind_backend = "portable", target_pointer_width = "32"))]
+use super::aes_fixslice32::Schedule;
+#[cfg(not(all(rind_backend = "portable", target_pointer_width = "32")))]
+use super::aes_nohw::Schedule;
 use crate::low;
+
+/// Expands `key`, which must be 16, 24, or 32 bytes.
+fn schedule(key: &[u8]) -> Schedule {
+    #[cfg(all(rind_backend = "portable", target_pointer_width = "32"))]
+    return Schedule::new(key);
+    #[cfg(not(all(rind_backend = "portable", target_pointer_width = "32")))]
+    return super::aes_nohw::NohwKey::new(key).schedule();
+}
 
 /// An AES key that encrypts.
 pub(crate) struct AesKey(Schedule);
@@ -13,7 +26,7 @@ pub(crate) struct AesKey(Schedule);
 impl AesKey {
     /// Expands `key`, which must be 16, 24, or 32 bytes.
     pub(crate) fn new(key: &[u8]) -> Self {
-        Self(NohwKey::new(key).schedule())
+        Self(schedule(key))
     }
 
     #[must_use]
@@ -58,7 +71,7 @@ pub(crate) struct AesDecKey(Schedule);
 impl AesDecKey {
     /// Expands `key`, which must be 16, 24, or 32 bytes.
     pub(crate) fn new(key: &[u8]) -> Self {
-        Self(NohwKey::new(key).schedule())
+        Self(schedule(key))
     }
 
     pub(crate) fn decrypt_block(&self, inout: &mut [u8; 16]) {
