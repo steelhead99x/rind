@@ -1452,7 +1452,7 @@ mod tests {
             schedule.cbc_decrypt(&[1; 16], blocks);
             let mut block = schedule.encrypt_block(&blocks[0]);
             schedule.decrypt_block(&mut block);
-            let _ = into_public(block);
+            assert_eq!(into_public(block), into_public(blocks[0]));
         }
     }
 
