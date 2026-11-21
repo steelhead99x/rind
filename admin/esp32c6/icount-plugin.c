@@ -90,6 +90,10 @@ static void at_exit(void *udata) {
         return;
     }
     FILE *f = fopen(prof, "w");
+    if (!f) {
+        perror("icount-plugin: prof file");
+        return;
+    }
     GHashTableIter it;
     gpointer k, v;
     g_hash_table_iter_init(&it, pcs);

@@ -3,7 +3,7 @@
 //! AES for the portable backend and armv7 without the crypto extension:
 //! aws-lc's bitsliced AES, several blocks a pass, with the round keys held
 //! bitsliced so each call skips that step. 32-bit portable targets run
-//! RustCrypto's fixsliced AES instead, which takes about a third fewer
+//! RustCrypto's fixsliced AES instead, which takes about a fifth fewer
 //! instructions there (`aes_fixslice32`).
 
 #[cfg(all(rind_backend = "portable", target_pointer_width = "32"))]

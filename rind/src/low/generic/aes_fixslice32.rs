@@ -10,7 +10,7 @@
 //! Fixslicing leaves ShiftRows out of every round but each fourth, folding
 //! it into four variants of MixColumns that rotate by different distances,
 //! so a round costs the S-box circuit, eight word rotations, and XORs. On a
-//! 32-bit core without a rotate instruction that is about a third fewer
+//! 32-bit core without a rotate instruction that is about a fifth fewer
 //! instructions than aws-lc's bitsliced `aes_nohw` in its two-block
 //! configuration, which spends a ShiftRows of masks and shifts in every
 //! round.
