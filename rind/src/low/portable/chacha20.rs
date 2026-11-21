@@ -2,8 +2,17 @@
 
 //! ChaCha20 on HACL*'s verified rounds in `generic::chacha20`, one block at a
 //! time, as x86_64 runs it without SSSE3.
+//!
+//! On 32-bit targets the keystream goes from registers straight into the
+//! buffer a word at a time, never through a 64-byte array. On the ESP32-C6
+//! (riscv32imac, which has no fast misaligned loads) that array cost a fifth
+//! of each block's instructions: stored a byte at a time, then loaded back
+//! to XOR a byte at a time.
 
+#[cfg(not(target_pointer_width = "32"))]
 use crate::low::generic::chacha20;
+#[cfg(any(target_pointer_width = "32", test))]
+use crate::low::generic::chacha20::{SIGMA, rounds};
 
 pub(crate) struct ChaCha20 {
     key: [u32; 8],
@@ -23,9 +32,94 @@ impl ChaCha20 {
     /// XORs the keystream into `buffer`, starting at the current block, then
     /// moves the counter past every block it touched.
     pub(crate) fn cipher(&mut self, buffer: &mut [u8]) {
+        #[cfg(target_pointer_width = "32")]
+        cipher32(&self.key, &self.counter_nonce, buffer);
+        #[cfg(not(target_pointer_width = "32"))]
         chacha20::cipher(&self.key, &self.counter_nonce, buffer);
         self.counter_nonce[0] =
             self.counter_nonce[0].wrapping_add(buffer.len().div_ceil(64) as u32);
+    }
+}
+
+/// The keystream block for the state `input`, as words.
+#[cfg(any(target_pointer_width = "32", test))]
+#[inline(always)]
+fn keystream(input: &[u32; 16]) -> [u32; 16] {
+    let mut st = *input;
+    rounds(&mut st);
+    for (s, i) in st.iter_mut().zip(input) {
+        *s = s.wrapping_add(*i);
+    }
+    st
+}
+
+/// `generic::chacha20::cipher`: XORs the keystream for `key` and
+/// `counter_nonce` into `buffer`.
+///
+/// A whole block's words are read and written whole. Where the buffer does
+/// not start on a word, each word takes the keystream's bytes across two of
+/// its words, shifted by the misalignment, which is public. One keystream
+/// call site keeps one copy of the unrolled rounds in the instruction cache.
+#[cfg(any(target_pointer_width = "32", test))]
+fn cipher32(key: &[u32; 8], counter_nonce: &[u32; 4], buffer: &mut [u8]) {
+    let mut input = [0u32; 16];
+    input[..4].copy_from_slice(&SIGMA);
+    input[4..12].copy_from_slice(key);
+    input[12..].copy_from_slice(counter_nonce);
+
+    for chunk in buffer.chunks_mut(64) {
+        let ks = keystream(&input);
+        input[12] = input[12].wrapping_add(1);
+        // SAFETY: every bit pattern is a `u32`, so aligned bytes may be read
+        // and written as words.
+        let (head, words, tail) = unsafe { chunk.align_to_mut::<u32>() };
+        let at = head.len();
+        if let Ok(words) = <&mut [u32; 16]>::try_from(&mut *words) {
+            for (w, k) in words.iter_mut().zip(ks) {
+                *w = (u32::from_le(*w) ^ k).to_le();
+            }
+        } else if let (Ok(words), 1..4) = (<&mut [u32; 15]>::try_from(&mut *words), at) {
+            // The keystream from byte `at`, a word at a time; the bytes
+            // before it from the first word, and the bytes after from
+            // the last.
+            let (lo, hi) = (8 * at as u32, 32 - 8 * at as u32);
+            for (i, w) in words.iter_mut().enumerate() {
+                *w = (u32::from_le(*w) ^ (ks[i] >> lo | ks[i + 1] << hi)).to_le();
+            }
+            for (i, b) in head.iter_mut().enumerate() {
+                *b ^= (ks[0] >> (8 * i)) as u8;
+            }
+            for (i, b) in (at..).zip(tail) {
+                *b ^= (ks[15] >> (8 * i)) as u8;
+            }
+        } else {
+            // A short last block, or `align_to_mut` leaving more in `head`,
+            // as it may under Miri.
+            xor_any(head, words, tail, &{ ks });
+        }
+    }
+}
+
+/// XORs the keystream `ks` into `head`, then `words`, then `tail`, which are
+/// one run of at most 64 bytes.
+#[cfg(any(target_pointer_width = "32", test))]
+#[inline(never)]
+fn xor_any(head: &mut [u8], words: &mut [u32], tail: &mut [u8], ks: &[u32; 16]) {
+    let byte = |i: usize| (ks[i / 4] >> (8 * (i % 4))) as u8;
+    for (i, b) in head.iter_mut().enumerate() {
+        *b ^= byte(i);
+    }
+    let at = head.len();
+    for (i, w) in words.iter_mut().enumerate() {
+        let mut b = w.to_ne_bytes();
+        for (j, b) in b.iter_mut().enumerate() {
+            *b ^= byte(at + 4 * i + j);
+        }
+        *w = u32::from_ne_bytes(b);
+    }
+    let at = at + 4 * words.len();
+    for (i, b) in tail.iter_mut().enumerate() {
+        *b ^= byte(at + i);
     }
 }
 
@@ -37,4 +131,42 @@ fn words<const B: usize, const W: usize>(bytes: &[u8; B]) -> [u32; W] {
         *w = u32::from_le_bytes(*b);
     }
     words
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+    use crate::low::ct;
+    use crate::low::generic::chacha20::cipher;
+
+    // `cipher32` against `generic::chacha20::cipher`, the proven loop: every
+    // length up to 300 bytes, starting at each offset from a word, so the
+    // aligned, misaligned, and short-block paths all run, from a counter
+    // that wraps partway. The key and data are secret, so under
+    // `admin/ctgrind` this also checks this path is constant time in both.
+    #[test]
+    fn matches_generic() {
+        let key: [u8; 32] = core::array::from_fn(|i| (i as u8).wrapping_mul(0x9d) ^ 0x5a);
+        let mut nonce = [0u8; 16];
+        nonce[..4].copy_from_slice(&(u32::MAX - 2).to_le_bytes());
+        nonce[4..].copy_from_slice(b"rind nonce!!");
+        let data: Vec<u8> = (0..300u32).map(|i| (i * 31 + 7) as u8).collect();
+        for len in 0..=data.len() {
+            let mut want = data[..len].to_vec();
+            cipher(&words(&key), &words(&nonce), &mut want);
+            for offset in 0..4 {
+                let mut buf = vec![0u8; len + 8];
+                let start = buf.as_ptr().addr().wrapping_neg() % 4 + offset;
+                let got = &mut buf[start..start + len];
+                got.copy_from_slice(&data[..len]);
+                ct::secret_slice(&key);
+                ct::secret_slice(got);
+                cipher32(&words(&key), &words(&nonce), got);
+                ct::public_slice(&key);
+                ct::public_slice(got);
+                assert_eq!(got, &want[..], "{len} bytes at offset {offset}");
+            }
+        }
+    }
 }
