@@ -10,9 +10,9 @@
 //! signature), as is the public key, so they are marked defined before the test
 //! compares them. rind marks the keys it generates or parses itself.
 //!
-//! This host build checks the portable code the ESP32-C6 runs, on the host's
-//! word size and instruction set, not riscv32imac itself, which valgrind does
-//! not support.
+//! This host build checks the portable code the ESP32-C6 runs, as `admin/ctgrind`
+//! forces `rind_portable` and 32-bit limbs for this suite, on the host's
+//! instruction set, not riscv32imac itself, which valgrind does not support.
 #![cfg(feature = "sensor")]
 
 use crabgrind::memcheck::{self, MemState};
