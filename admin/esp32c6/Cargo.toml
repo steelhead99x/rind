@@ -39,6 +39,8 @@ ed25519 = []
 mlkem768 = []
 mldsa65 = []
 p256-ecdsa = []
+# Valgrind's requests for tests/ctgrind.rs, which `admin/ctgrind esp32c6` runs.
+ctgrind = ["rind/__ctgrind"]
 # The sensor example, which needs these three.
 sensor = ["ed25519", "chacha20poly1305", "hkdf-sha256"]
 
@@ -46,6 +48,11 @@ sensor = ["ed25519", "chacha20poly1305", "hkdf-sha256"]
 rind = { path = "../../rind" }
 linked_list_allocator = { version = "0.10", default-features = false, features = ["use_spin"], optional = true }
 getrandom = { version = "0.4", optional = true }
+
+[dev-dependencies]
+# Requests reach valgrind only once `rind/__ctgrind` turns on crabgrind's default
+# features, as `admin/ctgrind esp32c6` does; otherwise they build as no-ops.
+crabgrind = { version = "0.4", default-features = false }
 
 [profile.release]
 opt-level = 3
