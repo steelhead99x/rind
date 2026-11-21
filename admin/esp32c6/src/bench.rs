@@ -13,6 +13,8 @@
 //! the chip's timer.
 
 use alloc::{format, string::String, vec, vec::Vec};
+use core::hint::black_box;
+use core::num::NonZeroU32;
 
 /// A monotonic clock.
 pub trait Clock {
@@ -48,26 +50,32 @@ impl Row {
 }
 
 /// Times `rounds` rounds of `iters` calls of `f`, after one untimed call.
-/// `f` returns a value that is folded into a sink, so the call is not optimized away.
+/// Zero counts are unrepresentable: the parameters are non-zero.
+///
+/// `f` returns a value, and each call's value goes through `black_box` before
+/// it is folded into the sink, so the compiler cannot hoist the call out of the
+/// loop or collapse repeated calls. `f` must also pass its inputs through
+/// `black_box` (the rows in `run_all` do), so the inputs are not known to be
+/// the same on every call.
 pub fn time<C: Clock>(
     clock: &mut C,
     operation: &'static str,
-    rounds: u32,
-    iters: u32,
+    rounds: NonZeroU32,
+    iters: NonZeroU32,
     mut f: impl FnMut() -> u8,
 ) -> Row {
-    assert!(rounds > 0 && iters > 0);
-    let mut sink = f();
+    let (rounds, iters) = (rounds.get(), iters.get());
+    let mut sink = black_box(f());
     let mut per_call: Vec<u64> = vec![];
     for _ in 0..rounds {
         let start = clock.now_ns();
         for _ in 0..iters {
-            sink = sink.wrapping_add(f());
+            sink = sink.wrapping_add(black_box(f()));
         }
         let end = clock.now_ns();
         per_call.push(end.saturating_sub(start) / u64::from(iters));
     }
-    core::hint::black_box(sink);
+    black_box(sink);
     per_call.sort_unstable();
     Row {
         operation,
@@ -83,34 +91,40 @@ pub fn time<C: Clock>(
 /// operation's iteration count (1 for the full count) so a slow board can
 /// shorten a run without changing what it times.
 #[allow(unused_variables, unused_mut)]
-pub fn run_all<C: Clock>(clock: &mut C, rounds: u32, scale: u32, mut emit: impl FnMut(&Row)) {
+pub fn run_all<C: Clock>(clock: &mut C, rounds: NonZeroU32, scale: u32, mut emit: impl FnMut(&Row)) {
     let scale = scale.max(1);
-    let it = |n: u32| (n / scale).max(1);
+    let it = |n: u32| NonZeroU32::new(n / scale).unwrap_or(NonZeroU32::MIN);
     let buf = [0x5au8; 1350];
+    // The 32 B associated data rind-bench's AEAD rows use for the 1350 B size
+    // (`criterion::aead_rows`): all zeroes.
+    #[allow(dead_code)]
+    const AAD: [u8; 32] = [0; 32];
     let mut push = |r: Row| emit(&r);
     #[cfg(feature = "sha256")]
     push(time(clock, "sha256/{lib}/1350B", rounds, it(8), || {
-        rind::digest::digest(&rind::digest::SHA256, &buf).as_ref()[0]
+        rind::digest::digest(&rind::digest::SHA256, black_box(&buf)).as_ref()[0]
     }));
     #[cfg(feature = "sha512")]
     push(time(clock, "sha512/{lib}/1350B", rounds, it(8), || {
-        rind::digest::digest(&rind::digest::SHA512, &buf).as_ref()[0]
+        rind::digest::digest(&rind::digest::SHA512, black_box(&buf)).as_ref()[0]
     }));
     #[cfg(feature = "sha3-256")]
     push(time(clock, "sha3-256/{lib}/1350B", rounds, it(8), || {
-        rind::digest::digest(&rind::digest::SHA3_256, &buf).as_ref()[0]
+        rind::digest::digest(&rind::digest::SHA3_256, black_box(&buf)).as_ref()[0]
     }));
+    // The canonical row keys HMAC per message, as rind-bench/benches/hmac.rs
+    // does (its `reused-key` rows are separate), so the key is built inside.
     #[cfg(feature = "hmac-sha256")]
-    {
-        let key = rind::hmac::Key::new(&rind::hmac::HMAC_SHA256, &[1; 32]);
-        push(time(
-            clock,
-            "hmac-sha256/{lib}/1350B",
-            rounds,
-            it(8),
-            || rind::hmac::sign(&key, &buf).as_ref()[0],
-        ));
-    }
+    push(time(
+        clock,
+        "hmac-sha256/{lib}/1350B",
+        rounds,
+        it(8),
+        || {
+            let key = rind::hmac::Key::new(&rind::hmac::HMAC_SHA256, black_box(&[1; 32]));
+            rind::hmac::sign(&key, black_box(&buf)).as_ref()[0]
+        },
+    ));
     #[cfg(feature = "hkdf-sha256")]
     push(time(
         clock,
@@ -119,10 +133,10 @@ pub fn run_all<C: Clock>(clock: &mut C, rounds: u32, scale: u32, mut emit: impl 
         it(16),
         || {
             let mut out = [0u8; 32];
-            let _ = rind::hkdf::Salt::new(&rind::hkdf::HKDF_SHA256, &[2; 16])
-                .extract(&[3; 32])
+            let _ = rind::hkdf::Salt::new(&rind::hkdf::HKDF_SHA256, black_box(&[2; 16]))
+                .extract(black_box(&[3; 32]))
                 .and_then(|p| p.fill(&[b"info"], &mut out));
-            out[0]
+            black_box(out)[0]
         },
     ));
     #[cfg(feature = "chacha20poly1305")]
@@ -134,9 +148,9 @@ pub fn run_all<C: Clock>(clock: &mut C, rounds: u32, scale: u32, mut emit: impl 
             rounds,
             it(8),
             || {
-                let mut b = buf;
+                let mut b = *black_box(&buf);
                 let n = rind::aead::Nonce::assume_unique_for_key([0; 12]);
-                key.seal_in_place_separate_tag(n, &[], &mut b)
+                key.seal_in_place_separate_tag(n, black_box(&AAD), black_box(&mut b[..]))
                     .map_or(0, |t| t.as_ref()[0])
             },
         ));
@@ -145,9 +159,9 @@ pub fn run_all<C: Clock>(clock: &mut C, rounds: u32, scale: u32, mut emit: impl 
     {
         let key = rind::aead::Key::new(&rind::aead::AES_128_GCM, &[5; 16]).unwrap();
         push(time(clock, "aes128-gcm/{lib}/1350B", rounds, it(8), || {
-            let mut b = buf;
+            let mut b = *black_box(&buf);
             let n = rind::aead::Nonce::assume_unique_for_key([0; 12]);
-            key.seal_in_place_separate_tag(n, &[], &mut b)
+            key.seal_in_place_separate_tag(n, black_box(&AAD), black_box(&mut b[..]))
                 .map_or(0, |t| t.as_ref()[0])
         }));
     }
@@ -157,8 +171,8 @@ pub fn run_all<C: Clock>(clock: &mut C, rounds: u32, scale: u32, mut emit: impl 
         let a = PrivateKey::from_scalar(&X25519, &[9; 32]).unwrap();
         let b = PrivateKey::from_scalar(&X25519, &[10; 32]).unwrap();
         let bp = b.public_key().as_ref().to_vec();
-        push(time(clock, "x25519/{lib}", rounds, it(2), || {
-            a.agree(&bp).map_or(0, |s| s.as_ref()[0])
+        push(time(clock, "x25519-ecdh-stored/{lib}", rounds, it(2), || {
+            a.agree(black_box(&bp)).map_or(0, |s| s.as_ref()[0])
         }));
     }
     #[cfg(feature = "ed25519")]
@@ -171,10 +185,14 @@ pub fn run_all<C: Clock>(clock: &mut C, rounds: u32, scale: u32, mut emit: impl 
         let verify_msg = b"Test";
         let sig = kp.sign(verify_msg);
         push(time(clock, "ed25519-sign/{lib}", rounds, it(2), || {
-            kp.sign(sign_msg).as_ref()[0]
+            kp.sign(black_box(sign_msg)).as_ref()[0]
         }));
         push(time(clock, "ed25519-verify/{lib}", rounds, it(2), || {
-            u8::from(kp.public_key().verify(verify_msg, sig.as_ref()).is_ok())
+            u8::from(
+                kp.public_key()
+                    .verify(black_box(verify_msg), black_box(sig.as_ref()))
+                    .is_ok(),
+            )
         }));
     }
 }
@@ -182,6 +200,10 @@ pub fn run_all<C: Clock>(clock: &mut C, rounds: u32, scale: u32, mut emit: impl 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn nz(n: u32) -> NonZeroU32 {
+        NonZeroU32::new(n).unwrap()
+    }
 
     /// A clock that advances a fixed step per call, so `time` is exact.
     struct Step(u64, u64);
@@ -196,7 +218,7 @@ mod tests {
     fn the_median_is_the_middle_round_and_the_line_is_stable() {
         // Each round reads the clock twice, a step apart: 100 ns per round over 4 calls.
         let mut c = Step(0, 100);
-        let row = time(&mut c, "sha256/{lib}/1350B", 5, 4, || 1);
+        let row = time(&mut c, "sha256/{lib}/1350B", nz(5), nz(4), || 1);
         assert_eq!(row.median_ns, 25);
         assert_eq!(
             (row.min_ns, row.max_ns, row.rounds, row.iters),
@@ -217,7 +239,7 @@ mod tests {
                 self.0
             }
         }
-        assert_eq!(time(&mut Back(1000), "x", 3, 2, || 0).max_ns, 0);
+        assert_eq!(time(&mut Back(1000), "x", nz(3), nz(2), || 0).max_ns, 0);
     }
 
     #[test]
@@ -232,7 +254,7 @@ mod tests {
         }
         let mut c = Seq(vec![0, 10, 20, 1020, 2000, 2010], 0);
         // Rounds read (0,10), (20,1020), (2000,2010): 10, 1000, 10.
-        let r = time(&mut c, "x", 3, 1, || 0);
+        let r = time(&mut c, "x", nz(3), nz(1), || 0);
         assert_eq!((r.median_ns, r.min_ns, r.max_ns), (10, 10, 1000));
     }
 
@@ -240,7 +262,7 @@ mod tests {
     #[test]
     fn every_enabled_operation_emits_one_row() {
         let mut rows = vec![];
-        run_all(&mut Step(0, 1000), 3, 4, |r| rows.push(r.operation));
+        run_all(&mut Step(0, 1000), nz(3), 4, |r| rows.push(r.operation));
         assert_eq!(rows.len(), 10);
         assert!(rows.iter().all(|o| o.contains("{lib}")));
     }
