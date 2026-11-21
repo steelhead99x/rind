@@ -2706,7 +2706,9 @@ let STACK_RET = prove
    [REWRITE_TAC[VAL_WORD_NEG; VAL_WORD; DIMINDEX_64] THEN CONV_TAC NUM_REDUCE_CONV;
     ARITH_TAC]);;
 
-let AES_HW_CBC_ENCRYPT_DECRYPT_SUB_GOAL = `!buf n key ks r ivec iv inp enc pc stackpointer returnaddress.
+(* Decryption goal. C_ARGUMENTS [buf; buf; ...] specializes inp == out, since
+   the sole caller in rind (AesHwDecKey::cbc_decrypt) decrypts in place. *)
+let DEC_SUB_GOAL = `!buf n key ks r ivec iv inp enc pc stackpointer returnaddress.
   r IN {9,11,13} /\ LENGTH (ks:int128 list) = r + 2 /\ 16 * n < 2 EXP 64 /\
   val(word_zx enc:int32) = 0 /\
   ALL (nonoverlapping (buf:int64,16 * n))
@@ -2741,7 +2743,7 @@ let AES_HW_CBC_ENCRYPT_DECRYPT_SUB_GOAL = `!buf n key ks r ivec iv inp enc pc st
     MAYCHANGE [events])`;;
 
 let AES_HW_CBC_ENCRYPT_DECRYPT_SUBROUTINE_CORRECT = time prove
- (AES_HW_CBC_ENCRYPT_DECRYPT_SUB_GOAL,
+ (DEC_SUB_GOAL,
   REWRITE_TAC[ALL; C_ARGUMENTS; MAYCHANGE_REGS_AND_FLAGS_PERMITTED_BY_ABI] THEN
   REPEAT GEN_TAC THEN STRIP_TAC THEN
   SUBGOAL_THEN `nonoverlapping (buf:int64,16 * n) (key:int64,16 * (r + 2)) /\
