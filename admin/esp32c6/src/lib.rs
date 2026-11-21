@@ -26,10 +26,24 @@ pub struct Kat {
     pub run: fn() -> bool,
 }
 
-/// Every check the enabled features include, in a fixed order.
+/// The name of the check that is always present and does nothing. It keeps
+/// the runner's per-check loop (stack painting, scanning, reporting) in every
+/// build, so `admin/esp32c6-riscv32 size` charges that machinery to the
+/// harness baseline and not to whichever algorithm is built alone.
+pub const BASELINE: &str = "baseline";
+
+fn baseline() -> bool {
+    true
+}
+
+/// Every check the enabled features include, in a fixed order, after the
+/// no-op `baseline` check.
 pub fn all() -> Vec<Kat> {
     #[allow(unused_mut)]
-    let mut v = Vec::new();
+    let mut v = alloc::vec![Kat {
+        name: BASELINE,
+        run: baseline,
+    }];
     #[cfg(feature = "sha256")]
     v.push(Kat {
         name: "sha256",
@@ -343,11 +357,18 @@ pub fn sensor_round_trip() -> bool {
     true
 }
 
-#[cfg(all(test, feature = "all"))]
+#[cfg(test)]
 mod tests {
     #[test]
     fn every_known_answer_holds_on_the_host() {
-        for k in super::all() {
+        let checks = super::all();
+        // The baseline is always present, so a build with no algorithm
+        // feature would otherwise pass while running no vector at all.
+        assert!(
+            checks.len() > 1,
+            "no algorithm feature is enabled: run `cargo test` with the default features, or `--features sha256` and so on"
+        );
+        for k in checks {
             assert!((k.run)(), "{} failed", k.name);
         }
     }
