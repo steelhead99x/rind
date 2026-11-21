@@ -122,7 +122,9 @@ impl Row {
     }
 }
 
-/// Times `rounds` rounds of `iters` calls of `f`, after one untimed call.
+/// Times `rounds` rounds of `iters` calls of `f`, after two untimed calls:
+/// rind builds a key's reusable state, such as a verifying key's expanded
+/// matrix, on its second use, which would otherwise land in the first round.
 /// `f` returns a value that is folded into a sink, so the call is not optimized away.
 pub fn time<C: Clock>(
     clock: &mut C,
@@ -133,7 +135,7 @@ pub fn time<C: Clock>(
     mut f: impl FnMut() -> u8,
 ) -> Row {
     assert!(rounds > 0 && iters > 0);
-    let mut sink = f();
+    let mut sink = f().wrapping_add(f());
     let mut per_call: Vec<u64> = vec![];
     for _ in 0..rounds {
         let start = clock.now_ns();
@@ -379,12 +381,17 @@ pub fn run_all<C: Clock>(clock: &mut C, rounds: u32, scale: u32, mut emit: impl 
         let kp = KeyPair::<MlDsa65>::generate().unwrap();
         let sig = kp.sign(&buf[..64]).unwrap();
         let pk = PublicKey::<MlDsa65>::new(kp.public_key().as_ref()).unwrap();
+        // Signing draws fresh randomness, so each call runs a random number
+        // of rejection-sampling attempts (about 5 on average for ML-DSA-65,
+        // one about a fifth of the time): one call a round makes the median
+        // a draw from a spread of ten times or more. 16 calls a round time
+        // the mean instead.
         push!(time(
             clock,
             "mldsa65-sign/{lib}",
             "rind",
             rounds,
-            it(1),
+            it(16),
             || kp.sign(&buf[..64]).map_or(0, |s| s.as_ref()[0]),
         ));
         push!(time(
