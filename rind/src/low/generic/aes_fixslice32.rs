@@ -1429,6 +1429,23 @@ impl Schedule {
                 }
             }
         };
+        // Where `inout` is word-aligned, which is public, whole pairs XOR
+        // as words: on riscv32imac a byte array's words otherwise load and
+        // store a byte at a time.
+        // SAFETY: every bit pattern is a valid `u32`.
+        let (head, aligned, _) = unsafe { inout.align_to_mut::<[u32; 8]>() };
+        let inout = if head.is_empty() {
+            for pair in aligned.iter_mut() {
+                let ks = keystream();
+                for (j, w) in pair.iter_mut().enumerate() {
+                    *w ^= ks[(j % 4) * 2 + j / 4].to_le();
+                }
+            }
+            let done = 32 * aligned.len();
+            &mut inout[done..]
+        } else {
+            inout
+        };
         let (pairs, tail) = inout.as_chunks_mut::<32>();
         for pair in pairs {
             let ks = keystream();
@@ -1546,12 +1563,25 @@ mod tests {
                     let input = bytes(len, seed);
                     let mut want = input.clone();
                     nohw.ctr32(&ivec, &mut want);
-                    let mut got = input;
+                    let mut got = input.clone();
                     fix.ctr32(&ivec, &mut got);
                     assert_eq!(
                         got, want,
                         "{key_len}-byte key, counter {counter}, {len} bytes"
                     );
+                    // Off word alignment, so the byte path runs too; and
+                    // aligned, so the word path does, whichever the
+                    // allocator gave `got`.
+                    for offset in 1..4 {
+                        let mut buf = vec![0u8; len + 4];
+                        buf[offset..offset + len].copy_from_slice(&input);
+                        fix.ctr32(&ivec, &mut buf[offset..offset + len]);
+                        assert_eq!(
+                            buf[offset..offset + len],
+                            want[..],
+                            "{key_len}-byte key, counter {counter}, {len} bytes at {offset}"
+                        );
+                    }
                 }
             }
             for blocks in [0, 1, 2, 3, 17] {
