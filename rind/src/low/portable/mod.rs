@@ -33,3 +33,6 @@ pub(crate) mod keccak;
 pub(crate) mod poly1305;
 #[cfg(rind_backend = "portable")]
 pub(crate) mod sha;
+#[cfg(any(all(rind_backend = "portable", target_pointer_width = "32"), test))]
+#[path = "../generic/words32.rs"]
+mod words32;

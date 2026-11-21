@@ -16,14 +16,29 @@
 //! formally verified: its correctness rests on its use and testing in
 //! BoringSSL and aws-lc, and on rind's tests of it against SSSE3, the
 //! portable model, Wycheproof, and aws-lc-rs.
+//!
+//! The portable backend on 32-bit targets multiplies differently, in rind's
+//! own arrangement of the same idea ([`polyval_k16`]): Karatsuba three
+//! levels down to 27 products of 16-bit halves, each by nine 32-bit `mul`s
+//! of operands masked to every third bit, whose whole product fits the low
+//! word. riscv32imac then needs no `mulhu`, which a fit of ESP32-C6 board
+//! timings puts at about one cycle more than `mul`, and the key's halves
+//! are split and masked once, when the key is set. Its timing likewise rests on `mul` taking the
+//! same time for every operand.
 
 use crate::low;
 
 /// A GHASH key as POLYVAL multiplies by it: aws-lc's `u128 Htable[16]`'s
 /// first entry, the only one it uses, holding H times x.
 pub(crate) struct NohwTable {
+    #[cfg(not(all(rind_backend = "portable", target_pointer_width = "32")))]
     hi: u64,
+    #[cfg(not(all(rind_backend = "portable", target_pointer_width = "32")))]
     lo: u64,
+    /// The same key as [`leaves`] splits it, each leaf masked by [`M0`],
+    /// [`M1`], and [`M2`], for [`polyval_k16`].
+    #[cfg(all(rind_backend = "portable", target_pointer_width = "32"))]
+    leaves: Leaves,
 }
 
 impl NohwTable {
@@ -44,11 +59,33 @@ impl NohwTable {
         // conditionally add 0xc200...0001.
         lo ^= carry & 1;
         hi ^= carry & 0xc200_0000_0000_0000;
-        Self { hi, lo }
+        #[cfg(not(all(rind_backend = "portable", target_pointer_width = "32")))]
+        return Self { hi, lo };
+        #[cfg(all(rind_backend = "portable", target_pointer_width = "32"))]
+        return Self {
+            leaves: key_leaves(hi, lo),
+        };
     }
 
     /// Folds whole blocks of `input` into the GHASH state `xi`, held in the
     /// byte order of a block.
+    #[cfg(all(rind_backend = "portable", target_pointer_width = "32"))]
+    pub(crate) fn ghash(&self, xi: &mut [u8; 16], input: &[[u8; 16]]) {
+        let mut x = [
+            be_word(xi, 0),
+            be_word(xi, 1),
+            be_word(xi, 2),
+            be_word(xi, 3),
+        ];
+        polyval_k16(&mut x, input, &self.leaves);
+        for (i, w) in x.iter().enumerate() {
+            xi[12 - 4 * i..16 - 4 * i].copy_from_slice(&w.to_be_bytes());
+        }
+    }
+
+    /// Folds whole blocks of `input` into the GHASH state `xi`, held in the
+    /// byte order of a block.
+    #[cfg(not(all(rind_backend = "portable", target_pointer_width = "32")))]
     pub(crate) fn ghash(&self, xi: &mut [u8; 16], input: &[[u8; 16]]) {
         let x = u128::from_be_bytes(*xi);
         let mut swapped = [x as u64, (x >> 64) as u64];
@@ -72,7 +109,7 @@ impl Drop for NohwTable {
 
 impl low::generic::zeroise::Zeroable for NohwTable {}
 
-#[cfg(target_pointer_width = "32")]
+#[cfg(all(target_pointer_width = "32", not(rind_backend = "portable")))]
 use gcm_mul64_split as gcm_mul64_nohw;
 #[cfg(not(target_pointer_width = "32"))]
 use gcm_mul64_wide as gcm_mul64_nohw;
@@ -125,14 +162,12 @@ fn gcm_mul64_wide(a: u64, b: u64) -> (u64, u64) {
     (lo, hi)
 }
 
-/// The carry-less product of `a` and `b`, by 32-bit multiplies.
-///
-/// Out of line: inlined three times into `gcm_mul64_split`, LLVM issues all
-/// 96 multiplies before their XORs and spills most products, which on
-/// riscv32imac took 250 of that function's 560 instructions in loads and
-/// stores, and 14% more instructions per GHASH block than calling this.
-#[cfg(any(target_pointer_width = "32", test))]
-#[cfg_attr(rind_backend = "portable", inline(never))]
+/// The carry-less product of `a` and `b`, by 32-bit multiplies, for
+/// armv7's portable path. The portable backend on 32-bit targets
+/// multiplies by [`polyval_k16`] instead: there, out of line, this took 16
+/// `mulhu` a call on riscv32imac, and inlined three times into
+/// `gcm_mul64_split`, LLVM issued all 96 multiplies first and spilled.
+#[cfg(any(all(target_pointer_width = "32", not(rind_backend = "portable")), test))]
 fn gcm_mul32_nohw(a: u32, b: u32) -> u64 {
     // One term every four bits means the largest term is 32/4 = 8, which
     // does not overflow into the next term.
@@ -158,9 +193,140 @@ fn gcm_mul32_nohw(a: u32, b: u32) -> u64 {
         | (c3 & 0x8888_8888_8888_8888)
 }
 
+/// Every third bit of a word, from bit 0; [`M1`] and [`M2`] from bits 1
+/// and 2.
+#[cfg(any(all(rind_backend = "portable", target_pointer_width = "32"), test))]
+const M0: u32 = 0x4924_9249;
+#[cfg(any(all(rind_backend = "portable", target_pointer_width = "32"), test))]
+const M1: u32 = M0 << 1;
+#[cfg(any(all(rind_backend = "portable", target_pointer_width = "32"), test))]
+const M2: u32 = M0 << 2;
+
+/// A 128-bit operand's 27 Karatsuba leaves, 16 bits each, the key's held
+/// masked by [`M0`], [`M1`], and [`M2`].
+#[cfg(any(all(rind_backend = "portable", target_pointer_width = "32"), test))]
+type Leaves = [[u32; 3]; 27];
+
+/// The 16-bit operands of the 27 carry-less multiplies Karatsuba splits a
+/// 128-bit product into, three levels down, from `x`'s words least
+/// significant first. Leaf `9i + 3j + k` is half `k` of half `j` of half
+/// `i`, where half 0 is the low one, 1 the high one, and 2 their sum.
+#[cfg(any(all(rind_backend = "portable", target_pointer_width = "32"), test))]
+fn leaves(x: [u32; 4]) -> [u32; 27] {
+    let mut out = [0u32; 27];
+    let h64 = [[x[0], x[1]], [x[2], x[3]], [x[0] ^ x[2], x[1] ^ x[3]]];
+    for (i, h) in h64.iter().enumerate() {
+        for (j, w) in [h[0], h[1], h[0] ^ h[1]].into_iter().enumerate() {
+            out[9 * i + 3 * j] = w & 0xffff;
+            out[9 * i + 3 * j + 1] = w >> 16;
+            out[9 * i + 3 * j + 2] = (w ^ (w >> 16)) & 0xffff;
+        }
+    }
+    out
+}
+
+/// The key `hi x^64 + lo`'s [`Leaves`].
+#[cfg(any(all(rind_backend = "portable", target_pointer_width = "32"), test))]
+fn key_leaves(hi: u64, lo: u64) -> Leaves {
+    leaves([lo as u32, (lo >> 32) as u32, hi as u32, (hi >> 32) as u32])
+        .map(|y| [y & M0, y & M1, y & M2])
+}
+
+/// The carry-less product of 16-bit `x` and the 16-bit `y` split by
+/// [`M0`], [`M1`], and [`M2`], by 32-bit multiplies alone.
+///
+/// Operands masked to every third bit hold at most six terms each, so a
+/// product's sum at any bit is at most six: three bits, which never carry
+/// into the next bit of the same residue mod 3, the only one kept. Both
+/// operands below 2^16 keep the product within 32 bits, so the low-word
+/// `mul` gives all of it, with no `mulhu`.
+#[cfg(any(all(rind_backend = "portable", target_pointer_width = "32"), test))]
+#[inline(always)]
+fn clmul16(x: u32, y: &[u32; 3]) -> u32 {
+    let (x0, x1, x2) = (x & M0, x & M1, x & M2);
+    let [y0, y1, y2] = *y;
+    let m = |a: u32, b: u32| a.wrapping_mul(b);
+    let z0 = m(x0, y0) ^ m(x1, y2) ^ m(x2, y1);
+    let z1 = m(x0, y1) ^ m(x1, y0) ^ m(x2, y2);
+    let z2 = m(x0, y2) ^ m(x1, y1) ^ m(x2, y0);
+    (z0 & M0) | (z1 & M1) | (z2 & M2)
+}
+
+/// The carry-less product of `w` and the key's 32-bit operand whose
+/// leaves are `h`, as its low and high words.
+#[cfg(any(all(rind_backend = "portable", target_pointer_width = "32"), test))]
+#[inline(always)]
+fn kara32(w: u32, h: &[[u32; 3]]) -> (u32, u32) {
+    let lo = clmul16(w & 0xffff, &h[0]);
+    let hi = clmul16(w >> 16, &h[1]);
+    let mid = clmul16((w ^ (w >> 16)) & 0xffff, &h[2]) ^ lo ^ hi;
+    (lo ^ (mid << 16), hi ^ (mid >> 16))
+}
+
+/// Word `i` of a GHASH block, counting from its least significant end as
+/// POLYVAL orders a block's bits.
+#[cfg(any(all(rind_backend = "portable", target_pointer_width = "32"), test))]
+#[inline(always)]
+fn be_word(b: &[u8; 16], i: usize) -> u32 {
+    u32::from_be_bytes([b[12 - 4 * i], b[13 - 4 * i], b[14 - 4 * i], b[15 - 4 * i]])
+}
+
+/// Folds each block of `input` into `x` and multiplies it by the key in
+/// POLYVAL's field, by the key's [`Leaves`]: 27 [`clmul16`]s, Karatsuba's
+/// sums back up the three levels, and the reduction of `gcm_polyval_nohw`.
+///
+/// The nine 32-bit products run in a loop, each from memory to memory:
+/// unrolled, LLVM issues the 243 multiplies first and spills most of them.
+#[cfg(any(all(rind_backend = "portable", target_pointer_width = "32"), test))]
+#[inline(never)]
+fn polyval_k16(x: &mut [u32; 4], input: &[[u8; 16]], h: &Leaves) {
+    let mut p = [(0u32, 0u32); 9];
+    for block in input {
+        for (i, x) in x.iter_mut().enumerate() {
+            *x ^= be_word(block, i);
+        }
+        // The nine 32-bit operands, as `leaves` splits `x`.
+        let (s0, s1) = (x[0] ^ x[2], x[1] ^ x[3]);
+        let w = [
+            x[0],
+            x[1],
+            x[0] ^ x[1],
+            x[2],
+            x[3],
+            x[2] ^ x[3],
+            s0,
+            s1,
+            s0 ^ s1,
+        ];
+        for (i, (p, w)) in p.iter_mut().zip(w).enumerate() {
+            *p = kara32(w, &h[3 * i..3 * i + 3]);
+        }
+        let kara64 = |l: (u32, u32), h: (u32, u32), m: (u32, u32)| {
+            let (m0, m1) = (m.0 ^ l.0 ^ h.0, m.1 ^ l.1 ^ h.1);
+            let lo = u64::from(l.0) | u64::from(l.1 ^ m0) << 32;
+            let hi = u64::from(h.0 ^ m1) | u64::from(h.1) << 32;
+            (lo, hi)
+        };
+        let (r0, mut r1) = kara64(p[0], p[1], p[2]);
+        let (mut r2, mut r3) = kara64(p[3], p[4], p[5]);
+        let (mut mid0, mut mid1) = kara64(p[6], p[7], p[8]);
+        mid0 ^= r0 ^ r2;
+        mid1 ^= r1 ^ r3;
+        r2 ^= mid1;
+        r1 ^= mid0;
+
+        // As `gcm_polyval_nohw` reduces.
+        r1 ^= (r0 << 63) ^ (r0 << 62) ^ (r0 << 57);
+        r2 ^= r0 ^ (r0 >> 1) ^ (r0 >> 2) ^ (r0 >> 7);
+        r2 ^= (r1 << 63) ^ (r1 << 62) ^ (r1 << 57);
+        r3 ^= r1 ^ (r1 >> 1) ^ (r1 >> 2) ^ (r1 >> 7);
+        *x = [r2 as u32, (r2 >> 32) as u32, r3 as u32, (r3 >> 32) as u32];
+    }
+}
+
 /// The carry-less product of `a` and `b`, as its low and high words, by
 /// Karatsuba over 32-bit halves.
-#[cfg(any(target_pointer_width = "32", test))]
+#[cfg(any(all(target_pointer_width = "32", not(rind_backend = "portable")), test))]
 fn gcm_mul64_split(a: u64, b: u64) -> (u64, u64) {
     let (a0, a1) = (a as u32, (a >> 32) as u32);
     let (b0, b1) = (b as u32, (b >> 32) as u32);
@@ -171,6 +337,7 @@ fn gcm_mul64_split(a: u64, b: u64) -> (u64, u64) {
 }
 
 /// Multiplies `xi` by `h` in POLYVAL's field.
+#[cfg(not(all(rind_backend = "portable", target_pointer_width = "32")))]
 fn gcm_polyval_nohw(xi: &mut [u64; 2], h: &NohwTable) {
     // Karatsuba multiplication. The product of `xi` and `h` is stored in `r0`
     // through `r3`. Note there is no byte or bit reversal because we are
@@ -249,6 +416,81 @@ mod tests {
             gcm_mul64_wide(u64::MAX, u64::MAX),
             gcm_mul64_split(u64::MAX, u64::MAX)
         );
+    }
+
+    // The 32-bit portable multiply against GHASH by the book, on every
+    // target, so 64-bit hosts test it too: from pseudo-random and all-ones
+    // keys, states, and blocks, whose products carry furthest within a
+    // residue class, and for each block count up to three.
+    #[test]
+    fn k16_matches_model() {
+        let mut x = 0x2545_f491_4f6c_dd1du64;
+        let mut next = || {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            x
+        };
+        for ones in [true, false] {
+            for _ in 0..200 {
+                let mut word = || if ones { u64::MAX } else { next() };
+                let key = (u128::from(word()) << 64 | u128::from(word())).to_be_bytes();
+                let start = (u128::from(word()) << 64 | u128::from(word())).to_be_bytes();
+                let blocks = [0, 1, 2, 3]
+                    .map(|_| (u128::from(word()) << 64 | u128::from(word())).to_be_bytes());
+
+                // `NohwTable::new`'s mulX_POLYVAL of the key.
+                let h = u128::from_be_bytes(key);
+                let carry = 0u128.wrapping_sub(h >> 127);
+                let h = (h << 1) ^ (carry & (0xc2u128 << 120 | 1));
+                let leaves = key_leaves((h >> 64) as u64, h as u64);
+
+                for n in 0..=3 {
+                    let mut got = [
+                        be_word(&start, 0),
+                        be_word(&start, 1),
+                        be_word(&start, 2),
+                        be_word(&start, 3),
+                    ];
+                    polyval_k16(&mut got, &blocks[..n], &leaves);
+
+                    let mut flat = blocks[..n].concat();
+                    for (f, s) in flat.iter_mut().zip(start) {
+                        *f ^= s;
+                    }
+                    let mut want = start;
+                    if n > 0 {
+                        let table = model::GhashTable::new(u128::from_be_bytes(key));
+                        let mut model = model::Ghash::new(&table);
+                        model.add(&flat);
+                        want = model.into_bytes();
+                    }
+                    let want = [
+                        be_word(&want, 0),
+                        be_word(&want, 1),
+                        be_word(&want, 2),
+                        be_word(&want, 3),
+                    ];
+                    assert_eq!(got, want, "{n} blocks");
+                }
+                if ones {
+                    break;
+                }
+            }
+        }
+    }
+
+    // Under ctgrind, with the key, state, and blocks secret, no branch or
+    // memory index of the 32-bit portable multiply or its key setup depends
+    // on them.
+    #[test]
+    fn k16_constant_time() {
+        use crate::low::ct::{into_public, into_secret};
+        let leaves = key_leaves(into_secret(0x0123_4567_89ab_cdef), into_secret(0x0fed_cba9));
+        let mut x = into_secret([1u32, 2, 3, 4]);
+        let blocks = into_secret([[0x5au8; 16]; 3]);
+        polyval_k16(&mut x, &blocks, &leaves);
+        assert_ne!(into_public(x), [0; 4]);
     }
 
     // On x86_64, the SSSE3 table is the arm above this one, and the model
