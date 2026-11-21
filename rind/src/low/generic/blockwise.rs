@@ -61,7 +61,7 @@ impl<const N: usize> Blockwise<N> {
     // Only Poly1305 uses it.
     #[cfg(any(
         rind_backend = "x86_64",
-        all(rind_backend = "portable", target_pointer_width = "64"),
+        rind_backend = "portable",
         all(rind_backend = "aarch64", test)
     ))]
     pub(crate) fn add_leading<'a>(&mut self, bytes: &'a [u8]) -> &'a [u8] {
@@ -80,7 +80,7 @@ impl<const N: usize> Blockwise<N> {
     // Only Poly1305 uses it.
     #[cfg(any(
         rind_backend = "x86_64",
-        all(rind_backend = "portable", target_pointer_width = "64"),
+        rind_backend = "portable",
         all(rind_backend = "aarch64", test)
     ))]
     pub(crate) fn take(&mut self) -> Option<[u8; N]> {
@@ -95,7 +95,7 @@ impl<const N: usize> Blockwise<N> {
     // Only Poly1305's tail reads it.
     #[cfg(any(
         rind_backend = "x86_64",
-        all(rind_backend = "portable", target_pointer_width = "64"),
+        rind_backend = "portable",
         all(rind_backend = "aarch64", test)
     ))]
     pub(crate) fn peek_remaining(&self) -> Option<&[u8]> {
@@ -114,7 +114,7 @@ impl<const N: usize> Blockwise<N> {
     // Only Poly1305 uses it.
     #[cfg(any(
         rind_backend = "x86_64",
-        all(rind_backend = "portable", target_pointer_width = "64"),
+        rind_backend = "portable",
         all(rind_backend = "aarch64", test)
     ))]
     pub(crate) fn add_trailing(&mut self, trailing: &[u8]) {
