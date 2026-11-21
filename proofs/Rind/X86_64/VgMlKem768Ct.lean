@@ -15,7 +15,9 @@ leakage trace, its addresses and branches, depends only on what its contract
 declares public (`VG.ConstantTime`, which `VG.Verified` is made of, in the
 vendored `VerifiedGarbage/TCB/Code.lean`, over the vendored
 `VerifiedGarbage/TCB/Artifact.lean`'s `Sig.contract`): `ρ`, which is in the
-encapsulation key, and no secret. Each says nothing about rind's Rust
+encapsulation key, and no secret. `vg_mlkem768_check_ek` and its AVX2 variant
+have no such axiom: they read only the encapsulation key, which is public, so
+what they leak is no secret's. Each says nothing about rind's Rust
 wrapper, nor about what its routine returns.
 
 The code is VG's own term, `VG.Impl.*` as `admin/import-vg-models` vendors it,

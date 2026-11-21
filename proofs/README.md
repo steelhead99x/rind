@@ -1379,7 +1379,9 @@ proof after those.
   state the leakage of those routines over `verified-garbage/Cosim/Progs.lean`
   (`Cosim/PrintMain.lean`'s `vg-print` prints them for `admin/vg-bytes`), and
   `Rind/X86_64/VgMlKem768Ct.lean`, the ten that state ML-KEM-768's over
-  `Cosim/ProgsX86_64.lean`.
+  `Cosim/ProgsX86_64.lean`; `Rind/VgOutcome.lean` and
+  `Rind/<Arch>/VgMlKem.lean`, the axioms restating what VG's ML-KEM-768
+  routines return.
 - `Rind/Rsa.lean` and `Rind/RsaLemmas.lean`: RFC 8017's verification,
   transliterated, and its lemmas; `Rind/X86_64/{RsaBytes,RsaMont,RsaPublic,RsaKey,RsaVerify,RsaPss}.lean`:
   the RSA verification proof, on x86_64 alone, and
