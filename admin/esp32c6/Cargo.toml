@@ -4,7 +4,7 @@ version = "0.0.0"
 edition = "2024"
 rust-version = "1.95"
 publish = false
-description = "Known-answer checks, stack and heap probes, and a sensor example for rind on riscv32imac (ESP32-C6). Not yet measured on hardware."
+description = "Known-answer checks, stack and heap probes, and a sensor example for rind on riscv32imac (ESP32-C6). Measured on hardware once (see benchmarks/esp32c6.md)."
 
 # Its own workspace and lockfile: nothing here builds for the host's gate
 # except `cargo test`, and the firmware target needs flags the workspace lacks.
@@ -25,7 +25,7 @@ default = []
 qemu = ["dep:linked_list_allocator", "dep:getrandom"]
 # One feature per algorithm, so `admin/esp32c6-riscv32 size` can build each
 # alone and take its code size as the difference from the empty build.
-all = ["sha256", "sha512", "sha3-256", "hmac-sha256", "hkdf-sha256", "chacha20poly1305", "aes128-gcm", "aes256-gcm", "x25519", "ed25519", "mlkem768", "mldsa65", "p256-ecdsa", "sensor"]
+all = ["sha256", "sha512", "sha3-256", "hmac-sha256", "hkdf-sha256", "chacha20poly1305", "aes128-gcm", "aes256-gcm", "x25519", "ed25519", "mlkem768", "mldsa65", "p256-ecdsa", "sensor", "sha1", "md5", "pbkdf2-sha256", "p256-ecdh"]
 sha256 = []
 sha512 = []
 sha3-256 = []
@@ -39,10 +39,25 @@ ed25519 = []
 mlkem768 = []
 mldsa65 = []
 p256-ecdsa = []
+sha1 = []
+md5 = []
+pbkdf2-sha256 = []
+p256-ecdh = []
 # The sensor example, which needs these three.
+# Times the libraries above next to rind, for the operations both have.
+compare = ["dep:sha2", "dep:sha3", "dep:hmac", "dep:chacha20poly1305", "dep:aes-gcm", "dep:ed25519-dalek", "dep:x25519-dalek"]
 sensor = ["ed25519", "chacha20poly1305", "hkdf-sha256"]
 
 [dependencies]
+# The comparison libraries, default features off, only with `compare`. Each is
+# one that admin/esp32c6-vendors found builds for riscv32imac out of the box.
+sha2 = { version = "0.11", default-features = false, optional = true }
+sha3 = { version = "0.12", default-features = false, optional = true }
+hmac = { version = "0.13", default-features = false, optional = true }
+chacha20poly1305 = { version = "0.11", default-features = false, features = ["alloc"], optional = true }
+aes-gcm = { version = "0.11", default-features = false, features = ["aes", "alloc"], optional = true }
+ed25519-dalek = { version = "3", default-features = false, optional = true }
+x25519-dalek = { version = "3", default-features = false, optional = true }
 rind = { path = "../../rind" }
 linked_list_allocator = { version = "0.10", default-features = false, features = ["use_spin"], optional = true }
 getrandom = { version = "0.4", optional = true }

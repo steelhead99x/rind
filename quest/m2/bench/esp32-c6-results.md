@@ -2,7 +2,7 @@
 
 ## Goal
 
-`benchmarks/esp32c6.md` holds rind's ESP32-C6 results: the measured-without-the-board table (code, static RAM, stack, heap, from qemu-user and section sizes) and the on-board table (time per operation, rounds, medians, clock, supply, temperature). Every cell is a number a command produced, or `TODO`. The board table stays `TODO` until [the firmware](/quest/m2/bench/esp32-c6-bench.md) has run on the board.
+`benchmarks/esp32c6.md` holds rind's ESP32-C6 results: the measured-without-the-board table (code, static RAM, stack, heap, from qemu-user and section sizes) and the on-board table (time per operation, rounds, medians, clock, supply, temperature). Every cell is a number a command produced, or `TODO`. The board tables were filled from one run of [the firmware](/quest/m2/bench/esp32-c6-bench.md) on a board in the compare PR; cells for operations the firmware does not time stay `TODO`.
 
 ## Plan
 

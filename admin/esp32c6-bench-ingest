@@ -10,7 +10,11 @@ LOG holds the lines the firmware (admin/esp32c6/firmware) prints:
 
   RIND-FW v1 done failed=<n> cpu_mhz=<n> rounds=<n>
   RIND-KAT v1 <algorithm> ok|FAIL
-  RIND-BENCH v1 <operation> median_ns=<n> min_ns=<n> max_ns=<n> rounds=<n> iters=<n>
+  RIND-BENCH v1 <operation> lib=<library> median_ns=<n> min_ns=<n> max_ns=<n> rounds=<n> iters=<n>
+  RIND-BENCH v1 <operation> lib=<library> size_failure=heap|stack need=<n> have=<n>
+
+A size_failure row is an operation the board had too little heap or stack for;
+it is kept as a result with `status` `size-failure` and no time.
 
 The firmware repeats its summary every five seconds, so a log holds several
 copies; they must agree row for row, and the first is kept. The known-answer
@@ -22,7 +26,7 @@ panic, a failed check, a malformed row, or no rows, instead of writing a file
 that looks like a result.
 
 The output's `status` is `ok` and its `results` rows have the operation IDs
-`admin/bench-report` uses, with `library` `rind`. It is not a bench-report
+`admin/bench-report` uses, with `library` the vendor that ran it. It is not a bench-report
 host: bench-report has no ESP32-C6 host or controls yet, so `render` does not
 read it. It is the data to put in `benchmarks/esp32c6.md`.
 """
@@ -32,8 +36,9 @@ import re
 import sys
 
 ROW = re.compile(
-    r"^RIND-BENCH v1 (\S+) median_ns=(\d+) min_ns=(\d+) max_ns=(\d+) rounds=(\d+) iters=(\d+)$"
+    r"^RIND-BENCH v1 (\S+) lib=(\S+) median_ns=(\d+) min_ns=(\d+) max_ns=(\d+) rounds=(\d+) iters=(\d+)$"
 )
+SKIP = re.compile(r"^RIND-BENCH v1 (\S+) lib=(\S+) size_failure=(heap|stack) need=(\d+) have=(\d+)$")
 KAT = re.compile(r"^RIND-KAT v1 (\S+) (ok|FAIL)$")
 DONE = re.compile(r"^RIND-FW v1 done failed=(\d+) cpu_mhz=(\d+) rounds=(\d+)$")
 # The start of a failure on a line a reset cut short.
@@ -72,6 +77,8 @@ def parse(text):
             (boot_kat if cur is None else cur["kat"])[m[1]] = m[2] == "ok"
         elif cur is not None and (m := ROW.match(line)):
             cur["rows"].append(m.groups())
+        elif cur is not None and (m := SKIP.match(line)):
+            cur["rows"].append(m.groups())
         elif line.startswith("RIND-FW v1 start"):
             continue
         elif n == len(lines) - 1 and PARTIAL_FAILURE.match(line):
@@ -102,14 +109,31 @@ def parse(text):
         raise Refused("the log's boot checks disagree with its summary")
     failed, mhz, rounds = (int(x) for x in first["done"])
     results = []
-    for op, med, lo, hi, r, it in first["rows"]:
+    for row in first["rows"]:
+        if len(row) == 5:
+            # The operation did not fit in the board's heap or stack: a recorded
+            # result, not a panic.
+            op, lib, which, need, have = row
+            results.append(
+                {
+                    "operation": op,
+                    "library": lib,
+                    "id": op.replace("{lib}", lib),
+                    "status": "size-failure",
+                    "limit": which,
+                    "need_bytes": int(need),
+                    "have_bytes": int(have),
+                }
+            )
+            continue
+        op, lib, med, lo, hi, r, it = row
         if int(lo) > int(med) or int(med) > int(hi):
             raise Refused(f"{op}: min, median and max are out of order")
         results.append(
             {
                 "operation": op,
-                "library": "rind",
-                "id": op.replace("{lib}", "rind"),
+                "library": lib,
+                "id": op.replace("{lib}", lib),
                 "ns": int(med),
                 "ns_low": int(lo),
                 "ns_high": int(hi),
@@ -140,7 +164,7 @@ def selftest():
         "ESP-ROM:esp32c6-20220919\nMAC 10:bd:a3:b4:2c:48 /dev/ttyACM1 /home/u/x\n"
         "RIND-FW v1 start target=esp32c6\n"
         "RIND-FW v1 done failed=0 cpu_mhz=160 rounds=7\n"
-        "RIND-KAT v1 sha256 ok\nRIND-BENCH v1 sha256/{lib}/1350B median_ns=100 min_ns=90 max_ns=120 rounds=7 iters=8\n"
+        "RIND-KAT v1 sha256 ok\nRIND-BENCH v1 sha256/{lib}/1350B lib=rind median_ns=100 min_ns=90 max_ns=120 rounds=7 iters=8\n"
     )
     out = parse(good + good)
     assert out["results"][0]["id"] == "sha256/rind/1350B" and out["cpu"]["mhz"] == 160
@@ -154,6 +178,12 @@ def selftest():
         else:
             raise AssertionError(f"accepted: {why}")
 
+    skipped = good + "RIND-BENCH v1 mldsa65-sign/{lib} lib=rind size_failure=heap need=110336 have=50000\n"
+    out2 = parse(skipped + skipped)
+    assert out2["results"][1]["status"] == "size-failure" and out2["results"][1]["limit"] == "heap"
+    assert "ns" not in out2["results"][1]
+    check_scrubbed(out2)
+    refuses(good + "RIND-BENCH v1 x lib=rind size_failure=disk need=1 have=0\n" + good, "malformed")
     refuses("RIND-FW v1 panic at x", "panicked")
     refuses(good.replace("sha256 ok", "sha256 FAIL"), "failed")
     refuses(good.replace("failed=0", "failed=1"), "failed")
