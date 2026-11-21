@@ -12,6 +12,10 @@
 
 extern crate alloc;
 
+pub mod bench;
+#[cfg(feature = "sensor")]
+pub mod sensor;
+
 use alloc::vec::Vec;
 
 /// One algorithm's check: its feature name and the function.
@@ -90,6 +94,11 @@ pub fn all() -> Vec<Kat> {
     v.push(Kat {
         name: "p256-ecdsa",
         run: p256_ecdsa,
+    });
+    #[cfg(feature = "sensor")]
+    v.push(Kat {
+        name: "sensor",
+        run: sensor_round_trip,
     });
     v
 }
@@ -305,6 +314,33 @@ pub fn p256_ecdsa() -> bool {
     PublicKey::new(&verify::P256_SHA256_FIXED, kp.public_key().as_ref()).is_ok_and(|pk| {
         pk.verify(b"hello", sig.as_ref()).is_ok() && pk.verify(b"hellp", sig.as_ref()).is_err()
     })
+}
+
+/// Three readings seal, open in order, and a replay and a changed byte fail.
+#[cfg(feature = "sensor")]
+pub fn sensor_round_trip() -> bool {
+    use sensor::{DeviceKeys, Opener, Sealer, Sensor, SyntheticSensor};
+    let (Ok(a), Ok(b)) = (DeviceKeys::derive(&[7; 32]), DeviceKeys::derive(&[7; 32])) else {
+        return false;
+    };
+    let (mut sealer, mut opener, mut s) =
+        (Sealer::new(a, 1), Opener::new(b), SyntheticSensor::new());
+    for _ in 0..3 {
+        let Ok(r) = s.read();
+        let Ok(p) = sealer.seal(&r) else { return false };
+        if opener.open(&p) != Ok(r) || opener.open(&p).is_ok() {
+            return false;
+        }
+        let mut bad = p.clone();
+        bad[12] ^= 1;
+        if Opener::new(DeviceKeys::derive(&[7; 32]).unwrap())
+            .open(&bad)
+            .is_ok()
+        {
+            return false;
+        }
+    }
+    true
 }
 
 #[cfg(all(test, feature = "all"))]

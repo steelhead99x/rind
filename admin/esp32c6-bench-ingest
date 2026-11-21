@@ -1,0 +1,184 @@
+#!/usr/bin/env python3
+"""Turns an ESP32-C6 serial log of the rind benchmark firmware into a scrubbed
+JSON file shaped like a `admin/bench-report` host's results.
+
+Usage:
+  admin/esp32c6-bench-ingest LOG [--out FILE] [--note TEXT]
+  admin/esp32c6-bench-ingest selftest
+
+LOG holds the lines the firmware (admin/esp32c6/firmware) prints:
+
+  RIND-FW v1 done failed=<n> cpu_mhz=<n> rounds=<n>
+  RIND-KAT v1 <algorithm> ok|FAIL
+  RIND-BENCH v1 <operation> median_ns=<n> min_ns=<n> max_ns=<n> rounds=<n> iters=<n>
+
+The firmware repeats its summary every five seconds, so a log holds several
+copies; they must agree, and the first is kept. Anything else in the log
+(boot messages, ROM output, a MAC address, a serial port path) is dropped, and
+the output is checked so that none of it survives. It refuses a log with a
+panic, a failed check, a malformed row, or no rows, instead of writing a file
+that looks like a result.
+
+The output's `status` is `ok` and its `results` rows have the operation IDs
+`admin/bench-report` uses, with `library` `rind`. It is not a bench-report
+host: bench-report has no ESP32-C6 host or controls yet, so `render` does not
+read it. It is the data to put in `benchmarks/esp32c6.md`.
+"""
+
+import json
+import re
+import sys
+
+ROW = re.compile(
+    r"^RIND-BENCH v1 (\S+) median_ns=(\d+) min_ns=(\d+) max_ns=(\d+) rounds=(\d+) iters=(\d+)$"
+)
+KAT = re.compile(r"^RIND-KAT v1 (\S+) (ok|FAIL)$")
+DONE = re.compile(r"^RIND-FW v1 done failed=(\d+) cpu_mhz=(\d+) rounds=(\d+)$")
+
+# What must never reach the output: the board's MAC and its USB serial, host
+# paths and user names, and addresses, as bench-app's scrub removes.
+PRIVATE = [
+    re.compile(r"\b[0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5}\b"),
+    re.compile(r"/(?:home|Users)/[^\s\"]+"),
+    re.compile(r"/dev/tty\w+"),
+    re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b"),
+    re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+"),
+]
+
+
+class Refused(Exception):
+    pass
+
+
+def parse(text):
+    """The first complete summary in `text`, as the output dict."""
+    blocks, cur = [], None
+    lines = [l.strip() for l in text.splitlines() if l.strip()]
+    for n, line in enumerate(lines):
+        if "panic" in line.lower() and line.startswith("RIND-FW"):
+            raise Refused(f"the firmware panicked: {line[:80]}")
+        if DONE.match(line):
+            if cur is not None:
+                blocks.append(cur)
+            cur = {"done": DONE.match(line).groups(), "kat": {}, "rows": []}
+        elif cur is not None and (m := KAT.match(line)):
+            cur["kat"][m[1]] = m[2] == "ok"
+        elif cur is not None and (m := ROW.match(line)):
+            cur["rows"].append(m.groups())
+        elif line.startswith("RIND-FW v1 start"):
+            continue
+        elif line.startswith("RIND-") and n < len(lines) - 1:
+            # (the last line may be cut off by a reset)
+            raise Refused(f"malformed line: {line[:80]}")
+    if cur is not None:
+        blocks.append(cur)
+    # A block cut off by a reset or an unplugged cable is dropped.
+    blocks = [b for b in blocks if b["rows"] and b["kat"]]
+    if not blocks:
+        raise Refused("no complete summary (checks and rows after a done line) in the log")
+    first = blocks[0]
+    for b in blocks[1:]:
+        if b["done"] != first["done"] or b["kat"] != first["kat"] or len(b["rows"]) != len(first["rows"]):
+            raise Refused("the log's summaries disagree: the board reset or ran different firmware")
+    failed, mhz, rounds = (int(x) for x in first["done"])
+    bad = [k for k, ok in first["kat"].items() if not ok]
+    if failed or bad:
+        raise Refused(f"known-answer checks failed: {bad or failed}")
+    results = []
+    for op, med, lo, hi, r, it in first["rows"]:
+        if int(lo) > int(med) or int(med) > int(hi):
+            raise Refused(f"{op}: min, median and max are out of order")
+        results.append(
+            {
+                "operation": op,
+                "library": "rind",
+                "id": op.replace("{lib}", "rind"),
+                "ns": int(med),
+                "ns_low": int(lo),
+                "ns_high": int(hi),
+                "rounds": int(r),
+                "iters": int(it),
+            }
+        )
+    return {
+        "schema": 1,
+        "host": "esp32c6",
+        "status": "ok",
+        "cpu": {"model": "ESP32-C6 (riscv32imac)", "mhz": mhz},
+        "rounds": rounds,
+        "kat": first["kat"],
+        "results": results,
+    }
+
+
+def check_scrubbed(out):
+    text = json.dumps(out)
+    for p in PRIVATE:
+        if p.search(text):
+            raise Refused(f"output still holds private data matching {p.pattern}")
+
+
+def selftest():
+    good = (
+        "ESP-ROM:esp32c6-20220919\nMAC 10:bd:a3:b4:2c:48 /dev/ttyACM1 /home/u/x\n"
+        "RIND-FW v1 start target=esp32c6\n"
+        "RIND-FW v1 done failed=0 cpu_mhz=160 rounds=7\n"
+        "RIND-KAT v1 sha256 ok\nRIND-BENCH v1 sha256/{lib}/1350B median_ns=100 min_ns=90 max_ns=120 rounds=7 iters=8\n"
+    )
+    out = parse(good + good)
+    assert out["results"][0]["id"] == "sha256/rind/1350B" and out["cpu"]["mhz"] == 160
+    check_scrubbed(out)
+
+    def refuses(text, why):
+        try:
+            parse(text)
+        except Refused as e:
+            assert why in str(e), (why, str(e))
+        else:
+            raise AssertionError(f"accepted: {why}")
+
+    refuses("RIND-FW v1 panic at x", "panicked")
+    refuses(good.replace("sha256 ok", "sha256 FAIL"), "failed")
+    refuses(good.replace("failed=0", "failed=1"), "failed")
+    refuses(good + "RIND-BENCH v1 junk\n" + good, "malformed")
+    refuses("boot only\n", "no complete")
+    refuses(good + good.replace("cpu_mhz=160", "cpu_mhz=80"), "disagree")
+    refuses(good.replace("min_ns=90", "min_ns=900"), "out of order")
+    # A cut-off second copy is ignored.
+    assert parse(good + "RIND-FW v1 done failed=0 cpu_mhz=160 rounds=7\nRIND-KAT v1 sha")
+    leaked = dict(out, note="10:bd:a3:b4:2c:48")
+    try:
+        check_scrubbed(leaked)
+    except Refused:
+        pass
+    else:
+        raise AssertionError("a MAC survived")
+    print("selftest ok")
+
+
+def main():
+    args = sys.argv[1:]
+    if args == ["selftest"]:
+        return selftest()
+    if not args or args[0].startswith("-"):
+        sys.exit(__doc__)
+    log = args[0]
+    out_path = args[args.index("--out") + 1] if "--out" in args else None
+    try:
+        with open(log, errors="replace") as f:
+            out = parse(f.read())
+        if "--note" in args:
+            out["note"] = args[args.index("--note") + 1]
+        check_scrubbed(out)
+    except Refused as e:
+        sys.exit(f"esp32c6-bench-ingest: refused: {e}")
+    text = json.dumps(out, indent=1) + "\n"
+    if out_path:
+        with open(out_path, "w") as f:
+            f.write(text)
+    else:
+        sys.stdout.write(text)
+
+
+if __name__ == "__main__":
+    main()

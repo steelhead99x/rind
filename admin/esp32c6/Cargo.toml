@@ -25,7 +25,7 @@ default = []
 qemu = ["dep:linked_list_allocator", "dep:getrandom"]
 # One feature per algorithm, so `admin/esp32c6-riscv32 size` can build each
 # alone and take its code size as the difference from the empty build.
-all = ["sha256", "sha512", "sha3-256", "hmac-sha256", "hkdf-sha256", "chacha20poly1305", "aes128-gcm", "aes256-gcm", "x25519", "ed25519", "mlkem768", "mldsa65", "p256-ecdsa"]
+all = ["sha256", "sha512", "sha3-256", "hmac-sha256", "hkdf-sha256", "chacha20poly1305", "aes128-gcm", "aes256-gcm", "x25519", "ed25519", "mlkem768", "mldsa65", "p256-ecdsa", "sensor"]
 sha256 = []
 sha512 = []
 sha3-256 = []
@@ -39,6 +39,8 @@ ed25519 = []
 mlkem768 = []
 mldsa65 = []
 p256-ecdsa = []
+# The sensor example, which needs these three.
+sensor = ["ed25519", "chacha20poly1305", "hkdf-sha256"]
 
 [dependencies]
 rind = { path = "../../rind" }
