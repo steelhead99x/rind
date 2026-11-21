@@ -1,0 +1,102 @@
+#!/usr/bin/env python3
+"""Tries to build each library rind-bench compares rind with for the ESP32-C6's
+`riscv32imac-unknown-none-elf`, with default features off, and records which
+build and the first error of each that does not. It patches nothing: a crate
+that does not build out of the box is recorded as not buildable.
+
+Usage:
+  admin/esp32c6-vendors [--out FILE] [--only a,b]   builds each in a scratch crate, prints Markdown
+
+Each library is a scratch `no_std` crate depending on it alone, at the version
+and with the features rind-bench uses minus anything that needs `std`, an OS, or
+a C compiler. Needs the same toolchain as admin/esp32c6-riscv32. The scratch
+crates live under `.tmp/esp32c6-vendors/` and are rebuilt every run.
+"""
+
+import json
+import os
+import re
+import subprocess
+import sys
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+WORK = os.path.join(ROOT, ".tmp", "esp32c6-vendors")
+TARGET = "riscv32imac-unknown-none-elf"
+CARGO = os.environ.get("RIND_RISCV32_CARGO", "cargo")
+
+# name: (dependency line, what rind-bench times with it)
+VENDORS = {
+    "sha2": ('sha2 = { version = "0.11", default-features = false }', "SHA-256, SHA-512"),
+    "sha3": ('sha3 = { version = "0.12", default-features = false }', "SHA-3"),
+    "sha1": ('sha1 = { version = "0.11", default-features = false }', "SHA-1"),
+    "md-5": ('md-5 = { version = "0.11", default-features = false }', "MD5"),
+    "hmac": ('hmac = { version = "0.13", default-features = false }', "HMAC"),
+    "hkdf": ('hkdf = { version = "0.13", default-features = false }', "HKDF"),
+    "pbkdf2": ('pbkdf2 = { version = "0.13", default-features = false, features = ["hmac"] }', "PBKDF2"),
+    "aes-gcm": ('aes-gcm = { version = "0.11", default-features = false, features = ["aes", "alloc"] }', "AES-GCM"),
+    "chacha20poly1305": ('chacha20poly1305 = { version = "0.11", default-features = false, features = ["alloc"] }', "ChaCha20-Poly1305, XChaCha20-Poly1305"),
+    "ed25519-dalek": ('ed25519-dalek = { version = "3", default-features = false }', "Ed25519"),
+    "x25519-dalek": ('x25519-dalek = { version = "3", default-features = false }', "X25519"),
+    "p256": ('p256 = { version = "0.14", default-features = false, features = ["ecdh", "ecdsa"] }', "P-256"),
+    "p384": ('p384 = { version = "0.14", default-features = false, features = ["ecdh", "ecdsa"] }', "P-384"),
+    "p521": ('p521 = { version = "0.14", default-features = false, features = ["ecdh", "ecdsa"] }', "P-521"),
+    "rsa": ('rsa = { version = "0.10", default-features = false, features = ["pkcs1v15"] }', "RSA"),
+    "ml-kem": ('ml-kem = { version = "0.3", default-features = false }', "ML-KEM"),
+    "ml-dsa": ('ml-dsa = { version = "0.1", default-features = false }', "ML-DSA"),
+    "slh-dsa": ('slh-dsa = { version = "=0.2.0-rc.5", default-features = false }', "SLH-DSA"),
+    "argon2": ('argon2 = { version = "0.6", default-features = false, features = ["alloc"] }', "Argon2id"),
+    "hpke": ('hpke = { version = "0.15", default-features = false, features = ["x25519", "aes", "hkdfsha2"] }', "HPKE"),
+    "libcrux-sha2": ('libcrux-sha2 = "0.0.9"', "SHA-2"),
+    "libcrux-sha3": ('libcrux-sha3 = "0.0.11"', "SHA-3"),
+    "libcrux-chacha20poly1305": ('libcrux-chacha20poly1305 = "0.0.10"', "ChaCha20-Poly1305"),
+    "libcrux-ed25519": ('libcrux-ed25519 = "0.0.10"', "Ed25519"),
+    "libcrux-ecdh": ('libcrux-ecdh = "0.0.9"', "X25519, P-256 ECDH"),
+    "libcrux-ml-kem": ('libcrux-ml-kem = { version = "0.0.11", default-features = false, features = ["mlkem768", "alloc"] }', "ML-KEM"),
+    "libcrux-ml-dsa": ('libcrux-ml-dsa = "0.0.11"', "ML-DSA"),
+    "ring": ('ring = { version = "0.17", default-features = false }', "everything ring has"),
+    "aws-lc-rs": ('aws-lc-rs = { version = "1.19", default-features = false, features = ["non-fips"] }', "everything aws-lc-rs has"),
+}
+
+
+def build(name, dep):
+    d = os.path.join(WORK, name)
+    os.makedirs(os.path.join(d, "src"), exist_ok=True)
+    with open(os.path.join(d, "Cargo.toml"), "w") as f:
+        f.write(f'[package]\nname = "v"\nversion = "0.0.0"\nedition = "2021"\n[workspace]\n[dependencies]\n{dep}\n')
+    with open(os.path.join(d, "src", "lib.rs"), "w") as f:
+        f.write("#![no_std]\n")
+    env = dict(os.environ)
+    env["CARGO_TARGET_DIR"] = os.path.join(WORK, "target")
+    p = subprocess.run([CARGO, "build", "--release", "--target", TARGET], cwd=d, env=env,
+                       capture_output=True, text=True, timeout=1200)
+    if p.returncode == 0:
+        return True, ""
+    errs = [l for l in p.stderr.splitlines() if re.match(r"\s*(error|Caused by)", l) or "failed to" in l]
+    first = next((l.strip() for l in p.stderr.splitlines() if l.startswith("error")), p.stderr[-200:])
+    detail = " / ".join(l.strip() for l in errs[:3]) or first
+    return False, detail[:300]
+
+
+def main():
+    only = sys.argv[sys.argv.index("--only") + 1].split(",") if "--only" in sys.argv else None
+    out = sys.argv[sys.argv.index("--out") + 1] if "--out" in sys.argv else None
+    rows = []
+    for name, (dep, what) in VENDORS.items():
+        if only and name not in only:
+            continue
+        ok, err = build(name, dep)
+        rows.append({"crate": name, "times": what, "builds": ok, "error": err})
+        print(f"{name}: {'builds' if ok else 'NOT BUILDABLE: ' + err}", file=sys.stderr, flush=True)
+    print("| crate | rind-bench times it for | riscv32imac no_std, default features off | first error |")
+    print("|---|---|---|---|")
+    for r in rows:
+        print(f"| {r['crate']} | {r['times']} | {'builds' if r['builds'] else 'not buildable on this target'} | "
+              f"{r['error'].replace('|', '/')} |")
+    if out:
+        with open(out, "w") as f:
+            json.dump({"target": TARGET, "rows": rows}, f, indent=1)
+            f.write("\n")
+
+
+if __name__ == "__main__":
+    main()

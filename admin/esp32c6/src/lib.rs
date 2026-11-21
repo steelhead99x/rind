@@ -15,6 +15,8 @@ extern crate alloc;
 pub mod bench;
 #[cfg(feature = "sensor")]
 pub mod sensor;
+#[cfg(feature = "compare")]
+pub mod vendors;
 
 use alloc::vec::Vec;
 
@@ -94,6 +96,31 @@ pub fn all() -> Vec<Kat> {
     v.push(Kat {
         name: "p256-ecdsa",
         run: p256_ecdsa,
+    });
+    #[cfg(feature = "sha1")]
+    v.push(Kat {
+        name: "sha1",
+        run: sha1,
+    });
+    #[cfg(feature = "md5")]
+    v.push(Kat {
+        name: "md5",
+        run: md5,
+    });
+    #[cfg(feature = "pbkdf2-sha256")]
+    v.push(Kat {
+        name: "pbkdf2-sha256",
+        run: pbkdf2_sha256,
+    });
+    #[cfg(feature = "p256-ecdh")]
+    v.push(Kat {
+        name: "p256-ecdh",
+        run: p256_ecdh,
+    });
+    #[cfg(feature = "compare")]
+    v.push(Kat {
+        name: "vendors-agree",
+        run: vendors::agree,
     });
     #[cfg(feature = "sensor")]
     v.push(Kat {
@@ -314,6 +341,57 @@ pub fn p256_ecdsa() -> bool {
     PublicKey::new(&verify::P256_SHA256_FIXED, kp.public_key().as_ref()).is_ok_and(|pk| {
         pk.verify(b"hello", sig.as_ref()).is_ok() && pk.verify(b"hellp", sig.as_ref()).is_err()
     })
+}
+
+/// FIPS 180-4 "abc".
+#[cfg(feature = "sha1")]
+pub fn sha1() -> bool {
+    use rind::digest::{digest, legacy::SHA1};
+    digest(&SHA1, b"abc").as_ref() == hex("a9993e364706816aba3e25717850c26c9cd0d89d")
+}
+
+/// RFC 1321 "abc".
+#[cfg(feature = "md5")]
+pub fn md5() -> bool {
+    use rind::digest::{digest, legacy::MD5};
+    digest(&MD5, b"abc").as_ref() == hex("900150983cd24fb0d6963f7d28e17f72")
+}
+
+/// RFC 7914 section 11, PBKDF2-HMAC-SHA256 with one iteration.
+#[cfg(feature = "pbkdf2-sha256")]
+pub fn pbkdf2_sha256() -> bool {
+    use rind::pbkdf2::{PBKDF2_HMAC_SHA256, Secret};
+    let mut out = [0u8; 64];
+    let Some(n) = core::num::NonZeroU32::new(1) else {
+        return false;
+    };
+    Secret::new(&PBKDF2_HMAC_SHA256, b"passwd")
+        .derive(n, b"salt", &mut out)
+        .is_ok()
+        && out.as_slice()
+            == hex(concat!(
+                "55ac046e56e3089fec1691c22544b605f94185216dde0465e68b9d57c20dacbc",
+                "49ca9cccf179b645991664b39d77ef317c71b845b1e30bd509112041d3a19783"
+            ))
+}
+
+/// Two P-256 keys derive the same secret.
+#[cfg(feature = "p256-ecdh")]
+pub fn p256_ecdh() -> bool {
+    use rind::agreement::{ECDH_P256, PrivateKey};
+    let (Ok(a), Ok(b)) = (
+        PrivateKey::generate(&ECDH_P256),
+        PrivateKey::generate(&ECDH_P256),
+    ) else {
+        return false;
+    };
+    match (
+        a.agree(b.public_key().as_ref()),
+        b.agree(a.public_key().as_ref()),
+    ) {
+        (Ok(x), Ok(y)) => x.as_ref() == y.as_ref(),
+        _ => false,
+    }
 }
 
 /// Three readings seal, open in order, and a replay and a changed byte fail.

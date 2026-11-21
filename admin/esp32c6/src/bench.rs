@@ -4,7 +4,7 @@
 //! in the form `admin/esp32c6-bench-ingest` reads:
 //!
 //! ```text
-//! RIND-BENCH v1 <operation> median_ns=<n> min_ns=<n> max_ns=<n> rounds=<n> iters=<n>
+//! RIND-BENCH v1 <operation> lib=<library> median_ns=<n> min_ns=<n> max_ns=<n> rounds=<n> iters=<n>
 //! ```
 //!
 //! `<operation>` is a bench-report operation ID with `{lib}` left in place
@@ -23,8 +23,10 @@ pub trait Clock {
 /// One operation's result.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Row {
-    /// The bench-report operation ID.
+    /// The bench-report operation ID, with `{lib}` in the library's place.
     pub operation: &'static str,
+    /// The library that ran it: `rind`, or the vendor.
+    pub library: &'static str,
     /// Median over rounds of the per-call time.
     pub median_ns: u64,
     /// Fastest round's per-call time.
@@ -41,8 +43,14 @@ impl Row {
     /// The row as the line `esp32c6-bench-ingest` parses.
     pub fn line(&self) -> String {
         format!(
-            "RIND-BENCH v1 {} median_ns={} min_ns={} max_ns={} rounds={} iters={}",
-            self.operation, self.median_ns, self.min_ns, self.max_ns, self.rounds, self.iters
+            "RIND-BENCH v1 {} lib={} median_ns={} min_ns={} max_ns={} rounds={} iters={}",
+            self.operation,
+            self.library,
+            self.median_ns,
+            self.min_ns,
+            self.max_ns,
+            self.rounds,
+            self.iters
         )
     }
 }
@@ -52,6 +60,7 @@ impl Row {
 pub fn time<C: Clock>(
     clock: &mut C,
     operation: &'static str,
+    library: &'static str,
     rounds: u32,
     iters: u32,
     mut f: impl FnMut() -> u8,
@@ -71,6 +80,7 @@ pub fn time<C: Clock>(
     per_call.sort_unstable();
     Row {
         operation,
+        library,
         median_ns: per_call[per_call.len() / 2],
         min_ns: per_call[0],
         max_ns: per_call[per_call.len() - 1],
@@ -89,23 +99,39 @@ pub fn run_all<C: Clock>(clock: &mut C, rounds: u32, scale: u32, mut emit: impl 
     let buf = [0x5au8; 1350];
     let mut push = |r: Row| emit(&r);
     #[cfg(feature = "sha256")]
-    push(time(clock, "sha256/{lib}/1350B", rounds, it(8), || {
-        rind::digest::digest(&rind::digest::SHA256, &buf).as_ref()[0]
-    }));
+    push(time(
+        clock,
+        "sha256/{lib}/1350B",
+        "rind",
+        rounds,
+        it(8),
+        || rind::digest::digest(&rind::digest::SHA256, &buf).as_ref()[0],
+    ));
     #[cfg(feature = "sha512")]
-    push(time(clock, "sha512/{lib}/1350B", rounds, it(8), || {
-        rind::digest::digest(&rind::digest::SHA512, &buf).as_ref()[0]
-    }));
+    push(time(
+        clock,
+        "sha512/{lib}/1350B",
+        "rind",
+        rounds,
+        it(8),
+        || rind::digest::digest(&rind::digest::SHA512, &buf).as_ref()[0],
+    ));
     #[cfg(feature = "sha3-256")]
-    push(time(clock, "sha3-256/{lib}/1350B", rounds, it(8), || {
-        rind::digest::digest(&rind::digest::SHA3_256, &buf).as_ref()[0]
-    }));
+    push(time(
+        clock,
+        "sha3-256/{lib}/1350B",
+        "rind",
+        rounds,
+        it(8),
+        || rind::digest::digest(&rind::digest::SHA3_256, &buf).as_ref()[0],
+    ));
     #[cfg(feature = "hmac-sha256")]
     {
         let key = rind::hmac::Key::new(&rind::hmac::HMAC_SHA256, &[1; 32]);
         push(time(
             clock,
             "hmac-sha256/{lib}/1350B",
+            "rind",
             rounds,
             it(8),
             || rind::hmac::sign(&key, &buf).as_ref()[0],
@@ -115,6 +141,7 @@ pub fn run_all<C: Clock>(clock: &mut C, rounds: u32, scale: u32, mut emit: impl 
     push(time(
         clock,
         "hkdf-sha256/extract-expand/{lib}",
+        "rind",
         rounds,
         it(16),
         || {
@@ -131,6 +158,7 @@ pub fn run_all<C: Clock>(clock: &mut C, rounds: u32, scale: u32, mut emit: impl 
         push(time(
             clock,
             "chacha20poly1305/{lib}/1350B",
+            "rind",
             rounds,
             it(8),
             || {
@@ -144,12 +172,155 @@ pub fn run_all<C: Clock>(clock: &mut C, rounds: u32, scale: u32, mut emit: impl 
     #[cfg(feature = "aes128-gcm")]
     {
         let key = rind::aead::Key::new(&rind::aead::AES_128_GCM, &[5; 16]).unwrap();
-        push(time(clock, "aes128-gcm/{lib}/1350B", rounds, it(8), || {
-            let mut b = buf;
-            let n = rind::aead::Nonce::assume_unique_for_key([0; 12]);
-            key.seal_in_place_separate_tag(n, &[], &mut b)
-                .map_or(0, |t| t.as_ref()[0])
-        }));
+        push(time(
+            clock,
+            "aes128-gcm/{lib}/1350B",
+            "rind",
+            rounds,
+            it(8),
+            || {
+                let mut b = buf;
+                let n = rind::aead::Nonce::assume_unique_for_key([0; 12]);
+                key.seal_in_place_separate_tag(n, &[], &mut b)
+                    .map_or(0, |t| t.as_ref()[0])
+            },
+        ));
+    }
+    #[cfg(feature = "sha1")]
+    push(time(
+        clock,
+        "sha1/{lib}/1350B",
+        "rind",
+        rounds,
+        it(8),
+        || rind::digest::digest(&rind::digest::legacy::SHA1, &buf).as_ref()[0],
+    ));
+    #[cfg(feature = "md5")]
+    push(time(
+        clock,
+        "md5/{lib}/1350B",
+        "rind",
+        rounds,
+        it(8),
+        || rind::digest::digest(&rind::digest::legacy::MD5, &buf).as_ref()[0],
+    ));
+    #[cfg(feature = "aes256-gcm")]
+    {
+        let key = rind::aead::Key::new(&rind::aead::AES_256_GCM, &[6; 32]).unwrap();
+        push(time(
+            clock,
+            "aes256-gcm/{lib}/1350B",
+            "rind",
+            rounds,
+            it(8),
+            || {
+                let mut b = buf;
+                let n = rind::aead::Nonce::assume_unique_for_key([0; 12]);
+                key.seal_in_place_separate_tag(n, &[], &mut b)
+                    .map_or(0, |t| t.as_ref()[0])
+            },
+        ));
+    }
+    #[cfg(feature = "pbkdf2-sha256")]
+    {
+        let secret = rind::pbkdf2::Secret::new(&rind::pbkdf2::PBKDF2_HMAC_SHA256, b"password");
+        let n = core::num::NonZeroU32::new(1000).unwrap();
+        push(time(
+            clock,
+            "pbkdf2-hmac-sha256-1000/{lib}",
+            "rind",
+            rounds,
+            it(1),
+            || {
+                let mut out = [0u8; 32];
+                let _ = secret.derive(n, b"salt", &mut out);
+                out[0]
+            },
+        ));
+    }
+    #[cfg(feature = "p256-ecdh")]
+    {
+        use rind::agreement::{ECDH_P256, PrivateKey};
+        let a = PrivateKey::generate(&ECDH_P256).unwrap();
+        let b = PrivateKey::generate(&ECDH_P256).unwrap();
+        let bp = b.public_key().as_ref().to_vec();
+        push(time(
+            clock,
+            "p256-ecdh/{lib}",
+            "rind",
+            rounds,
+            it(1),
+            || a.agree(&bp).map_or(0, |s| s.as_ref()[0]),
+        ));
+    }
+    #[cfg(feature = "p256-ecdsa")]
+    {
+        use rind::ecdsa::{KeyPair, PublicKey, sign, verify};
+        let kp = KeyPair::generate(&sign::P256_SHA256_FIXED).unwrap();
+        let sig = kp.sign(&buf[..64]).unwrap();
+        let pk = PublicKey::new(&verify::P256_SHA256_FIXED, kp.public_key().as_ref()).unwrap();
+        push(time(
+            clock,
+            "p256-ecdsa-sign/{lib}",
+            "rind",
+            rounds,
+            it(1),
+            || kp.sign(&buf[..64]).map_or(0, |s| s.as_ref()[0]),
+        ));
+        push(time(
+            clock,
+            "p256-ecdsa-verify/{lib}",
+            "rind",
+            rounds,
+            it(1),
+            || u8::from(pk.verify(&buf[..64], sig.as_ref()).is_ok()),
+        ));
+    }
+    #[cfg(feature = "mlkem768")]
+    {
+        use rind::kem::{DecapsulationKey, MlKem768};
+        let dk = DecapsulationKey::<MlKem768>::generate().unwrap();
+        let ek = dk.public_key();
+        let (ct, _) = ek.encapsulate().unwrap();
+        push(time(
+            clock,
+            "mlkem768-encaps/{lib}",
+            "rind",
+            rounds,
+            it(1),
+            || ek.encapsulate().map_or(0, |(_, s)| s.as_ref()[0]),
+        ));
+        push(time(
+            clock,
+            "mlkem768-decaps/{lib}",
+            "rind",
+            rounds,
+            it(1),
+            || dk.decapsulate(&ct).as_ref()[0],
+        ));
+    }
+    #[cfg(feature = "mldsa65")]
+    {
+        use rind::ml_dsa::{KeyPair, MlDsa65, PublicKey};
+        let kp = KeyPair::<MlDsa65>::generate().unwrap();
+        let sig = kp.sign(&buf[..64]).unwrap();
+        let pk = PublicKey::<MlDsa65>::new(kp.public_key().as_ref()).unwrap();
+        push(time(
+            clock,
+            "mldsa65-sign/{lib}",
+            "rind",
+            rounds,
+            it(1),
+            || kp.sign(&buf[..64]).map_or(0, |s| s.as_ref()[0]),
+        ));
+        push(time(
+            clock,
+            "mldsa65-verify/{lib}",
+            "rind",
+            rounds,
+            it(1),
+            || u8::from(pk.verify(&buf[..64], sig.as_ref()).is_ok()),
+        ));
     }
     #[cfg(feature = "x25519")]
     {
@@ -157,7 +328,7 @@ pub fn run_all<C: Clock>(clock: &mut C, rounds: u32, scale: u32, mut emit: impl 
         let a = PrivateKey::from_scalar(&X25519, &[9; 32]).unwrap();
         let b = PrivateKey::from_scalar(&X25519, &[10; 32]).unwrap();
         let bp = b.public_key().as_ref().to_vec();
-        push(time(clock, "x25519/{lib}", rounds, it(2), || {
+        push(time(clock, "x25519/{lib}", "rind", rounds, it(2), || {
             a.agree(&bp).map_or(0, |s| s.as_ref()[0])
         }));
     }
@@ -165,12 +336,22 @@ pub fn run_all<C: Clock>(clock: &mut C, rounds: u32, scale: u32, mut emit: impl 
     {
         let kp = rind::ed25519::KeyPair::from_seed(&[11; 32]).unwrap();
         let sig = kp.sign(&buf[..64]);
-        push(time(clock, "ed25519-sign/{lib}", rounds, it(2), || {
-            kp.sign(&buf[..64]).as_ref()[0]
-        }));
-        push(time(clock, "ed25519-verify/{lib}", rounds, it(2), || {
-            u8::from(kp.public_key().verify(&buf[..64], sig.as_ref()).is_ok())
-        }));
+        push(time(
+            clock,
+            "ed25519-sign/{lib}",
+            "rind",
+            rounds,
+            it(2),
+            || kp.sign(&buf[..64]).as_ref()[0],
+        ));
+        push(time(
+            clock,
+            "ed25519-verify/{lib}",
+            "rind",
+            rounds,
+            it(2),
+            || u8::from(kp.public_key().verify(&buf[..64], sig.as_ref()).is_ok()),
+        ));
     }
 }
 
@@ -191,7 +372,7 @@ mod tests {
     fn the_median_is_the_middle_round_and_the_line_is_stable() {
         // Each round reads the clock twice, a step apart: 100 ns per round over 4 calls.
         let mut c = Step(0, 100);
-        let row = time(&mut c, "sha256/{lib}/1350B", 5, 4, || 1);
+        let row = time(&mut c, "sha256/{lib}/1350B", "rind", 5, 4, || 1);
         assert_eq!(row.median_ns, 25);
         assert_eq!(
             (row.min_ns, row.max_ns, row.rounds, row.iters),
@@ -199,7 +380,7 @@ mod tests {
         );
         assert_eq!(
             row.line(),
-            "RIND-BENCH v1 sha256/{lib}/1350B median_ns=25 min_ns=25 max_ns=25 rounds=5 iters=4"
+            "RIND-BENCH v1 sha256/{lib}/1350B lib=rind median_ns=25 min_ns=25 max_ns=25 rounds=5 iters=4"
         );
     }
 
@@ -212,7 +393,7 @@ mod tests {
                 self.0
             }
         }
-        assert_eq!(time(&mut Back(1000), "x", 3, 2, || 0).max_ns, 0);
+        assert_eq!(time(&mut Back(1000), "x", "rind", 3, 2, || 0).max_ns, 0);
     }
 
     #[test]
@@ -227,7 +408,7 @@ mod tests {
         }
         let mut c = Seq(vec![0, 10, 20, 1020, 2000, 2010], 0);
         // Rounds read (0,10), (20,1020), (2000,2010): 10, 1000, 10.
-        let r = time(&mut c, "x", 3, 1, || 0);
+        let r = time(&mut c, "x", "rind", 3, 1, || 0);
         assert_eq!((r.median_ns, r.min_ns, r.max_ns), (10, 10, 1000));
     }
 
@@ -236,7 +417,7 @@ mod tests {
     fn every_enabled_operation_emits_one_row() {
         let mut rows = vec![];
         run_all(&mut Step(0, 1000), 3, 4, |r| rows.push(r.operation));
-        assert_eq!(rows.len(), 10);
+        assert_eq!(rows.len(), 21);
         assert!(rows.iter().all(|o| o.contains("{lib}")));
     }
 }

@@ -167,6 +167,10 @@ fn main() -> ! {
         let _ = writeln!(rows, "{}", r.line());
         leds.blink(State::Running, 1);
     });
+    rind_esp32c6::vendors::run_all(&mut timer, ROUNDS, 1, |r| {
+        let _ = writeln!(rows, "{}", r.line());
+        leds.blink(State::Running, 1);
+    });
     let state = if failed == 0 {
         State::Passed
     } else {
