@@ -87,11 +87,11 @@ Is it fair? It is the vendor crate's default configuration on this target, so it
 
 ### Not timed
 
-XChaCha20-Poly1305, P-384, P-521, RSA, SLH-DSA, Argon2id, HPKE: `TODO`, not run in this firmware (RSA, SLH-DSA and Argon2id may not fit the 140 KB heap). The libcrux crates that build (`libcrux-sha2`, `libcrux-sha3`, `libcrux-chacha20poly1305`, `libcrux-ed25519`, `libcrux-ml-kem`) have no row yet. Temperature: `TODO`.
+XChaCha20-Poly1305, P-384, P-521, RSA, SLH-DSA, Argon2id, HPKE: `TODO`, not run in this firmware (RSA, SLH-DSA and Argon2id may not fit the 140 KB heap). The libcrux crates that build (`libcrux-sha2`, `libcrux-sha3`, `libcrux-chacha20poly1305`, `libcrux-ed25519`, `libcrux-ml-kem`, `libcrux-aes`, `libcrux-hmac`, `libcrux-hkdf`, `libcrux-rsa`) have no row yet. Temperature: `TODO`.
 
 ### Vendors that could not be timed
 
-Not buildable for `riscv32imac-unknown-none-elf` here (details in the next section): `ring` (getrandom has no backend for the target), `aws-lc-rs` (needs a `riscv32-unknown-elf-gcc` C toolchain), `libcrux-ecdh` and `libcrux-ml-dsa` (need `std`). No claim is made against them.
+Not buildable for `riscv32imac-unknown-none-elf` here (details in the next section): `ring` (getrandom has no backend for the target), `aws-lc-rs` (needs a `riscv32-unknown-elf-gcc` C toolchain), `libcrux-ecdh`, `libcrux-ecdsa` and `libcrux-ml-dsa` (need `std`), and, for the same or similar reasons, `hpke-rs`, `blind-rsa-signatures`, `vrf-rfc9381`, `jsonwebtoken`, `rustls`, `aws-lc-sys`, `verified-garbage`, `graviola`, `rustls-graviola`, `openssl`, `openssl-sys` and `rustls-openssl` (the table below has each one's error). The rest of rind-bench's comparison libraries build: the libcrux crates `libcrux-aes`, `libcrux-hmac`, `libcrux-hkdf` and `libcrux-rsa` as well, and `fips205`, `voprf` and `spake2plus`. No claim is made against the ones that do not build.
 
 ## Which comparison libraries build for the C6
 
@@ -126,6 +126,26 @@ Not buildable for `riscv32imac-unknown-none-elf` here (details in the next secti
 | libcrux-ecdh | X25519, P-256 ECDH | not buildable on this target | error[E0463]: can't find crate for `std` / error: could not compile `rand` (lib) due to 1 previous error |
 | libcrux-ml-kem | ML-KEM | builds |  |
 | libcrux-ml-dsa | ML-DSA | not buildable on this target | error[E0463]: can't find crate for `std` / error: could not compile `libcrux-ml-dsa` (lib) due to 1 previous error |
+| libcrux-aes | AES-GCM, AES-CBC/CTR ciphers | builds |  |
+| libcrux-ecdsa | P-256 ECDSA | not buildable on this target | error[E0463]: can't find crate for `std` / error: could not compile `rand` (lib) due to 1 previous error |
+| libcrux-hmac | HMAC | builds |  |
+| libcrux-hkdf | HKDF | builds |  |
+| libcrux-rsa | RSA | builds |  |
+| hpke-rs | HPKE (libcrux backend) | not buildable on this target | error: target is not supported. You may need to define a custom backend see: https://docs.rs/getrandom/0.4.3/#custom-backend / error: could not compile `getrandom` (lib) due to 1 previous error |
+| fips205 | SLH-DSA | builds |  |
+| blind-rsa-signatures | blind RSA | not buildable on this target | error[E0463]: can't find crate for `std` / error: cannot resolve a prelude import / error: cannot find macro `vec` in this scope |
+| voprf | OPRF | builds |  |
+| spake2plus | SPAKE2+ | builds |  |
+| vrf-rfc9381 | VRF | not buildable on this target | error[E0463]: can't find crate for `std` / error: could not compile `subtle` (lib) due to 1 previous error / error: target is not supported. You may need to define a custom backend see: https://docs.rs/getrandom/0.4.3/#custom-backend |
+| jsonwebtoken | JWT | not buildable on this target | error[E0463]: can't find crate for `std` / error[E0463]: can't find crate for `std` / error: cannot resolve a prelude import |
+| rustls | TLS handshake and records | not buildable on this target | error: target is not supported, for more information see: https://docs.rs/getrandom/#unsupported-targets / error: could not compile `getrandom` (lib) due to 1 previous error |
+| aws-lc-sys | XChaCha20-Poly1305 | not buildable on this target | needs a `riscv32-unknown-elf-gcc` C toolchain (ToolNotFound), as aws-lc-rs |
+| verified-garbage | everything verified-garbage has | not buildable on this target | error[E0463]: can't find crate for `std` / error: could not compile `verified-garbage-cpu` (lib) due to 1 previous error |
+| graviola | everything graviola has (x86_64 and aarch64 only) | not buildable on this target | error: target is not supported. You may need to define a custom backend see: https://docs.rs/getrandom/0.4.3/#custom-backend / error: could not compile `getrandom` (lib) due to 1 previous error |
+| rustls-graviola | TLS (x86_64 and aarch64 only) | not buildable on this target | error[E0463]: can't find crate for `std` / error: cannot resolve a prelude import / error: target is not supported. You may need to define a custom backend see: https://docs.rs/getrandom/0.4.3/#custom-backend |
+| openssl | everything OpenSSL has (needs the system library) | not buildable on this target | error: failed to run custom build command for `openssl-sys v0.9.118` |
+| openssl-sys | OpenSSL bindings (needs the system library) | not buildable on this target | error: failed to run custom build command for `openssl-sys v0.9.118` |
+| rustls-openssl | TLS over OpenSSL | not buildable on this target | error: failed to run custom build command for `openssl-sys v0.9.118` / error[E0463]: can't find crate for `std` |
 | ring | everything ring has | not buildable on this target | error: target is not supported, for more information see: https://docs.rs/getrandom/#unsupported-targets / error: could not compile `getrandom` (lib) due to 1 previous error |
 | aws-lc-rs | everything aws-lc-rs has | not buildable on this target | warning: aws-lc-sys@0.47.0: Compiler family detection failed due to error: ToolNotFound: failed to find tool "riscv32-unknown-elf-gcc": No such file or directory (os error 2) / warning: aws-lc-sys@0.47.0: Compiler family detection failed due to error: ToolNotFound: failed to find tool "riscv32-unkno |
 

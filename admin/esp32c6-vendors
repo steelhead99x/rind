@@ -9,7 +9,8 @@ Usage:
 
 Each library is a scratch `no_std` crate depending on it alone, at the version
 and with the features rind-bench uses minus anything that needs `std`, an OS, or
-a C compiler. Needs the same toolchain as admin/esp32c6-riscv32. The scratch
+a C compiler. Every competitor in rind-bench's [dev-dependencies] has a row, those
+that only build on other targets too: they are recorded as not buildable, not skipped. Needs the same toolchain as admin/esp32c6-riscv32. The scratch
 crates live under `.tmp/esp32c6-vendors/` and are rebuilt every run.
 """
 
@@ -51,8 +52,28 @@ VENDORS = {
     "libcrux-chacha20poly1305": ('libcrux-chacha20poly1305 = "0.0.10"', "ChaCha20-Poly1305"),
     "libcrux-ed25519": ('libcrux-ed25519 = "0.0.10"', "Ed25519"),
     "libcrux-ecdh": ('libcrux-ecdh = "0.0.9"', "X25519, P-256 ECDH"),
-    "libcrux-ml-kem": ('libcrux-ml-kem = { version = "0.0.11", default-features = false, features = ["mlkem768", "alloc"] }', "ML-KEM"),
+    "libcrux-ml-kem": ('libcrux-ml-kem = { version = "0.0.11", default-features = false, features = ["mlkem512", "mlkem768", "mlkem1024", "alloc"] }', "ML-KEM"),
     "libcrux-ml-dsa": ('libcrux-ml-dsa = "0.0.11"', "ML-DSA"),
+    "libcrux-aes": ('libcrux-aes = "0.0.10"', "AES-GCM, AES-CBC/CTR ciphers"),
+    "libcrux-ecdsa": ('libcrux-ecdsa = "0.0.9"', "P-256 ECDSA"),
+    "libcrux-hmac": ('libcrux-hmac = "0.0.9"', "HMAC"),
+    "libcrux-hkdf": ('libcrux-hkdf = "0.0.9"', "HKDF"),
+    "libcrux-rsa": ('libcrux-rsa = "0.0.9"', "RSA"),
+    "hpke-rs": ('hpke-rs = { version = "0.8", default-features = false, features = ["libcrux"] }', "HPKE (libcrux backend)"),
+    "fips205": ('fips205 = { version = "0.5", default-features = false }', "SLH-DSA"),
+    "blind-rsa-signatures": ('blind-rsa-signatures = { version = "0.18", default-features = false }', "blind RSA"),
+    "voprf": ('voprf = { version = "=0.6.0-pre.2", default-features = false, features = ["ristretto255-ciphersuite"] }', "OPRF"),
+    "spake2plus": ('spake2plus = { version = "0.1", default-features = false }', "SPAKE2+"),
+    "vrf-rfc9381": ('vrf-rfc9381 = { version = "0.0.7", default-features = false, features = ["edwards25519", "p256"] }', "VRF"),
+    "jsonwebtoken": ('jsonwebtoken = { version = "11.1", default-features = false, features = ["aws_lc_rs"] }', "JWT"),
+    "rustls": ('rustls = { version = "0.23.36", default-features = false, features = ["aws-lc-rs", "ring"] }', "TLS handshake and records"),
+    "aws-lc-sys": ('aws-lc-sys = { version = "0.47", default-features = false }', "XChaCha20-Poly1305"),
+    "verified-garbage": ('verified-garbage = { git = "https://github.com/pyca/verified-garbage", rev = "0aa40d6c21fd02943fe5b38a5b69b6213d07764d" }', "everything verified-garbage has"),
+    "graviola": ('graviola = "0.4"', "everything graviola has (x86_64 and aarch64 only)"),
+    "rustls-graviola": ('rustls-graviola = "0.4"', "TLS (x86_64 and aarch64 only)"),
+    "openssl": ('openssl = "0.10"', "everything OpenSSL has (needs the system library)"),
+    "openssl-sys": ('openssl-sys = "0.9"', "OpenSSL bindings (needs the system library)"),
+    "rustls-openssl": ('rustls-openssl = { version = "0.4", default-features = false }', "TLS over OpenSSL"),
     "ring": ('ring = { version = "0.17", default-features = false }', "everything ring has"),
     "aws-lc-rs": ('aws-lc-rs = { version = "1.19", default-features = false, features = ["non-fips"] }', "everything aws-lc-rs has"),
 }

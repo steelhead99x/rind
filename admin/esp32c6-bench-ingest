@@ -10,8 +10,8 @@ LOG holds the lines the firmware (admin/esp32c6/firmware) prints:
 
   RIND-FW v1 done failed=<n> cpu_mhz=<n> rounds=<n> kats=<n> rows=<n>
   RIND-KAT v1 <algorithm> ok|FAIL
-  RIND-BENCH v1 <operation> lib=<library> median_ns=<n> min_ns=<n> max_ns=<n> rounds=<n> iters=<n>
-  RIND-BENCH v1 <operation> lib=<library> size_failure=heap|stack need=<n> have=<n>
+  RIND-BENCH v1 <operation> [lib=<library>] median_ns=<n> min_ns=<n> max_ns=<n> rounds=<n> iters=<n>
+  RIND-BENCH v1 <operation> [lib=<library>] size_failure=heap|stack need=<n> have=<n>
 
 A size_failure row is an operation the board had too little heap or stack for;
 it is kept as a result with `status` `size-failure` and no time.
@@ -43,10 +43,12 @@ import json
 import re
 import sys
 
+# `lib=<library>` names the vendor a row measured. Older v1 firmware printed
+# rind's rows without it, so a row with none is rind's.
 ROW = re.compile(
-    r"^RIND-BENCH v1 (\S+) lib=(\S+) median_ns=(\d+) min_ns=(\d+) max_ns=(\d+) rounds=(\d+) iters=(\d+)$"
+    r"^RIND-BENCH v1 (\S+) (?:lib=(\S+) )?median_ns=(\d+) min_ns=(\d+) max_ns=(\d+) rounds=(\d+) iters=(\d+)$"
 )
-SKIP = re.compile(r"^RIND-BENCH v1 (\S+) lib=(\S+) size_failure=(heap|stack) need=(\d+) have=(\d+)$")
+SKIP = re.compile(r"^RIND-BENCH v1 (\S+) (?:lib=(\S+) )?size_failure=(heap|stack) need=(\d+) have=(\d+)$")
 KAT = re.compile(r"^RIND-KAT v1 (\S+) (ok|FAIL)$")
 # `kats=<n> rows=<m>` declares how many check and benchmark lines follow, so a
 # copy cut off after some rows is told from a whole one. Firmware that predates
@@ -112,6 +114,11 @@ def complete(blocks):
     return whole
 
 
+def with_lib(row):
+    """`row` with the implicit `rind` filled in for a row that names no lib."""
+    return (row[0], row[1] or "rind", *row[2:])
+
+
 def parse(text):
     """The first complete summary in `text`, as the output dict."""
     blocks, cur = [], None
@@ -139,11 +146,15 @@ def parse(text):
             else:
                 cur["kat"].append((m[1], m[2] == "ok"))
         elif cur is not None and (m := ROW.match(line)):
-            cur["rows"].append(m.groups())
+            cur["rows"].append(with_lib(m.groups()))
         elif cur is not None and (m := SKIP.match(line)):
-            cur["rows"].append(m.groups())
+            cur["rows"].append(with_lib(m.groups()))
         elif line.startswith("RIND-FW v1 start"):
-            continue
+            # A new boot ends the block before it: its startup checks are the
+            # next boot's, not more of this summary.
+            if cur is not None:
+                blocks.append(cur)
+                cur = None
         elif n == len(lines) - 1 and PARTIAL_FAILURE.match(line):
             # A last line cut off by a reset still shows a failure it began.
             raise Refused(f"known-answer checks failed: {line[:80]}")
@@ -246,6 +257,13 @@ def selftest():
     assert out2["results"][1]["status"] == "size-failure" and out2["results"][1]["limit"] == "heap"
     assert "ns" not in out2["results"][1]
     check_scrubbed(out2)
+    # Rows in the older format, with no `lib=`, are rind's, and read the same
+    # as the explicit form; the two may be mixed across copies.
+    old = good.replace(" lib=rind", "")
+    assert "lib=" not in old and parse(old + old) == parse(good + good)
+    assert parse(old + good) == parse(good + good)
+    old_skip = skipped.replace(" lib=rind", "")
+    assert parse(old_skip + old_skip) == parse(skipped + skipped)
     refuses(good + "RIND-BENCH v1 x lib=rind size_failure=disk need=1 have=0\n" + good, "malformed")
     refuses("RIND-FW v1 panic at x", "panicked")
     refuses(good.replace("sha256 ok", "sha256 FAIL"), "failed")
@@ -303,6 +321,16 @@ def selftest():
     refuses(whole + whole.replace("cpu_mhz=160", "cpu_mhz=80"), "disagree")
     # A copy that declares more rows than it holds is cut off, not a disagreement.
     assert len(parse(whole + whole.replace("rows=2", "rows=3"))["results"]) == 2
+    # A new boot's start marker ends the summary before it, so that boot's
+    # startup checks are not appended to it (which would drop it as cut off)
+    # and a later summary that disagrees is still caught.
+    one = (
+        "RIND-FW v1 done failed=0 cpu_mhz=160 rounds=7 kats=1 rows=1\n"
+        "RIND-KAT v1 sha256 ok\n" + row1
+    )
+    start = "RIND-FW v1 start target=esp32c6\nRIND-KAT v1 sha256 ok\n"
+    assert len(parse(one + start + one)["results"]) == 1
+    refuses(one + start + one.replace("median_ns=100", "median_ns=101"), "disagree")
     leaked = dict(out, note="10:bd:a3:b4:2c:48")
     try:
         check_scrubbed(leaked)
