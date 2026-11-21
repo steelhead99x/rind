@@ -143,7 +143,11 @@ def parse(text):
         elif cur is not None and (m := SKIP.match(line)):
             cur["rows"].append(m.groups())
         elif line.startswith("RIND-FW v1 start"):
-            continue
+            # A new boot ends the block before it: its startup checks are the
+            # next boot's, not more of this summary.
+            if cur is not None:
+                blocks.append(cur)
+                cur = None
         elif n == len(lines) - 1 and PARTIAL_FAILURE.match(line):
             # A last line cut off by a reset still shows a failure it began.
             raise Refused(f"known-answer checks failed: {line[:80]}")
@@ -303,6 +307,16 @@ def selftest():
     refuses(whole + whole.replace("cpu_mhz=160", "cpu_mhz=80"), "disagree")
     # A copy that declares more rows than it holds is cut off, not a disagreement.
     assert len(parse(whole + whole.replace("rows=2", "rows=3"))["results"]) == 2
+    # A new boot's start marker ends the summary before it, so that boot's
+    # startup checks are not appended to it (which would drop it as cut off)
+    # and a later summary that disagrees is still caught.
+    one = (
+        "RIND-FW v1 done failed=0 cpu_mhz=160 rounds=7 kats=1 rows=1\n"
+        "RIND-KAT v1 sha256 ok\n" + row1
+    )
+    start = "RIND-FW v1 start target=esp32c6\nRIND-KAT v1 sha256 ok\n"
+    assert len(parse(one + start + one)["results"]) == 1
+    refuses(one + start + one.replace("median_ns=100", "median_ns=101"), "disagree")
     leaked = dict(out, note="10:bd:a3:b4:2c:48")
     try:
         check_scrubbed(leaked)
