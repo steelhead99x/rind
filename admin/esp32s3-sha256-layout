@@ -69,7 +69,7 @@ fi
 # builds. Dropping either would otherwise leave this script green.
 # rustfmt wraps the attribute, so compare it with whitespace removed.
 tr -d ' \n' <"$root/rind/src/lib.rs" |
-  grep -F '#![cfg_attr(all(target_arch="xtensa",target_os="espidf"),feature(asm_experimental_arch))]' \
+  grep -F '#![cfg_attr(any(all(target_arch="xtensa",target_os="espidf"),rind_esp32s3),feature(asm_experimental_arch))]' \
     >/dev/null || {
   printf 'esp32s3-sha256-layout: rind/src/lib.rs no longer enables asm_experimental_arch on ESP-IDF Xtensa\n' >&2
   exit 1

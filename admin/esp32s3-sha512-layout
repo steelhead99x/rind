@@ -116,6 +116,16 @@ done
 # The feature name matches rind's, so the cfg in the source applies.
 cp "$root/rind/src/low/generic/sha512.rs" "$work/body.rs"
 
+# The probe sets `asm_experimental_arch` in its own crate, so it cannot
+# notice rind dropping the gate. Without it the none-elf S3 build fails on
+# the message-load asm. rustfmt wraps the attribute: strip whitespace.
+tr -d ' \n' <"$root/rind/src/lib.rs" |
+  grep -F '#![cfg_attr(any(all(target_arch="xtensa",target_os="espidf"),rind_esp32s3),feature(asm_experimental_arch))]' \
+    >/dev/null || {
+  printf 'esp32s3-sha512-layout: rind/src/lib.rs no longer enables asm_experimental_arch on the ESP32-S3\n' >&2
+  exit 1
+}
+
 mkdir -p "$work/probe/src"
 {
   # rind/src/lib.rs enables asm_experimental_arch on Xtensa; the probe
