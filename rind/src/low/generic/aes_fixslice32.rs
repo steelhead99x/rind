@@ -259,51 +259,6 @@ pub(crate) fn aes128_decrypt(rkeys: &FixsliceKeys128, blocks: &BatchBlocks) -> B
     inv_bitslice(&state)
 }
 
-/// Fully-fixsliced AES-128 encryption (the ShiftRows is completely omitted).
-///
-/// Encrypts four blocks in-place and in parallel.
-pub(crate) fn aes128_encrypt(rkeys: &FixsliceKeys128, blocks: &BatchBlocks) -> BatchBlocks {
-    let mut state = State::default();
-
-    bitslice(&mut state, &blocks[0], &blocks[1]);
-
-    add_round_key(&mut state, &rkeys[..8]);
-
-    let mut rk_off = 8;
-    loop {
-        sub_bytes(&mut state);
-        mix_columns_1(&mut state);
-        add_round_key(&mut state, &rkeys[rk_off..(rk_off + 8)]);
-        rk_off += 8;
-
-        if rk_off == 80 {
-            break;
-        }
-
-        sub_bytes(&mut state);
-        mix_columns_2(&mut state);
-        add_round_key(&mut state, &rkeys[rk_off..(rk_off + 8)]);
-        rk_off += 8;
-
-        sub_bytes(&mut state);
-        mix_columns_3(&mut state);
-        add_round_key(&mut state, &rkeys[rk_off..(rk_off + 8)]);
-        rk_off += 8;
-
-        sub_bytes(&mut state);
-        mix_columns_0(&mut state);
-        add_round_key(&mut state, &rkeys[rk_off..(rk_off + 8)]);
-        rk_off += 8;
-    }
-
-    shift_rows_2(&mut state);
-
-    sub_bytes(&mut state);
-    add_round_key(&mut state, &rkeys[80..]);
-
-    inv_bitslice(&state)
-}
-
 /// Fully-fixsliced AES-192 decryption (the InvShiftRows is completely omitted).
 ///
 /// Decrypts four blocks in-place and in parallel.
@@ -343,49 +298,6 @@ pub(crate) fn aes192_decrypt(rkeys: &FixsliceKeys192, blocks: &BatchBlocks) -> B
     }
 
     add_round_key(&mut state, &rkeys[..8]);
-
-    inv_bitslice(&state)
-}
-
-/// Fully-fixsliced AES-192 encryption (the ShiftRows is completely omitted).
-///
-/// Encrypts four blocks in-place and in parallel.
-pub(crate) fn aes192_encrypt(rkeys: &FixsliceKeys192, blocks: &BatchBlocks) -> BatchBlocks {
-    let mut state = State::default();
-
-    bitslice(&mut state, &blocks[0], &blocks[1]);
-
-    add_round_key(&mut state, &rkeys[..8]);
-
-    let mut rk_off = 8;
-    loop {
-        sub_bytes(&mut state);
-        mix_columns_1(&mut state);
-        add_round_key(&mut state, &rkeys[rk_off..(rk_off + 8)]);
-        rk_off += 8;
-
-        sub_bytes(&mut state);
-        mix_columns_2(&mut state);
-        add_round_key(&mut state, &rkeys[rk_off..(rk_off + 8)]);
-        rk_off += 8;
-
-        sub_bytes(&mut state);
-        mix_columns_3(&mut state);
-        add_round_key(&mut state, &rkeys[rk_off..(rk_off + 8)]);
-        rk_off += 8;
-
-        if rk_off == 96 {
-            break;
-        }
-
-        sub_bytes(&mut state);
-        mix_columns_0(&mut state);
-        add_round_key(&mut state, &rkeys[rk_off..(rk_off + 8)]);
-        rk_off += 8;
-    }
-
-    sub_bytes(&mut state);
-    add_round_key(&mut state, &rkeys[96..]);
 
     inv_bitslice(&state)
 }
@@ -435,13 +347,13 @@ pub(crate) fn aes256_decrypt(rkeys: &FixsliceKeys256, blocks: &BatchBlocks) -> B
     inv_bitslice(&state)
 }
 
-/// Fully-fixsliced AES-256 encryption (the ShiftRows is completely omitted).
-///
-/// Encrypts four blocks in-place and in parallel.
-pub(crate) fn aes256_encrypt(rkeys: &FixsliceKeys256, blocks: &BatchBlocks) -> BatchBlocks {
+/// Fully-fixsliced AES-192 encryption (the ShiftRows is completely
+/// omitted) of two blocks, in and out as [`bitslice_words`] orders them.
+#[inline(always)]
+fn aes192_encrypt_words(rkeys: &[u32; 120], words: [u32; 8]) -> [u32; 8] {
     let mut state = State::default();
 
-    bitslice(&mut state, &blocks[0], &blocks[1]);
+    bitslice_words(&mut state, words);
 
     add_round_key(&mut state, &rkeys[..8]);
 
@@ -452,7 +364,53 @@ pub(crate) fn aes256_encrypt(rkeys: &FixsliceKeys256, blocks: &BatchBlocks) -> B
         add_round_key(&mut state, &rkeys[rk_off..(rk_off + 8)]);
         rk_off += 8;
 
-        if rk_off == 112 {
+        sub_bytes(&mut state);
+        mix_columns_2(&mut state);
+        add_round_key(&mut state, &rkeys[rk_off..(rk_off + 8)]);
+        rk_off += 8;
+
+        sub_bytes(&mut state);
+        mix_columns_3(&mut state);
+        add_round_key(&mut state, &rkeys[rk_off..(rk_off + 8)]);
+        rk_off += 8;
+
+        if rk_off == 96 {
+            break;
+        }
+
+        sub_bytes(&mut state);
+        mix_columns_0(&mut state);
+        add_round_key(&mut state, &rkeys[rk_off..(rk_off + 8)]);
+        rk_off += 8;
+    }
+
+    sub_bytes(&mut state);
+    add_round_key(&mut state, &rkeys[96..104]);
+
+    inv_bitslice_words(&state)
+}
+
+/// Fully-fixsliced AES-128 (`LAST` 80) or AES-256 (`LAST` 112) encryption
+/// (the ShiftRows is completely omitted) of two blocks, in and out as
+/// [`bitslice_words`] orders them: RustCrypto's `aes128_encrypt` and
+/// `aes256_encrypt`, whose rounds differ only in number. AES-192's twelve
+/// end on a different MixColumns, so [`aes192_encrypt_words`] runs them.
+#[inline(always)]
+fn encrypt_words<const LAST: usize>(rkeys: &[u32; 120], words: [u32; 8]) -> [u32; 8] {
+    let mut state = State::default();
+
+    bitslice_words(&mut state, words);
+
+    add_round_key(&mut state, &rkeys[..8]);
+
+    let mut rk_off = 8;
+    loop {
+        sub_bytes(&mut state);
+        mix_columns_1(&mut state);
+        add_round_key(&mut state, &rkeys[rk_off..(rk_off + 8)]);
+        rk_off += 8;
+
+        if rk_off == LAST {
             break;
         }
 
@@ -475,9 +433,21 @@ pub(crate) fn aes256_encrypt(rkeys: &FixsliceKeys256, blocks: &BatchBlocks) -> B
     shift_rows_2(&mut state);
 
     sub_bytes(&mut state);
-    add_round_key(&mut state, &rkeys[112..]);
+    add_round_key(&mut state, &rkeys[LAST..LAST + 8]);
 
-    inv_bitslice(&state)
+    inv_bitslice_words(&state)
+}
+
+/// Fully-fixsliced encryption of two blocks, in and out as
+/// [`bitslice_words`] orders them, under the key size whose last round key
+/// starts at word `LAST` of `rkeys`: 80, 96, or 112.
+#[inline(always)]
+fn encrypt_last<const LAST: usize>(rkeys: &[u32; 120], words: [u32; 8]) -> [u32; 8] {
+    if LAST == 96 {
+        aes192_encrypt_words(rkeys, words)
+    } else {
+        encrypt_words::<LAST>(rkeys, words)
+    }
 }
 
 /// Note that the 4 bitwise NOT (^= 0xffffffff) are accounted for here so that it is a true
@@ -1084,9 +1054,30 @@ fn xor_columns(rkeys: &mut [u32], offset: usize, idx_xor: usize, idx_ror: u32) {
 /// Bitslice two 128-bit input blocks input0, input1 into a 256-bit internal state.
 #[inline(always)]
 fn bitslice(output: &mut [u32], input0: &[u8], input1: &[u8]) {
-    debug_assert_eq!(output.len(), 8);
     debug_assert_eq!(input0.len(), 16);
     debug_assert_eq!(input1.len(), 16);
+    let w =
+        |input: &[u8], i: usize| u32::from_le_bytes(input[4 * i..4 * i + 4].try_into().unwrap());
+    bitslice_words(
+        output,
+        [
+            w(input0, 0),
+            w(input1, 0),
+            w(input0, 1),
+            w(input1, 1),
+            w(input0, 2),
+            w(input1, 2),
+            w(input0, 3),
+            w(input1, 3),
+        ],
+    );
+}
+
+/// [`bitslice`] from the blocks' little-endian words, interleaved: word `i`
+/// of the first block at `2i`, of the second at `2i + 1`.
+#[inline(always)]
+fn bitslice_words(output: &mut [u32], words: [u32; 8]) {
+    debug_assert_eq!(output.len(), 8);
 
     // Bitslicing is a bit index manipulation. 256 bits of data means each bit is positioned at an
     // 8-bit index. AES data is 2 blocks, each one a 4x4 column-major matrix of bytes, so the
@@ -1098,14 +1089,16 @@ fn bitslice(output: &mut [u32], input0: &[u8], input1: &[u8]) {
 
     // Interleave the columns on input (note the order of input)
     //     b0 c1 c0 __ __ __ __ __ => c1 c0 b0 __ __ __ __ __
-    let mut t0 = u32::from_le_bytes(input0[0x00..0x04].try_into().unwrap());
-    let mut t2 = u32::from_le_bytes(input0[0x04..0x08].try_into().unwrap());
-    let mut t4 = u32::from_le_bytes(input0[0x08..0x0c].try_into().unwrap());
-    let mut t6 = u32::from_le_bytes(input0[0x0c..0x10].try_into().unwrap());
-    let mut t1 = u32::from_le_bytes(input1[0x00..0x04].try_into().unwrap());
-    let mut t3 = u32::from_le_bytes(input1[0x04..0x08].try_into().unwrap());
-    let mut t5 = u32::from_le_bytes(input1[0x08..0x0c].try_into().unwrap());
-    let mut t7 = u32::from_le_bytes(input1[0x0c..0x10].try_into().unwrap());
+    let [
+        mut t0,
+        mut t1,
+        mut t2,
+        mut t3,
+        mut t4,
+        mut t5,
+        mut t6,
+        mut t7,
+    ] = words;
 
     // Bit Index Swap 5 <-> 0:
     //     __ __ b0 __ __ __ __ p0 => __ __ p0 __ __ __ __ b0
@@ -1146,6 +1139,18 @@ fn bitslice(output: &mut [u32], input0: &[u8], input1: &[u8]) {
 /// Un-bitslice a 256-bit internal state into two 128-bit blocks of output.
 #[inline(always)]
 fn inv_bitslice(input: &[u32]) -> BatchBlocks {
+    let words = inv_bitslice_words(input);
+    let mut output = [[0u8; 16]; 2];
+    for (i, w) in words.iter().enumerate() {
+        output[i % 2][4 * (i / 2)..4 * (i / 2) + 4].copy_from_slice(&w.to_le_bytes());
+    }
+    output
+}
+
+/// [`inv_bitslice`] to the blocks' little-endian words, interleaved as
+/// [`bitslice_words`] takes them.
+#[inline(always)]
+fn inv_bitslice_words(input: &[u32]) -> [u32; 8] {
     debug_assert_eq!(input.len(), 8);
 
     // Unbitslicing is a bit index manipulation. 256 bits of data means each bit is positioned at
@@ -1191,21 +1196,11 @@ fn inv_bitslice(input: &[u32]) -> BatchBlocks {
     delta_swap_2(&mut t6, &mut t2, 4, m2);
     delta_swap_2(&mut t7, &mut t3, 4, m2);
 
-    let mut output = [[0u8; 16]; 2];
     // De-interleave the columns on output (note the order of output)
     //     c1 c0 b0 __ __ __ __ __ => b0 c1 c0 __ __ __ __ __
-    output[0][0x00..0x04].copy_from_slice(&t0.to_le_bytes());
-    output[0][0x04..0x08].copy_from_slice(&t2.to_le_bytes());
-    output[0][0x08..0x0c].copy_from_slice(&t4.to_le_bytes());
-    output[0][0x0c..0x10].copy_from_slice(&t6.to_le_bytes());
-    output[1][0x00..0x04].copy_from_slice(&t1.to_le_bytes());
-    output[1][0x04..0x08].copy_from_slice(&t3.to_le_bytes());
-    output[1][0x08..0x0c].copy_from_slice(&t5.to_le_bytes());
-    output[1][0x0c..0x10].copy_from_slice(&t7.to_le_bytes());
-
     // Final AES bit index, as desired:
     //     b0 c1 c0 r1 r0 p2 p1 p0
-    output
+    [t0, t1, t2, t3, t4, t5, t6, t7]
 }
 
 /// Copy 32-bytes within the provided slice to an 8-byte offset
@@ -1240,6 +1235,37 @@ fn ror(x: u32, y: u32) -> u32 {
     x.rotate_right(y)
 }
 
+/// `a` where `mask` is set and `b` elsewhere, as `(a & mask) | (b & !mask)`
+/// but by one mask, so the rounds hold three mask constants in registers
+/// rather than six, which on riscv32imac left the S-box circuit spilling.
+/// [`opaque`] keeps LLVM from turning it back into two masks.
+#[inline(always)]
+fn blend(a: u32, b: u32, mask: u32) -> u32 {
+    b ^ (opaque(a ^ b) & mask)
+}
+
+/// `v`, which the optimiser can no longer see through, as `md5`'s.
+#[inline(always)]
+#[cfg(not(any(target_family = "wasm", miri)))]
+// The operand appears only in a comment, so no register width is printed.
+#[allow(asm_sub_register)]
+fn opaque(mut v: u32) -> u32 {
+    // SAFETY: the assembly is empty, so it reads, writes, and clobbers
+    // nothing but returns `v` in the register it took it in.
+    unsafe {
+        core::arch::asm!("/* {0} */", inout(reg) v, options(pure, nomem, nostack, preserves_flags));
+    }
+    v
+}
+
+// WebAssembly has no stable inline assembly or general-purpose register class,
+// and Miri runs none.
+#[inline(always)]
+#[cfg(any(target_family = "wasm", miri))]
+fn opaque(v: u32) -> u32 {
+    v
+}
+
 #[inline(always)]
 fn ror_distance(rows: u32, cols: u32) -> u32 {
     (rows << 3) + (cols << 1)
@@ -1258,29 +1284,25 @@ fn rotate_rows_2(x: u32) -> u32 {
 #[inline(always)]
 #[rustfmt::skip]
 fn rotate_rows_and_columns_1_1(x: u32) -> u32 {
-    (ror(x, ror_distance(1, 1)) & 0x3f3f3f3f) |
-    (ror(x, ror_distance(0, 1)) & 0xc0c0c0c0)
+    blend(ror(x, ror_distance(1, 1)), ror(x, ror_distance(0, 1)), 0x3f3f3f3f)
 }
 
 #[inline(always)]
 #[rustfmt::skip]
 fn rotate_rows_and_columns_1_2(x: u32) -> u32 {
-    (ror(x, ror_distance(1, 2)) & 0x0f0f0f0f) |
-    (ror(x, ror_distance(0, 2)) & 0xf0f0f0f0)
+    blend(ror(x, ror_distance(1, 2)), ror(x, ror_distance(0, 2)), 0x0f0f0f0f)
 }
 
 #[inline(always)]
 #[rustfmt::skip]
 fn rotate_rows_and_columns_1_3(x: u32) -> u32 {
-    (ror(x, ror_distance(1, 3)) & 0x03030303) |
-    (ror(x, ror_distance(0, 3)) & 0xfcfcfcfc)
+    blend(ror(x, ror_distance(1, 3)), ror(x, ror_distance(0, 3)), 0x03030303)
 }
 
 #[inline(always)]
 #[rustfmt::skip]
 fn rotate_rows_and_columns_2_2(x: u32) -> u32 {
-    (ror(x, ror_distance(2, 2)) & 0x0f0f0f0f) |
-    (ror(x, ror_distance(1, 2)) & 0xf0f0f0f0)
+    blend(ror(x, ror_distance(2, 2)), ror(x, ror_distance(1, 2)), 0x0f0f0f0f)
 }
 
 /// Fixsliced round keys for any AES key size, which encrypt and decrypt two
@@ -1316,11 +1338,29 @@ impl Schedule {
 
     #[inline(always)]
     fn encrypt2(&self, blocks: &BatchBlocks) -> BatchBlocks {
-        match self.key_len {
-            16 => aes128_encrypt(self.rkeys[..88].try_into().unwrap(), blocks),
-            24 => aes192_encrypt(self.rkeys[..104].try_into().unwrap(), blocks),
-            _ => aes256_encrypt(&self.rkeys, blocks),
+        let w = |b: usize, i: usize| {
+            u32::from_le_bytes(blocks[b][4 * i..4 * i + 4].try_into().unwrap())
+        };
+        let words = [
+            w(0, 0),
+            w(1, 0),
+            w(0, 1),
+            w(1, 1),
+            w(0, 2),
+            w(1, 2),
+            w(0, 3),
+            w(1, 3),
+        ];
+        let out = match self.key_len {
+            16 => encrypt_last::<80>(&self.rkeys, words),
+            24 => encrypt_last::<96>(&self.rkeys, words),
+            _ => encrypt_last::<112>(&self.rkeys, words),
+        };
+        let mut blocks = [[0u8; 16]; 2];
+        for (i, w) in out.iter().enumerate() {
+            blocks[i % 2][4 * (i / 2)..4 * (i / 2) + 4].copy_from_slice(&w.to_le_bytes());
         }
+        blocks
     }
 
     #[inline(always)]
@@ -1349,26 +1389,57 @@ impl Schedule {
     /// The counter blocks are `ivec`, then `ivec` with its last four bytes,
     /// a big-endian counter, incremented with 32-bit wrapping.
     pub(crate) fn ctr32(&self, ivec: &[u8; 16], inout: &mut [u8]) {
-        let mut ivs = [*ivec; 2];
+        match self.key_len {
+            16 => self.ctr32_rounds::<80>(ivec, inout),
+            24 => self.ctr32_rounds::<96>(ivec, inout),
+            _ => self.ctr32_rounds::<112>(ivec, inout),
+        }
+    }
+
+    /// [`Self::ctr32`] for the key size whose last round key starts at
+    /// `LAST`. The counter blocks go in, and the keystream comes out, as
+    /// words: the nonce's three words are the same in every block, and
+    /// only the counter's changes.
+    #[inline(never)]
+    fn ctr32_rounds<const LAST: usize>(&self, ivec: &[u8; 16], inout: &mut [u8]) {
+        let w = |i: usize| u32::from_le_bytes(ivec[4 * i..4 * i + 4].try_into().unwrap());
+        let (n0, n1, n2) = (w(0), w(1), w(2));
         let mut ctr = u32::from_be_bytes(ivec[12..].try_into().unwrap());
+        let mut keystream = || {
+            let words = [
+                n0,
+                n0,
+                n1,
+                n1,
+                n2,
+                n2,
+                ctr.swap_bytes(),
+                ctr.wrapping_add(1).swap_bytes(),
+            ];
+            ctr = ctr.wrapping_add(2);
+            encrypt_last::<LAST>(&self.rkeys, words)
+        };
+        // Word `i` of block `b` of the pair is keystream word `2i + b`.
+        let xor = |pair: &mut [u8; 32], ks: &[u32; 8]| {
+            let (words, _) = pair.as_chunks_mut::<4>();
+            for (i, word) in words.iter_mut().enumerate() {
+                let k = ks[(i % 4) * 2 + i / 4].to_le_bytes();
+                for (b, k) in word.iter_mut().zip(k) {
+                    *b ^= k;
+                }
+            }
+        };
         let (pairs, tail) = inout.as_chunks_mut::<32>();
         for pair in pairs {
-            ivs[0][12..].copy_from_slice(&ctr.to_be_bytes());
-            ivs[1][12..].copy_from_slice(&ctr.wrapping_add(1).to_be_bytes());
-            let ks = self.encrypt2(&ivs);
-            // Fixed-length arrays, so the XOR unrolls without bounds checks.
-            for (b, k) in pair.iter_mut().zip(ks.as_flattened()) {
-                *b ^= k;
-            }
-            ctr = ctr.wrapping_add(2);
+            let ks = keystream();
+            xor(pair, &ks);
         }
         if !tail.is_empty() {
-            ivs[0][12..].copy_from_slice(&ctr.to_be_bytes());
-            ivs[1][12..].copy_from_slice(&ctr.wrapping_add(1).to_be_bytes());
-            let ks = self.encrypt2(&ivs);
-            for (b, k) in tail.iter_mut().zip(ks.as_flattened()) {
-                *b ^= k;
-            }
+            let mut pair = [0u8; 32];
+            pair[..tail.len()].copy_from_slice(tail);
+            let ks = keystream();
+            xor(&mut pair, &ks);
+            tail.copy_from_slice(&pair[..tail.len()]);
         }
     }
 
