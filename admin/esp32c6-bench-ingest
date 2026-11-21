@@ -8,12 +8,20 @@ Usage:
 
 LOG holds the lines the firmware (admin/esp32c6/firmware) prints:
 
-  RIND-FW v1 done failed=<n> cpu_mhz=<n> rounds=<n>
+  RIND-FW v1 done failed=<n> cpu_mhz=<n> rounds=<n> kats=<n> rows=<n>
   RIND-KAT v1 <algorithm> ok|FAIL
   RIND-BENCH v1 <operation> median_ns=<n> min_ns=<n> max_ns=<n> rounds=<n> iters=<n>
 
+The `kats=` and `rows=` on the done line declare how many check and benchmark
+lines follow it. A copy holding fewer (a reset, or a capture stopped between
+lines) was cut off and is discarded; a log with no whole copy is refused, so a
+log with missing measurements is never `ok`. Firmware that predates the counts
+prints a done line without them: such a log is still read, a copy shorter than
+a longer one is discarded if it is a prefix of it, but a lone cut-off copy of
+it cannot be told from a whole one, so capture at least two copies.
+
 The firmware repeats its summary every five seconds, so a log holds several
-copies; they must agree row for row, and the first is kept. The known-answer
+copies; the whole ones must agree row for row, and the first is kept. The known-answer
 lines it prints once at boot, before the first summary, are accepted and must
 agree with it. A failure anywhere in the log refuses it, even in a summary cut
 off by a reset. Anything else in the log (boot messages, ROM output, a MAC address, a serial port path) is dropped, and
@@ -35,9 +43,17 @@ ROW = re.compile(
     r"^RIND-BENCH v1 (\S+) median_ns=(\d+) min_ns=(\d+) max_ns=(\d+) rounds=(\d+) iters=(\d+)$"
 )
 KAT = re.compile(r"^RIND-KAT v1 (\S+) (ok|FAIL)$")
-DONE = re.compile(r"^RIND-FW v1 done failed=(\d+) cpu_mhz=(\d+) rounds=(\d+)$")
+# `kats=<n> rows=<m>` declares how many check and benchmark lines follow, so a
+# copy cut off after some rows is told from a whole one. Firmware that predates
+# it prints neither.
+DONE = re.compile(
+    r"^RIND-FW v1 done failed=(\d+) cpu_mhz=(\d+) rounds=(\d+)(?: kats=(\d+) rows=(\d+))?$"
+)
 # The start of a failure on a line a reset cut short.
-PARTIAL_FAILURE = re.compile(r"^(?:RIND-FW v1 done failed=[1-9]|RIND-KAT v1 \S+ F)")
+# (or `failed=` cut before its digit, whose value is unknown).
+PARTIAL_FAILURE = re.compile(
+    r"^(?:RIND-FW v1 done failed=(?:[1-9]|$)|RIND-KAT v1 \S+ F(?:A|AI)?$)"
+)
 
 # What must never reach the output: the board's MAC and its USB serial, host
 # paths and user names, and addresses, as bench-app's scrub removes.
@@ -54,22 +70,69 @@ class Refused(Exception):
     pass
 
 
+def complete(blocks):
+    """The blocks that were printed whole.
+
+    A `done` line that declares `kats=<n> rows=<m>` makes a block complete only
+    when it holds exactly that many checks and rows; any other copy was cut off
+    (by a reset, or a capture stopped between lines) and is dropped. A log from
+    firmware that declares nothing has no such proof: its longest copies are
+    taken as whole, a shorter one is dropped only if it is a prefix of them,
+    and a lone cut-off copy cannot be told from a whole one.
+    """
+    declared = [b for b in blocks if b["done"][3] is not None]
+    if declared:
+        if len(declared) != len(blocks):
+            raise Refused("the log mixes summaries with and without declared counts")
+        whole = [
+            b
+            for b in blocks
+            if len(b["kat"]) == int(b["done"][3]) and len(b["rows"]) == int(b["done"][4])
+        ]
+        if not whole:
+            raise Refused("no complete summary: every copy has fewer checks or rows than it declares")
+        return whole
+    blocks = [b for b in blocks if b["rows"] and b["kat"]]
+    if not blocks:
+        raise Refused("no complete summary (checks and rows after a done line) in the log")
+    most = max((len(b["kat"]), len(b["rows"])) for b in blocks)
+    whole = [b for b in blocks if (len(b["kat"]), len(b["rows"])) == most]
+    for b in blocks:
+        if b not in whole and not (
+            b["done"] == whole[0]["done"]
+            and whole[0]["kat"][: len(b["kat"])] == b["kat"]
+            and whole[0]["rows"][: len(b["rows"])] == b["rows"]
+        ):
+            raise Refused("the log's summaries disagree: the board reset or ran different firmware")
+    return whole
+
+
 def parse(text):
     """The first complete summary in `text`, as the output dict."""
     blocks, cur = [], None
     # The firmware prints its known-answer lines once at boot, before its first
     # `done` line: they belong to no block, but a failure in them counts.
     boot_kat = {}
+    # Every FAIL the log shows, kept apart from the per-algorithm results so a
+    # later `ok` for the same check (another boot) cannot erase it.
+    failures = []
     lines = [l.strip() for l in text.splitlines() if l.strip()]
     for n, line in enumerate(lines):
         if "panic" in line.lower() and line.startswith("RIND-FW"):
             raise Refused(f"the firmware panicked: {line[:80]}")
-        if DONE.match(line):
+        if (m := DONE.match(line)):
             if cur is not None:
                 blocks.append(cur)
-            cur = {"done": DONE.match(line).groups(), "kat": {}, "rows": []}
+            cur = {"done": m.groups(), "kat": [], "rows": []}
+            if int(m[1]):
+                failures.append(f"failed={m[1]}")
         elif (m := KAT.match(line)):
-            (boot_kat if cur is None else cur["kat"])[m[1]] = m[2] == "ok"
+            if m[2] != "ok":
+                failures.append(m[1])
+            if cur is None:
+                boot_kat[m[1]] = m[2] == "ok"
+            else:
+                cur["kat"].append((m[1], m[2] == "ok"))
         elif cur is not None and (m := ROW.match(line)):
             cur["rows"].append(m.groups())
         elif line.startswith("RIND-FW v1 start"):
@@ -83,24 +146,22 @@ def parse(text):
     if cur is not None:
         blocks.append(cur)
     # Every failure the log shows counts, in a block that was cut off too.
-    failures = [k for k, ok in boot_kat.items() if not ok]
-    for b in blocks:
-        failures += [k for k, ok in b["kat"].items() if not ok]
-        if int(b["done"][0]):
-            failures.append(f"failed={b['done'][0]}")
     if failures:
         raise Refused(f"known-answer checks failed: {failures}")
-    # A block cut off by a reset or an unplugged cable is dropped.
-    blocks = [b for b in blocks if b["rows"] and b["kat"]]
-    if not blocks:
-        raise Refused("no complete summary (checks and rows after a done line) in the log")
+    blocks = complete(blocks)
     first = blocks[0]
     for b in blocks[1:]:
-        if b["done"] != first["done"] or b["kat"] != first["kat"] or b["rows"] != first["rows"]:
+        if b != first:
             raise Refused("the log's summaries disagree: the board reset or ran different firmware")
-    if boot_kat and boot_kat != first["kat"]:
+    names = [k for k, _ in first["kat"]]
+    if len(set(names)) != len(names):
+        raise Refused("a known-answer check is repeated in one summary")
+    first = dict(first, kat=dict(first["kat"]))
+    # Boot lines may be a copy cut off by a capture that began mid-boot, but
+    # every one that is there must agree with the summary.
+    if any(first["kat"].get(k) != v for k, v in boot_kat.items()):
         raise Refused("the log's boot checks disagree with its summary")
-    failed, mhz, rounds = (int(x) for x in first["done"])
+    failed, mhz, rounds = (int(x) for x in first["done"][:3])
     results = []
     for op, med, lo, hi, r, it in first["rows"]:
         if int(lo) > int(med) or int(med) > int(hi):
@@ -175,7 +236,40 @@ def selftest():
     refuses(good + good + "RIND-FW v1 done failed=1 cpu_mhz=160 rounds=7\n", "failed")
     refuses(good + "RIND-FW v1 done failed=0 cpu_mhz=160 rounds=7\nRIND-KAT v1 sha256 FAIL\n", "failed")
     refuses(good + "RIND-FW v1 done failed=1 cpu_mhz=16", "failed")
+    refuses(good + "RIND-FW v1 done failed=", "failed")
+    refuses(good + "RIND-FW v1 done failed=0 cpu_mhz=160 rounds=7\nRIND-KAT v1 sha256 FAI", "failed")
+    # A FAIL is kept when a later boot prints ok for the same check.
+    refuses(good.replace("sha256 ok", "sha256 FAIL") + good, "failed")
+    refuses("RIND-KAT v1 sha256 FAIL\nRIND-KAT v1 sha256 ok\n" + good + good, "failed")
+    refuses(good + "RIND-FW v1 done failed=0 cpu_mhz=160 rounds=7\nRIND-KAT v1 sha256 FAIL\n" + good, "failed")
+    # A failing block cut off before its first row still refuses.
+    refuses(good + "RIND-FW v1 done failed=2 cpu_mhz=160 rounds=7\n" + good, "failed")
     refuses(good + "RIND-FW v1 done failed=0 cpu_mhz=160 rounds=7\nRIND-KAT v1 sha256 FA", "failed")
+    # Legacy firmware (no declared counts): a shorter copy that is a prefix of a
+    # longer one was cut off and is dropped, whichever comes first.
+    two = good + "RIND-BENCH v1 sha512/{lib}/1350B median_ns=200 min_ns=190 max_ns=220 rounds=7 iters=8\n"
+    cut = good
+    assert len(parse(two + cut)["results"]) == 2
+    assert len(parse(cut + two)["results"]) == 2
+    refuses(two + good.replace("median_ns=100", "median_ns=101"), "disagree")
+    # Firmware that declares its counts: only whole copies count.
+    row1 = "RIND-BENCH v1 sha256/{lib}/1350B median_ns=100 min_ns=90 max_ns=120 rounds=7 iters=8\n"
+    row2 = "RIND-BENCH v1 sha512/{lib}/1350B median_ns=200 min_ns=190 max_ns=220 rounds=7 iters=8\n"
+    whole = (
+        "RIND-FW v1 done failed=0 cpu_mhz=160 rounds=7 kats=1 rows=2\n"
+        "RIND-KAT v1 sha256 ok\n" + row1 + row2
+    )
+    assert len(parse(whole + whole)["results"]) == 2
+    first_row = whole.replace(row2, "")  # a copy cut off after row one
+    assert len(parse(whole + first_row)["results"]) == 2
+    # A capture holding only the cut-off copy is no result.
+    refuses(first_row, "no complete")
+    refuses(first_row + first_row, "no complete")
+    refuses(whole.replace("kats=1", "kats=2"), "no complete")
+    refuses(whole + good, "mixes")
+    refuses(whole + whole.replace("cpu_mhz=160", "cpu_mhz=80"), "disagree")
+    # A copy that declares more rows than it holds is cut off, not a disagreement.
+    assert len(parse(whole + whole.replace("rows=2", "rows=3"))["results"]) == 2
     leaked = dict(out, note="10:bd:a3:b4:2c:48")
     try:
         check_scrubbed(leaked)

@@ -18,6 +18,7 @@
 //! last it accepted, so a replay fails.
 
 use alloc::vec::Vec;
+use core::mem::{ManuallyDrop, size_of};
 use rind::aead::{CHACHA20_POLY1305, Key, Nonce};
 use rind::ed25519::KeyPair;
 use rind::hkdf::{HKDF_SHA256, Salt};
@@ -128,13 +129,16 @@ const SIG: usize = 64;
 /// The keys both ends derive from one 32-byte secret: HKDF-SHA256 with
 /// distinct `info` for the AEAD key, the IV, and the Ed25519 seed.
 ///
-/// On drop the IV is wiped here, and `aead` and `signing` wipe their whole
-/// values through rind's own `Drop`. Together that is every byte this type
-/// holds that is derived from the secret.
+/// AGENTS.md: "A key type wipes its whole value on drop, public parts
+/// included". So on drop this type first drops `aead` and `signing`, which wipe
+/// their own values through rind's `Drop`, then overwrites every byte of itself
+/// (the derived IV, a public security parameter, and any padding) with zeroes.
+/// The two keys sit in `ManuallyDrop` so that `Drop::drop` runs them first,
+/// once, and the zeroing comes after, with nothing left to run over it.
 pub struct DeviceKeys {
-    aead: Key,
+    aead: ManuallyDrop<Key>,
     iv: [u8; 12],
-    signing: KeyPair,
+    signing: ManuallyDrop<KeyPair>,
 }
 
 impl DeviceKeys {
@@ -151,9 +155,11 @@ impl DeviceKeys {
         prk.fill(&[b"ed25519"], &mut seed)
             .map_err(|_| Error::Crypto)?;
         Ok(Self {
-            aead: Key::new(&CHACHA20_POLY1305, &aead).map_err(|_| Error::Crypto)?,
+            aead: ManuallyDrop::new(
+                Key::new(&CHACHA20_POLY1305, &aead).map_err(|_| Error::Crypto)?,
+            ),
             iv,
-            signing: KeyPair::from_seed(&seed).map_err(|_| Error::Crypto)?,
+            signing: ManuallyDrop::new(KeyPair::from_seed(&seed).map_err(|_| Error::Crypto)?),
         })
     }
 
@@ -165,7 +171,19 @@ impl DeviceKeys {
 
 impl Drop for DeviceKeys {
     fn drop(&mut self) {
-        wipe(&mut self.iv);
+        // SAFETY: each field is dropped exactly once, here, and never used
+        // again: the zeroing below is the last access to the whole value.
+        unsafe {
+            ManuallyDrop::drop(&mut self.aead);
+            ManuallyDrop::drop(&mut self.signing);
+        }
+        // SAFETY: `self` is valid for writes of `size_of::<Self>()` bytes, and
+        // all-zero bytes are written only as bytes: nothing reads the fields
+        // as their types again, since the value is being dropped.
+        let whole = unsafe {
+            core::slice::from_raw_parts_mut((self as *mut Self).cast::<u8>(), size_of::<Self>())
+        };
+        wipe(whole);
     }
 }
 
@@ -290,13 +308,21 @@ mod tests {
     }
 
     #[test]
-    fn dropping_device_keys_wipes_the_iv() {
+    fn dropping_device_keys_wipes_the_whole_value() {
         let mut k = core::mem::ManuallyDrop::new(keys());
+        let at = (&*k as *const DeviceKeys).cast::<u8>();
+        let len = size_of::<DeviceKeys>();
+        // SAFETY: `k` is live; the bytes are only counted, as `u8` copies.
+        let before = unsafe { core::slice::from_raw_parts(at, len) };
         assert_ne!(k.iv, [0; 12]);
-        // SAFETY: dropped once, and only the plain `iv` bytes are read after.
+        // The keys and the IV make most of the value non-zero, not only the IV.
+        assert!(before.iter().filter(|&&b| b != 0).count() > 12);
+        // SAFETY: dropped once; `k` is not used as a `DeviceKeys` afterward.
         unsafe { core::mem::ManuallyDrop::drop(&mut k) };
-        let iv = unsafe { core::ptr::addr_of!(k.iv).read() };
-        assert_eq!(iv, [0; 12]);
+        // SAFETY: `ManuallyDrop` keeps the storage; `Drop::drop` wrote every
+        // byte of it, so all `len` bytes are initialised.
+        let after = unsafe { core::slice::from_raw_parts(at, len) };
+        assert!(after.iter().all(|&b| b == 0), "{after:02x?}");
     }
 
     #[test]

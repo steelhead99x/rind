@@ -145,10 +145,12 @@ fn main() -> ! {
     println!("RIND-FW v1 start target=esp32c6 cpu_mhz=160 rind=0.3.2");
 
     let mut failed = 0u32;
+    let mut kats = 0u32;
     let mut summary = String::new();
     for kat in rind_esp32c6::all() {
         leds.blink(State::Running, 10);
         let ok = (kat.run)();
+        kats += 1;
         if !ok {
             failed += 1;
         }
@@ -163,8 +165,10 @@ fn main() -> ! {
 
     let mut timer = Timer;
     let mut rows = String::new();
+    let mut row_count = 0u32;
     bench::run_all(&mut timer, ROUNDS, 1, |r| {
         let _ = writeln!(rows, "{}", r.line());
+        row_count += 1;
         leds.blink(State::Running, 1);
     });
     let state = if failed == 0 {
@@ -174,7 +178,10 @@ fn main() -> ! {
     };
     leds.show(state);
     loop {
-        println!("RIND-FW v1 done failed={failed} cpu_mhz=160 rounds={ROUNDS}");
+        // The counts let the ingest tell a whole copy from one cut off.
+        println!(
+            "RIND-FW v1 done failed={failed} cpu_mhz=160 rounds={ROUNDS} kats={kats} rows={row_count}"
+        );
         println!("{summary}{rows}");
         for _ in 0..10 {
             leds.blink(state, if state == State::Failed { 250 } else { 500 });
