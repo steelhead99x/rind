@@ -27,6 +27,8 @@
 
 #![allow(clippy::unreadable_literal)]
 
+use super::words32::{aligned_pairs, opaque};
+
 /// Two blocks, which one pass encrypts or decrypts.
 pub(crate) type BatchBlocks = [[u8; 16]; 2];
 
@@ -1247,32 +1249,10 @@ fn ror(x: u32, y: u32) -> u32 {
 /// `a` where `mask` is set and `b` elsewhere, as `(a & mask) | (b & !mask)`
 /// but by one mask, so the rounds hold three mask constants in registers
 /// rather than six, which on riscv32imac left the S-box circuit spilling.
-/// [`opaque`] keeps LLVM from turning it back into two masks.
+/// `opaque` keeps LLVM from turning it back into two masks.
 #[inline(always)]
 fn blend(a: u32, b: u32, mask: u32) -> u32 {
     b ^ (opaque(a ^ b) & mask)
-}
-
-/// `v`, which the optimiser can no longer see through, as `md5`'s.
-#[inline(always)]
-#[cfg(not(any(target_family = "wasm", miri)))]
-// The operand appears only in a comment, so no register width is printed.
-#[allow(asm_sub_register)]
-fn opaque(mut v: u32) -> u32 {
-    // SAFETY: the assembly is empty, so it reads, writes, and clobbers
-    // nothing but returns `v` in the register it took it in.
-    unsafe {
-        core::arch::asm!("/* {0} */", inout(reg) v, options(pure, nomem, nostack, preserves_flags));
-    }
-    v
-}
-
-// WebAssembly has no stable inline assembly or general-purpose register class,
-// and Miri runs none.
-#[inline(always)]
-#[cfg(any(target_family = "wasm", miri))]
-fn opaque(v: u32) -> u32 {
-    v
 }
 
 #[inline(always)]
@@ -1437,19 +1417,17 @@ impl Schedule {
         // Where `inout` is word-aligned, which is public, whole pairs XOR
         // as words: on riscv32imac a byte array's words otherwise load and
         // store a byte at a time.
-        // SAFETY: every bit pattern is a valid `u32`.
-        let (head, aligned, _) = unsafe { inout.align_to_mut::<[u32; 8]>() };
-        let inout = if head.is_empty() {
-            for pair in aligned.iter_mut() {
-                let ks = keystream();
-                for (j, w) in pair.iter_mut().enumerate() {
-                    *w ^= ks[(j % 4) * 2 + j / 4].to_le();
+        let inout = match aligned_pairs(inout) {
+            Some((aligned, rest)) => {
+                for pair in aligned.iter_mut() {
+                    let ks = keystream();
+                    for (j, w) in pair.iter_mut().enumerate() {
+                        *w ^= ks[(j % 4) * 2 + j / 4].to_le();
+                    }
                 }
+                rest
             }
-            let done = 32 * aligned.len();
-            &mut inout[done..]
-        } else {
-            inout
+            None => inout,
         };
         let (pairs, tail) = inout.as_chunks_mut::<32>();
         for pair in pairs {
