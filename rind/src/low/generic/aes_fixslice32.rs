@@ -440,8 +440,9 @@ fn encrypt_words<const LAST: usize>(rkeys: &[u32; 120], words: [u32; 8]) -> [u32
 
 /// Fully-fixsliced encryption of two blocks, in and out as
 /// [`bitslice_words`] orders them, under the key size whose last round key
-/// starts at word `LAST` of `rkeys`: 80, 96, or 112.
-#[inline(always)]
+/// starts at word `LAST` of `rkeys`: 80, 96, or 112. Out of line, so CTR
+/// and single blocks share one copy per key size.
+#[inline(never)]
 fn encrypt_last<const LAST: usize>(rkeys: &[u32; 120], words: [u32; 8]) -> [u32; 8] {
     if LAST == 96 {
         aes192_encrypt_words(rkeys, words)
@@ -1336,6 +1337,15 @@ impl Schedule {
         self.key_len
     }
 
+    /// The key size's two-block encryption on words.
+    fn encryptor(&self) -> fn(&[u32; 120], [u32; 8]) -> [u32; 8] {
+        match self.key_len {
+            16 => encrypt_last::<80>,
+            24 => encrypt_last::<96>,
+            _ => encrypt_last::<112>,
+        }
+    }
+
     #[inline(always)]
     fn encrypt2(&self, blocks: &BatchBlocks) -> BatchBlocks {
         let w = |b: usize, i: usize| {
@@ -1351,11 +1361,7 @@ impl Schedule {
             w(0, 3),
             w(1, 3),
         ];
-        let out = match self.key_len {
-            16 => encrypt_last::<80>(&self.rkeys, words),
-            24 => encrypt_last::<96>(&self.rkeys, words),
-            _ => encrypt_last::<112>(&self.rkeys, words),
-        };
+        let out = self.encryptor()(&self.rkeys, words);
         let mut blocks = [[0u8; 16]; 2];
         for (i, w) in out.iter().enumerate() {
             blocks[i % 2][4 * (i / 2)..4 * (i / 2) + 4].copy_from_slice(&w.to_le_bytes());
@@ -1389,19 +1395,10 @@ impl Schedule {
     /// The counter blocks are `ivec`, then `ivec` with its last four bytes,
     /// a big-endian counter, incremented with 32-bit wrapping.
     pub(crate) fn ctr32(&self, ivec: &[u8; 16], inout: &mut [u8]) {
-        match self.key_len {
-            16 => self.ctr32_rounds::<80>(ivec, inout),
-            24 => self.ctr32_rounds::<96>(ivec, inout),
-            _ => self.ctr32_rounds::<112>(ivec, inout),
-        }
-    }
-
-    /// [`Self::ctr32`] for the key size whose last round key starts at
-    /// `LAST`. The counter blocks go in, and the keystream comes out, as
-    /// words: the nonce's three words are the same in every block, and
-    /// only the counter's changes.
-    #[inline(never)]
-    fn ctr32_rounds<const LAST: usize>(&self, ivec: &[u8; 16], inout: &mut [u8]) {
+        // The counter blocks go in, and the keystream comes out, as words:
+        // the nonce's three words are the same in every block, and only the
+        // counter's changes.
+        let encrypt = self.encryptor();
         let w = |i: usize| u32::from_le_bytes(ivec[4 * i..4 * i + 4].try_into().unwrap());
         let (n0, n1, n2) = (w(0), w(1), w(2));
         let mut ctr = u32::from_be_bytes(ivec[12..].try_into().unwrap());
@@ -1417,7 +1414,7 @@ impl Schedule {
                 ctr.wrapping_add(1).swap_bytes(),
             ];
             ctr = ctr.wrapping_add(2);
-            encrypt_last::<LAST>(&self.rkeys, words)
+            encrypt(&self.rkeys, words)
         };
         // Word `i` of block `b` of the pair is keystream word `2i + b`.
         let xor = |pair: &mut [u8; 32], ks: &[u32; 8]| {
