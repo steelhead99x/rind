@@ -91,14 +91,15 @@ pub fn run_all<C: Clock>(clock: &mut C, rounds: u32, scale: u32, mut emit: impl 
         use ed25519_dalek::{Signer, SigningKey, Verifier};
         let sk = SigningKey::from_bytes(&[11; 32]);
         let vk = sk.verifying_key();
-        let sig = sk.sign(&buf[..64]);
+        // The canonical messages of rind-bench/benches/ed25519.rs, as rind's rows use.
+        let sig = sk.sign(b"Test");
         push(time(
             clock,
             "ed25519-sign/{lib}",
             "dalek",
             rounds,
             it(2),
-            || sk.sign(&buf[..64]).to_bytes()[0],
+            || sk.sign(b"123400").to_bytes()[0],
         ));
         push(time(
             clock,
@@ -106,7 +107,7 @@ pub fn run_all<C: Clock>(clock: &mut C, rounds: u32, scale: u32, mut emit: impl 
             "dalek",
             rounds,
             it(2),
-            || u8::from(vk.verify(&buf[..64], &sig).is_ok()),
+            || u8::from(vk.verify(b"Test", &sig).is_ok()),
         ));
     }
     push(time(clock, "x25519/{lib}", "dalek", rounds, it(2), || {
@@ -138,8 +139,11 @@ pub fn agree() -> bool {
         rind::digest::digest(&rind::digest::SHA3_256, &buf).as_ref(),
         &sha3::Sha3_256::digest(buf),
     ) && same(
-        kp.sign(&buf[..64]).as_ref(),
-        &sk.sign(&buf[..64]).to_bytes(),
+        kp.sign(b"123400").as_ref(),
+        &sk.sign(b"123400").to_bytes(),
+    ) && same(
+        kp.sign(b"Test").as_ref(),
+        &sk.sign(b"Test").to_bytes(),
     ) && same(
         &x25519_dalek::x25519([9; 32], x25519_dalek::X25519_BASEPOINT_BYTES),
         x.public_key().as_ref(),
