@@ -12,6 +12,12 @@
 pub(crate) mod aes;
 pub(crate) mod aes_cbc;
 pub(crate) mod aes_ctr;
+// Fixsliced AES on 32-bit portable targets, aws-lc's bitsliced AES
+// elsewhere; tests build both, to check one against the other.
+#[cfg(any(all(rind_backend = "portable", target_pointer_width = "32"), test))]
+#[path = "../generic/aes_fixslice32.rs"]
+mod aes_fixslice32;
+#[cfg(any(not(all(rind_backend = "portable", target_pointer_width = "32")), test))]
 #[path = "../generic/aes_nohw.rs"]
 mod aes_nohw;
 pub(crate) mod bignum_eq;
