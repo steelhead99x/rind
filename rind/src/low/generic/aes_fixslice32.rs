@@ -15,6 +15,11 @@
 //! configuration, which spends a ShiftRows of masks and shifts in every
 //! round.
 //!
+//! rind changes the encryption side for riscv32imac, which has no rotate
+//! and loads a byte array's words a byte at a time: CTR's counter blocks go
+//! in, and its keystream comes out, as words; AES-128 and AES-256 run every
+//! round unrolled; and MixColumns blends its rotations by one mask, not two.
+//!
 //! The S-box is a circuit of ANDs and XORs, so no branch or memory index
 //! depends on the key or data. It is not formally verified: its correctness
 //! rests on its use and testing in RustCrypto's `aes`, and on rind's tests of
