@@ -308,7 +308,7 @@ fn sqr_limbs(z: &mut [Limb], x: &[Limb], scratch: &mut [Limb]) {
                 &x[i + 2..],
                 x[i],
                 x[i + 1],
-                s >> Limb::BITS,
+                (s >> Limb::BITS) as Limb,
             );
             z[i + n] = rest as Limb;
             z[i + n + 1] = (rest >> Limb::BITS) as Limb;
@@ -453,14 +453,14 @@ fn redc(t: &mut [Limb], m: &[Limb], n0: Limb) {
     sub_limbs_masked(r, m, Limb::wrapping_sub(0, top as Limb | (below ^ 1)));
 }
 
-/// `x += y * (u + v 2^b) + c` over `x`'s limbs, as many as `y`'s, for a `c`
-/// that fits a limb, returning what lands above them, which fits `Wide`.
+/// `x += y * (u + v 2^b) + c` over `x`'s limbs, as many as `y`'s, returning
+/// what lands above them, which fits `Wide`.
 ///
 /// Its two products a limb are summed in two carry chains, which run side
 /// by side where one chain's latency would bound `mul_add`. It takes two
 /// limbs a step, which measured faster than one a step or four.
-fn mul_add2(x: &mut [Limb], y: &[Limb], u: Limb, v: Limb, c: Wide) -> Wide {
-    let (mut c0, mut c1, mut prev) = (c, 0, 0);
+fn mul_add2(x: &mut [Limb], y: &[Limb], u: Limb, v: Limb, c: Limb) -> Wide {
+    let (mut c0, mut c1, mut prev) = (Wide::from(c), 0, 0);
     let n = x.len().min(y.len());
     let (x, y) = (&mut x[..n], &y[..n]);
     let (xb, xr) = x.as_chunks_mut::<2>();
@@ -645,12 +645,12 @@ mod tests {
     #[test]
     fn mul_add2_ones() {
         for n in 0..=3 * 4 + 1 {
-            for c in [0, 1, Wide::from(Limb::MAX)] {
+            for c in [0, 1, Limb::MAX] {
                 let mut x = vec![Limb::MAX; n];
                 let rest = mul_add2(&mut x, &vec![Limb::MAX; n], Limb::MAX, Limb::MAX, c);
                 // 2^b(n + 2) - 2^2b + c, as n + 2 limbs.
                 let mut want = vec![Limb::MAX; n + 2];
-                want[0] = c as Limb;
+                want[0] = c;
                 want[1] = 0;
                 let got: Vec<Limb> = x
                     .iter()
@@ -659,7 +659,7 @@ mod tests {
                     .collect();
                 if n == 0 {
                     // No limbs leave only `c`.
-                    assert_eq!(rest, c);
+                    assert_eq!(rest, Wide::from(c));
                 } else {
                     assert_eq!(got, want, "n = {n}, c = {c}");
                 }
