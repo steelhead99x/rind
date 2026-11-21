@@ -1,11 +1,12 @@
 import Rind.Spec
 
 /-!
-# P-384
+# P-384 and P-521
 
-P-384's parameters on `Rind.Spec`'s group law of the NIST curves, from HOL
-Light's `EC/nistp384.ml` at
+P-384's and P-521's parameters on `Rind.Spec`'s group law of the NIST curves,
+from HOL Light's `EC/nistp384.ml` at
 https://github.com/jrh13/hol-light/blob/217dd32e798d98926d3ab81ed3dfcdf435831e1f/EC/nistp384.ml
+and `EC/nistp521.ml` beside it.
 -/
 
 namespace rind.spec
