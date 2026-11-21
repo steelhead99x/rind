@@ -75,6 +75,8 @@ def run_qemu(elf):
     for line in p.stdout.splitlines():
         m = re.fullmatch(r"RIND-KAT v1 (\S+) (ok|FAIL) stack=(\d+) heap_peak=(\d+)", line)
         if m:
+            if m[1] in rows:
+                fail(f"duplicate output row for {m[1]}")
             rows[m[1]] = {"ok": m[2] == "ok", "stack": int(m[3]), "heap_peak": int(m[4])}
         elif line.startswith("RIND-KAT"):
             print(line)
@@ -130,15 +132,20 @@ def main():
               f"then read the serial log into a file and run admin/esp32c6-bench-ingest on it")
     elif cmd == "test":
         rows = run_qemu(build_runner(["all"]))
+        expected = set(algorithms()) | {"baseline"}
         bad = [n for n, r in rows.items() if not r["ok"]]
-        if bad or len(rows) != len(algorithms()):
-            fail(f"checks failed or missing: {bad} ({len(rows)} of {len(algorithms())} ran)")
-        print(f"all {len(rows)} known-answer checks passed on riscv32imac under qemu-user")
+        if bad or set(rows) != expected:
+            fail(f"checks failed {bad}, missing {sorted(expected - set(rows))}, "
+                 f"unexpected {sorted(set(rows) - expected)}")
+        print(f"all {len(algorithms())} known-answer checks passed on riscv32imac under qemu-user")
     elif cmd == "size":
         out = None
         if "--out" in sys.argv:
             out = sys.argv[sys.argv.index("--out") + 1]
         algs = algorithms()
+        # The empty build still runs the no-op `baseline` check through the
+        # runner's whole per-check loop, so the subtraction below removes that
+        # machinery from every algorithm and not just from the baseline.
         base_code, base_ram = sections(build_runner([]))
         stacks = run_qemu(build_runner(["all"]))
         table = []
@@ -147,7 +154,7 @@ def main():
             r = stacks[a]
             table.append({"algorithm": a, "code": code - base_code, "static_ram": ram - base_ram,
                           "stack": r["stack"], "heap_peak": r["heap_peak"], "ok": r["ok"]})
-        print(f"harness alone: {base_code} B code, {base_ram} B static RAM (qemu-kat, opt-level 3, lto)\n")
+        print(f"harness alone (with the no-op baseline check): {base_code} B code, {base_ram} B static RAM (qemu-kat, opt-level 3, lto)\n")
         print("| algorithm | code over harness (B) | static RAM (B) | peak stack (B) | peak heap (B) | check |")
         print("|---|---|---|---|---|---|")
         for t in table:
