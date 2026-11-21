@@ -480,6 +480,19 @@ mod tests {
         }
     }
 
+    // Under ctgrind, with the key, state, and blocks secret, no branch or
+    // memory index of the 32-bit portable multiply or its key setup depends
+    // on them.
+    #[test]
+    fn k16_constant_time() {
+        use crate::low::ct::{into_public, into_secret};
+        let leaves = key_leaves(into_secret(0x0123_4567_89ab_cdef), into_secret(0x0fed_cba9));
+        let mut x = into_secret([1u32, 2, 3, 4]);
+        let blocks = into_secret([[0x5au8; 16]; 3]);
+        polyval_k16(&mut x, &blocks, &leaves);
+        assert_ne!(into_public(x), [0; 4]);
+    }
+
     // On x86_64, the SSSE3 table is the arm above this one, and the model
     // is GHASH by the book, so all three must agree from any state, under
     // keys and inputs of pseudo-random bytes and of all ones, whose products
