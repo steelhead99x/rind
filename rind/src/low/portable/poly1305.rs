@@ -11,8 +11,6 @@
 //! which a 32-bit address space cannot exceed. Tests check the others
 //! against it.
 
-#[cfg(all(rind_backend = "portable", target_pointer_width = "32"))]
-pub(crate) use crate::low::generic::poly1305_32::Poly1305;
 #[cfg(any(rind_backend = "arm", test))]
 use libcrux_hacl_rs::streaming_types::error_code;
 #[cfg(any(rind_backend = "arm", test))]
@@ -20,6 +18,8 @@ use libcrux_poly1305::hacl::mac_poly1305::{self, state_t};
 
 #[cfg(all(rind_backend = "portable", target_pointer_width = "64"))]
 pub(crate) use crate::low::generic::poly1305::Poly1305;
+#[cfg(all(rind_backend = "portable", target_pointer_width = "32"))]
+pub(crate) use crate::low::generic::poly1305_32::Poly1305;
 
 #[cfg(any(rind_backend = "arm", test))]
 pub(crate) struct Hacl([state_t; 1]);
