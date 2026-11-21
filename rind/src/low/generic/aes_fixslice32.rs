@@ -64,14 +64,12 @@ pub(crate) fn aes128_key_schedule(key: &[u8; 16]) -> FixsliceKeys128 {
     }
 
     // Adjust to match fixslicing format
-    {
-        for i in (8..72).step_by(32) {
-            inv_shift_rows_1(&mut rkeys[i..(i + 8)]);
-            inv_shift_rows_2(&mut rkeys[(i + 8)..(i + 16)]);
-            inv_shift_rows_3(&mut rkeys[(i + 16)..(i + 24)]);
-        }
-        inv_shift_rows_1(&mut rkeys[72..80]);
+    for i in (8..72).step_by(32) {
+        inv_shift_rows_1(&mut rkeys[i..(i + 8)]);
+        inv_shift_rows_2(&mut rkeys[(i + 8)..(i + 16)]);
+        inv_shift_rows_3(&mut rkeys[(i + 16)..(i + 24)]);
     }
+    inv_shift_rows_1(&mut rkeys[72..80]);
 
     // Account for NOTs removed from sub_bytes
     for i in 1..11 {
@@ -152,12 +150,10 @@ pub(crate) fn aes192_key_schedule(key: &[u8; 24]) -> FixsliceKeys192 {
     }
 
     // Adjust to match fixslicing format
-    {
-        for i in (0..96).step_by(32) {
-            inv_shift_rows_1(&mut rkeys[(i + 8)..(i + 16)]);
-            inv_shift_rows_2(&mut rkeys[(i + 16)..(i + 24)]);
-            inv_shift_rows_3(&mut rkeys[(i + 24)..(i + 32)]);
-        }
+    for i in (0..96).step_by(32) {
+        inv_shift_rows_1(&mut rkeys[(i + 8)..(i + 16)]);
+        inv_shift_rows_2(&mut rkeys[(i + 16)..(i + 24)]);
+        inv_shift_rows_3(&mut rkeys[(i + 24)..(i + 32)]);
     }
 
     // Account for NOTs removed from sub_bytes
@@ -203,14 +199,12 @@ pub(crate) fn aes256_key_schedule(key: &[u8; 32]) -> FixsliceKeys256 {
     }
 
     // Adjust to match fixslicing format
-    {
-        for i in (8..104).step_by(32) {
-            inv_shift_rows_1(&mut rkeys[i..(i + 8)]);
-            inv_shift_rows_2(&mut rkeys[(i + 8)..(i + 16)]);
-            inv_shift_rows_3(&mut rkeys[(i + 16)..(i + 24)]);
-        }
-        inv_shift_rows_1(&mut rkeys[104..112]);
+    for i in (8..104).step_by(32) {
+        inv_shift_rows_1(&mut rkeys[i..(i + 8)]);
+        inv_shift_rows_2(&mut rkeys[(i + 8)..(i + 16)]);
+        inv_shift_rows_3(&mut rkeys[(i + 16)..(i + 24)]);
     }
+    inv_shift_rows_1(&mut rkeys[104..112]);
 
     // Account for NOTs removed from sub_bytes
     for i in 1..15 {
@@ -231,13 +225,10 @@ pub(crate) fn aes128_decrypt(rkeys: &FixsliceKeys128, blocks: &BatchBlocks) -> B
     add_round_key(&mut state, &rkeys[80..]);
     inv_sub_bytes(&mut state);
 
-    {
-        inv_shift_rows_2(&mut state);
-    }
+    inv_shift_rows_2(&mut state);
 
     let mut rk_off = 72;
     loop {
-
         add_round_key(&mut state, &rkeys[rk_off..(rk_off + 8)]);
         inv_mix_columns_1(&mut state);
         inv_sub_bytes(&mut state);
@@ -252,17 +243,15 @@ pub(crate) fn aes128_decrypt(rkeys: &FixsliceKeys128, blocks: &BatchBlocks) -> B
         inv_sub_bytes(&mut state);
         rk_off -= 8;
 
-        {
-            add_round_key(&mut state, &rkeys[rk_off..(rk_off + 8)]);
-            inv_mix_columns_3(&mut state);
-            inv_sub_bytes(&mut state);
-            rk_off -= 8;
+        add_round_key(&mut state, &rkeys[rk_off..(rk_off + 8)]);
+        inv_mix_columns_3(&mut state);
+        inv_sub_bytes(&mut state);
+        rk_off -= 8;
 
-            add_round_key(&mut state, &rkeys[rk_off..(rk_off + 8)]);
-            inv_mix_columns_2(&mut state);
-            inv_sub_bytes(&mut state);
-            rk_off -= 8;
-        }
+        add_round_key(&mut state, &rkeys[rk_off..(rk_off + 8)]);
+        inv_mix_columns_2(&mut state);
+        inv_sub_bytes(&mut state);
+        rk_off -= 8;
     }
 
     add_round_key(&mut state, &rkeys[..8]);
@@ -291,17 +280,15 @@ pub(crate) fn aes128_encrypt(rkeys: &FixsliceKeys128, blocks: &BatchBlocks) -> B
             break;
         }
 
-        {
-            sub_bytes(&mut state);
-            mix_columns_2(&mut state);
-            add_round_key(&mut state, &rkeys[rk_off..(rk_off + 8)]);
-            rk_off += 8;
+        sub_bytes(&mut state);
+        mix_columns_2(&mut state);
+        add_round_key(&mut state, &rkeys[rk_off..(rk_off + 8)]);
+        rk_off += 8;
 
-            sub_bytes(&mut state);
-            mix_columns_3(&mut state);
-            add_round_key(&mut state, &rkeys[rk_off..(rk_off + 8)]);
-            rk_off += 8;
-        }
+        sub_bytes(&mut state);
+        mix_columns_3(&mut state);
+        add_round_key(&mut state, &rkeys[rk_off..(rk_off + 8)]);
+        rk_off += 8;
 
         sub_bytes(&mut state);
         mix_columns_0(&mut state);
@@ -309,9 +296,7 @@ pub(crate) fn aes128_encrypt(rkeys: &FixsliceKeys128, blocks: &BatchBlocks) -> B
         rk_off += 8;
     }
 
-    {
-        shift_rows_2(&mut state);
-    }
+    shift_rows_2(&mut state);
 
     sub_bytes(&mut state);
     add_round_key(&mut state, &rkeys[80..]);
@@ -332,17 +317,15 @@ pub(crate) fn aes192_decrypt(rkeys: &FixsliceKeys192, blocks: &BatchBlocks) -> B
 
     let mut rk_off = 88;
     loop {
-        {
-            add_round_key(&mut state, &rkeys[rk_off..(rk_off + 8)]);
-            inv_mix_columns_3(&mut state);
-            inv_sub_bytes(&mut state);
-            rk_off -= 8;
+        add_round_key(&mut state, &rkeys[rk_off..(rk_off + 8)]);
+        inv_mix_columns_3(&mut state);
+        inv_sub_bytes(&mut state);
+        rk_off -= 8;
 
-            add_round_key(&mut state, &rkeys[rk_off..(rk_off + 8)]);
-            inv_mix_columns_2(&mut state);
-            inv_sub_bytes(&mut state);
-            rk_off -= 8;
-        }
+        add_round_key(&mut state, &rkeys[rk_off..(rk_off + 8)]);
+        inv_mix_columns_2(&mut state);
+        inv_sub_bytes(&mut state);
+        rk_off -= 8;
 
         add_round_key(&mut state, &rkeys[rk_off..(rk_off + 8)]);
         inv_mix_columns_1(&mut state);
@@ -381,17 +364,15 @@ pub(crate) fn aes192_encrypt(rkeys: &FixsliceKeys192, blocks: &BatchBlocks) -> B
         add_round_key(&mut state, &rkeys[rk_off..(rk_off + 8)]);
         rk_off += 8;
 
-        {
-            sub_bytes(&mut state);
-            mix_columns_2(&mut state);
-            add_round_key(&mut state, &rkeys[rk_off..(rk_off + 8)]);
-            rk_off += 8;
+        sub_bytes(&mut state);
+        mix_columns_2(&mut state);
+        add_round_key(&mut state, &rkeys[rk_off..(rk_off + 8)]);
+        rk_off += 8;
 
-            sub_bytes(&mut state);
-            mix_columns_3(&mut state);
-            add_round_key(&mut state, &rkeys[rk_off..(rk_off + 8)]);
-            rk_off += 8;
-        }
+        sub_bytes(&mut state);
+        mix_columns_3(&mut state);
+        add_round_key(&mut state, &rkeys[rk_off..(rk_off + 8)]);
+        rk_off += 8;
 
         if rk_off == 96 {
             break;
@@ -420,13 +401,10 @@ pub(crate) fn aes256_decrypt(rkeys: &FixsliceKeys256, blocks: &BatchBlocks) -> B
     add_round_key(&mut state, &rkeys[112..]);
     inv_sub_bytes(&mut state);
 
-    {
-        inv_shift_rows_2(&mut state);
-    }
+    inv_shift_rows_2(&mut state);
 
     let mut rk_off = 104;
     loop {
-
         add_round_key(&mut state, &rkeys[rk_off..(rk_off + 8)]);
         inv_mix_columns_1(&mut state);
         inv_sub_bytes(&mut state);
@@ -441,17 +419,15 @@ pub(crate) fn aes256_decrypt(rkeys: &FixsliceKeys256, blocks: &BatchBlocks) -> B
         inv_sub_bytes(&mut state);
         rk_off -= 8;
 
-        {
-            add_round_key(&mut state, &rkeys[rk_off..(rk_off + 8)]);
-            inv_mix_columns_3(&mut state);
-            inv_sub_bytes(&mut state);
-            rk_off -= 8;
+        add_round_key(&mut state, &rkeys[rk_off..(rk_off + 8)]);
+        inv_mix_columns_3(&mut state);
+        inv_sub_bytes(&mut state);
+        rk_off -= 8;
 
-            add_round_key(&mut state, &rkeys[rk_off..(rk_off + 8)]);
-            inv_mix_columns_2(&mut state);
-            inv_sub_bytes(&mut state);
-            rk_off -= 8;
-        }
+        add_round_key(&mut state, &rkeys[rk_off..(rk_off + 8)]);
+        inv_mix_columns_2(&mut state);
+        inv_sub_bytes(&mut state);
+        rk_off -= 8;
     }
 
     add_round_key(&mut state, &rkeys[..8]);
@@ -480,17 +456,15 @@ pub(crate) fn aes256_encrypt(rkeys: &FixsliceKeys256, blocks: &BatchBlocks) -> B
             break;
         }
 
-        {
-            sub_bytes(&mut state);
-            mix_columns_2(&mut state);
-            add_round_key(&mut state, &rkeys[rk_off..(rk_off + 8)]);
-            rk_off += 8;
+        sub_bytes(&mut state);
+        mix_columns_2(&mut state);
+        add_round_key(&mut state, &rkeys[rk_off..(rk_off + 8)]);
+        rk_off += 8;
 
-            sub_bytes(&mut state);
-            mix_columns_3(&mut state);
-            add_round_key(&mut state, &rkeys[rk_off..(rk_off + 8)]);
-            rk_off += 8;
-        }
+        sub_bytes(&mut state);
+        mix_columns_3(&mut state);
+        add_round_key(&mut state, &rkeys[rk_off..(rk_off + 8)]);
+        rk_off += 8;
 
         sub_bytes(&mut state);
         mix_columns_0(&mut state);
@@ -498,9 +472,7 @@ pub(crate) fn aes256_encrypt(rkeys: &FixsliceKeys256, blocks: &BatchBlocks) -> B
         rk_off += 8;
     }
 
-    {
-        shift_rows_2(&mut state);
-    }
+    shift_rows_2(&mut state);
 
     sub_bytes(&mut state);
     add_round_key(&mut state, &rkeys[112..]);
@@ -1311,7 +1283,6 @@ fn rotate_rows_and_columns_2_2(x: u32) -> u32 {
     (ror(x, ror_distance(1, 2)) & 0xf0f0f0f0)
 }
 
-
 /// Fixsliced round keys for any AES key size, which encrypt and decrypt two
 /// blocks a pass. It does not wipe itself: the key types that hold one do.
 pub(crate) struct Schedule {
@@ -1506,7 +1477,10 @@ mod tests {
                     nohw.ctr32(&ivec, &mut want);
                     let mut got = input;
                     fix.ctr32(&ivec, &mut got);
-                    assert_eq!(got, want, "{key_len}-byte key, counter {counter}, {len} bytes");
+                    assert_eq!(
+                        got, want,
+                        "{key_len}-byte key, counter {counter}, {len} bytes"
+                    );
                 }
             }
             for blocks in [0, 1, 2, 3, 17] {

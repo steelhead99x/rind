@@ -96,7 +96,8 @@ out = [
     "",
     *table('rind_backend = "x86_64"', 7, "[u64; 512]"),
     "",
-    *table('not(any(rind_backend = "x86_64", all(rind_backend = "portable", target_pointer_width = "32")))', 6, "[u64; 256]"),
+    # Wrapped as rustfmt wraps it.
+    *table('not(any(\n    rind_backend = "x86_64",\n    all(rind_backend = "portable", target_pointer_width = "32")\n))', 6, "[u64; 256]"),
     "",
     *table('all(rind_backend = "portable", target_pointer_width = "32")', 4, "[u64; 64]"),
     "",

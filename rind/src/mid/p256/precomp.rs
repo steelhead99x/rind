@@ -19137,7 +19137,10 @@ pub(super) static CURVE_GENERATOR_PRECOMP: super::AffineMontPointTable = [
     ROW_25, ROW_26, ROW_27, ROW_28, ROW_29, ROW_30, ROW_31, ROW_32, ROW_33, ROW_34, ROW_35, ROW_36,
 ];
 
-#[cfg(not(any(rind_backend = "x86_64", all(rind_backend = "portable", target_pointer_width = "32"))))]
+#[cfg(not(any(
+    rind_backend = "x86_64",
+    all(rind_backend = "portable", target_pointer_width = "32")
+)))]
 /// 1G..32G << 0
 const ROW_0: [u64; 256] = [
     0x79e730d418a9143c,
@@ -19398,7 +19401,10 @@ const ROW_0: [u64; 256] = [
     0x6231d7929591c2a4,
 ];
 
-#[cfg(not(any(rind_backend = "x86_64", all(rind_backend = "portable", target_pointer_width = "32"))))]
+#[cfg(not(any(
+    rind_backend = "x86_64",
+    all(rind_backend = "portable", target_pointer_width = "32")
+)))]
 /// 1G..32G << 6
 const ROW_1: [u64; 256] = [
     0xdb6d96f305968b80,
@@ -19659,7 +19665,10 @@ const ROW_1: [u64; 256] = [
     0xfdaf6b20ec66890f,
 ];
 
-#[cfg(not(any(rind_backend = "x86_64", all(rind_backend = "portable", target_pointer_width = "32"))))]
+#[cfg(not(any(
+    rind_backend = "x86_64",
+    all(rind_backend = "portable", target_pointer_width = "32")
+)))]
 /// 1G..32G << 12
 const ROW_2: [u64; 256] = [
     0x6772b0e5ab4b35a2,
@@ -19920,7 +19929,10 @@ const ROW_2: [u64; 256] = [
     0x6f0d1f3040ef730b,
 ];
 
-#[cfg(not(any(rind_backend = "x86_64", all(rind_backend = "portable", target_pointer_width = "32"))))]
+#[cfg(not(any(
+    rind_backend = "x86_64",
+    all(rind_backend = "portable", target_pointer_width = "32")
+)))]
 /// 1G..32G << 18
 const ROW_3: [u64; 256] = [
     0xfabf770977f7195a,
@@ -20181,7 +20193,10 @@ const ROW_3: [u64; 256] = [
     0x86ad71cfa354d837,
 ];
 
-#[cfg(not(any(rind_backend = "x86_64", all(rind_backend = "portable", target_pointer_width = "32"))))]
+#[cfg(not(any(
+    rind_backend = "x86_64",
+    all(rind_backend = "portable", target_pointer_width = "32")
+)))]
 /// 1G..32G << 24
 const ROW_4: [u64; 256] = [
     0xd9d0c8c4868af75d,
@@ -20442,7 +20457,10 @@ const ROW_4: [u64; 256] = [
     0x80b360f84fb995be,
 ];
 
-#[cfg(not(any(rind_backend = "x86_64", all(rind_backend = "portable", target_pointer_width = "32"))))]
+#[cfg(not(any(
+    rind_backend = "x86_64",
+    all(rind_backend = "portable", target_pointer_width = "32")
+)))]
 /// 1G..32G << 30
 const ROW_5: [u64; 256] = [
     0x55d5c68da61a76fa,
@@ -20703,7 +20721,10 @@ const ROW_5: [u64; 256] = [
     0x1efe9ed3d3ca65a7,
 ];
 
-#[cfg(not(any(rind_backend = "x86_64", all(rind_backend = "portable", target_pointer_width = "32"))))]
+#[cfg(not(any(
+    rind_backend = "x86_64",
+    all(rind_backend = "portable", target_pointer_width = "32")
+)))]
 /// 1G..32G << 36
 const ROW_6: [u64; 256] = [
     0xe27a6dbe305406dd,
@@ -20964,7 +20985,10 @@ const ROW_6: [u64; 256] = [
     0x0045d5cf88647c16,
 ];
 
-#[cfg(not(any(rind_backend = "x86_64", all(rind_backend = "portable", target_pointer_width = "32"))))]
+#[cfg(not(any(
+    rind_backend = "x86_64",
+    all(rind_backend = "portable", target_pointer_width = "32")
+)))]
 /// 1G..32G << 42
 const ROW_7: [u64; 256] = [
     0xa6f3d574c005979d,
@@ -21225,7 +21249,10 @@ const ROW_7: [u64; 256] = [
     0x7d37fa9ee64a9f1b,
 ];
 
-#[cfg(not(any(rind_backend = "x86_64", all(rind_backend = "portable", target_pointer_width = "32"))))]
+#[cfg(not(any(
+    rind_backend = "x86_64",
+    all(rind_backend = "portable", target_pointer_width = "32")
+)))]
 /// 1G..32G << 48
 const ROW_8: [u64; 256] = [
     0xcc7a64880a750c0f,
@@ -21486,7 +21513,10 @@ const ROW_8: [u64; 256] = [
     0x69080646c4c935fd,
 ];
 
-#[cfg(not(any(rind_backend = "x86_64", all(rind_backend = "portable", target_pointer_width = "32"))))]
+#[cfg(not(any(
+    rind_backend = "x86_64",
+    all(rind_backend = "portable", target_pointer_width = "32")
+)))]
 /// 1G..32G << 54
 const ROW_9: [u64; 256] = [
     0xb93452381d531696,
@@ -21747,7 +21777,10 @@ const ROW_9: [u64; 256] = [
     0x420fa3840bdb323b,
 ];
 
-#[cfg(not(any(rind_backend = "x86_64", all(rind_backend = "portable", target_pointer_width = "32"))))]
+#[cfg(not(any(
+    rind_backend = "x86_64",
+    all(rind_backend = "portable", target_pointer_width = "32")
+)))]
 /// 1G..32G << 60
 const ROW_10: [u64; 256] = [
     0x646f96796424c49b,
@@ -22008,7 +22041,10 @@ const ROW_10: [u64; 256] = [
     0x5ea60411b62c5173,
 ];
 
-#[cfg(not(any(rind_backend = "x86_64", all(rind_backend = "portable", target_pointer_width = "32"))))]
+#[cfg(not(any(
+    rind_backend = "x86_64",
+    all(rind_backend = "portable", target_pointer_width = "32")
+)))]
 /// 1G..32G << 66
 const ROW_11: [u64; 256] = [
     0x9ad5462bb4d8bc50,
@@ -22269,7 +22305,10 @@ const ROW_11: [u64; 256] = [
     0x50b62c6d6df135a9,
 ];
 
-#[cfg(not(any(rind_backend = "x86_64", all(rind_backend = "portable", target_pointer_width = "32"))))]
+#[cfg(not(any(
+    rind_backend = "x86_64",
+    all(rind_backend = "portable", target_pointer_width = "32")
+)))]
 /// 1G..32G << 72
 const ROW_12: [u64; 256] = [
     0x0db2fb5ed005832a,
@@ -22530,7 +22569,10 @@ const ROW_12: [u64; 256] = [
     0x1084a333c8146fef,
 ];
 
-#[cfg(not(any(rind_backend = "x86_64", all(rind_backend = "portable", target_pointer_width = "32"))))]
+#[cfg(not(any(
+    rind_backend = "x86_64",
+    all(rind_backend = "portable", target_pointer_width = "32")
+)))]
 /// 1G..32G << 78
 const ROW_13: [u64; 256] = [
     0x96649933aed1d1f7,
@@ -22791,7 +22833,10 @@ const ROW_13: [u64; 256] = [
     0x7990a63889b98636,
 ];
 
-#[cfg(not(any(rind_backend = "x86_64", all(rind_backend = "portable", target_pointer_width = "32"))))]
+#[cfg(not(any(
+    rind_backend = "x86_64",
+    all(rind_backend = "portable", target_pointer_width = "32")
+)))]
 /// 1G..32G << 84
 const ROW_14: [u64; 256] = [
     0xe5aa692a87dec0e1,
@@ -23052,7 +23097,10 @@ const ROW_14: [u64; 256] = [
     0x35e4fd59a5540dfe,
 ];
 
-#[cfg(not(any(rind_backend = "x86_64", all(rind_backend = "portable", target_pointer_width = "32"))))]
+#[cfg(not(any(
+    rind_backend = "x86_64",
+    all(rind_backend = "portable", target_pointer_width = "32")
+)))]
 /// 1G..32G << 90
 const ROW_15: [u64; 256] = [
     0x9894344f3a29467a,
@@ -23313,7 +23361,10 @@ const ROW_15: [u64; 256] = [
     0x61a1b8842aa7a711,
 ];
 
-#[cfg(not(any(rind_backend = "x86_64", all(rind_backend = "portable", target_pointer_width = "32"))))]
+#[cfg(not(any(
+    rind_backend = "x86_64",
+    all(rind_backend = "portable", target_pointer_width = "32")
+)))]
 /// 1G..32G << 96
 const ROW_16: [u64; 256] = [
     0x4fe7ee31b0e63d34,
@@ -23574,7 +23625,10 @@ const ROW_16: [u64; 256] = [
     0xddb27ce35cd44444,
 ];
 
-#[cfg(not(any(rind_backend = "x86_64", all(rind_backend = "portable", target_pointer_width = "32"))))]
+#[cfg(not(any(
+    rind_backend = "x86_64",
+    all(rind_backend = "portable", target_pointer_width = "32")
+)))]
 /// 1G..32G << 102
 const ROW_17: [u64; 256] = [
     0x9c7c581d26ee8382,
@@ -23835,7 +23889,10 @@ const ROW_17: [u64; 256] = [
     0x66d3b2c645460515,
 ];
 
-#[cfg(not(any(rind_backend = "x86_64", all(rind_backend = "portable", target_pointer_width = "32"))))]
+#[cfg(not(any(
+    rind_backend = "x86_64",
+    all(rind_backend = "portable", target_pointer_width = "32")
+)))]
 /// 1G..32G << 108
 const ROW_18: [u64; 256] = [
     0x8de2b7bc453cadd6,
@@ -24096,7 +24153,10 @@ const ROW_18: [u64; 256] = [
     0x6e9fccc6a27ee34b,
 ];
 
-#[cfg(not(any(rind_backend = "x86_64", all(rind_backend = "portable", target_pointer_width = "32"))))]
+#[cfg(not(any(
+    rind_backend = "x86_64",
+    all(rind_backend = "portable", target_pointer_width = "32")
+)))]
 /// 1G..32G << 114
 const ROW_19: [u64; 256] = [
     0x3bc77adedda492f8,
@@ -24357,7 +24417,10 @@ const ROW_19: [u64; 256] = [
     0x2be2b2ab87fbd7f5,
 ];
 
-#[cfg(not(any(rind_backend = "x86_64", all(rind_backend = "portable", target_pointer_width = "32"))))]
+#[cfg(not(any(
+    rind_backend = "x86_64",
+    all(rind_backend = "portable", target_pointer_width = "32")
+)))]
 /// 1G..32G << 120
 const ROW_20: [u64; 256] = [
     0x3e0e5c9dd111f8ec,
@@ -24618,7 +24681,10 @@ const ROW_20: [u64; 256] = [
     0x87fab43a959ef494,
 ];
 
-#[cfg(not(any(rind_backend = "x86_64", all(rind_backend = "portable", target_pointer_width = "32"))))]
+#[cfg(not(any(
+    rind_backend = "x86_64",
+    all(rind_backend = "portable", target_pointer_width = "32")
+)))]
 /// 1G..32G << 126
 const ROW_21: [u64; 256] = [
     0x09891641d4c5105f,
@@ -24879,7 +24945,10 @@ const ROW_21: [u64; 256] = [
     0x8c2731bb7ce1c2e7,
 ];
 
-#[cfg(not(any(rind_backend = "x86_64", all(rind_backend = "portable", target_pointer_width = "32"))))]
+#[cfg(not(any(
+    rind_backend = "x86_64",
+    all(rind_backend = "portable", target_pointer_width = "32")
+)))]
 /// 1G..32G << 132
 const ROW_22: [u64; 256] = [
     0x6a7091c2e48fb889,
@@ -25140,7 +25209,10 @@ const ROW_22: [u64; 256] = [
     0xfd251438ccda47ad,
 ];
 
-#[cfg(not(any(rind_backend = "x86_64", all(rind_backend = "portable", target_pointer_width = "32"))))]
+#[cfg(not(any(
+    rind_backend = "x86_64",
+    all(rind_backend = "portable", target_pointer_width = "32")
+)))]
 /// 1G..32G << 138
 const ROW_23: [u64; 256] = [
     0xe13122f3dbfb894e,
@@ -25401,7 +25473,10 @@ const ROW_23: [u64; 256] = [
     0x7460fc76e3fc27e5,
 ];
 
-#[cfg(not(any(rind_backend = "x86_64", all(rind_backend = "portable", target_pointer_width = "32"))))]
+#[cfg(not(any(
+    rind_backend = "x86_64",
+    all(rind_backend = "portable", target_pointer_width = "32")
+)))]
 /// 1G..32G << 144
 const ROW_24: [u64; 256] = [
     0x80531fe1c63c4962,
@@ -25662,7 +25737,10 @@ const ROW_24: [u64; 256] = [
     0xf4837f97cb09311f,
 ];
 
-#[cfg(not(any(rind_backend = "x86_64", all(rind_backend = "portable", target_pointer_width = "32"))))]
+#[cfg(not(any(
+    rind_backend = "x86_64",
+    all(rind_backend = "portable", target_pointer_width = "32")
+)))]
 /// 1G..32G << 150
 const ROW_25: [u64; 256] = [
     0x994f523a626332d5,
@@ -25923,7 +26001,10 @@ const ROW_25: [u64; 256] = [
     0xccc832f869f00755,
 ];
 
-#[cfg(not(any(rind_backend = "x86_64", all(rind_backend = "portable", target_pointer_width = "32"))))]
+#[cfg(not(any(
+    rind_backend = "x86_64",
+    all(rind_backend = "portable", target_pointer_width = "32")
+)))]
 /// 1G..32G << 156
 const ROW_26: [u64; 256] = [
     0x488f1185ca8d9d1a,
@@ -26184,7 +26265,10 @@ const ROW_26: [u64; 256] = [
     0xe4e879de5a56ba98,
 ];
 
-#[cfg(not(any(rind_backend = "x86_64", all(rind_backend = "portable", target_pointer_width = "32"))))]
+#[cfg(not(any(
+    rind_backend = "x86_64",
+    all(rind_backend = "portable", target_pointer_width = "32")
+)))]
 /// 1G..32G << 162
 const ROW_27: [u64; 256] = [
     0xaaafafb0285b9491,
@@ -26445,7 +26529,10 @@ const ROW_27: [u64; 256] = [
     0x79422f1d6097be83,
 ];
 
-#[cfg(not(any(rind_backend = "x86_64", all(rind_backend = "portable", target_pointer_width = "32"))))]
+#[cfg(not(any(
+    rind_backend = "x86_64",
+    all(rind_backend = "portable", target_pointer_width = "32")
+)))]
 /// 1G..32G << 168
 const ROW_28: [u64; 256] = [
     0x263a2cfb9db3b381,
@@ -26706,7 +26793,10 @@ const ROW_28: [u64; 256] = [
     0x65296e94d399ddd5,
 ];
 
-#[cfg(not(any(rind_backend = "x86_64", all(rind_backend = "portable", target_pointer_width = "32"))))]
+#[cfg(not(any(
+    rind_backend = "x86_64",
+    all(rind_backend = "portable", target_pointer_width = "32")
+)))]
 /// 1G..32G << 174
 const ROW_29: [u64; 256] = [
     0xd7e0c4cdb30cfb3a,
@@ -26967,7 +27057,10 @@ const ROW_29: [u64; 256] = [
     0x9be7048696c9cb5d,
 ];
 
-#[cfg(not(any(rind_backend = "x86_64", all(rind_backend = "portable", target_pointer_width = "32"))))]
+#[cfg(not(any(
+    rind_backend = "x86_64",
+    all(rind_backend = "portable", target_pointer_width = "32")
+)))]
 /// 1G..32G << 180
 const ROW_30: [u64; 256] = [
     0x949c9976e1337c26,
@@ -27228,7 +27321,10 @@ const ROW_30: [u64; 256] = [
     0x2a6279f74e0bcb5b,
 ];
 
-#[cfg(not(any(rind_backend = "x86_64", all(rind_backend = "portable", target_pointer_width = "32"))))]
+#[cfg(not(any(
+    rind_backend = "x86_64",
+    all(rind_backend = "portable", target_pointer_width = "32")
+)))]
 /// 1G..32G << 186
 const ROW_31: [u64; 256] = [
     0xfd8e139f8f5fcda8,
@@ -27489,7 +27585,10 @@ const ROW_31: [u64; 256] = [
     0xdf94739e5b46f1b5,
 ];
 
-#[cfg(not(any(rind_backend = "x86_64", all(rind_backend = "portable", target_pointer_width = "32"))))]
+#[cfg(not(any(
+    rind_backend = "x86_64",
+    all(rind_backend = "portable", target_pointer_width = "32")
+)))]
 /// 1G..32G << 192
 const ROW_32: [u64; 256] = [
     0x56f8410ef4f8b16a,
@@ -27750,7 +27849,10 @@ const ROW_32: [u64; 256] = [
     0x527729a6422ad600,
 ];
 
-#[cfg(not(any(rind_backend = "x86_64", all(rind_backend = "portable", target_pointer_width = "32"))))]
+#[cfg(not(any(
+    rind_backend = "x86_64",
+    all(rind_backend = "portable", target_pointer_width = "32")
+)))]
 /// 1G..32G << 198
 const ROW_33: [u64; 256] = [
     0xefb26a753f73f449,
@@ -28011,7 +28113,10 @@ const ROW_33: [u64; 256] = [
     0x19d99719f90f462b,
 ];
 
-#[cfg(not(any(rind_backend = "x86_64", all(rind_backend = "portable", target_pointer_width = "32"))))]
+#[cfg(not(any(
+    rind_backend = "x86_64",
+    all(rind_backend = "portable", target_pointer_width = "32")
+)))]
 /// 1G..32G << 204
 const ROW_34: [u64; 256] = [
     0xf431f462060b5f61,
@@ -28272,7 +28377,10 @@ const ROW_34: [u64; 256] = [
     0xbd53005e045bb95d,
 ];
 
-#[cfg(not(any(rind_backend = "x86_64", all(rind_backend = "portable", target_pointer_width = "32"))))]
+#[cfg(not(any(
+    rind_backend = "x86_64",
+    all(rind_backend = "portable", target_pointer_width = "32")
+)))]
 /// 1G..32G << 210
 const ROW_35: [u64; 256] = [
     0xe5f649be9d8e68fd,
@@ -28533,7 +28641,10 @@ const ROW_35: [u64; 256] = [
     0x2331fb467ec283b1,
 ];
 
-#[cfg(not(any(rind_backend = "x86_64", all(rind_backend = "portable", target_pointer_width = "32"))))]
+#[cfg(not(any(
+    rind_backend = "x86_64",
+    all(rind_backend = "portable", target_pointer_width = "32")
+)))]
 /// 1G..32G << 216
 const ROW_36: [u64; 256] = [
     0xa0158eeae457a477,
@@ -28794,7 +28905,10 @@ const ROW_36: [u64; 256] = [
     0x5931de26697d6413,
 ];
 
-#[cfg(not(any(rind_backend = "x86_64", all(rind_backend = "portable", target_pointer_width = "32"))))]
+#[cfg(not(any(
+    rind_backend = "x86_64",
+    all(rind_backend = "portable", target_pointer_width = "32")
+)))]
 /// 1G..32G << 222
 const ROW_37: [u64; 256] = [
     0x142b55021a93507a,
@@ -29055,7 +29169,10 @@ const ROW_37: [u64; 256] = [
     0xf59aba7bb49359c3,
 ];
 
-#[cfg(not(any(rind_backend = "x86_64", all(rind_backend = "portable", target_pointer_width = "32"))))]
+#[cfg(not(any(
+    rind_backend = "x86_64",
+    all(rind_backend = "portable", target_pointer_width = "32")
+)))]
 /// 1G..32G << 228
 const ROW_38: [u64; 256] = [
     0xc37e2c2e421d3aa4,
@@ -29316,7 +29433,10 @@ const ROW_38: [u64; 256] = [
     0xb4069ea4e3aead59,
 ];
 
-#[cfg(not(any(rind_backend = "x86_64", all(rind_backend = "portable", target_pointer_width = "32"))))]
+#[cfg(not(any(
+    rind_backend = "x86_64",
+    all(rind_backend = "portable", target_pointer_width = "32")
+)))]
 /// 1G..32G << 234
 const ROW_39: [u64; 256] = [
     0x9f51439e558df019,
@@ -29577,7 +29697,10 @@ const ROW_39: [u64; 256] = [
     0x8631594dd757e089,
 ];
 
-#[cfg(not(any(rind_backend = "x86_64", all(rind_backend = "portable", target_pointer_width = "32"))))]
+#[cfg(not(any(
+    rind_backend = "x86_64",
+    all(rind_backend = "portable", target_pointer_width = "32")
+)))]
 /// 1G..32G << 240
 const ROW_40: [u64; 256] = [
     0x1083e2ea1f095615,
@@ -29838,7 +29961,10 @@ const ROW_40: [u64; 256] = [
     0xfa2e067d67aaa746,
 ];
 
-#[cfg(not(any(rind_backend = "x86_64", all(rind_backend = "portable", target_pointer_width = "32"))))]
+#[cfg(not(any(
+    rind_backend = "x86_64",
+    all(rind_backend = "portable", target_pointer_width = "32")
+)))]
 /// 1G..32G << 246
 const ROW_41: [u64; 256] = [
     0xb6d92a7f3e5f9f11,
@@ -30099,7 +30225,10 @@ const ROW_41: [u64; 256] = [
     0x037248e9d2d4fcb4,
 ];
 
-#[cfg(not(any(rind_backend = "x86_64", all(rind_backend = "portable", target_pointer_width = "32"))))]
+#[cfg(not(any(
+    rind_backend = "x86_64",
+    all(rind_backend = "portable", target_pointer_width = "32")
+)))]
 /// 1G..32G << 252
 const ROW_42: [u64; 256] = [
     0x80802dc91ec34f9e,
@@ -30360,7 +30489,10 @@ const ROW_42: [u64; 256] = [
     0x11e7c1ed344411af,
 ];
 
-#[cfg(not(any(rind_backend = "x86_64", all(rind_backend = "portable", target_pointer_width = "32"))))]
+#[cfg(not(any(
+    rind_backend = "x86_64",
+    all(rind_backend = "portable", target_pointer_width = "32")
+)))]
 pub(super) static CURVE_GENERATOR_PRECOMP: super::AffineMontPointTable = [
     ROW_0, ROW_1, ROW_2, ROW_3, ROW_4, ROW_5, ROW_6, ROW_7, ROW_8, ROW_9, ROW_10, ROW_11, ROW_12,
     ROW_13, ROW_14, ROW_15, ROW_16, ROW_17, ROW_18, ROW_19, ROW_20, ROW_21, ROW_22, ROW_23, ROW_24,
