@@ -10,11 +10,16 @@ Usage:
                                 the flash command; it flashes nothing
   admin/esp32c6-riscv32 size    prints each algorithm's code size, and the stack
                                 and heap it used in that run, as Markdown
+  admin/esp32c6-riscv32 icount  prints the benchmark rows with instruction
+                                counts in place of nanoseconds, under the
+                                plugin RIND_ICOUNT_PLUGIN names
 
 The ESP32-C6 is a riscv32imac core with no hardware SHA-512 or AES in rind's
 use, so rind's portable backend runs on it. qemu-user is not the chip: what
-this measures is the code (size, peak stack, peak heap, correctness), never
-time. Add `--out FILE` to `size` to also save the rows as JSON.
+this measures is the code (size, peak stack, peak heap, correctness,
+instructions executed), never time. Instruction counts rank changes to
+arithmetic before a board times them; they miss what the board adds, such as
+flash cache misses on large tables and multiply latency. Add `--out FILE` to `size` to also save the rows as JSON.
 
 Needs `cargo` and `rustc` with the riscv32imac-unknown-none-elf standard
 library, and `qemu-riscv32` on PATH (nixpkgs' `qemu-user`). RIND_RISCV32_CARGO
@@ -136,6 +141,16 @@ def main():
         if bad or len(rows) != want:
             fail(f"checks failed or missing: {bad} ({len(rows)} of {want} ran)")
         print(f"all {len(rows)} known-answer checks passed on riscv32imac under qemu-user")
+    elif cmd == "icount":
+        # Build the plugin with qemu's plugin header and glib's, as in
+        # cc -shared -fPIC -O2 $(pkg-config --cflags glib-2.0) -I<qemu>/include \
+        #   -o icount.so admin/esp32c6/icount-plugin.c
+        plugin = os.environ.get("RIND_ICOUNT_PLUGIN") or fail("set RIND_ICOUNT_PLUGIN to icount-plugin.c built as a .so")
+        elf = build_runner(["icount", "all", "compare"])
+        p = subprocess.run([QEMU, "-plugin", plugin, elf], capture_output=True, text=True, timeout=1800)
+        if p.returncode != 0:
+            fail(f"qemu run failed (exit {p.returncode}): {p.stderr[-400:]}")
+        print(p.stdout, end="")
     elif cmd == "size":
         out = None
         if "--out" in sys.argv:
@@ -161,7 +176,7 @@ def main():
                            "rows": table}, f, indent=1)
                 f.write("\n")
     else:
-        fail("usage: admin/esp32c6-riscv32 build|host|test|size [--out FILE]|firmware")
+        fail("usage: admin/esp32c6-riscv32 build|host|test|size [--out FILE]|icount|firmware")
 
 
 if __name__ == "__main__":

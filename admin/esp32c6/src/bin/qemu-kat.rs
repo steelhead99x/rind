@@ -126,11 +126,37 @@ fn sp() -> usize {
     s
 }
 
+/// With `icount`, the bench clock: instructions executed so far, which
+/// `admin/esp32c6/icount-plugin.c` writes into a0 and a1 at the marker hint.
+struct Icount;
+
+impl rind_esp32c6::bench::Clock for Icount {
+    fn now_ns(&mut self) -> u64 {
+        let (lo, hi): (u32, u32);
+        // SAFETY: `slti x0` is a hint that writes nothing; under the plugin,
+        // a0 and a1 then hold the count, and without it, zero.
+        unsafe {
+            asm!("li a0, 0", "li a1, 0", "slti x0, x0, 0x7a5", out("a0") lo, out("a1") hi, options(nostack));
+        }
+        u64::from(hi) << 32 | u64::from(lo)
+    }
+}
+
 extern "C" fn rust_main() -> ! {
     // SAFETY: the arena is used only by the allocator.
     unsafe {
         let p = core::ptr::addr_of_mut!(HEAP_MEM) as *mut u8;
         ALLOC.heap.lock().init(p, HEAP_BYTES);
+    }
+    // Times every operation in instructions instead of checking: the rows'
+    // `_ns` fields are instruction counts.
+    if cfg!(feature = "icount") {
+        let rounds = 3;
+        let emit = |r: &rind_esp32c6::bench::Row| print(&format!("{}\n", r.line()));
+        rind_esp32c6::bench::run_all(&mut Icount, rounds, 1, emit);
+        #[cfg(feature = "compare")]
+        rind_esp32c6::vendors::run_all(&mut Icount, rounds, 1, emit);
+        exit(0)
     }
     let lo = STACK.0.get() as usize;
     let mut failed = 0;
