@@ -1,0 +1,150 @@
+#!/usr/bin/env python3
+"""Builds rind for riscv32imac, runs its known-answer checks under qemu, and
+sizes each algorithm. Nothing here runs on an ESP32-C6.
+
+Usage:
+  admin/esp32c6-riscv32 build   cross-builds the rind library
+  admin/esp32c6-riscv32 test    runs every check under qemu-riscv32 (user mode)
+  admin/esp32c6-riscv32 size    prints each algorithm's code size, and the stack
+                                and heap it used in that run, as Markdown
+
+The ESP32-C6 is a riscv32imac core with no hardware SHA-512 or AES in rind's
+use, so rind's portable backend runs on it. qemu-user is not the chip: what
+this measures is the code (size, peak stack, peak heap, correctness), never
+time. Add `--out FILE` to `size` to also save the rows as JSON.
+
+Needs `cargo` and `rustc` with the riscv32imac-unknown-none-elf standard
+library, and `qemu-riscv32` on PATH (nixpkgs' `qemu-user`). RIND_RISCV32_CARGO
+and RIND_RISCV32_QEMU name them where PATH does not, and RUSTC and RUSTFLAGS
+pass through, so a sysroot without rustup can be given with `--sysroot`.
+"""
+
+import json
+import os
+import re
+import struct
+import subprocess
+import sys
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+CRATE = os.path.join(ROOT, "admin", "esp32c6")
+TARGET = "riscv32imac-unknown-none-elf"
+CARGO = os.environ.get("RIND_RISCV32_CARGO", "cargo")
+QEMU = os.environ.get("RIND_RISCV32_QEMU", "qemu-riscv32")
+# Without an operating system getrandom has no source but the caller's.
+CFG = '--cfg getrandom_backend="custom"'
+
+
+def fail(msg):
+    sys.exit(f"esp32c6-riscv32: {msg}")
+
+
+def env():
+    e = dict(os.environ)
+    e["RUSTFLAGS"] = (e.get("RUSTFLAGS", "") + " " + CFG).strip()
+    return e
+
+
+def build_lib():
+    subprocess.run(
+        [CARGO, "build", "-p", "rind", "--lib", "--locked", "--release", "--target", TARGET],
+        cwd=ROOT,
+        env=env(),
+        check=True,
+    )
+
+
+def build_runner(features):
+    """Builds qemu-kat with `features` and returns the ELF's path."""
+    cmd = [CARGO, "build", "--release", "--locked", "--target", TARGET, "--bin", "qemu-kat",
+           "--no-default-features", "--features", ",".join(["qemu"] + features)]
+    subprocess.run(cmd, cwd=CRATE, env=env(), check=True)
+    target_dir = json.loads(
+        subprocess.run([CARGO, "metadata", "--format-version", "1", "--no-deps"], cwd=CRATE, env=env(),
+                       check=True, capture_output=True, text=True).stdout)["target_directory"]
+    return os.path.join(target_dir, TARGET, "release", "qemu-kat")
+
+
+def run_qemu(elf):
+    """Runs the ELF and returns its RIND-KAT rows by name."""
+    p = subprocess.run([QEMU, elf], capture_output=True, text=True, timeout=1800)
+    rows = {}
+    for line in p.stdout.splitlines():
+        m = re.fullmatch(r"RIND-KAT v1 (\S+) (ok|FAIL) stack=(\d+) heap_peak=(\d+)", line)
+        if m:
+            rows[m[1]] = {"ok": m[2] == "ok", "stack": int(m[3]), "heap_peak": int(m[4])}
+        elif line.startswith("RIND-KAT"):
+            print(line)
+    if p.returncode != 0 or not rows:
+        fail(f"qemu run failed (exit {p.returncode}): {p.stdout[-400:]} {p.stderr[-400:]}")
+    return rows
+
+
+def sections(path):
+    """Code (text + rodata) and static RAM (data + bss) bytes of an ELF32."""
+    with open(path, "rb") as f:
+        d = f.read()
+    shoff, = struct.unpack_from("<I", d, 0x20)
+    shentsize, shnum, shstrndx = struct.unpack_from("<HHH", d, 0x2E)
+    sh = [struct.unpack_from("<IIIIIIIIII", d, shoff + i * shentsize) for i in range(shnum)]
+    strtab = sh[shstrndx]
+    code = ram = 0
+    for name_off, typ, flags, _, off, size, *_ in sh:
+        end = d.index(b"\0", strtab[4] + name_off)
+        name = d[strtab[4] + name_off:end].decode()
+        if not flags & 2:  # SHF_ALLOC
+            continue
+        if name.startswith((".text", ".rodata")):
+            code += size
+        elif name.startswith((".data", ".bss", ".sdata", ".sbss")):
+            ram += size
+    return code, ram
+
+
+def algorithms():
+    with open(os.path.join(CRATE, "Cargo.toml")) as f:
+        text = f.read()
+    all_line = re.search(r"^all = \[(.*)\]", text, re.M).group(1)
+    return re.findall(r'"([^"]+)"', all_line)
+
+
+def main():
+    cmd = sys.argv[1] if len(sys.argv) > 1 else ""
+    if cmd == "build":
+        build_lib()
+    elif cmd == "test":
+        rows = run_qemu(build_runner(["all"]))
+        bad = [n for n, r in rows.items() if not r["ok"]]
+        if bad or len(rows) != len(algorithms()):
+            fail(f"checks failed or missing: {bad} ({len(rows)} of {len(algorithms())} ran)")
+        print(f"all {len(rows)} known-answer checks passed on riscv32imac under qemu-user")
+    elif cmd == "size":
+        out = None
+        if "--out" in sys.argv:
+            out = sys.argv[sys.argv.index("--out") + 1]
+        algs = algorithms()
+        base_code, base_ram = sections(build_runner([]))
+        stacks = run_qemu(build_runner(["all"]))
+        table = []
+        for a in algs:
+            code, ram = sections(build_runner([a]))
+            r = stacks[a]
+            table.append({"algorithm": a, "code": code - base_code, "static_ram": ram - base_ram,
+                          "stack": r["stack"], "heap_peak": r["heap_peak"], "ok": r["ok"]})
+        print(f"harness alone: {base_code} B code, {base_ram} B static RAM (qemu-kat, opt-level 3, lto)\n")
+        print("| algorithm | code over harness (B) | static RAM (B) | peak stack (B) | peak heap (B) | check |")
+        print("|---|---|---|---|---|---|")
+        for t in table:
+            print(f"| {t['algorithm']} | {t['code']} | {t['static_ram']} | {t['stack']} | {t['heap_peak']} | "
+                  f"{'ok' if t['ok'] else 'FAIL'} |")
+        if out:
+            with open(out, "w") as f:
+                json.dump({"target": TARGET, "harness": {"code": base_code, "static_ram": base_ram},
+                           "rows": table}, f, indent=1)
+                f.write("\n")
+    else:
+        fail("usage: admin/esp32c6-riscv32 build|test|size [--out FILE]")
+
+
+if __name__ == "__main__":
+    main()
