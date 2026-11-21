@@ -4,7 +4,7 @@ version = "0.0.0"
 edition = "2024"
 rust-version = "1.95"
 publish = false
-description = "Known-answer checks, stack and heap probes, and a sensor example for rind on riscv32imac (ESP32-C6). Not yet measured on hardware."
+description = "Known-answer checks, stack and heap probes, and a sensor example for rind on riscv32imac (ESP32-C6). Measured on hardware once (see benchmarks/esp32c6.md)."
 
 # Its own workspace and lockfile: nothing here builds for the host's gate
 # except `cargo test`, and the firmware target needs flags the workspace lacks.
