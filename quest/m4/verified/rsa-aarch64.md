@@ -13,10 +13,6 @@ RSA verification and signing earn the ✓ on aarch64: the glue `proofs/Rind/X86_
 - Apple: byte-check or prove `bn_mul_mont.apple.s`. The cheapest route is a byte check against the Linux object modulo the entry's alignment, as `admin/prove bytes` compares other builds' objects, if the two differ only in directives and branch offsets; otherwise a HOL Light proof of the Apple object as for the Linux one.
 - Report: `verified.toml` rows for RSA verification and signing with `arch = "aarch64"`, and `proofs/README.md` updated.
 
-## Waiting
-
-- Claude: Apple's `bn_mul_mont.apple.s` has no proof or byte check yet; start on it once the Linux glue's translation builds, and drop this item when the Apple object is covered.
-
 ## Related
 
 - [RSA signing is proven](/quest/m4/verified/rsa-sign.md) - runs the same products for its private operation
