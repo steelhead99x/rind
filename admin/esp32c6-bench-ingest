@@ -133,8 +133,12 @@ def parse(text):
                 boot_kat[m[1]] = m[2] == "ok"
             else:
                 cur["kat"].append((m[1], m[2] == "ok"))
-        elif cur is not None and (m := ROW.match(line)):
-            cur["rows"].append(m.groups())
+        elif (m := ROW.match(line)):
+            # A row before the first summary's `done` line (or after a boot
+            # marker) is the tail of a summary the capture began inside:
+            # well formed, but part of no block, so it is discarded.
+            if cur is not None:
+                cur["rows"].append(m.groups())
         elif line.startswith("RIND-FW v1 start"):
             # A new boot ends the block before it: its startup checks are the
             # next boot's, not more of this summary.
@@ -277,6 +281,11 @@ def selftest():
     refuses(whole + whole.replace("cpu_mhz=160", "cpu_mhz=80"), "disagree")
     # A copy that declares more rows than it holds is cut off, not a disagreement.
     assert len(parse(whole + whole.replace("rows=2", "rows=3"))["results"]) == 2
+    # A capture that began inside a summary: its leading valid row is dropped,
+    # genuinely malformed text still refuses.
+    assert len(parse(row1 + whole + whole)["results"]) == 2
+    assert len(parse(row1 + good + good)["results"]) == 1
+    refuses("RIND-BENCH v1 junk\n" + good + good, "malformed")
     # A new boot's start marker ends the summary before it, so that boot's
     # startup checks are not appended to it (which would drop it as cut off)
     # and a later summary that disagrees is still caught.
