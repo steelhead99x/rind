@@ -4,9 +4,9 @@
 //! crypto extension, and SHA-256 on HACL*'s verified `Hacl_Hash_SHA2`, as
 //! libcrux-sha2 ships it, except on ESP-IDF Xtensa. HACL*'s SHA-256 took
 //! 0.67-0.93 of `generic`'s time at 16 KB on x86_64. SHA-384/512 is that
-//! HACL* body on 64-bit targets and the rolled loop in `generic::sha512` on
-//! every other pointer width, where the unrolled body is about 47 KiB and
-//! misses a 16 KiB instruction cache. On ESP-IDF Xtensa, SHA-256 is rind's
+//! HACL* body on 64-bit targets and `generic::sha512` (rolled, or unrolled
+//! by sixteen on the ESP32-S3) on every other pointer width, where HACL*'s
+//! unrolled body is about 47 KiB and misses a 16 KiB instruction cache. On ESP-IDF Xtensa, SHA-256 is rind's
 //! own FIPS 180-4 compression in `sha256_iram`: sixteen rounds unrolled, the
 //! schedule body run three times, placed in internal RAM. It is not HACL*
 //! and nothing proves it. A fully rolled SHA-256 was slower than HACL* in
@@ -100,6 +100,10 @@ pub(crate) fn sha512_compress_blocks(state: &mut [u64; 8], blocks: &[u8]) {
     // width on which this function returns `state` unchanged.
     #[cfg(not(target_pointer_width = "64"))]
     {
+        // The ESP32-S3 runs `generic::sha512`'s unrolled body, which ESP-IDF
+        // places in `.iram1.text`; with `esp32s3-sha512-flash` it runs the
+        // rolled loop in ordinary text, as every other non-64-bit target
+        // does. SHA-256 on ESP-IDF Xtensa is `sha256_iram`.
         crate::low::generic::sha512::sha512_compress_blocks(state, blocks);
     }
     #[cfg(target_pointer_width = "64")]

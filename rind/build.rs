@@ -46,6 +46,9 @@ fn main() {
     );
 
     println!(r#"cargo::rustc-check-cfg=cfg(rind_limb, values("32", "64"))"#);
+    println!("cargo::rustc-check-cfg=cfg(rind_esp32s3)");
+    // The SHA-512 layout probe sets this so it can link `sha512_load_probe`.
+    println!("cargo::rustc-check-cfg=cfg(rind_sha512_load_probe)");
     println!("cargo::rustc-check-cfg=cfg(rind_std)");
     println!("cargo::rustc-check-cfg=cfg(rind_reg_asm)");
 
@@ -100,6 +103,13 @@ fn main() {
     if env::var_os("CARGO_CFG_RIND_LIMB").is_none() {
         let limb = if wide { 64 } else { 32 };
         println!(r#"cargo::rustc-cfg=rind_limb="{limb}""#);
+    }
+
+    // The ESP32-S3, from its triple: esp rustc 1.97.0.0 reports an
+    // `esp32s3ops` target feature and 1.98.1.0 does not, so the feature
+    // cannot pick the S3's SHA-512 placement.
+    if env::var("TARGET").is_ok_and(|t| t.starts_with("xtensa-esp32s3-")) {
+        println!("cargo::rustc-cfg=rind_esp32s3");
     }
 }
 

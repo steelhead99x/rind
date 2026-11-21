@@ -1,0 +1,660 @@
+#!/bin/sh
+#
+# Checks the ESP32-S3 placement of the SHA-512 compressor, the unrolled body, in IRAM and its K table in DRAM.
+#
+# On xtensa-esp32s3-espidf the body must land in .iram1.text (literal pool
+# included) and K in .dram1.rodata, so neither is part of the flash
+# catch-all that shifts later objects. The ESP32 and xtensa-esp32s3-none-elf
+# keep the ordinary sections. The esp32s3-sha512-flash feature runs the
+# rolled loop in ordinary sections: that object must carry no unrolled body
+# and no l32i byte swap, and no IRAM or DRAM section.
+#
+# opt-level 3 is the firmware profile. opt-level s and z are checked on
+# the ESP32-S3 object as well: the same section, relocation, and no-call
+# rules, because a size-optimized outline into flash is the failure this
+# body is written to avoid. opt-level 0 is not a cache-off promise. At
+# each of the three it prints the IRAM block's and literal pool's sizes,
+# and fails when their sum passes iram_ceiling.
+# Every ESP32-S3 object is also checked for the message byte swap: `l32i`
+# into `a14`, `ssai 8`, a 16-bit shift, then `src R, R, a14`; `src R, R, R`;
+# `src R, a14, R`. That is the sequence in `be_u32`. The ESP32 object must
+# have none, and so must the esp32s3-sha512-flash object: only the ESP32-S3
+# without that feature takes the unrolled body and its load. A
+# call0 build of the ESP32-S3 ESP-IDF object, IRAM block and DRAM K
+# included, is then linked and run under QEMU's esp32s3 CPU: the message
+# load, including blocks that are not word-aligned, and FIPS 180-4's "abc"
+# block through the whole compressor, at byte offsets 0 and 1, compared
+# word for word. That is the emulator's model of the core, not a cycle
+# count. ESP-IDF v5.5.1's ESP32-S3 core-isa.h is
+# checked too: Hardware Alignment is on and an unaligned load does not
+# trap, which is that core's l32i of an address that is not a multiple of
+# 4. Board timing is not measured.
+#
+# ESP-IDF Xtensa SHA-256 is rind's IRAM body, checked by
+# admin/esp32s3-sha256-layout. This script does not link a stand-in for
+# it and does not rewrite libcrux-sha2. Board timing is not measured.
+#
+# Needs the espup rustc that the board uses (1.97.0.0, 8ea53bcd7) and the
+# xtensa-esp-elf binutils. Defaults are under $HOME/.espressif, which is
+# where .github/actions/esp32s3-toolchain installs them (admin/esp32s3-toolchain.sh
+# has the paths, shared with admin/esp32s3-sha256-layout). It also
+# needs curl, sha256sum, a host C compiler, and network, to fetch and
+# check that pinned header. The host compiler reads them so the
+# Xtensa gcc's own core header cannot satisfy the include guard first.
+set -eu
+
+root=$(CDPATH='' cd -- "$(dirname "$0")/.." && pwd)
+# shellcheck source=admin/esp32s3-toolchain.sh
+. "$root/admin/esp32s3-toolchain.sh"
+host_cc=${CC:-cc}
+
+# Most IRAM the block may take at opt-level 3, s, or z: its .iram1.text
+# plus its literal pool, in bytes, as the object file has them. The first
+# CI run measured 18,533 at opt-level 3 (17,792 at s, 17,797 at z); this is
+# that plus about 10% slack.
+iram_ceiling=20480
+
+mkdir -p "$root/.tmp"
+work=$(mktemp -d "$root/.tmp/sha512-layout.XXXXXX")
+trap 'rm -rf "$work"' EXIT
+
+# ESP-IDF v5.5.1's ESP32-S3 core-isa.h, beside the QEMU run below.
+# XCHAL_UNALIGNED_LOAD_HW is the Hardware Alignment option, which covers
+# l32i. With XCHAL_UNALIGNED_LOAD_EXCEPTION
+# at 0, an unaligned l32i is the word at that address: it does not trap and
+# it does not ignore the low bits. The bytes are checked before the compiler
+# reads a macro. The tag is v5.5.1, path
+# components/xtensa/<chip>/include/xtensa/config/core-isa.h.
+if ! command -v curl >/dev/null 2>&1 || ! command -v sha256sum >/dev/null 2>&1; then
+  printf 'missing curl or sha256sum\n' >&2
+  exit 1
+fi
+if ! command -v "$host_cc" >/dev/null 2>&1; then
+  if command -v gcc >/dev/null 2>&1; then
+    host_cc=gcc
+  else
+    printf 'missing host C compiler %s\n' "$host_cc" >&2
+    exit 1
+  fi
+fi
+check_unaligned_l32i() {
+  chip=$1
+  sum=$2
+  id0=$3
+  id1=$4
+  version=$5
+  hdr=$work/$chip-core-isa.h
+  url=https://raw.githubusercontent.com/espressif/esp-idf/v5.5.1/components/xtensa/$chip/include/xtensa/config/core-isa.h
+  curl -fsSL -o "$hdr" "$url"
+  printf '%s  %s\n' "$sum" "$hdr" | sha256sum -c -
+  cat > "$work/$chip-unaligned.c" << EOF
+_Static_assert(XCHAL_HW_CONFIGID0 == $id0, "not the $chip core-isa.h");
+_Static_assert(XCHAL_HW_CONFIGID1 == $id1, "not the $chip core-isa.h");
+_Static_assert(XCHAL_HW_VERSION == $version, "not the $chip core-isa.h");
+_Static_assert(XCHAL_UNALIGNED_LOAD_HW == 1, "$chip unaligned l32i is not hardware");
+_Static_assert(XCHAL_UNALIGNED_LOAD_EXCEPTION == 0, "$chip unaligned l32i traps");
+EOF
+  # -nostdinc so no other core-isa.h can satisfy the include guard first.
+  "$host_cc" -fsyntax-only -std=c11 -ffreestanding -nostdinc \
+    -include "$hdr" "$work/$chip-unaligned.c"
+  printf '%s core-isa.h: unaligned l32i is hardware\n' "$chip"
+}
+check_unaligned_l32i esp32s3 \
+  7019cdf8369feda20f243f11ae5418bde0ecf99cb1c639d1ef4777957a4d800f \
+  0xC2F0FFFEu 0x23090F1Fu 270012
+
+for tool in "$rustc" "$cargo" "$objdump" "$readelf" "$nm" "$ar" "$gcc" "$ld"; do
+  if [ ! -x "$tool" ]; then
+    printf 'missing %s\ninstall the toolchain as .github/actions/esp32s3-toolchain does\n' "$tool" >&2
+    exit 1
+  fi
+done
+
+# The real compressor, plus an entry so the block is live. The whole file
+# is copied: its `tests` module compiles only its probe exports here,
+# under cfg(rind_sha512_load_probe), and nothing in the other builds.
+# The feature name matches rind's, so the cfg in the source applies.
+cp "$root/rind/src/low/generic/sha512.rs" "$work/body.rs"
+
+# The probe sets `asm_experimental_arch` in its own crate, so it cannot
+# notice rind dropping the gate. Without it the none-elf S3 build fails on
+# the message-load asm. rustfmt wraps the attribute: strip whitespace.
+tr -d ' \n' <"$root/rind/src/lib.rs" |
+  grep -F '#![cfg_attr(any(all(target_arch="xtensa",target_os="espidf"),rind_esp32s3),feature(asm_experimental_arch))]' \
+    >/dev/null || {
+  printf 'esp32s3-sha512-layout: rind/src/lib.rs no longer enables asm_experimental_arch on the ESP32-S3\n' >&2
+  exit 1
+}
+
+mkdir -p "$work/probe/src"
+{
+  # rind/src/lib.rs enables asm_experimental_arch on Xtensa; the probe
+  # needs the same gate for the message-load asm.
+  printf '%s\n' '#![no_std]' '#![feature(asm_experimental_arch)]' '#![allow(dead_code, rustdoc::broken_intra_doc_links)]'
+  cat "$work/body.rs"
+  cat << 'EOF'
+
+#[unsafe(no_mangle)]
+pub fn sha512_entry(state: &mut [u64; 8], blocks: &[u8]) {
+    sha512_compress_blocks(state, blocks);
+}
+EOF
+} > "$work/probe/src/lib.rs"
+
+# rind's build script, so the probe gets the same `rind_esp32s3` cfg.
+cp "$root/rind/build.rs" "$work/probe/build.rs"
+
+cat > "$work/probe/Cargo.toml" << 'EOF'
+[package]
+name = "sha512_layout"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[features]
+esp32s3-sha512-flash = []
+
+[profile.release]
+opt-level = 3
+lto = false
+codegen-units = 1
+panic = "abort"
+EOF
+
+esp_toolchain_env "$work"
+
+# $1 name, $2 target, $3 opt-level, $4 cargo flags; the rest are rustc
+# flags for this crate only.
+build() {
+  name=$1
+  target=$2
+  opt=$3
+  extra=$4
+  shift 4
+  # shellcheck disable=SC2086
+  CARGO_TARGET_DIR="$work/target-$name" \
+    "$cargo" rustc --manifest-path "$work/probe/Cargo.toml" \
+      --release --target "$target" -Z build-std=core --offline \
+      --config "profile.release.opt-level=$opt" $extra -- "$@" \
+      >"$work/$name.log" 2>&1 \
+    || {
+      printf 'build %s failed\n' "$name" >&2
+      cat "$work/$name.log" >&2
+      exit 1
+    }
+  rlib=$(find "$work/target-$name/$target/release/deps" -name 'libsha512_layout-*.rlib' | head -1)
+  mkdir -p "$work/obj/$name"
+  (cd "$work/obj/$name" && "$ar" x "$rlib")
+  find "$work/obj/$name" -name 'sha512_layout-*.o' -exec mv {} "$work/obj/$name.o" \;
+}
+
+build s3 xtensa-esp32s3-espidf 3 ''
+build s xtensa-esp32s3-espidf '"s"' ''
+build z xtensa-esp32s3-espidf '"z"' ''
+build flash xtensa-esp32s3-espidf 3 '--features esp32s3-sha512-flash'
+build esp32 xtensa-esp32-espidf 3 ''
+build none xtensa-esp32s3-none-elf 3 ''
+# The QEMU probe: the ESP32-S3 ESP-IDF build, so the block is the IRAM one
+# with K in DRAM, plus the probe exports. call0, so the stub can enter it
+# without a window exception. `-windowed` on core does not compile, so the
+# flag is this crate's only. The firmware objects above keep the target's
+# default ABI. The inline asm sequence does not change with the ABI.
+build probe xtensa-esp32s3-espidf 3 '' \
+  --cfg rind_sha512_load_probe -C target-feature=-windowed
+build probe-s xtensa-esp32s3-espidf '"s"' '' \
+  --cfg rind_sha512_load_probe -C target-feature=-windowed
+build probe-z xtensa-esp32s3-espidf '"z"' '' \
+  --cfg rind_sha512_load_probe -C target-feature=-windowed
+build probe-none xtensa-esp32s3-none-elf 3 '' \
+  --cfg rind_sha512_load_probe -C target-feature=-windowed
+
+sections() {
+  "$objdump" -h "$1" | awk 'NR > 3 && $2 ~ /^\./ { print $2, $3 }'
+}
+
+fail() {
+  printf 'esp32s3-sha512-layout: %s\n' "$1" >&2
+  exit 1
+}
+
+section_size() {
+  sections "$1" | awk -v name="$2" '$1 == name { print $2; found = 1 } END { if (!found) exit 1 }'
+}
+
+has_section() {
+  sections "$1" | awk -v name="$2" '$1 == name { found = 1 } END { exit !found }'
+}
+
+# $1 object, $2 section name that must exist, $3 1 if .iram1/.dram1 are required.
+expect_placed() {
+  obj=$1
+  if has_section "$obj" .iram1.text && has_section "$obj" .iram1.text.literal; then
+    :
+  else
+    fail "$obj is missing .iram1.text or its literal pool"
+  fi
+  if ! has_section "$obj" .dram1.rodata; then
+    fail "$obj is missing .dram1.rodata for K"
+  fi
+  ksize=$(section_size "$obj" .dram1.rodata)
+  if [ "$ksize" != "00000280" ]; then
+    fail "$obj K section is $ksize, want 00000280"
+  fi
+  if sections "$obj" | awk '$1 ~ /^\.text\./ && $1 ~ /compress_block/ { found = 1 } END { exit !found }'; then
+    fail "$obj still has the compressor in a .text section"
+  fi
+  if sections "$obj" | awk '$1 ~ /^\.rodata\./ && $1 ~ /[^.]K$/ { found = 1 } END { exit !found }'; then
+    fail "$obj still has K in .rodata"
+  fi
+}
+
+expect_ordinary() {
+  obj=$1
+  label=$2
+  if has_section "$obj" .iram1.text || has_section "$obj" .dram1.rodata; then
+    fail "$label placed IRAM or DRAM sections"
+  fi
+  if ! sections "$obj" | awk '$1 ~ /^\.text\./ && $1 ~ /compress_block/ { found = 1 } END { exit !found }'; then
+    fail "$label has no .text compressor"
+  fi
+  if ! sections "$obj" | awk '$1 ~ /^\.literal\./ && $1 ~ /compress_block/ { found = 1 } END { exit !found }'; then
+    fail "$label has no .literal pool for the compressor"
+  fi
+  if ! sections "$obj" | awk '$1 ~ /^\.rodata\./ { found = 1 } END { exit !found }'; then
+    fail "$label has no .rodata for K"
+  fi
+}
+
+expect_placed "$work/obj/s3.o"
+expect_placed "$work/obj/s.o"
+expect_placed "$work/obj/z.o"
+expect_ordinary "$work/obj/flash.o" 'esp32s3-sha512-flash'
+expect_ordinary "$work/obj/esp32.o" 'xtensa-esp32-espidf'
+expect_ordinary "$work/obj/none.o" 'xtensa-esp32s3-none-elf'
+expect_placed "$work/obj/probe.o"
+
+# The IRAM this placement costs an image, printed so CI records it.
+largest=0
+for opt in 3 s z; do
+  case $opt in
+    3) obj=$work/obj/s3.o ;;
+    *) obj=$work/obj/$opt.o ;;
+  esac
+  text=$((0x$(section_size "$obj" .iram1.text)))
+  lit=$((0x$(section_size "$obj" .iram1.text.literal)))
+  k=$((0x$(section_size "$obj" .dram1.rodata)))
+  line="opt-level $opt: IRAM block $text bytes + literal pool $lit bytes = $((text + lit)); K in DRAM $k bytes"
+  printf 'esp32s3-sha512-layout: %s\n' "$line"
+  if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+    printf -- '- SHA-512 %s\n' "$line" >>"$GITHUB_STEP_SUMMARY"
+  fi
+  if [ $((text + lit)) -gt "$largest" ]; then
+    largest=$((text + lit))
+  fi
+done
+if [ "$largest" -gt "$iram_ceiling" ]; then
+  fail "IRAM block and literal pool take $largest bytes, above iram_ceiling ($iram_ceiling); shrink the block, or raise the ceiling in this script with the reason in the PR"
+fi
+
+# The block's own relocations point at its IRAM literal pool, and that pool
+# points at K in DRAM. A flash .rodata reference here would fault with the
+# cache off.
+# Quote-terminated so `.rela.iram1.text` does not also match the literal
+# section. Allow only these two section targets, so any function reference
+# (including a panic, not just memset) or other data reference fails.
+check_iram() {
+  obj=$1
+  label=$2
+  "$readelf" -rW "$obj" | awk '
+    /\.rela\.iram1\.text\.literal'\''/ { inlit = 1; intext = 0; next }
+    /\.rela\.iram1\.text'\''/ { intext = 1; inlit = 0; next }
+    /^Relocation section/ { intext = 0; inlit = 0 }
+    intext && /R_XTENSA_/ && $5 != ".iram1.text.literal" { bad = 1; print > "/dev/stderr" }
+    inlit && /R_XTENSA_/ && $5 != ".dram1.rodata" { bad = 1; print > "/dev/stderr" }
+    inlit && /R_XTENSA_/ && $5 == ".dram1.rodata" { sawk = 1 }
+    END { if (bad || !sawk) exit 1 }
+  ' || fail "$label IRAM relocations are not (literal pool, DRAM K)"
+  if "$objdump" -d -j .iram1.text "$obj" | grep -Eq '[[:space:]]callx?(0|4|8|12)[[:space:]]'; then
+    fail "$label IRAM compressor contains a call instruction"
+  fi
+}
+
+check_iram "$work/obj/s3.o" 'opt-level 3'
+check_iram "$work/obj/s.o" 'opt-level s'
+check_iram "$work/obj/z.o" 'opt-level z'
+check_iram "$work/obj/probe.o" 'QEMU probe'
+
+# The message load is assembly on the ESP32-S3, and the host tests never
+# compile it. Require the operand order from `be_u32`, at least once per
+# half of each of the 16 message words. A swapped `src` operand fails.
+# `none` requires that no such load is present, as on the ESP32's rolled
+# body, and lets any other `ssai 8`, such as a rotate's, through.
+check_swap() {
+  label=$1
+  "$objdump" -d "$2" > "$work/dis.s"
+  python3 - "$label" "$work/dis.s" "${3:-some}" << 'PY' || fail "$label byte swap"
+import re
+import sys
+
+label, path, want = sys.argv[1], sys.argv[2], sys.argv[3]
+insn = re.compile(r"^\s*[0-9a-fA-F]+:\s+[0-9a-fA-F ]+\s+([a-z][a-z0-9.]*)\b(.*)$")
+
+def is_16(token):
+    try:
+        return int(token, 0) == 16
+    except ValueError:
+        return False
+
+rows = []
+for line in open(path):
+    match = insn.match(line)
+    if match:
+        operands = [part.strip() for part in match.group(2).split(",") if part.strip()]
+        rows.append((match.group(1), operands, line.strip()))
+found = 0
+i = 0
+while i < len(rows):
+    mnemonic, operands, _line = rows[i]
+    if mnemonic != "ssai" or operands != ["8"]:
+        i += 1
+        continue
+    window = rows[max(0, i - 1) : i + 5]
+    if i == 0 or len(window) < 6:
+        if want == "none":
+            i += 1
+            continue
+        raise SystemExit(f"{label}: ssai 8 is not inside a byte swap")
+    load, _ssai, shift, first, second, third = window
+    dest = shift[1][0] if shift[1] else ""
+    ok = (
+        load[0] == "l32i"
+        and load[1][:1] == ["a14"]
+        and shift[0] in ("srli", "extui")
+        and len(shift[1]) >= 3
+        and shift[1][1] == "a14"
+        and any(is_16(part) for part in shift[1][2:])
+        and first[0] == "src"
+        and second[0] == "src"
+        and third[0] == "src"
+        and first[1] == [dest, dest, "a14"]
+        and second[1] == [dest, dest, dest]
+        and third[1] == [dest, "a14", dest]
+    )
+    if not ok and want == "none":
+        i += 1
+        continue
+    if not ok:
+        sys.stderr.write(f"{label}: byte swap operands are not l32i a14; ssai 8; shift 16; src\n")
+        for item in window:
+            sys.stderr.write(item[2] + "\n")
+        raise SystemExit(1)
+    found += 1
+    i += 5
+if want == "none":
+    if found:
+        raise SystemExit(f"{label}: expected no l32i byte swap, found {found}")
+    print(f"{label}: no l32i byte swap")
+    raise SystemExit(0)
+if found < 32:
+    raise SystemExit(f"{label}: expected at least 32 byte swaps, found {found}")
+print(f"{label}: byte swaps {found}")
+PY
+}
+
+check_swap 'opt-level 3' "$work/obj/s3.o"
+check_swap 'opt-level s' "$work/obj/s.o"
+check_swap 'opt-level z' "$work/obj/z.o"
+check_swap 'esp32s3-sha512-flash' "$work/obj/flash.o" none
+check_swap 'xtensa-esp32-espidf' "$work/obj/esp32.o" none
+check_swap 'xtensa-esp32s3-none-elf' "$work/obj/none.o"
+check_swap 'QEMU probe' "$work/obj/probe.o"
+
+# Link the compressor so the literal-pool order and the call from
+# sha512_entry can be checked. ESP-IDF Xtensa SHA-256 is sha256_iram;
+# admin/esp32s3-sha256-layout checks that body. This probe does not
+# stand in for it.
+{
+  printf '%s\n' 'void *memset(void *s, int c, unsigned long n) {'
+  printf '%s\n' '    unsigned char *p = s;'
+  printf '%s\n' '    for (unsigned long i = 0; i < n; i++) p[i] = (unsigned char)c;'
+  printf '%s\n' '    return s;'
+  printf '%s\n' '}'
+  "$nm" -u "$work/obj/s3.o" "$work/obj/flash.o" | awk '$1 == "U" && $2 != "memset" { print $2 }' | sort -u |
+    while read -r sym; do
+      printf 'void %s(void) {}\n' "$sym"
+    done
+} > "$work/stubs.c"
+"$gcc" -c -O2 -o "$work/stubs.o" "$work/stubs.c"
+
+cat > "$work/link.ld" << 'EOF'
+MEMORY {
+  iram0_0_seg (RX) : ORIGIN = 0x40378000, LENGTH = 0x50000
+  default_code_seg (RX) : ORIGIN = 0x42000000, LENGTH = 0x400000
+  dram0_0_seg (RW) : ORIGIN = 0x3FC88000, LENGTH = 0x50000
+}
+SECTIONS {
+  .iram0.text : { *(.iram1 .iram1.*) } > iram0_0_seg
+  .flash.text : {
+    *(.literal .literal.* .text .text.*)
+  } > default_code_seg
+  .dram0.data : { *(.dram1 .dram1.*) *(.data .data.*) } > dram0_0_seg
+  .flash.rodata : { *(.rodata .rodata.*) } > default_code_seg
+  .dram0.bss (NOLOAD) : { *(.bss .bss.*) } > dram0_0_seg
+}
+EOF
+
+link_one() {
+  "$ld" --relax -e sha512_entry -T "$work/link.ld" -o "$1" \
+    "$2" "$work/stubs.o"
+}
+
+link_one "$work/s3.elf" "$work/obj/s3.o"
+link_one "$work/flash.elf" "$work/obj/flash.o"
+
+# Literal pool before the code, which is the direction l32r requires.
+block=$("$nm" -n "$work/s3.elf" | awk '/compress_block/ { print $1; exit }')
+iram_addr=$("$objdump" -h "$work/s3.elf" | awk '/\.iram0\.text/ { print $4; exit }')
+python3 - "$iram_addr" "$block" << 'PY'
+import sys
+base, block = int(sys.argv[1], 16), int(sys.argv[2], 16)
+if block <= base:
+    raise SystemExit("literal pool is not before the compressor")
+print(f"literal pool leads the block by {block - base:#x}")
+PY
+
+# The caller stays an absolute callx8 under relaxation, in both placements.
+for elf in "$work/s3.elf" "$work/flash.elf"; do
+  if ! "$objdump" -d "$elf" | awk '/<sha512_entry>:/{f=1} f && /^$/{exit} f' | grep -q callx8; then
+    fail "sha512_entry in $elf has no callx8"
+  fi
+  if "$objdump" -d "$elf" | awk '/<sha512_entry>:/{f=1} f && /^$/{exit} f' | grep -q 'call8'; then
+    fail "sha512_entry in $elf relaxed to call8"
+  fi
+done
+
+# Execute the message load and a FIPS 180-4 "abc" compression through the
+# IRAM block. The firmware link above is not runnable: its text sits in the
+# flash window, which this sim machine does not map. Code, constants
+# (`.iram1` and `.dram1` included), and the stack stay in the instruction
+# RAM the esp32s3 CPU model maps at 0x40000000. The stub is call0.
+qemu=${RIND_QEMU:-"$esp/qemu/bin/qemu-system-xtensa"}
+if [ ! -x "$qemu" ]; then
+  printf 'missing %s\ninstall it as .github/workflows/esp32s3-sha512-layout.yml does\n' "$qemu" >&2
+  exit 1
+fi
+probes='probe probe-s probe-z probe-none'
+for name in $probes; do
+  for sym in sha512_load_probe sha512_abc_probe; do
+    if ! "$nm" "$work/obj/$name.o" | awk -v s="$sym" '$3 == s { found = 1 } END { exit !found }'; then
+      fail "$name object has no $sym"
+    fi
+  done
+  # The probes, the driver, and the block: no `entry`, so all call0.
+  if "$objdump" -d "$work/obj/$name.o" | grep -Eq '^[[:space:]]*[0-9a-f]+:[[:space:]].*[[:space:]]entry[[:space:]]'; then
+    fail "the $name object is windowed; the QEMU stub is call0"
+  fi
+done
+
+{
+  printf '%s\n' 'void *memset(void *s, int c, unsigned long n) {'
+  printf '%s\n' '    unsigned char *p = s;'
+  printf '%s\n' '    for (unsigned long i = 0; i < n; i++) p[i] = (unsigned char)c;'
+  printf '%s\n' '    return s;'
+  printf '%s\n' '}'
+  printf '%s\n' 'void *memcpy(void *d, const void *s, unsigned long n) {'
+  printf '%s\n' '    unsigned char *out = d;'
+  printf '%s\n' '    const unsigned char *in = s;'
+  printf '%s\n' '    for (unsigned long i = 0; i < n; i++) out[i] = in[i];'
+  printf '%s\n' '    return d;'
+  printf '%s\n' '}'
+  for name in $probes; do
+    "$nm" -u "$work/obj/$name.o"
+  done | awk '$1 == "U" && $2 != "memset" && $2 != "memcpy" { print $2 }' | sort -u |
+    while read -r sym; do
+      # A panic must not return into the probe.
+      printf 'void %s(void) { for (;;) {} }\n' "$sym"
+    done
+} > "$work/load-stubs.c"
+# Unoptimized: at -O2 gcc turns each loop back into a call to the function
+# it is defining, which never returns, or into a zero-overhead `loop`.
+"$gcc" -c -mabi=call0 -O0 -fno-builtin -o "$work/load-stubs.o" "$work/load-stubs.c"
+
+cat > "$work/load.ld" << 'EOF'
+MEMORY {
+  iram (rwx) : ORIGIN = 0x40000000, LENGTH = 128K
+}
+ENTRY(_start)
+SECTIONS {
+  .literal : { *(.literal .literal.* .xt.lit .iram1.text.literal) } > iram
+  .text : { *(.text .text.* .iram1.text) } > iram
+  .rodata : { *(.rodata .rodata.* .dram1.rodata) } > iram
+  .data : { *(.data .data.*) } > iram
+  .bss : { *(.bss .bss.*) } > iram
+}
+EOF
+
+# Runs both probes and prints each one's name, then its result as eight hex
+# digits: the name alone on the last line means that probe never returned.
+# a12 is callee-saved under call0, so it holds the results across the calls.
+cat > "$work/start.S" << 'EOF'
+.section .text
+.global _start
+_start:
+    // Reset leaves PS.EXCM set, and a zero-overhead `loop` does not loop
+    // back while it is: the C stubs' loops would run once. PS 0 is ring 0,
+    // no exception mode, no windows, and no interrupt is enabled.
+    movi a2, 0
+    wsr.ps a2
+    rsync
+    movi a1, 0x4001F000
+    movi a4, load_msg
+    movi a5, 5
+    call0 write
+    call0 sha512_load_probe
+    mov a12, a2
+    call0 print_hex
+    movi a4, abc_msg
+    movi a5, 4
+    call0 write
+    call0 sha512_abc_probe
+    or a12, a12, a2
+    call0 print_hex
+    movi a3, 0
+    beqz a12, 1f
+    movi a3, 1
+1:
+    movi a2, 1
+    simcall
+2:
+    j 2b
+
+// Writes the a5 bytes at a4 to stdout.
+write:
+    movi a2, 4
+    movi a3, 1
+    simcall
+    ret
+
+// Writes a2 as eight hex digits and a newline.
+print_hex:
+    movi a4, hex_buf
+    movi a7, 8
+3:
+    extui a8, a2, 28, 4
+    slli a2, a2, 4
+    movi a9, hex_digits
+    add a9, a9, a8
+    l8ui a9, a9, 0
+    s8i a9, a4, 0
+    addi a4, a4, 1
+    addi a7, a7, -1
+    bnez a7, 3b
+    movi a4, hex_buf
+    movi a5, 9
+    j write
+
+.section .rodata
+load_msg:
+    .ascii "load "
+abc_msg:
+    .ascii "abc "
+hex_digits:
+    .ascii "0123456789abcdef"
+.section .data
+hex_buf:
+    .ascii "00000000\n"
+EOF
+"$gcc" -c -mabi=call0 -o "$work/start.o" "$work/start.S"
+
+# $1 probe object name, $2 what it is.
+run_probe() {
+  name=$1
+  elf=$work/$name.elf
+  out=$work/$name.out
+  err=$work/$name.err
+  "$ld" --relax -e _start -T "$work/load.ld" -o "$elf" \
+    "$work/start.o" "$work/obj/$name.o" "$work/load-stubs.o"
+  # The stack is at 0x4001F000 and grows down. The image has to end before it.
+  "$readelf" -lW "$elf" | python3 -c '
+import sys
+max_end = 0
+for line in sys.stdin:
+    parts = line.split()
+    if not parts or parts[0] != "LOAD" or len(parts) < 6:
+        continue
+    max_end = max(max_end, int(parts[2], 16) + int(parts[5], 16))
+limit = 0x4001F000
+if max_end == 0 or max_end >= limit:
+    raise SystemExit(f"load image ends at {max_end:#x}, stack is {limit:#x}")
+'
+  status=0
+  timeout 20 "$qemu" -M sim -cpu esp32s3 -nographic -monitor none -semihosting \
+    -device "loader,file=$elf,cpu-num=0" >"$out" 2>"$err" || status=$?
+  if [ "$status" -eq 0 ] && [ "$(cat "$out")" = "load 00000000
+abc 00000000" ]; then
+    printf 'qemu esp32s3, %s: message load and FIPS 180-4 abc OK\n' "$2"
+    return
+  fi
+  printf 'qemu esp32s3, %s: failed, exit %s\n' "$2" "$status" >&2
+  cat "$out" "$err" >&2
+  # What the image took from the C stubs, and how they were compiled.
+  "$nm" -u "$work/obj/$name.o" >&2
+  "$objdump" -d "$work/load-stubs.o" | awk '/<mem(set|cpy)>:/{f=1} f' >&2
+  qemu_failed=1
+}
+
+# Every build runs before any failure is reported, so one log shows which
+# of the placement and the optimization level a failure follows.
+qemu_failed=0
+run_probe probe 'ESP-IDF IRAM build at opt-level 3'
+run_probe probe-s 'ESP-IDF IRAM build at opt-level s'
+run_probe probe-z 'ESP-IDF IRAM build at opt-level z'
+run_probe probe-none 'none-elf build at opt-level 3'
+if [ "$qemu_failed" -ne 0 ]; then
+  fail 'a QEMU probe failed'
+fi
+
+printf 'board_timing: not measured\n'
+printf 'esp32s3-sha512-layout: ok\n'

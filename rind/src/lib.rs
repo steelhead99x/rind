@@ -26,7 +26,7 @@
 )]
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(
-    all(target_arch = "xtensa", target_os = "espidf"),
+    any(all(target_arch = "xtensa", target_os = "espidf"), rind_esp32s3),
     feature(asm_experimental_arch)
 )]
 // Unit tests run on hosted targets and keep `std`'s prelude.
