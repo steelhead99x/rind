@@ -1,0 +1,53 @@
+[package]
+name = "rind-esp32c6"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.95"
+publish = false
+description = "Known-answer checks, stack and heap probes, and a sensor example for rind on riscv32imac (ESP32-C6). Not yet measured on hardware."
+
+# Its own workspace and lockfile: nothing here builds for the host's gate
+# except `cargo test`, and the firmware target needs flags the workspace lacks.
+[workspace]
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "qemu-kat"
+path = "src/bin/qemu-kat.rs"
+required-features = ["qemu"]
+
+[features]
+default = []
+# The qemu-user runner: a `no_std` binary that makes Linux syscalls. It runs
+# the checks the other features include.
+qemu = ["dep:linked_list_allocator", "dep:getrandom"]
+# One feature per algorithm, so `admin/esp32c6-riscv32 size` can build each
+# alone and take its code size as the difference from the empty build.
+all = ["sha256", "sha512", "sha3-256", "hmac-sha256", "hkdf-sha256", "chacha20poly1305", "aes128-gcm", "aes256-gcm", "x25519", "ed25519", "mlkem768", "mldsa65", "p256-ecdsa"]
+sha256 = []
+sha512 = []
+sha3-256 = []
+hmac-sha256 = []
+hkdf-sha256 = []
+chacha20poly1305 = []
+aes128-gcm = []
+aes256-gcm = []
+x25519 = []
+ed25519 = []
+mlkem768 = []
+mldsa65 = []
+p256-ecdsa = []
+
+[dependencies]
+rind = { path = "../../rind" }
+linked_list_allocator = { version = "0.10", default-features = false, features = ["use_spin"], optional = true }
+getrandom = { version = "0.4", optional = true }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+debug = 1
