@@ -216,16 +216,34 @@ def scrub_text(text, secrets):
     return text
 
 
-def scrub(value, secrets, keep=frozenset()):
+# Fields whose value is one of a fixed protocol vocabulary, by key path (lists
+# are transparent). An account named `rind`, `ok`, or `bench` must not turn
+# `library: rind` or `status: ok` into `<redacted>`.
+FIXED_VALUES = {
+    ("status",): {"ok", "noisy"},
+    ("results", "library"): set(br.LIBRARIES.values()) | set(LIBS),
+    ("results", "operation"): set(br.OPERATIONS),
+    ("results", "id"): {op.format(lib=lib) for ops in SUITE.values() for op in ops for lib in br.LIBRARIES},
+    ("bench_app", "control"): {CONTROL},
+    ("bench_app", "throttle_source"): {"vcgencmd", "thermal_throttle", "pmset"},
+}
+
+
+def is_fixed(path, value):
+    return isinstance(value, str) and value in FIXED_VALUES.get(path, ())
+
+
+def scrub(value, secrets, keep=frozenset(), path=()):
     """`value` with every string in it scrubbed. Keys are scrubbed too, except
     those in `keep`: the fixed schema keys this tool wrote itself, which an
-    account named `bench` must not turn into `<redacted>_app`."""
+    account named `bench` must not turn into `<redacted>_app`. A value at one of
+    the FIXED_VALUES paths is kept when it is one of that field's fixed values."""
     if isinstance(value, str):
-        return scrub_text(value, secrets)
+        return value if is_fixed(path, value) else scrub_text(value, secrets)
     if isinstance(value, list):
-        return [scrub(v, secrets, keep) for v in value]
+        return [scrub(v, secrets, keep, path) for v in value]
     if isinstance(value, dict):
-        return {(k if k in keep else scrub_text(k, secrets)): scrub(v, secrets, keep) for k, v in value.items()}
+        return {(k if k in keep else scrub_text(k, secrets)): scrub(v, secrets, keep, path + (k,)) for k, v in value.items()}
     return value
 
 
@@ -238,14 +256,19 @@ def schema_keys(value):
     return set()
 
 
-def without_keys(value, keep):
-    """`value` with the keys in `keep` renamed to a placeholder, so `leaks`
-    looks at them no more than `scrub` does."""
+def checked_text(value, keep, path=()):
+    """Every string `scrub` would have looked at in `value`: all values, and
+    the keys not in `keep`, minus the fixed protocol values."""
+    if isinstance(value, str):
+        return [] if is_fixed(path, value) else [value]
     if isinstance(value, list):
-        return [without_keys(v, keep) for v in value]
+        return [t for v in value for t in checked_text(v, keep, path)]
     if isinstance(value, dict):
-        return {("k" if k in keep else k): without_keys(v, keep) for k, v in value.items()}
-    return value
+        out = [k for k in value if k not in keep]
+        for k, v in value.items():
+            out += checked_text(v, keep, path + (k,))
+        return out
+    return []
 
 
 def safe_host(host, hidden, fallback):
@@ -261,7 +284,7 @@ def safe_host(host, hidden, fallback):
 
 def leaks(value, secrets, keep=frozenset()):
     """What scrubbing should have removed from `value` and did not."""
-    text = json.dumps(without_keys(value, keep), ensure_ascii=False)
+    text = "\n".join(checked_text(value, keep))
     found = [v for v in secrets if literal(v).search(text)]
     found += [m.group(0) for pattern, _ in PATTERNS for m in pattern.finditer(text)]
     return found

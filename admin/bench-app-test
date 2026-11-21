@@ -101,6 +101,51 @@ class Scrub(unittest.TestCase):
         self.assertEqual(app.safe_host("devbox-7", hidden, None), (None, True))
         self.assertEqual(app.safe_host("devbox-7", hidden, "alice"), (None, True))
 
+    def test_the_host_survives_scrubbing_and_names_the_file(self):
+        # What run() does after safe_host: the name written in `host` is the
+        # one scrubbing leaves alone, so file name and JSON agree and
+        # bench-report can read it back.
+        hidden = ["devbox-7", "alice"]
+        for given in ["devbox-7", "alice", "alice-laptop", "ci-box"]:
+            name, _ = app.safe_host(given, hidden, "intel-x")
+            result = app.scrub({"host": name}, hidden, {"host"})
+            self.assertEqual(result["host"], name, given)
+            self.assertNotIn(app.REDACTED, f"{name}.json")
+            self.assertEqual(app.leaks(result, hidden, {"host"}), [])
+            app.br.check_host_name(name)
+
+    def test_fixed_values_survive_accounts_named_like_them(self):
+        for account in ["rind", "ok", "bench", "aws-lc-rs", "noisy", "ring"]:
+            result = {
+                "host": "test-cpu",
+                "status": "ok",
+                "bench_app": {"control": "aws-lc-rs", "throttle_source": "pmset", "user": account},
+                "results": [
+                    {"operation": "x25519-ecdh", "library": lib, "id": f"x25519-ecdh/{lib}", "ns": 1.0, "rounds_ns": [1.0], "who": account}
+                    for lib in ("rind", "aws-lc-rs", "ring")
+                ],
+            }
+            hidden = [account]
+            keep = app.schema_keys(result)
+            scrubbed = app.scrub(result, hidden, keep)
+            self.assertEqual(scrubbed["status"], "ok", account)
+            self.assertEqual([r["library"] for r in scrubbed["results"]], ["rind", "aws-lc-rs", "ring"], account)
+            self.assertEqual([r["id"] for r in scrubbed["results"]], [f"x25519-ecdh/{x}" for x in ("rind", "aws-lc-rs", "ring")], account)
+            self.assertEqual(scrubbed["bench_app"]["control"], "aws-lc-rs")
+            # The same word anywhere else is still scrubbed, and still found.
+            self.assertEqual({r["who"] for r in scrubbed["results"]}, {app.REDACTED}, account)
+            self.assertEqual(scrubbed["bench_app"]["user"], app.REDACTED)
+            self.assertEqual(app.leaks(scrubbed, hidden, keep), [], account)
+            self.assertEqual(app.leaks(result, hidden, keep), [account], account)
+
+    def test_leaks_checks_every_value_when_keys_are_kept(self):
+        keep = {"host", "results"}
+        self.assertEqual(app.leaks({"host": "alice", "results": []}, ["alice"], keep), ["alice"])
+        nested = {"host": "ok-host", "results": [{"library": "rind", "note": "run by alice"}, {"rounds_ns": [1.0], "id": "x"}]}
+        self.assertEqual(app.leaks(nested, ["alice"], app.schema_keys(nested)), ["alice"])
+        clean = {"host": "ok-host", "results": [{"library": "rind"}]}
+        self.assertEqual(app.leaks(clean, ["alice"], app.schema_keys(clean)), [])
+
     def test_short_values_match_whole_words(self):
         self.assertEqual(app.scrub_text("Raspberry Pi; user pi; spake2plus", ["pi"]), "Raspberry Pi; user <redacted>; spake2plus")
 
