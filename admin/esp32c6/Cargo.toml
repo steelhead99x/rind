@@ -43,9 +43,11 @@ sha1 = []
 md5 = []
 pbkdf2-sha256 = []
 p256-ecdh = []
-# The sensor example, which needs these three.
+# Valgrind's requests for tests/ctgrind.rs, which `admin/ctgrind esp32c6` runs.
+ctgrind = ["rind/__ctgrind"]
 # Times the libraries above next to rind, for the operations both have.
 compare = ["dep:sha2", "dep:sha3", "dep:hmac", "dep:chacha20poly1305", "dep:aes-gcm", "dep:ed25519-dalek", "dep:x25519-dalek"]
+# The sensor example, which needs these three.
 sensor = ["ed25519", "chacha20poly1305", "hkdf-sha256"]
 
 [dependencies]
@@ -61,6 +63,11 @@ x25519-dalek = { version = "3", default-features = false, optional = true }
 rind = { path = "../../rind" }
 linked_list_allocator = { version = "0.10", default-features = false, features = ["use_spin"], optional = true }
 getrandom = { version = "0.4", optional = true }
+
+[dev-dependencies]
+# Requests reach valgrind only once `rind/__ctgrind` turns on crabgrind's default
+# features, as `admin/ctgrind esp32c6` does; otherwise they build as no-ops.
+crabgrind = { version = "0.4", default-features = false }
 
 [profile.release]
 opt-level = 3
