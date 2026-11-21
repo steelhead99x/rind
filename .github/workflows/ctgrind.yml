@@ -27,6 +27,7 @@ on:
       - rind-fips/**
       - admin/ctgrind
       - admin/ctgrind.supp
+      - admin/esp32c6/**
       - admin/ct-binsec
       - Cargo.lock
       - flake.nix
@@ -111,6 +112,8 @@ jobs:
         run: nix develop .#ctgrind --command admin/ctgrind ${{ matrix.build == 'release' && '--release' || '' }}
       - name: ctgrind FIPS module tests
         run: nix develop .#ctgrind --command admin/ctgrind fips ${{ matrix.build == 'release' && '--release' || '' }}
+      - name: ctgrind ESP32-C6 sensor tests
+        run: nix develop .#ctgrind --command admin/ctgrind esp32c6 ${{ matrix.build == 'release' && '--release' || '' }}
 
   # Valgrind hides ADX, which `admin/ctgrind`'s build switch overrides to
   # check s2n-bignum's ADX routines, so this job denies it to check what
