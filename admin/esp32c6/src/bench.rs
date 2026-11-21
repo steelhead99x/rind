@@ -409,14 +409,19 @@ pub fn run_all<C: Clock>(clock: &mut C, rounds: u32, scale: u32, mut emit: impl 
     #[cfg(feature = "ed25519")]
     {
         let kp = rind::ed25519::KeyPair::from_seed(&[11; 32]).unwrap();
-        let sig = kp.sign(&buf[..64]);
+        // The messages rind-bench/benches/ed25519.rs uses, so these rows measure
+        // the canonical workload: verification hashes R | A | message, which is
+        // one SHA-512 block for four bytes and two for 64.
+        let sign_msg = b"123400";
+        let verify_msg = b"Test";
+        let sig = kp.sign(verify_msg);
         push!(time(
             clock,
             "ed25519-sign/{lib}",
             "rind",
             rounds,
             it(2),
-            || kp.sign(&buf[..64]).as_ref()[0],
+            || kp.sign(sign_msg).as_ref()[0],
         ));
         push!(time(
             clock,
@@ -424,7 +429,7 @@ pub fn run_all<C: Clock>(clock: &mut C, rounds: u32, scale: u32, mut emit: impl 
             "rind",
             rounds,
             it(2),
-            || u8::from(kp.public_key().verify(&buf[..64], sig.as_ref()).is_ok()),
+            || u8::from(kp.public_key().verify(verify_msg, sig.as_ref()).is_ok()),
         ));
     }
 }

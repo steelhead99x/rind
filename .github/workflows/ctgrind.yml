@@ -112,8 +112,11 @@ jobs:
         run: nix develop .#ctgrind --command admin/ctgrind ${{ matrix.build == 'release' && '--release' || '' }}
       - name: ctgrind FIPS module tests
         run: nix develop .#ctgrind --command admin/ctgrind fips ${{ matrix.build == 'release' && '--release' || '' }}
+      # The suite forces the portable backend and `--release` itself, so the
+      # debug row has nothing more to check.
       - name: ctgrind ESP32-C6 sensor tests
-        run: nix develop .#ctgrind --command admin/ctgrind esp32c6 ${{ matrix.build == 'release' && '--release' || '' }}
+        if: ${{ matrix.build == 'release' }}
+        run: nix develop .#ctgrind --command admin/ctgrind esp32c6
 
   # Valgrind hides ADX, which `admin/ctgrind`'s build switch overrides to
   # check s2n-bignum's ADX routines, so this job denies it to check what
