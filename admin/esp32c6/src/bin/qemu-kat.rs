@@ -26,6 +26,8 @@ use core::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 const STACK_BYTES: usize = 512 * 1024;
 const HEAP_BYTES: usize = 512 * 1024;
 const PAINT: u8 = 0xA5;
+/// Bytes below the caller's sp left unpainted for the painting call itself.
+const GUARD: usize = 256;
 
 #[repr(C, align(16))]
 struct Stack(UnsafeCell<[u8; STACK_BYTES]>);
@@ -163,7 +165,13 @@ extern "C" fn rust_main() -> ! {
     print("RIND-KAT v1 target=riscv32imac emulator=qemu-user\n");
     for kat in rind_esp32c6::all() {
         // Paint everything below this frame, run, find the lowest dirty byte.
-        let here = sp() - 256;
+        // `origin` is the caller's true sp: depth is measured from it. The
+        // painted region stops `GUARD` bytes lower, because the painting call
+        // itself needs stack. A run that dirties nothing painted therefore
+        // reports `GUARD`, an upper bound for it, and never less than the
+        // truth.
+        let origin = sp();
+        let here = origin - GUARD;
         unsafe { core::ptr::write_bytes(lo as *mut u8, PAINT, here - lo) };
         ALLOC.peak.store(ALLOC.live.load(Relaxed), Relaxed);
         let base = ALLOC.live.load(Relaxed);
@@ -173,7 +181,7 @@ extern "C" fn rust_main() -> ! {
             while i < here && unsafe { *(i as *const u8) } == PAINT {
                 i += 1;
             }
-            here - i
+            origin - i
         };
         let heap = ALLOC.peak.load(Relaxed) - base;
         if !ok {
