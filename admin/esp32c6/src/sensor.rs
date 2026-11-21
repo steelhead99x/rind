@@ -127,6 +127,10 @@ const SIG: usize = 64;
 
 /// The keys both ends derive from one 32-byte secret: HKDF-SHA256 with
 /// distinct `info` for the AEAD key, the IV, and the Ed25519 seed.
+///
+/// On drop the IV is wiped here, and `aead` and `signing` wipe their whole
+/// values through rind's own `Drop`. Together that is every byte this type
+/// holds that is derived from the secret.
 pub struct DeviceKeys {
     aead: Key,
     iv: [u8; 12],
@@ -157,6 +161,21 @@ impl DeviceKeys {
     pub fn public_key(&self) -> &[u8] {
         self.signing.public_key().as_ref()
     }
+}
+
+impl Drop for DeviceKeys {
+    fn drop(&mut self) {
+        wipe(&mut self.iv);
+    }
+}
+
+/// Overwrites `bytes` with zeroes in a way the compiler may not remove.
+fn wipe(bytes: &mut [u8]) {
+    for b in bytes.iter_mut() {
+        // SAFETY: `b` is a valid, aligned, exclusive reference to one byte.
+        unsafe { core::ptr::write_volatile(b, 0) };
+    }
+    core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::SeqCst);
 }
 
 /// Seals readings in order, numbering them from `next_seq`.
@@ -268,6 +287,16 @@ mod tests {
         let (p, r) = packet();
         assert_eq!(p.len(), HEADER + Reading::LEN + TAG + SIG);
         assert_eq!(Opener::new(keys()).open(&p), Ok(r));
+    }
+
+    #[test]
+    fn dropping_device_keys_wipes_the_iv() {
+        let mut k = core::mem::ManuallyDrop::new(keys());
+        assert_ne!(k.iv, [0; 12]);
+        // SAFETY: dropped once, and only the plain `iv` bytes are read after.
+        unsafe { core::mem::ManuallyDrop::drop(&mut k) };
+        let iv = unsafe { core::ptr::addr_of!(k.iv).read() };
+        assert_eq!(iv, [0; 12]);
     }
 
     #[test]
