@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# Usage: admin/backends-test
+#
+# Checks that sh/backends.sh maps the paths of the ESP32-C6 sensor workspace
+# (admin/esp32c6/), which its own ctgrind suite tests, to a backend rather
+# than `none`, so a sensor-only change is not skipped by admin/ctgrind's scope
+# guard.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+status=0
+check() {
+    local want=$1 path=$2 got
+    got=$(sh/backends.sh - <<<"$path")
+    if [[ "$got" != "$want" ]]; then
+        echo "admin/backends-test: $path gave '$got', want '$want'" >&2
+        status=1
+    fi
+}
+
+check all admin/esp32c6/src/sensor.rs
+check all admin/esp32c6/tests/ctgrind.rs
+check all admin/esp32c6/Cargo.toml
+check none admin/bench-report
+check none README.md
+exit "$status"
