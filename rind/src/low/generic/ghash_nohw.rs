@@ -126,7 +126,13 @@ fn gcm_mul64_wide(a: u64, b: u64) -> (u64, u64) {
 }
 
 /// The carry-less product of `a` and `b`, by 32-bit multiplies.
+///
+/// Out of line: inlined three times into `gcm_mul64_split`, LLVM issues all
+/// 96 multiplies before their XORs and spills most products, which on
+/// riscv32imac took 250 of that function's 560 instructions in loads and
+/// stores, and 14% more instructions per GHASH block than calling this.
 #[cfg(any(target_pointer_width = "32", test))]
+#[inline(never)]
 fn gcm_mul32_nohw(a: u32, b: u32) -> u64 {
     // One term every four bits means the largest term is 32/4 = 8, which
     // does not overflow into the next term.
