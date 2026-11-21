@@ -19,7 +19,9 @@ path = "src/bin/qemu-kat.rs"
 required-features = ["qemu"]
 
 [features]
-default = []
+# `cargo test` checks every vector. `admin/esp32c6-riscv32` builds with
+# `--no-default-features` and picks its own features.
+default = ["all"]
 # The qemu-user runner: a `no_std` binary that makes Linux syscalls. It runs
 # the checks the other features include.
 qemu = ["dep:linked_list_allocator", "dep:getrandom"]
