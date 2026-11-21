@@ -7,6 +7,12 @@ publish = false
 
 [workspace]
 
+[features]
+# `bench` times the algorithms after the checks. Without it the image is the
+# LED status firmware: the checks, the LED, and the summary, no timing rows.
+default = ["bench"]
+bench = []
+
 [dependencies]
 rind-esp32c6 = { path = "..", features = ["all", "compare"] }
 getrandom = "0.4"

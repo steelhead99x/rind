@@ -11,6 +11,10 @@ LOG holds the lines the firmware (admin/esp32c6/firmware) prints:
   RIND-FW v1 done failed=<n> cpu_mhz=<n> rounds=<n>
   RIND-KAT v1 <algorithm> ok|FAIL
   RIND-BENCH v1 <operation> lib=<library> median_ns=<n> min_ns=<n> max_ns=<n> rounds=<n> iters=<n>
+  RIND-BENCH v1 <operation> lib=<library> size_failure=heap|stack need=<n> have=<n>
+
+A size_failure row is an operation the board had too little heap or stack for;
+it is kept as a result with `status` `size-failure` and no time.
 
 The firmware repeats its summary every five seconds, so a log holds several
 copies; they must agree, and the first is kept. Anything else in the log
@@ -32,6 +36,7 @@ import sys
 ROW = re.compile(
     r"^RIND-BENCH v1 (\S+) lib=(\S+) median_ns=(\d+) min_ns=(\d+) max_ns=(\d+) rounds=(\d+) iters=(\d+)$"
 )
+SKIP = re.compile(r"^RIND-BENCH v1 (\S+) lib=(\S+) size_failure=(heap|stack) need=(\d+) have=(\d+)$")
 KAT = re.compile(r"^RIND-KAT v1 (\S+) (ok|FAIL)$")
 DONE = re.compile(r"^RIND-FW v1 done failed=(\d+) cpu_mhz=(\d+) rounds=(\d+)$")
 
@@ -65,6 +70,8 @@ def parse(text):
             cur["kat"][m[1]] = m[2] == "ok"
         elif cur is not None and (m := ROW.match(line)):
             cur["rows"].append(m.groups())
+        elif cur is not None and (m := SKIP.match(line)):
+            cur["rows"].append(m.groups())
         elif line.startswith("RIND-FW v1 start"):
             continue
         elif line.startswith("RIND-") and n < len(lines) - 1:
@@ -85,7 +92,24 @@ def parse(text):
     if failed or bad:
         raise Refused(f"known-answer checks failed: {bad or failed}")
     results = []
-    for op, lib, med, lo, hi, r, it in first["rows"]:
+    for row in first["rows"]:
+        if len(row) == 5:
+            # The operation did not fit in the board's heap or stack: a recorded
+            # result, not a panic.
+            op, lib, which, need, have = row
+            results.append(
+                {
+                    "operation": op,
+                    "library": lib,
+                    "id": op.replace("{lib}", lib),
+                    "status": "size-failure",
+                    "limit": which,
+                    "need_bytes": int(need),
+                    "have_bytes": int(have),
+                }
+            )
+            continue
+        op, lib, med, lo, hi, r, it = row
         if int(lo) > int(med) or int(med) > int(hi):
             raise Refused(f"{op}: min, median and max are out of order")
         results.append(
@@ -137,6 +161,12 @@ def selftest():
         else:
             raise AssertionError(f"accepted: {why}")
 
+    skipped = good + "RIND-BENCH v1 mldsa65-sign/{lib} lib=rind size_failure=heap need=110336 have=50000\n"
+    out2 = parse(skipped + skipped)
+    assert out2["results"][1]["status"] == "size-failure" and out2["results"][1]["limit"] == "heap"
+    assert "ns" not in out2["results"][1]
+    check_scrubbed(out2)
+    refuses(good + "RIND-BENCH v1 x lib=rind size_failure=disk need=1 have=0\n" + good, "malformed")
     refuses("RIND-FW v1 panic at x", "panicked")
     refuses(good.replace("sha256 ok", "sha256 FAIL"), "failed")
     refuses(good.replace("failed=0", "failed=1"), "failed")
