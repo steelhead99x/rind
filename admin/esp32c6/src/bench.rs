@@ -333,15 +333,17 @@ pub fn run_all<C: Clock>(
             },
         ));
     }
+    // Keys are generated once outside the timed closure, so this is the stored-key
+    // workload of `p256-ecdh-stored`, not the `p256-ecdh` benchmark that times key generation.
     #[cfg(feature = "p256-ecdh")]
-    if fits(clock, "p256", &["p256-ecdh/{lib}"], "rind", &mut emit) {
+    if fits(clock, "p256", &["p256-ecdh-stored/{lib}"], "rind", &mut emit) {
         use rind::agreement::{ECDH_P256, PrivateKey};
         let a = PrivateKey::generate(&ECDH_P256).unwrap();
         let b = PrivateKey::generate(&ECDH_P256).unwrap();
         let bp = b.public_key().as_ref().to_vec();
         push!(time(
             clock,
-            "p256-ecdh/{lib}",
+            "p256-ecdh-stored/{lib}",
             "rind",
             rounds,
             it(1),
