@@ -154,12 +154,18 @@ impl DeviceKeys {
         prk.fill(&[b"iv"], &mut iv).map_err(|_| Error::Crypto)?;
         prk.fill(&[b"ed25519"], &mut seed)
             .map_err(|_| Error::Crypto)?;
+        let keys = Key::new(&CHACHA20_POLY1305, &aead)
+            .and_then(|k| KeyPair::from_seed(&seed).map(|s| (k, s)))
+            .map_err(|_| Error::Crypto);
+        // The derived secrets were copied into the key types; wipe the stack
+        // copies on every path, including the error one.
+        wipe(&mut aead);
+        wipe(&mut seed);
+        let (aead, signing) = keys?;
         Ok(Self {
-            aead: ManuallyDrop::new(
-                Key::new(&CHACHA20_POLY1305, &aead).map_err(|_| Error::Crypto)?,
-            ),
+            aead: ManuallyDrop::new(aead),
             iv,
-            signing: ManuallyDrop::new(KeyPair::from_seed(&seed).map_err(|_| Error::Crypto)?),
+            signing: ManuallyDrop::new(signing),
         })
     }
 
@@ -312,17 +318,53 @@ mod tests {
         let mut k = core::mem::ManuallyDrop::new(keys());
         let at = (&*k as *const DeviceKeys).cast::<u8>();
         let len = size_of::<DeviceKeys>();
-        // SAFETY: `k` is live; the bytes are only counted, as `u8` copies.
-        let before = unsafe { core::slice::from_raw_parts(at, len) };
+        // Only initialised fields are read before the drop: the value's padding
+        // and the AEAD key's unused storage are not, and reading them as bytes
+        // would be undefined behaviour.
         assert_ne!(k.iv, [0; 12]);
-        // The keys and the IV make most of the value non-zero, not only the IV.
-        assert!(before.iter().filter(|&&b| b != 0).count() > 12);
+        assert_ne!(k.public_key(), &[0; 32][..]);
         // SAFETY: dropped once; `k` is not used as a `DeviceKeys` afterward.
         unsafe { core::mem::ManuallyDrop::drop(&mut k) };
-        // SAFETY: `ManuallyDrop` keeps the storage; `Drop::drop` wrote every
-        // byte of it, so all `len` bytes are initialised.
+        // SAFETY: `ManuallyDrop` keeps the storage, and `Drop::drop` wrote
+        // every byte of it, padding included, so all `len` bytes are
+        // initialised now.
         let after = unsafe { core::slice::from_raw_parts(at, len) };
         assert!(after.iter().all(|&b| b == 0), "{after:02x?}");
+    }
+
+    fn unhex(s: &str) -> Vec<u8> {
+        (0..s.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
+            .collect()
+    }
+
+    // Produced outside rind and outside its backend: the HKDF-SHA256 keys,
+    // the nonce, ChaCha20-Poly1305 and Ed25519 come from Python's
+    // `cryptography` (OpenSSL 3.5). Secret [7; 32], sequence 1, the first
+    // synthetic reading (channel 0, unit 1, 20.000, uptime 0).
+    const VECTOR_PACKET: &str = "0100000000000000014e09ce87eaf8a6f915f7f5ca8120dad3c019e33fa97ef6cedf5410534550fceda8d148158679f86143b90e38c2e112aa6c59da07db3b3eaf4211efe6ce0fdaf2b7cfc990aa7052dadad56a4a4fa318609ee5f935cba002acb6bd8241cf06";
+    const VECTOR_PUBLIC_KEY: &str =
+        "233216634a8ecb8d4708c8e355e4a2c59df50e12b8c62c79e4f3dcb6f1bbd309";
+
+    #[test]
+    fn the_packet_and_public_key_match_an_independent_implementation() {
+        let (p, r) = packet();
+        assert_eq!(p, unhex(VECTOR_PACKET));
+        assert_eq!(keys().public_key(), unhex(VECTOR_PUBLIC_KEY));
+        assert_eq!(Opener::new(keys()).open(&unhex(VECTOR_PACKET)), Ok(r));
+    }
+
+    #[test]
+    fn a_signed_packet_with_a_bad_tag_is_refused_as_a_bad_tag() {
+        let (p, _) = packet();
+        // Change a ciphertext byte, then sign the result properly, so the
+        // signature check passes and only the AEAD tag can refuse it.
+        let mut signed = p[..p.len() - SIG].to_vec();
+        signed[HEADER] ^= 1;
+        let sig = keys().signing.sign(&signed);
+        signed.extend_from_slice(sig.as_ref());
+        assert_eq!(Opener::new(keys()).open(&signed), Err(Error::BadTag));
     }
 
     #[test]
