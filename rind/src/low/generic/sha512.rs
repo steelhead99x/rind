@@ -98,10 +98,7 @@ use unrolled::sha512_compress_block;
 
 // Also compiled for the layout probe's default build, which runs this body
 // through the driver and `unrolled`'s message load beside it.
-#[cfg(any(
-    not(all(rind_esp32s3, feature = "esp32s3-sha512-unrolled")),
-    test
-))]
+#[cfg(any(not(all(rind_esp32s3, feature = "esp32s3-sha512-unrolled")), test))]
 mod rolled {
     use super::K;
 
