@@ -124,6 +124,7 @@ fn mul_half_soft(a: u32, mut b: u32) -> u32 {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+    use crate::low::ct;
 
     fn from_halves(half: fn(u32, u32) -> u32, a: u32, b: u32) -> u64 {
         let (a0, a1) = (a & 0xffff, a >> 16);
@@ -137,7 +138,29 @@ mod tests {
     // Each pair of edge values, where a half is zero, one, all ones, or a
     // power of two, then pairs from SplitMix64, against the 64-bit multiply.
     // The plain, top-bit, and shift-and-add halves are all checked here, not
-    // only the one this target selects.
+    // only the one this target selects. The operands are secret, so under
+    // `admin/ctgrind` each variant is also checked for a branch or an access
+    // that depends on them, whichever one the build selected; only the
+    // products are made public, for the comparison.
+    fn check(a: u32, b: u32) {
+        type HalfFn = fn(u32, u32) -> u32;
+        let halves: [(&str, HalfFn); 3] = [
+            ("plain", mul_half_plain),
+            ("top", mul_half_top),
+            ("soft", mul_half_soft),
+        ];
+        let want = u64::from(a) * u64::from(b);
+        let (sa, sb) = (ct::into_secret(a), ct::into_secret(b));
+        assert_eq!(ct::into_public(mul16(sa, sb)), want, "{a:#x} * {b:#x}");
+        for (name, half) in halves {
+            assert_eq!(
+                ct::into_public(from_halves(half, sa, sb)),
+                want,
+                "{name} {a:#x} * {b:#x}"
+            );
+        }
+    }
+
     #[test]
     fn matches_the_wide_product() {
         let edges = [
@@ -156,36 +179,15 @@ mod tests {
             0xffff_fffe,
             u32::MAX,
         ];
-        type HalfFn = fn(u32, u32) -> u32;
-        let halves: [(&str, HalfFn); 3] = [
-            ("plain", mul_half_plain),
-            ("top", mul_half_top),
-            ("soft", mul_half_soft),
-        ];
         for a in edges {
             for b in edges {
-                assert_eq!(mul16(a, b), u64::from(a) * u64::from(b), "{a:#x} * {b:#x}");
-                for (name, half) in halves {
-                    assert_eq!(
-                        from_halves(half, a, b),
-                        u64::from(a) * u64::from(b),
-                        "{name} {a:#x} * {b:#x}"
-                    );
-                }
+                check(a, b);
             }
         }
         let mut state = 0x6d75_6c31_365f_7465u64;
         for _ in 0..100_000 {
             let z = super::super::splitmix::next(&mut state);
-            let (a, b) = (z as u32, (z >> 32) as u32);
-            assert_eq!(mul16(a, b), u64::from(a) * u64::from(b), "{a:#x} * {b:#x}");
-            for (name, half) in halves {
-                assert_eq!(
-                    from_halves(half, a, b),
-                    u64::from(a) * u64::from(b),
-                    "{name} {a:#x} * {b:#x}"
-                );
-            }
+            check(z as u32, (z >> 32) as u32);
         }
     }
 }

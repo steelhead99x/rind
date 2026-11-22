@@ -44,7 +44,9 @@
 //! too, including on a 16-bit half, so `rind_mul16_top` sets bit 31 of each
 //! half and the early-out takes its long path. That includes a custom target
 //! whose triple, `llvm-target`, or features name `v4t` or `v5te`, not only
-//! Android's `armv5te` triple. On 32-bit RISC-V with no multiply instruction,
+//! Android's `armv5te` triple. A custom target whose specification the script
+//! cannot find (it looks in `RUST_TARGET_PATH` and the package directory and
+//! its parents) takes the top-bit path, as the safe choice. On 32-bit RISC-V with no multiply instruction,
 //! `rind_mul16_soft` builds each half with a shift and an add. Zmmul has
 //! `mul` and `mulhu`, so it does not. A 64-bit RISC-V target with neither
 //! keeps 64-bit limbs; those products call `__multi3`, and the build warns.
@@ -56,10 +58,11 @@
 
 use std::env;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 fn main() {
     println!("cargo::rerun-if-changed=build.rs");
+    println!("cargo::rerun-if-env-changed=RUST_TARGET_PATH");
     println!(
         r#"cargo::rustc-check-cfg=cfg(rind_backend, values("x86_64", "aarch64", "arm", "portable"))"#
     );
@@ -251,7 +254,13 @@ fn arm_early_mul() -> bool {
     let later = ["v6", "v6k", "v6t2", "v7", "v8", "thumb2"]
         .iter()
         .any(|name| feature_on(name));
-    early && !later
+    if later {
+        return false;
+    }
+    // A custom 32-bit ARM specification the script could not find: the early
+    // core is possible and the top bit costs the others only a little time,
+    // so take it.
+    early || custom_target_unlocated()
 }
 
 /// `thumbv6m`, `thumbv7m`, and `thumbv8m.base`: one fixed-time 32-bit `mul`
@@ -408,7 +417,48 @@ fn target_json_text() -> Option<String> {
     if json.is_file() {
         return fs::read_to_string(json).ok();
     }
-    None
+    // Cargo sets `TARGET` to the file stem of `--target /path/board.json`
+    // and runs this script in the package directory, so look where a
+    // specification is usually kept: `RUST_TARGET_PATH`, which rustc also
+    // searches, and the package directory and each parent up to the
+    // workspace root. A specification kept anywhere else stays unseen, and
+    // `custom_target_unlocated` makes that case fail closed.
+    let name = format!("{}.json", target_file_stem(&target));
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    if let Some(list) = env::var_os("RUST_TARGET_PATH") {
+        dirs.extend(env::split_paths(&list));
+    }
+    if let Some(manifest) = env::var_os("CARGO_MANIFEST_DIR") {
+        dirs.extend(Path::new(&manifest).ancestors().map(Path::to_path_buf));
+    }
+    dirs.into_iter()
+        .map(|dir| dir.join(&name))
+        .find(|candidate| candidate.is_file())
+        .and_then(|candidate| fs::read_to_string(candidate).ok())
+}
+
+/// Whether `TARGET` names a custom target specification this script could
+/// not read. The arch, `llvm-target`, and features it would have named are
+/// unknown, so an ARMv4T or ARMv5TE core, or a Cortex-M3, may be behind it.
+fn custom_target_unlocated() -> bool {
+    let Ok(target) = env::var("TARGET") else {
+        return false;
+    };
+    if target_json_text().is_some() {
+        return false;
+    }
+    // A built-in triple is in rustc's list. If rustc cannot be asked, a name
+    // with no hyphen is not a triple.
+    let rustc = env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
+    match std::process::Command::new(rustc)
+        .args(["--print", "target-list"])
+        .output()
+    {
+        Ok(out) if out.status.success() => !String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .any(|line| line == target),
+        _ => !target.contains('-'),
+    }
 }
 
 /// The string value of one top-level JSON field, if it is a string.
