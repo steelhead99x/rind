@@ -4,8 +4,9 @@
 //! by `admin/ctgrind esp32c6`, as AGENTS.md requires of a new secret-handling
 //! path.
 //!
-//! The 32-byte device secret is marked undefined, so memcheck flags any branch
-//! or memory index that depends on it while the keys derive, a reading seals
+//! The 32-byte device secret and the reading are marked undefined (the reading
+//! is confidential: the packet encrypts it), so memcheck flags any branch or
+//! memory index that depends on either while the keys derive, a reading seals
 //! and a packet opens. The packet is public by design (ciphertext, tag and
 //! signature), as is the public key, so they are marked defined before the test
 //! compares them. rind marks the keys it generates or parses itself.
@@ -60,7 +61,9 @@ fn the_secret_path_is_constant_time() {
     public(sealing.public_key());
     let public_key = sealing.public_key().to_vec();
     let mut sealer = Sealer::new(sealing, 9);
-    let packet = sealer.seal(&reading()).unwrap();
+    let confidential = reading();
+    secret(&confidential);
+    let packet = sealer.seal(&confidential).unwrap();
     public(&packet[..]);
     assert_eq!(packet, expected);
     assert_eq!(public_key, DeviceKeys::derive(&seed).unwrap().public_key());

@@ -19,6 +19,7 @@ extern crate alloc;
 
 use alloc::string::String;
 use core::fmt::Write as _;
+use core::num::NonZeroU32;
 use esp_hal::{
     clock::CpuClock,
     gpio::{Level, Output, OutputConfig},
@@ -33,7 +34,7 @@ use rind_esp32c6::bench::{self, Clock};
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
-const ROUNDS: u32 = 7;
+const ROUNDS: NonZeroU32 = NonZeroU32::new(7).unwrap();
 
 #[unsafe(no_mangle)]
 unsafe extern "Rust" fn __getrandom_v03_custom(
