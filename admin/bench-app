@@ -458,7 +458,17 @@ def run(args):
     # are what show whether it disturbed the run.
     busy_before_build = round(br.busy_cpus(), 2)
     exes = build(cargo, env)
-    result["rind_cpu"] = json.loads(br.output(cargo + ["run", "-q", "--release", "-p", "rind-cpuid"], env))
+    # The probe reads the current core's identity (`wide_multiplier` reads its
+    # MIDR), so it runs pinned to the benchmark core: on a big.LITTLE machine
+    # an unpinned run can land on a different core than the timed one. It is
+    # built first, so the pinned run does not compile on one core.
+    br.output(cargo + ["build", "-q", "--release", "-p", "rind-cpuid"], env)
+    pin = (lambda: os.sched_setaffinity(0, {cpu})) if cpu is not None else None
+    probe_out = subprocess.run(
+        cargo + ["run", "-q", "--release", "-p", "rind-cpuid"],
+        env=env, preexec_fn=pin, capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    result["rind_cpu"] = json.loads(probe_out)
     busy_before_run = round(br.busy_cpus(), 2)
 
     probe = Probe(cpu)
