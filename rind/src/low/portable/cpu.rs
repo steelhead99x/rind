@@ -19,11 +19,13 @@ pub(in crate::low) unsafe fn zero_bytes(ptr: *mut u8, len: usize) {
     // it, so the compiler cannot call the stores dead when the value is
     // about to be freed. A volatile store a byte at a time (the loop this
     // was) costs four instructions a byte on Xtensa, with a `memw` in front
-    // of each, and wiping one AEAD key took 113 us at 80 MHz.
+    // of each, and the per-call cost of a short-lived AEAD key on the S3 was at most about 88 us of it (see the quest).
     //
     // SAFETY: the caller guarantees `len` writable bytes at `ptr`.
     unsafe { ptr.write_bytes(0, len) };
     core::hint::black_box(ptr);
+    // `black_box` is best effort; the fence orders the stores before whatever follows.
+    core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::SeqCst);
 }
 
 /// Compares the first `min(a.len(), b.len())` bytes of `a` and `b`, reading
