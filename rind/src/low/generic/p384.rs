@@ -746,7 +746,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
+    #[should_panic(expected = "assertion `left == right` failed")]
     fn other_modulus_refused() {
         bignum_modadd(&mut [0; 6], &[1; 6], &[1; 6], &P);
     }

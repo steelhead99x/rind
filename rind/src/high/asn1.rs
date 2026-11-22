@@ -1269,7 +1269,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
+    #[should_panic(expected = "extremely long asn1 object")]
     #[cfg(target_pointer_width = "64")]
     fn test_encode_len_limit() {
         let _ = encoded_length_for(4294967296);

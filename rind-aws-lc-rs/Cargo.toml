@@ -103,6 +103,10 @@ untrusted = "0.7.1"
 zeroize = "1.9"
 
 [dev-dependencies]
+# Tests see `unstable` and `dev-tests-only`, so the tests gated on them run in
+# every test build, cargo-mutants' included, while normal builds keep only the
+# requested features.
+rind-aws-lc-rs = { path = ".", features = ["unstable", "dev-tests-only"] }
 aws-lc-rs = { version = "1.19", default-features = false, features = ["alloc", "prebuilt-nasm", "non-fips", "ring-io", "ring-sig-verify"] }
 # Requests reach valgrind only once `rind/__ctgrind` turns on crabgrind's default
 # features, as `admin/ctgrind` does; otherwise they build as no-ops.

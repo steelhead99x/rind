@@ -3215,9 +3215,18 @@ mod ecdh_scalars {
         ]
     }
 
-    // Any 32 bytes is a private key or a peer's u-coordinate, including
-    // coordinates at or above the field prime. The fixed peers have small
-    // order, which both sides refuse for the all-zero secret they give.
+    // Any 32 bytes is a private key, and the all-zero one is a case of its
+    // own: random bytes never draw it.
+    fn x25519_private() -> impl Strategy<Value = [u8; 32]> {
+        prop_oneof![
+            15 => any::<[u8; 32]>(),
+            1 => Just([0u8; 32]),
+        ]
+    }
+
+    // Any 32 bytes is a peer's u-coordinate, including coordinates at or
+    // above the field prime. The fixed peers have small order, which both
+    // sides refuse for the all-zero secret they give.
     fn x25519_peer() -> impl Strategy<Value = [u8; 32]> {
         let mut one = [0u8; 32];
         one[0] = 1;
@@ -3282,7 +3291,7 @@ mod ecdh_scalars {
         }
 
         #[test]
-        fn x25519(private in any::<[u8; 32]>(), peer in x25519_peer()) {
+        fn x25519(private in x25519_private(), peer in x25519_peer()) {
             check(&ours::X25519, &X25519, &private, &peer)?;
 
             // libcrux's X25519, HACL*'s, which rind runs nowhere, derives the

@@ -22,6 +22,24 @@ impl ours::aead::NonceSequence for Counter {
     }
 }
 
+/// `mut_fill`, which only `dev-tests-only` adds, fills as `fill` does.
+#[cfg(feature = "dev-tests-only")]
+#[test]
+fn mut_fill_fills_like_fill() {
+    use ours::rand::SecureRandom;
+
+    let mut rng = ours::rand::SystemRandom::new();
+    let mut a = [0u8; 32];
+    let mut b = [0u8; 32];
+    rng.mut_fill(&mut a).unwrap();
+    rng.fill(&mut b).unwrap();
+    // Each is all zero with probability 2^-256, and the two are equal with
+    // the same.
+    assert_ne!(a, [0u8; 32]);
+    assert_ne!(b, [0u8; 32]);
+    assert_ne!(a, b);
+}
+
 #[test]
 fn nonces_convert_as_aws_lc_rs_does() {
     let bytes = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
