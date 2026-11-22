@@ -9,7 +9,8 @@ Usage:
 
 Each library is a scratch `no_std` crate depending on it alone, at the version
 and with the features rind-bench uses minus anything that needs `std`, an OS, or
-a C compiler. Every competitor in rind-bench's [dev-dependencies] has a row, those
+a C compiler. libcrux's default features pull in `std`, so each libcrux crate is
+probed with its defaults off, as the no_std build of it would be. Every competitor in rind-bench's [dev-dependencies] has a row, those
 that only build on other targets too: they are recorded as not buildable, not skipped. Needs the same toolchain as admin/esp32c6-riscv32. The scratch
 crates live under `.tmp/esp32c6-vendors/` and are rebuilt every run.
 """
@@ -47,18 +48,18 @@ VENDORS = {
     "slh-dsa": ('slh-dsa = { version = "=0.2.0-rc.5", default-features = false }', "SLH-DSA"),
     "argon2": ('argon2 = { version = "0.6", default-features = false, features = ["alloc"] }', "Argon2id"),
     "hpke": ('hpke = { version = "0.15", default-features = false, features = ["x25519", "aes", "hkdfsha2"] }', "HPKE"),
-    "libcrux-sha2": ('libcrux-sha2 = "0.0.9"', "SHA-2"),
-    "libcrux-sha3": ('libcrux-sha3 = "0.0.11"', "SHA-3"),
-    "libcrux-chacha20poly1305": ('libcrux-chacha20poly1305 = "0.0.10"', "ChaCha20-Poly1305"),
-    "libcrux-ed25519": ('libcrux-ed25519 = "0.0.10"', "Ed25519"),
-    "libcrux-ecdh": ('libcrux-ecdh = "0.0.9"', "X25519, P-256 ECDH"),
+    "libcrux-sha2": ('libcrux-sha2 = { version = "0.0.9", default-features = false }', "SHA-2"),
+    "libcrux-sha3": ('libcrux-sha3 = { version = "0.0.11", default-features = false }', "SHA-3"),
+    "libcrux-chacha20poly1305": ('libcrux-chacha20poly1305 = { version = "0.0.10", default-features = false }', "ChaCha20-Poly1305"),
+    "libcrux-ed25519": ('libcrux-ed25519 = { version = "0.0.10", default-features = false }', "Ed25519"),
+    "libcrux-ecdh": ('libcrux-ecdh = { version = "0.0.9", default-features = false }', "X25519, P-256 ECDH"),
     "libcrux-ml-kem": ('libcrux-ml-kem = { version = "0.0.11", default-features = false, features = ["mlkem512", "mlkem768", "mlkem1024", "alloc"] }', "ML-KEM"),
-    "libcrux-ml-dsa": ('libcrux-ml-dsa = "0.0.11"', "ML-DSA"),
-    "libcrux-aes": ('libcrux-aes = "0.0.10"', "AES-GCM, AES-CBC/CTR ciphers"),
-    "libcrux-ecdsa": ('libcrux-ecdsa = "0.0.9"', "P-256 ECDSA"),
-    "libcrux-hmac": ('libcrux-hmac = "0.0.9"', "HMAC"),
-    "libcrux-hkdf": ('libcrux-hkdf = "0.0.9"', "HKDF"),
-    "libcrux-rsa": ('libcrux-rsa = "0.0.9"', "RSA"),
+    "libcrux-ml-dsa": ('libcrux-ml-dsa = { version = "0.0.11", default-features = false, features = ["mldsa44", "mldsa65", "mldsa87"] }', "ML-DSA"),
+    "libcrux-aes": ('libcrux-aes = { version = "0.0.10", default-features = false }', "AES-GCM, AES-CBC/CTR ciphers"),
+    "libcrux-ecdsa": ('libcrux-ecdsa = { version = "0.0.9", default-features = false }', "P-256 ECDSA"),
+    "libcrux-hmac": ('libcrux-hmac = { version = "0.0.9", default-features = false }', "HMAC"),
+    "libcrux-hkdf": ('libcrux-hkdf = { version = "0.0.9", default-features = false }', "HKDF"),
+    "libcrux-rsa": ('libcrux-rsa = { version = "0.0.9", default-features = false }', "RSA"),
     "hpke-rs": ('hpke-rs = { version = "0.8", default-features = false, features = ["libcrux"] }', "HPKE (libcrux backend)"),
     "fips205": ('fips205 = { version = "0.5", default-features = false }', "SLH-DSA"),
     "blind-rsa-signatures": ('blind-rsa-signatures = { version = "0.18", default-features = false }', "blind RSA"),
