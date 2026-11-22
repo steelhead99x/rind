@@ -12,7 +12,9 @@
 #[cfg(not(target_pointer_width = "32"))]
 use crate::low::generic::chacha20;
 #[cfg(any(target_pointer_width = "32", test))]
-use crate::low::generic::chacha20::{SIGMA, rounds};
+use crate::low::generic::chacha20::SIGMA;
+#[cfg(all(any(target_pointer_width = "32", test), not(target_arch = "xtensa")))]
+use crate::low::generic::chacha20::rounds;
 
 pub(crate) struct ChaCha20 {
     key: [u32; 8],
@@ -41,11 +43,112 @@ impl ChaCha20 {
     }
 }
 
+/// ChaCha20's twenty rounds on Xtensa, where four rotates by one distance
+/// share one `ssai` and take one `src` each, not the shift pair and `or`
+/// LLVM's backend emits (960 of a block's 2,200 instructions were rotates).
+/// Same arithmetic as `generic::chacha20::rounds`, which `matches_generic`
+/// and the firmware's RFC 8439 known answer check it against; nothing here
+/// is proven.
+///
+/// Every operation is an add, an xor, or a fixed rotate: no branch or index
+/// depends on the state, and `ssai`'s distance is an immediate, not data.
+#[cfg(target_arch = "xtensa")]
+#[inline(never)]
+fn rounds_xtensa(st: &mut [u32; 16]) {
+    // Rotates four words left by `32 - R`, which is right by `R`.
+    //
+    // SAFETY: `ssai` and `src` are base Xtensa instructions; `R` is one of
+    // 16, 20, 24, 25 (the call sites), in `ssai`'s 0..32 range. The block
+    // writes only SAR and the four words, loads and stores nothing, and
+    // reads SAR only after its own `ssai`, so no other write to SAR matters.
+    #[inline(always)]
+    fn rotl4<const R: u32>([w0, w1, w2, w3]: [u32; 4]) -> [u32; 4] {
+        let (y0, y1, y2, y3);
+        unsafe {
+            core::arch::asm!(
+                "ssai {r}",
+                "src {y0}, {w0}, {w0}",
+                "src {y1}, {w1}, {w1}",
+                "src {y2}, {w2}, {w2}",
+                "src {y3}, {w3}, {w3}",
+                r = const R,
+                w0 = in(reg) w0,
+                w1 = in(reg) w1,
+                w2 = in(reg) w2,
+                w3 = in(reg) w3,
+                y0 = lateout(reg) y0,
+                y1 = lateout(reg) y1,
+                y2 = lateout(reg) y2,
+                y3 = lateout(reg) y3,
+                out("sar") _,
+                options(nomem, nostack),
+            );
+        }
+        [y0, y1, y2, y3]
+    }
+    // Four quarter rounds at once, step by step, so each rotate distance
+    // is shared by the four.
+    #[inline(always)]
+    fn round(x: &mut [u32; 16], a: [usize; 4], b: [usize; 4], c: [usize; 4], d: [usize; 4]) {
+        let mut va = a.map(|i| x[i]);
+        let mut vb = b.map(|i| x[i]);
+        let mut vc = c.map(|i| x[i]);
+        let mut vd = d.map(|i| x[i]);
+        for i in 0..4 {
+            va[i] = va[i].wrapping_add(vb[i]);
+            vd[i] ^= va[i];
+        }
+        vd = rotl4::<16>(vd);
+        for i in 0..4 {
+            vc[i] = vc[i].wrapping_add(vd[i]);
+            vb[i] ^= vc[i];
+        }
+        vb = rotl4::<20>(vb);
+        for i in 0..4 {
+            va[i] = va[i].wrapping_add(vb[i]);
+            vd[i] ^= va[i];
+        }
+        vd = rotl4::<24>(vd);
+        for i in 0..4 {
+            vc[i] = vc[i].wrapping_add(vd[i]);
+            vb[i] ^= vc[i];
+        }
+        vb = rotl4::<25>(vb);
+        for i in 0..4 {
+            x[a[i]] = va[i];
+            x[b[i]] = vb[i];
+            x[c[i]] = vc[i];
+            x[d[i]] = vd[i];
+        }
+    }
+    let mut x = *st;
+    for _ in 0..10 {
+        round(
+            &mut x,
+            [0, 1, 2, 3],
+            [4, 5, 6, 7],
+            [8, 9, 10, 11],
+            [12, 13, 14, 15],
+        );
+        round(
+            &mut x,
+            [0, 1, 2, 3],
+            [5, 6, 7, 4],
+            [10, 11, 8, 9],
+            [15, 12, 13, 14],
+        );
+    }
+    *st = x;
+}
+
 /// The keystream block for the state `input`, as words.
 #[cfg(any(target_pointer_width = "32", test))]
 #[inline(always)]
 fn keystream(input: &[u32; 16]) -> [u32; 16] {
     let mut st = *input;
+    #[cfg(target_arch = "xtensa")]
+    rounds_xtensa(&mut st);
+    #[cfg(not(target_arch = "xtensa"))]
     rounds(&mut st);
     for (s, i) in st.iter_mut().zip(input) {
         *s = s.wrapping_add(*i);
