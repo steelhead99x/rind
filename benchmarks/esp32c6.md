@@ -4,30 +4,36 @@ The ESP32-C6 is a 160 MHz `riscv32imac` core. rind runs its portable backend the
 
 ## Measured without the board
 
-Cross-built for `riscv32imac-unknown-none-elf` at opt-level 3 with LTO, rustc 1.98.1, rind at the commit this file was written on, run under `qemu-riscv32` (user mode). Code is `.text` plus `.rodata` over the harness alone ("7047 B code"), so an algorithm that shares code with another shows what it adds over the harness, not over the others. Stack is the distance from the checking function's stack pointer to the deepest byte touched in a painted region (re-measured after a fix that had left every figure 256 bytes low) and heap the peak of live allocator bytes, both from one run of that algorithm's known-answer check inside the all-algorithms build, so inlining can move them a little in another build. They are properties of the code, and not time.
+Cross-built for `riscv32imac-unknown-none-elf` at opt-level 3 with LTO, rustc 1.98.1, rind at the commit this file was written on, run under `qemu-riscv32` (user mode). Code is `.text` plus `.rodata` over the harness alone ("7823 B code": the runner, with a no-op check that keeps its per-check loop in the baseline), so an algorithm that shares code with another shows what it adds over the harness, not over the others. Stack is the distance from the checking function's stack pointer to the deepest byte touched in a painted region (re-measured after a fix that had left every figure 256 bytes low) and heap the peak of live allocator bytes, both from one run of that algorithm's known-answer check inside the all-algorithms build, so inlining can move them a little in another build. They are properties of the code, and not time.
 
 | algorithm | code over harness (B) | peak stack (B) | peak heap (B) | known answer |
 |---|---|---|---|---|
-| sha256 | 12681 | 800 | 32 | ok |
-| sha512 | 8013 | 852 | 64 | ok |
-| sha3-256 | 8173 | 808 | 32 | ok |
-| hmac-sha256 | 15262 | 1040 | 32 | ok |
-| hkdf-sha256 | 16444 | 2288 | 52 | ok |
-| chacha20poly1305 | 22161 | 2376 | 468 | ok |
-| aes128-gcm | 25741 | 2612 | 16 | ok |
-| aes256-gcm | 25775 | 2612 | 16 | ok |
-| x25519 | 66191 | 3800 | 64 | ok |
-| ed25519 | 97382 | 5816 | 64 | ok |
-| mlkem768 | 38811 | 41460 | 12288 | ok |
-| mldsa65 | 35230 | 40532 | 84992 | ok |
-| p256-ecdsa | 175571 | 17484 | 0 | ok |
-| sensor | 134561 | 11864 | 206 | ok |
+| sha256 | 11997 | 800 | 32 | ok |
+| sha512 | 7329 | 852 | 64 | ok |
+| sha3-256 | 7487 | 808 | 32 | ok |
+| hmac-sha256 | 14586 | 1040 | 32 | ok |
+| hkdf-sha256 | 15768 | 1984 | 52 | ok |
+| chacha20poly1305 | 21477 | 2376 | 468 | ok |
+| aes128-gcm | 42829 | 2544 | 16 | ok |
+| aes256-gcm | 42847 | 2544 | 16 | ok |
+| x25519 | 65503 | 3800 | 64 | ok |
+| ed25519 | 96690 | 5816 | 64 | ok |
+| mlkem768 | 38125 | 41460 | 12288 | ok |
+| mldsa65 | 34554 | 40532 | 84992 | ok |
+| p256-ecdsa | 122135 | 17484 | 0 | ok |
+| sensor | 134643 | 11368 | 206 | ok |
+| sha1 | 8635 | 516 | 20 | ok |
+| md5 | 7629 | 760 | 16 | ok |
+| pbkdf2-sha256 | 15964 | 2944 | 64 | ok |
+| p256-ecdh | 83145 | 4892 | 0 | ok |
 
 `mlkem768` and `mldsa65` check a round trip, not a vector, and `p256-ecdsa` and `sensor` a round trip and a rejected change; the rest match published vectors. The randomness in that run is a fixed, insecure stream.
 
 ## Measured on the board
 
-Board: one ESP32-C6, chip revision v0.2, 4 MB flash, CPU clock 160 MHz (the firmware sets it and prints `cpu_mhz=160`). The benchmark image is 785,808 B, 19.0% of the 4,128,768 B app partition (ELF text 1,092,038 B, data 1,744 B, bss 144,060 B including the 140 KB heap). Firmware built from branch `claude/q-esp32c6-compare`, rustc 1.98.1, opt-level 3, LTO, `panic = "abort"`; ELF sha256 `4eb27928...`. Rounds: 7. Iterations per round are in the tables (8 for 1350 B operations, 16 for HKDF, 2 for X25519 and Ed25519, 1 for the slow ones). Time comes from the chip's system timer, which ticks at 16 MHz and so resolves 62.5 ns; each row is the median over rounds of the per-call time, with the min and max over rounds. Supply and temperature were not recorded (`TODO`, not measurable from the log). The board's MAC and serial port are not recorded here; `admin/esp32c6-bench-ingest` drops them.
+Board: one ESP32-C6, chip revision v0.2, 4 MB flash, CPU clock 160 MHz (the firmware sets it and prints `cpu_mhz=160`). The benchmark image is 785,808 B, 19.0% of the 4,128,768 B app partition (ELF text 1,092,038 B, data 1,744 B, bss 144,060 B including the 140 KB heap). Firmware built from branch `claude/q-esp32c6-compare`, rustc 1.98.1, opt-level 3, LTO, `panic = "abort"`; ELF sha256 `4eb27928...`. Rounds: 7. Iterations per round are in the tables (8 for 1350 B operations, 16 for HKDF, 2 for X25519 and Ed25519, 1 for the slow ones). Time comes from the chip's system timer, which ticks at 16 MHz, but the firmware reads it in whole microseconds (`Instant::now().duration_since_epoch().as_micros()`), so each timestamp resolves 1 us and not 62.5 ns. A round times `iters` calls between two such timestamps and divides, so a per-call value is a mean over those calls with a granularity of 1 us divided by `iters`; each row is the median over rounds of that per-call time, with the min and max over rounds. An operation that takes a few microseconds per call is only as precise as its `iters` allows. Supply and temperature were not recorded (`TODO`, not measurable from the log). The board's MAC and serial port are not recorded here; `admin/esp32c6-bench-ingest` drops them.
+
+**Workload note.** The board rows below come from a firmware image built before the benchmark workloads were aligned with `rind-bench`: the HMAC-SHA256, ChaCha20-Poly1305, AES-GCM, X25519 and Ed25519 rows (rind and vendors alike) were measured on the previous workload (HMAC with the key built outside the timed call, empty associated data in the AEAD rows, X25519 under the old ID `x25519/{lib}` and, for dalek, against the basepoint, and the earlier Ed25519 messages). The source now times the canonical workloads (HMAC keyed per message, 32 B associated data, `x25519-ecdh-stored/{lib}` against the same peer key for both libraries, rind-bench's Ed25519 messages), so those rows need a re-run on the board before they are compared with other platforms. The SHA, HKDF, PBKDF2, P-256, ML-KEM and ML-DSA rows are unaffected.
 
 The raw log held 12 copies of the summary (the firmware repeats it); they agree, and the first was ingested. The 19 checks are sha256, sha512, sha3-256, hmac-sha256, hkdf-sha256, chacha20poly1305, aes128-gcm, aes256-gcm, x25519, ed25519, mlkem768, mldsa65, p256-ecdsa, sha1, md5, pbkdf2-sha256, p256-ecdh, vendors-agree, and sensor.
 
@@ -87,11 +93,11 @@ Is it fair? It is the vendor crate's default configuration on this target, so it
 
 ### Not timed
 
-XChaCha20-Poly1305, P-384, P-521, RSA, SLH-DSA, Argon2id, HPKE: `TODO`, not run in this firmware (RSA, SLH-DSA and Argon2id may not fit the 140 KB heap). The libcrux crates that build (`libcrux-sha2`, `libcrux-sha3`, `libcrux-chacha20poly1305`, `libcrux-ed25519`, `libcrux-ml-kem`, `libcrux-aes`, `libcrux-hmac`, `libcrux-hkdf`, `libcrux-rsa`) have no row yet. Temperature: `TODO`.
+XChaCha20-Poly1305, P-384, P-521, RSA, SLH-DSA, Argon2id, HPKE: `TODO`, not run in this firmware (RSA, SLH-DSA and Argon2id may not fit the 140 KB heap). The libcrux crates that build (`libcrux-sha2`, `libcrux-sha3`, `libcrux-chacha20poly1305`, `libcrux-ed25519`, `libcrux-ml-kem`, `libcrux-aes`, `libcrux-hmac`, `libcrux-hkdf`, `libcrux-rsa`, and, with default features off, `libcrux-ecdh`, `libcrux-ecdsa` and `libcrux-ml-dsa`) have no row yet. Temperature: `TODO`.
 
 ### Vendors that could not be timed
 
-Not buildable for `riscv32imac-unknown-none-elf` here (details in the next section): `ring` (getrandom has no backend for the target), `aws-lc-rs` (needs a `riscv32-unknown-elf-gcc` C toolchain), `libcrux-ecdh`, `libcrux-ecdsa` and `libcrux-ml-dsa` (need `std`), and, for the same or similar reasons, `hpke-rs`, `blind-rsa-signatures`, `vrf-rfc9381`, `jsonwebtoken`, `rustls`, `aws-lc-sys`, `verified-garbage`, `graviola`, `rustls-graviola`, `openssl`, `openssl-sys` and `rustls-openssl` (the table below has each one's error). The rest of rind-bench's comparison libraries build: the libcrux crates `libcrux-aes`, `libcrux-hmac`, `libcrux-hkdf` and `libcrux-rsa` as well, and `fips205`, `voprf` and `spake2plus`. No claim is made against the ones that do not build.
+Not buildable for `riscv32imac-unknown-none-elf` here (details in the next section): `ring` (getrandom has no backend for the target), `aws-lc-rs` (needs a `riscv32-unknown-elf-gcc` C toolchain), and, for the same or similar reasons, `hpke-rs`, `blind-rsa-signatures`, `vrf-rfc9381`, `jsonwebtoken`, `rustls`, `aws-lc-sys`, `verified-garbage`, `graviola`, `rustls-graviola`, `openssl`, `openssl-sys` and `rustls-openssl` (the table below has each one's error). The rest of rind-bench's comparison libraries build: the libcrux crates `libcrux-aes`, `libcrux-hmac`, `libcrux-hkdf`, `libcrux-rsa`, `libcrux-ecdh`, `libcrux-ecdsa` and `libcrux-ml-dsa` as well (each libcrux crate is probed with its default features off: `libcrux-ecdh`, `libcrux-ecdsa` and `libcrux-ml-dsa` were first recorded as needing `std` only because their defaults enable it), and `fips205`, `voprf` and `spake2plus`. No claim is made against the ones that do not build.
 
 ## Which comparison libraries build for the C6
 
@@ -123,11 +129,11 @@ Not buildable for `riscv32imac-unknown-none-elf` here (details in the next secti
 | libcrux-sha3 | SHA-3 | builds |  |
 | libcrux-chacha20poly1305 | ChaCha20-Poly1305 | builds |  |
 | libcrux-ed25519 | Ed25519 | builds |  |
-| libcrux-ecdh | X25519, P-256 ECDH | not buildable on this target | error[E0463]: can't find crate for `std` / error: could not compile `rand` (lib) due to 1 previous error |
+| libcrux-ecdh | X25519, P-256 ECDH | builds |  |
 | libcrux-ml-kem | ML-KEM | builds |  |
-| libcrux-ml-dsa | ML-DSA | not buildable on this target | error[E0463]: can't find crate for `std` / error: could not compile `libcrux-ml-dsa` (lib) due to 1 previous error |
+| libcrux-ml-dsa | ML-DSA | builds |  |
 | libcrux-aes | AES-GCM, AES-CBC/CTR ciphers | builds |  |
-| libcrux-ecdsa | P-256 ECDSA | not buildable on this target | error[E0463]: can't find crate for `std` / error: could not compile `rand` (lib) due to 1 previous error |
+| libcrux-ecdsa | P-256 ECDSA | builds |  |
 | libcrux-hmac | HMAC | builds |  |
 | libcrux-hkdf | HKDF | builds |  |
 | libcrux-rsa | RSA | builds |  |

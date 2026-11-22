@@ -153,7 +153,7 @@ extern "C" fn rust_main() -> ! {
     // Times every operation in instructions instead of checking: the rows'
     // `_ns` fields are instruction counts.
     if cfg!(feature = "icount") {
-        let rounds = 3;
+        let rounds = core::num::NonZeroU32::new(3).unwrap();
         let emit = |r: &rind_esp32c6::bench::Row| print(&format!("{}\n", r.line()));
         rind_esp32c6::bench::run_all(&mut Icount, rounds, 1, emit);
         #[cfg(feature = "compare")]
