@@ -145,24 +145,14 @@ impl Poly1305 {
         h3 = (h3 & use_h) | (g3 & use_g);
         h4 = (h4 & use_h) | (g4 & use_g);
 
-        // Repack the low 128 bits into 32-bit words, and add s mod 2^128 in
-        // 16-bit halves, so the carry is a shift of a `u32` sum: a `u64` add
-        // is a branch on its carry on Xtensa.
+        // Repack the low 128 bits into 32-bit words, and add s mod 2^128.
         let words = [
             h0 | (h1 << 26),
             (h1 >> 6) | (h2 << 20),
             (h2 >> 12) | (h3 << 14),
             (h3 >> 18) | (h4 << 8),
         ];
-        let mut tag = [0u8; 16];
-        let mut carry = 0u32;
-        for ((out, word), s) in tag.as_chunks_mut::<4>().0.iter_mut().zip(words).zip(self.s) {
-            let lo = (word & 0xffff).wrapping_add(s & 0xffff).wrapping_add(carry);
-            let hi = (word >> 16).wrapping_add(s >> 16).wrapping_add(lo >> 16);
-            *out = ((lo & 0xffff) | (hi << 16)).to_le_bytes();
-            carry = hi >> 16;
-        }
-        tag
+        add_s(words, self.s)
     }
 
     /// h = (h + block) * r for each 16-byte block of `bytes`, where `hibit`
@@ -234,6 +224,55 @@ impl Blocks {
 
         self.h = [h0, h1, h2, h3, h4];
     }
+}
+
+/// `words` plus `s` mod 2^128, as the tag's bytes. Xtensa takes `add_s_split`,
+/// the rest `add_s_wide`; they agree on every input, which a test checks.
+#[inline(always)]
+fn add_s(words: [u32; 4], s: [u32; 4]) -> [u8; 16] {
+    #[cfg(target_arch = "xtensa")]
+    return add_s_split(words, s);
+    #[cfg(all(not(target_arch = "xtensa"), test))]
+    return if tests::FORCE_SPLIT.with(|f| f.get()) {
+        add_s_split(words, s)
+    } else {
+        add_s_wide(words, s)
+    };
+    #[cfg(all(not(target_arch = "xtensa"), not(test)))]
+    return add_s_wide(words, s);
+}
+
+/// The sum with a `u64` carry: a few branch-free instructions on riscv32imac,
+/// whose `finish` is then the code it had before the Xtensa form existed.
+#[cfg(any(not(target_arch = "xtensa"), test))]
+#[inline(always)]
+fn add_s_wide(words: [u32; 4], s: [u32; 4]) -> [u8; 16] {
+    let mut tag = [0u8; 16];
+    let mut carry = 0u64;
+    for ((out, word), s) in tag.as_chunks_mut::<4>().0.iter_mut().zip(words).zip(s) {
+        let sum = u64::from(word)
+            .wrapping_add(u64::from(s))
+            .wrapping_add(carry);
+        *out = (sum as u32).to_le_bytes();
+        carry = sum >> 32;
+    }
+    tag
+}
+
+/// The sum in 16-bit halves, so the carry is a shift of a `u32` sum: a `u64`
+/// add is a branch on its carry on Xtensa.
+#[cfg(any(target_arch = "xtensa", test))]
+#[inline(always)]
+fn add_s_split(words: [u32; 4], s: [u32; 4]) -> [u8; 16] {
+    let mut tag = [0u8; 16];
+    let mut carry = 0u32;
+    for ((out, word), s) in tag.as_chunks_mut::<4>().0.iter_mut().zip(words).zip(s) {
+        let lo = (word & 0xffff).wrapping_add(s & 0xffff).wrapping_add(carry);
+        let hi = (word >> 16).wrapping_add(s >> 16).wrapping_add(lo >> 16);
+        *out = ((lo & 0xffff) | (hi << 16)).to_le_bytes();
+        carry = hi >> 16;
+    }
+    tag
 }
 
 /// h * r partially reduced: the limbs of `h` times `r`, with the products at
@@ -598,6 +637,33 @@ mod tests {
             assert_eq!(got, want, "{} bytes in pieces", msg.len());
             ct::public_slice(key);
             ct::public_slice(bytes);
+        }
+    }
+
+    // `add_s_split`, which Xtensa runs, against `add_s_wide`: edges (all ones,
+    // carry through every word) and random words.
+    #[test]
+    fn add_s_split_matches_wide() {
+        let mut rng = 0x1305_5eed_f00d_cafeu64;
+        let mut next = move || {
+            rng ^= rng << 13;
+            rng ^= rng >> 7;
+            rng ^= rng << 17;
+            rng as u32
+        };
+        let edges = [0, 1, 0xffff, 0x1_0000, 0x7fff_ffff, 0x8000_0000, u32::MAX];
+        for a in edges {
+            for b in edges {
+                let (w, s) = ([a, b, a, b], [b, a, b, a]);
+                assert_eq!(add_s_split(w, s), add_s_wide(w, s), "{w:x?} {s:x?}");
+                let (w, s) = ([u32::MAX; 4], [a, b, a, b]);
+                assert_eq!(add_s_split(w, s), add_s_wide(w, s), "{w:x?} {s:x?}");
+            }
+        }
+        for _ in 0..20_000 {
+            let w = [(); 4].map(|()| next());
+            let s = [(); 4].map(|()| next());
+            assert_eq!(add_s_split(w, s), add_s_wide(w, s), "{w:x?} {s:x?}");
         }
     }
 
