@@ -1,13 +1,18 @@
 #!/bin/sh
 #
-# Checks the ESP32-S3 placement of the SHA-512 compressor, the unrolled body, in IRAM and its K table in DRAM.
+# Checks the ESP32-S3 SHA-512 compressor: the default rolled loop, and the
+# esp32s3-sha512-unrolled body in IRAM with its K table in DRAM.
 #
-# On xtensa-esp32s3-espidf the body must land in .iram1.text (literal pool
-# included) and K in .dram1.rodata, so neither is part of the flash
-# catch-all that shifts later objects. The ESP32 and xtensa-esp32s3-none-elf
-# keep the ordinary sections. The esp32s3-sha512-flash feature runs the
-# rolled loop in ordinary sections: that object must carry no unrolled body
-# and no l32i byte swap, and no IRAM or DRAM section.
+# By default every target, the ESP32-S3 included, runs the rolled loop in
+# ordinary flash sections: that object must carry no unrolled body and no
+# l32i byte swap, no IRAM or DRAM section, and a compressor under
+# rolled_ceiling bytes (a regression to the 18 KiB body fails here).
+# With esp32s3-sha512-unrolled, on xtensa-esp32s3-espidf the body must land
+# in .iram1.text (literal pool included) and K in .dram1.rodata, so neither
+# is part of the flash catch-all that shifts later objects. With that
+# feature xtensa-esp32s3-none-elf keeps the ordinary sections, which is the
+# slow placement the feature's documentation warns about. The ESP32 never
+# takes the unrolled body.
 #
 # opt-level 3 is the firmware profile. opt-level s and z are checked on
 # the ESP32-S3 object as well: the same section, relocation, and no-call
@@ -18,10 +23,11 @@
 # Every ESP32-S3 object is also checked for the message byte swap: `l32i`
 # into `a14`, `ssai 8`, a 16-bit shift, then `src R, R, a14`; `src R, R, R`;
 # `src R, a14, R`. That is the sequence in `be_u32`. The ESP32 object must
-# have none, and so must the esp32s3-sha512-flash object: only the ESP32-S3
-# without that feature takes the unrolled body and its load. A
-# call0 build of the ESP32-S3 ESP-IDF object, IRAM block and DRAM K
-# included, is then linked and run under QEMU's esp32s3 CPU: the message
+# have none, and so must every default object: only the ESP32-S3 with
+# esp32s3-sha512-unrolled takes the unrolled body and its load. call0
+# builds of the ESP32-S3 ESP-IDF object, the default one and the unrolled one
+# with IRAM block and DRAM K included, are then linked and run under QEMU's
+# esp32s3 CPU: the message
 # load, including blocks that are not word-aligned, and FIPS 180-4's "abc"
 # block through the whole compressor, at byte offsets 0 and 1, compared
 # word for word. That is the emulator's model of the core, not a cycle
@@ -53,6 +59,12 @@ host_cc=${CC:-cc}
 # CI run measured 18,533 at opt-level 3 (17,792 at s, 17,797 at z); this is
 # that plus about 10% slack.
 iram_ceiling=20480
+
+# Most flash the default rolled compressor may take at opt-level 3, s, or z:
+# its .text and .literal sections for the compressor, in bytes. The first
+# run measured 1,276 at opt-level 3, 1,326 at s, and 1,306 at z; this leaves
+# room for compiler drift and sits far below the 17 KiB unrolled body.
+rolled_ceiling=4096
 
 mkdir -p "$root/.tmp"
 work=$(mktemp -d "$root/.tmp/sha512-layout.XXXXXX")
@@ -154,7 +166,7 @@ publish = false
 [workspace]
 
 [features]
-esp32s3-sha512-flash = []
+esp32s3-sha512-unrolled = []
 
 [profile.release]
 opt-level = 3
@@ -190,24 +202,33 @@ build() {
   find "$work/obj/$name" -name 'sha512_layout-*.o' -exec mv {} "$work/obj/$name.o" \;
 }
 
-build s3 xtensa-esp32s3-espidf 3 ''
-build s xtensa-esp32s3-espidf '"s"' ''
-build z xtensa-esp32s3-espidf '"z"' ''
-build flash xtensa-esp32s3-espidf 3 '--features esp32s3-sha512-flash'
+unrolled='--features esp32s3-sha512-unrolled'
+build s3 xtensa-esp32s3-espidf 3 "$unrolled"
+build s xtensa-esp32s3-espidf '"s"' "$unrolled"
+build z xtensa-esp32s3-espidf '"z"' "$unrolled"
+build rolled xtensa-esp32s3-espidf 3 ''
+build rolled-s xtensa-esp32s3-espidf '"s"' ''
+build rolled-z xtensa-esp32s3-espidf '"z"' ''
 build esp32 xtensa-esp32-espidf 3 ''
-build none xtensa-esp32s3-none-elf 3 ''
-# The QEMU probe: the ESP32-S3 ESP-IDF build, so the block is the IRAM one
-# with K in DRAM, plus the probe exports. call0, so the stub can enter it
+build none xtensa-esp32s3-none-elf 3 "$unrolled"
+build rolled-none xtensa-esp32s3-none-elf 3 ''
+# The QEMU probes: the ESP32-S3 ESP-IDF build with the unrolled feature, so
+# the block is the IRAM one with K in DRAM, plus the probe exports, and the
+# default build, whose "abc" runs through the rolled loop. call0, so the stub can enter it
 # without a window exception. `-windowed` on core does not compile, so the
 # flag is this crate's only. The firmware objects above keep the target's
 # default ABI. The inline asm sequence does not change with the ABI.
-build probe xtensa-esp32s3-espidf 3 '' \
+build probe xtensa-esp32s3-espidf 3 "$unrolled" \
   --cfg rind_sha512_load_probe -C target-feature=-windowed
-build probe-s xtensa-esp32s3-espidf '"s"' '' \
+build probe-s xtensa-esp32s3-espidf '"s"' "$unrolled" \
   --cfg rind_sha512_load_probe -C target-feature=-windowed
-build probe-z xtensa-esp32s3-espidf '"z"' '' \
+build probe-z xtensa-esp32s3-espidf '"z"' "$unrolled" \
   --cfg rind_sha512_load_probe -C target-feature=-windowed
-build probe-none xtensa-esp32s3-none-elf 3 '' \
+build probe-none xtensa-esp32s3-none-elf 3 "$unrolled" \
+  --cfg rind_sha512_load_probe -C target-feature=-windowed
+build probe-rolled xtensa-esp32s3-espidf 3 '' \
+  --cfg rind_sha512_load_probe -C target-feature=-windowed
+build probe-rolled-none xtensa-esp32s3-none-elf 3 '' \
   --cfg rind_sha512_load_probe -C target-feature=-windowed
 
 sections() {
@@ -270,10 +291,31 @@ expect_ordinary() {
 expect_placed "$work/obj/s3.o"
 expect_placed "$work/obj/s.o"
 expect_placed "$work/obj/z.o"
-expect_ordinary "$work/obj/flash.o" 'esp32s3-sha512-flash'
+expect_ordinary "$work/obj/rolled.o" 'default ESP-IDF build'
+expect_ordinary "$work/obj/rolled-s.o" 'default ESP-IDF build, opt-level s'
+expect_ordinary "$work/obj/rolled-z.o" 'default ESP-IDF build, opt-level z'
 expect_ordinary "$work/obj/esp32.o" 'xtensa-esp32-espidf'
-expect_ordinary "$work/obj/none.o" 'xtensa-esp32s3-none-elf'
+expect_ordinary "$work/obj/none.o" 'xtensa-esp32s3-none-elf with esp32s3-sha512-unrolled'
+expect_ordinary "$work/obj/rolled-none.o" 'default xtensa-esp32s3-none-elf'
 expect_placed "$work/obj/probe.o"
+
+# The default compressor's flash, printed so CI records it, and capped so the
+# unrolled body cannot become the default again unnoticed.
+for name in rolled rolled-s rolled-z rolled-none esp32; do
+  obj=$work/obj/$name.o
+  size=0
+  for hex in $(sections "$obj" | awk '$1 ~ /^\.(text|literal)\./ && $1 ~ /compress_block/ { print $2 }'); do
+    size=$((size + 0x$hex))
+  done
+  line="default $name: compressor and driver $size bytes of .text and .literal, ceiling $rolled_ceiling"
+  printf 'esp32s3-sha512-layout: %s\n' "$line"
+  if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+    printf -- '- SHA-512 %s\n' "$line" >>"$GITHUB_STEP_SUMMARY"
+  fi
+  if [ "$size" -eq 0 ] || [ "$size" -gt "$rolled_ceiling" ]; then
+    fail "$name compressor is $size bytes, want 1 to $rolled_ceiling"
+  fi
+done
 
 # The IRAM this placement costs an image, printed so CI records it.
 largest=0
@@ -406,9 +448,12 @@ PY
 check_swap 'opt-level 3' "$work/obj/s3.o"
 check_swap 'opt-level s' "$work/obj/s.o"
 check_swap 'opt-level z' "$work/obj/z.o"
-check_swap 'esp32s3-sha512-flash' "$work/obj/flash.o" none
+check_swap 'default ESP-IDF build' "$work/obj/rolled.o" none
+check_swap 'default ESP-IDF build, opt-level s' "$work/obj/rolled-s.o" none
+check_swap 'default ESP-IDF build, opt-level z' "$work/obj/rolled-z.o" none
+check_swap 'default xtensa-esp32s3-none-elf' "$work/obj/rolled-none.o" none
 check_swap 'xtensa-esp32-espidf' "$work/obj/esp32.o" none
-check_swap 'xtensa-esp32s3-none-elf' "$work/obj/none.o"
+check_swap 'xtensa-esp32s3-none-elf with esp32s3-sha512-unrolled' "$work/obj/none.o"
 check_swap 'QEMU probe' "$work/obj/probe.o"
 
 # Link the compressor so the literal-pool order and the call from
@@ -421,7 +466,7 @@ check_swap 'QEMU probe' "$work/obj/probe.o"
   printf '%s\n' '    for (unsigned long i = 0; i < n; i++) p[i] = (unsigned char)c;'
   printf '%s\n' '    return s;'
   printf '%s\n' '}'
-  "$nm" -u "$work/obj/s3.o" "$work/obj/flash.o" | awk '$1 == "U" && $2 != "memset" { print $2 }' | sort -u |
+  "$nm" -u "$work/obj/s3.o" "$work/obj/rolled.o" | awk '$1 == "U" && $2 != "memset" { print $2 }' | sort -u |
     while read -r sym; do
       printf 'void %s(void) {}\n' "$sym"
     done
@@ -451,7 +496,7 @@ link_one() {
 }
 
 link_one "$work/s3.elf" "$work/obj/s3.o"
-link_one "$work/flash.elf" "$work/obj/flash.o"
+link_one "$work/rolled.elf" "$work/obj/rolled.o"
 
 # Literal pool before the code, which is the direction l32r requires.
 block=$("$nm" -n "$work/s3.elf" | awk '/compress_block/ { print $1; exit }')
@@ -465,7 +510,7 @@ print(f"literal pool leads the block by {block - base:#x}")
 PY
 
 # The caller stays an absolute callx8 under relaxation, in both placements.
-for elf in "$work/s3.elf" "$work/flash.elf"; do
+for elf in "$work/s3.elf" "$work/rolled.elf"; do
   if ! "$objdump" -d "$elf" | awk '/<sha512_entry>:/{f=1} f && /^$/{exit} f' | grep -q callx8; then
     fail "sha512_entry in $elf has no callx8"
   fi
@@ -484,7 +529,7 @@ if [ ! -x "$qemu" ]; then
   printf 'missing %s\ninstall it as .github/workflows/esp32s3-sha512-layout.yml does\n' "$qemu" >&2
   exit 1
 fi
-probes='probe probe-s probe-z probe-none'
+probes='probe probe-s probe-z probe-none probe-rolled probe-rolled-none'
 for name in $probes; do
   for sym in sha512_load_probe sha512_abc_probe; do
     if ! "$nm" "$work/obj/$name.o" | awk -v s="$sym" '$3 == s { found = 1 } END { exit !found }'; then
@@ -648,10 +693,12 @@ abc 00000000" ]; then
 # Every build runs before any failure is reported, so one log shows which
 # of the placement and the optimization level a failure follows.
 qemu_failed=0
-run_probe probe 'ESP-IDF IRAM build at opt-level 3'
-run_probe probe-s 'ESP-IDF IRAM build at opt-level s'
-run_probe probe-z 'ESP-IDF IRAM build at opt-level z'
-run_probe probe-none 'none-elf build at opt-level 3'
+run_probe probe 'ESP-IDF unrolled IRAM build at opt-level 3'
+run_probe probe-s 'ESP-IDF unrolled IRAM build at opt-level s'
+run_probe probe-z 'ESP-IDF unrolled IRAM build at opt-level z'
+run_probe probe-none 'none-elf build with esp32s3-sha512-unrolled at opt-level 3'
+run_probe probe-rolled 'default ESP-IDF rolled build at opt-level 3'
+run_probe probe-rolled-none 'default none-elf rolled build at opt-level 3'
 if [ "$qemu_failed" -ne 0 ]; then
   fail 'a QEMU probe failed'
 fi

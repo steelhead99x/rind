@@ -233,41 +233,59 @@ with portable Rust in place of the assembly armv7 runs regardless.
   IRAM, `K` in `.dram1`, no call from the block, and no relocation into
   flash text. A debug build is not that promise. Every other portable
   target keeps HACL* through libcrux-sha2.
-- portable, ESP32-S3: 32-bit SHA-512 is rind's unrolled body, sixteen-round
-  groups with constant indexes and an `l32i` message load, so no bounds
-  check, iterator, or `memset` can outline into flash. Every other 32-bit
-  portable target runs the single rolled loop, whose size is unchanged;
-  the unrolled body's size is checked only on the ESP32-S3. On ESP-IDF the
-  block is in `.iram1` and `K` is in `.dram1`. The driver
-  `sha512_compress_blocks` stays in ordinary flash text, so the update
-  path is not a cache-off API. `xtensa-esp32s3-none-elf` leaves the block and
-  `K` in ordinary flash sections. `esp32s3-sha512-flash` selects the rolled
-  loop there instead, with `K` in flash `.rodata`, for an image whose IRAM
-  is full: the unrolled body run from flash was 11.3 to 13.1 times slower
-  than the rolled loop.
-  `admin/esp32s3-sha512-layout` checks those sections, the relocation
-  allowlist, and that the block has no call, at opt-level 3, s, and z.
-  At each it prints the block's IRAM and literal-pool bytes, and `K`'s 640
-  bytes of DRAM, and fails when block and pool pass its `iram_ceiling`,
-  20,480 bytes. The `ESP32-S3 SHA-512 layout` workflow's run at `942bb48a`
-  measured 18,533 bytes at opt-level 3 (18,401 of block and a 132-byte
-  pool), 17,792 at s, and 17,797 at z; later runs print the current ones. It also runs, on QEMU's ESP32-S3 CPU, the Xtensa message load (`l32i`,
-  `ssai`, `src`), including blocks at byte offsets 1 and 3, and FIPS
-  180-4's "abc" block through the whole compressor, built for ESP-IDF so
-  the block runs from its IRAM section with `K` from DRAM, at byte offsets
-  0 and 1, comparing all eight state words. That run is the emulator's
-  model of the core, not a cycle count. The same check
-  compiles ESP-IDF v5.5.1's ESP32-S3 `core-isa.h` and requires
-  `XCHAL_UNALIGNED_LOAD_HW` 1 and `XCHAL_UNALIGNED_LOAD_EXCEPTION` 0, the
-  hardware `l32i` of an unaligned address. Board time of this IRAM
-  placement against the rolled loop, which `esp32s3-sha512-flash`
-  selects, was measured on the board: 0.911 to 0.918 of its cycles for
-  SHA-512 and HMAC-SHA384. The unrolled body from flash was 11.3 to 13.1
-  times slower than that loop. The raw logs are in the PR discussion
-  that introduced the placement. Host FIPS
-  180-4 vectors cover both Rust bodies. The Xtensa load is not in the host ctgrind binary:
-  its instructions and shift distance are fixed. The synthetic link is not
-  a full ESP-IDF image.
+- portable, ESP32-S3: 32-bit SHA-512 is the same single rolled loop every
+  other 32-bit portable target runs, in ordinary flash text with `K` in
+  flash `.rodata`. The `esp32s3-sha512-unrolled` feature selects rind's
+  unrolled body instead: sixteen-round groups with constant indexes and an
+  `l32i` message load, so no bounds check, iterator, or `memset` can
+  outline into flash. On ESP-IDF that block is in `.iram1` and `K` is in
+  `.dram1`; the driver `sha512_compress_blocks` stays in ordinary flash
+  text, so the update path is not a cache-off API. On
+  `xtensa-esp32s3-none-elf` there is no IRAM placement, so the feature
+  leaves the unrolled body and `K` in ordinary flash, where the body is
+  slower than the rolled loop; leave the feature off there. The unrolled
+  body was the default until PR 94 made the smaller one the default: `esp32s3-sha512-flash`, which used to select the rolled
+  loop, is now an empty feature kept so a manifest that names it resolves.
+  MEASURED object sizes (esp rustc 1.97.0.0, 8ea53bcd7; `.o` linked with
+  the layout script's synthetic script, driver included; board images were
+  not built):
+
+  | Build | opt 3 | opt s | opt z |
+  | --- | --- | --- | --- |
+  | default, rolled, flash text | 1,373 | 1,425 | 1,405 |
+  | default, rolled, flash `.rodata` (K and 80 bytes of other constants) | 720 | 720 | 720 |
+  | `esp32s3-sha512-unrolled`, ESP-IDF, IRAM (block and pool) | 18,533 | 17,792 | 17,797 |
+  | `esp32s3-sha512-unrolled`, ESP-IDF, DRAM `K` | 640 | 640 | 640 |
+  | `esp32s3-sha512-unrolled`, none-elf, flash text | 18,633 | 17,889 | 17,897 |
+
+  Board time of the IRAM unrolled placement against the rolled loop was
+  measured on the board: 0.911 to 0.918 of its cycles for SHA-512 and
+  HMAC-SHA384. The unrolled body from flash was 11.3 to 13.1 times slower
+  than that loop. The raw logs are in the PR discussion that introduced
+  the placement. Those are old-default numbers; no new timing was taken
+  for the default change.
+  `admin/esp32s3-sha512-layout` checks the default objects (no IRAM or DRAM
+  section, no `l32i` byte swap, compressor and driver under 4,096 bytes of
+  text and literals at opt-level 3, s, and z) and the unrolled ones (sections,
+  the relocation allowlist, no call from the block, at opt-level 3, s, and
+  z). For the unrolled body it prints the block's IRAM and literal-pool
+  bytes, and `K`'s 640 bytes of DRAM, and fails when block and pool pass its
+  `iram_ceiling`, 20,480 bytes. It also runs, on QEMU's ESP32-S3 CPU, the
+  Xtensa message load (`l32i`, `ssai`, `src`), including blocks at byte
+  offsets 1 and 3, and FIPS 180-4's "abc" block through the whole
+  compressor, for the unrolled ESP-IDF build (block from its IRAM section,
+  `K` from DRAM) and for the default rolled build, at byte offsets 0 and 1,
+  comparing all eight state words. That run is the emulator's model of the
+  core, not a cycle count. The same check compiles ESP-IDF v5.5.1's
+  ESP32-S3 `core-isa.h` and requires `XCHAL_UNALIGNED_LOAD_HW` 1 and
+  `XCHAL_UNALIGNED_LOAD_EXCEPTION` 0, the hardware `l32i` of an unaligned
+  address. Host FIPS 180-4 vectors, RFC 6234's one-million-`a` message
+  included, cover both Rust bodies, and their equality on arbitrary chaining
+  states. Both bodies are straight-line over the block: no branch or index
+  depends on the message or the state (the schedule indexes and the round
+  count are constants), and ctgrind marks the block secret. The Xtensa load
+  is not in the host ctgrind binary: its instructions and shift distance
+  are fixed. The synthetic link is not a full ESP-IDF image.
   SHA-256 on ESP-IDF Xtensa is the IRAM body above, and this
   placement leaves libcrux-sha2's object sections unchanged.
 - portable: ChaCha20-Poly1305's Poly1305 is Graviola's on 64-bit targets
@@ -303,7 +321,7 @@ tests use [Wycheproof]'s vectors.
 | rind | its own code | Apache-2.0 OR ISC OR MIT-0 | nothing |
 | [Argon2's reference] | ported: its AVX2 BlaMka rounds, `blamka-round-opt.h`, to Rust intrinsics, for Argon2id on x86_64 CPUs with AVX2 | CC0-1.0 OR Apache-2.0, taken under CC0-1.0 | nothing |
 | [s2n-bignum] | copied: its assembly for the elliptic curves, RSA, ML-KEM, ML-DSA, Keccak-f, and aarch64 AES-GCM, transliterated into Rust `asm!` by `admin/parse-asm`, which ends each x86_64 routine using 256-bit registers with `vzeroupper` | Apache-2.0 OR ISC OR MIT-0; its ML-KEM, ML-DSA, and aarch64 Keccak-f routines (from mlkem-native and mldsa-native) Apache-2.0 OR ISC OR MIT; its x86_64 single-state Keccak-f (from OpenSSL) Apache-2.0 | HOL Light proofs ([x86_64](https://github.com/awslabs/s2n-bignum/tree/3f01260ff1bd2577abf0117ce45aa008bc243a80/x86/proofs), [aarch64](https://github.com/awslabs/s2n-bignum/tree/3f01260ff1bd2577abf0117ce45aa008bc243a80/arm/proofs)) that each routine's object code computes its specified result for all inputs; some also prove that its memory accesses stay in bounds and that its branches and addresses depend on no secret. `admin/prove bytes` checks that rind's build of each routine holds the instructions its proof lists, with the differences [below](#s2n-bignums-constant-time-theorems), so the proofs are of rind's code. The aarch64 AES-GCM kernels' theorems cover the in-place calls rind makes. |
-| [HACL\*] | dependency, through libcrux-hacl-rs and libcrux-poly1305; copied, from libcrux-chacha20poly1305: the ChaCha20 rounds, for HChaCha20 and QUIC header protection and for x86_64's ChaCha20 up to one block, 128 bytes without AVX2, and every length without SSSE3, and armv7's ChaCha20 state setup, and every ChaCha20 length on the portable backend; dependency, through libcrux-sha2: SHA-256 for the portable backend except ESP-IDF Xtensa, where rind's own 16-round body runs from internal RAM and is not this proved code, and SHA-384/512 on 64-bit portable; 32-bit SHA-512 is rind's rolled loop, and on the ESP32-S3 its unrolled body, in IRAM on ESP-IDF (`esp32s3-sha512-flash` keeps it in flash); copied, by `admin/import-hacl`: Vale's x86_64 AES-GCM assembly, as Rust naked functions | Apache-2.0; Vale's AES-GCM routines port OpenSSL's `aesni_gcm`, Apache-2.0 | [F\* proofs](https://github.com/hacl-star/hacl-star/tree/f557259007db9933442dde10aa995c1b00bd3446) of memory safety, functional correctness, and secret independence of the F\* source. libcrux's Rust is compiled mechanically from HACL\*'s verified C, and that step is not itself verified. rind's code that loads the rounds' state and XORs their keystream is not covered, except for header protection, which rind's own Lean proof covers with the rounds. Vale's [F\* proofs](https://github.com/hacl-star/hacl-star/blob/f557259007db9933442dde10aa995c1b00bd3446/vale/code/arch/x64/interop/Vale.Wrapper.X64.GCMencryptOpt.fsti) that its x86_64 AES-GCM, as Vale prints it, computes AES-128-GCM and AES-256-GCM, tag check included, for any AAD and message under 2^32 bytes, in place or not, from the counter block its own routine computes, which rind runs for it, and the round keys and GHASH key powers its own routines compute. `admin/prove bytes` checks that rind's copies of the routines it runs assemble to the instructions of Vale's printed text. rind computes those keys and powers itself, and its tests check them byte for byte against Vale's routines. [`proofs/`](proofs/README.md) proves that code, and rind's Rust that splits the message into the routines' blocks and copies the partial ones, as EverCrypt's proven Low\* wrapper does, from its AEAD API down to Vale's routines. |
+| [HACL\*] | dependency, through libcrux-hacl-rs and libcrux-poly1305; copied, from libcrux-chacha20poly1305: the ChaCha20 rounds, for HChaCha20 and QUIC header protection and for x86_64's ChaCha20 up to one block, 128 bytes without AVX2, and every length without SSSE3, and armv7's ChaCha20 state setup, and every ChaCha20 length on the portable backend; dependency, through libcrux-sha2: SHA-256 for the portable backend except ESP-IDF Xtensa, where rind's own 16-round body runs from internal RAM and is not this proved code, and SHA-384/512 on 64-bit portable; 32-bit SHA-512 is rind's rolled loop, on the ESP32-S3 too unless `esp32s3-sha512-unrolled` selects its unrolled body, in IRAM on ESP-IDF; copied, by `admin/import-hacl`: Vale's x86_64 AES-GCM assembly, as Rust naked functions | Apache-2.0; Vale's AES-GCM routines port OpenSSL's `aesni_gcm`, Apache-2.0 | [F\* proofs](https://github.com/hacl-star/hacl-star/tree/f557259007db9933442dde10aa995c1b00bd3446) of memory safety, functional correctness, and secret independence of the F\* source. libcrux's Rust is compiled mechanically from HACL\*'s verified C, and that step is not itself verified. rind's code that loads the rounds' state and XORs their keystream is not covered, except for header protection, which rind's own Lean proof covers with the rounds. Vale's [F\* proofs](https://github.com/hacl-star/hacl-star/blob/f557259007db9933442dde10aa995c1b00bd3446/vale/code/arch/x64/interop/Vale.Wrapper.X64.GCMencryptOpt.fsti) that its x86_64 AES-GCM, as Vale prints it, computes AES-128-GCM and AES-256-GCM, tag check included, for any AAD and message under 2^32 bytes, in place or not, from the counter block its own routine computes, which rind runs for it, and the round keys and GHASH key powers its own routines compute. `admin/prove bytes` checks that rind's copies of the routines it runs assemble to the instructions of Vale's printed text. rind computes those keys and powers itself, and its tests check them byte for byte against Vale's routines. [`proofs/`](proofs/README.md) proves that code, and rind's Rust that splits the message into the routines' blocks and copies the partial ones, as EverCrypt's proven Low\* wrapper does, from its AEAD API down to Vale's routines. |
 | [mlkem-native] | ported: its portable C polynomial arithmetic (the NTT, inverse NTT, base multiplication, reductions, byte encoding, and rejection sampling), to Rust, for armv7 and x86_64 CPUs without AVX2; copied, by `admin/import-aws-lc` from aws-lc's copy: its x86_64 AVX2 ciphertext compression at 4, 5, 10, and 11 bits, which rind ends with `vzeroupper` | Apache-2.0 OR ISC OR MIT | [CBMC proofs](https://github.com/pq-code-package/mlkem-native/tree/d1b2fe782888bdb761a50336012923180be7f502/proofs/cbmc) of memory safety and coefficient bounds for its C. They do not cover rind's port. [HOL Light proofs](https://github.com/pq-code-package/mlkem-native/tree/d1b2fe782888bdb761a50336012923180be7f502/proofs/hol_light/x86_64) that its AVX2 compression's object code computes its specified result for all inputs, of mlkem-native's own build, at the revision aws-lc's copy takes. |
 | [mldsa-native] | ported: its C FIPS 204 construction (`sign.c`, `packing.c`, `poly.c`, and `poly_kl.c`) on every CPU, and its portable C polynomial arithmetic for armv7, the portable backend, and x86_64 CPUs without AVX2, to Rust, at v2.0.0 | Apache-2.0 OR ISC OR MIT | [CBMC proofs](https://github.com/pq-code-package/mldsa-native/tree/834a90d5e846ffa1e1611bd24e160bb2e9b86d35/proofs/cbmc) of memory safety and coefficient bounds for its C. They do not cover rind's port, which rind's tests check against s2n-bignum's routines, [Wycheproof], ACVP, and aws-lc-rs. |
 | [aws-lc] | copied, by `admin/import-aws-lc`: its SHA-384/512 assembly for x86_64 and aarch64, its x86_64 AVX SHA-256 routine and its aarch64 one for the SHA-256 instructions, Montgomery multiplication and the x86_64 exponentiation's `bn_power5` (with one deliberate change: rind's `bn_sqr8x_mont` and `bn_powerx5` zero two scratch words their `mulx` squaring reads unwritten, which valgrind reports though results and timing do not depend on them), AVX2 and dual AVX-512 RSAZ exponentiation, AES-NI AES-CTR, P-256's mixed addition for its generator multiplication (with one deliberate change: rind's BMI2 and ADX copy drops the `.byte 0x67` address-size prefixes aws-lc pads two of its squaring's register-only `mulx` with, which the CPU ignores and s2n-bignum's x86 model does not decode), and SSE4.1 and AVX2 ChaCha20-Poly1305 (with one deliberate change: rind's copy reads the choice of AVX2 from the block rind passes it rather than aws-lc's `OPENSSL_ia32cap_P`), its aarch64 NEON ChaCha20-Poly1305 and eight-way AES-192-GCM, its x86_64 assembly for CPUs without AVX2 (SSSE3 ChaCha20, SSSE3 and AVX SHA-1, and SSSE3 SHA-256) without AES-NI (SSSE3 AES and GHASH), and without SSSE3 (integer SHA-1 and SHA-256), its aarch64 Montgomery multiplication, and its aarch64 assembly for CPUs without the crypto extension (NEON AES, NEON GHASH, and scalar SHA-1 and SHA-256), as Rust naked functions; its 32-bit ARM assembly for ChaCha20, SHA-1 and SHA-256 (NEON and integer), SHA-384/512, Montgomery multiplication, the ARMv8 crypto extension (AES, GHASH, SHA-1, SHA-256), and NEON Poly1305, in Rust `global_asm!`; and the C that drives that Poly1305, RSAZ, and `bn_power5`, that sets up its x86_64 SSSE3 GHASH table, and that computes its constant-time SSE2 AES and integer GHASH for x86_64 CPUs without SSSE3, ported to Rust, both also for armv7 without the crypto extension and the portable backend. aws-lc takes its Poly1305, ChaCha20-Poly1305, SSSE3 GHASH, and constant-time AES and GHASH from BoringSSL and the rest from OpenSSL | Apache-2.0; Poly1305, ChaCha20-Poly1305, SSSE3 and integer GHASH, and constant-time AES ISC | [SAW and NSym proofs](https://github.com/awslabs/aws-lc-verification/tree/797302470c1703cbb1a3a6fa98daffef0bfd3d80) that its x86_64 AVX and aarch64 scalar SHA-384/512 routines compute their specified result for all inputs. Their proof of its aarch64 routine for the SHA-512 instructions ends with the result in registers, before the routine stores it, so rind's own HOL Light proof covers that routine, of the object code rind's build emits, against s2n-bignum's FIPS 180-4 spec, and rind's own HOL Light proofs cover both forms of P-256's mixed addition, of the object code rind's Linux build emits, against s2n-bignum's P-256 group law. `admin/prove bytes` checks that rind's copies of the first two routines assemble to the instructions of aws-lc's text at the revision the proofs pin, so the proofs are of rind's code. They do not cover its 32-bit ARM code. [`proofs/`](proofs/README.md) proves rind's SHA-384/512 around the AVX and both aarch64 routines. |

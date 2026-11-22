@@ -100,10 +100,11 @@ pub(crate) fn sha512_compress_blocks(state: &mut [u64; 8], blocks: &[u8]) {
     // width on which this function returns `state` unchanged.
     #[cfg(not(target_pointer_width = "64"))]
     {
-        // The ESP32-S3 runs `generic::sha512`'s unrolled body, which ESP-IDF
-        // places in `.iram1.text`; with `esp32s3-sha512-flash` it runs the
-        // rolled loop in ordinary text, as every other non-64-bit target
-        // does. SHA-256 on ESP-IDF Xtensa is `sha256_iram`.
+        // Every non-64-bit target runs `generic::sha512`'s rolled loop in
+        // ordinary text, the ESP32-S3 included; with
+        // `esp32s3-sha512-unrolled` the ESP32-S3 runs the unrolled body,
+        // which ESP-IDF places in `.iram1.text`. SHA-256 on ESP-IDF Xtensa
+        // is `sha256_iram`.
         crate::low::generic::sha512::sha512_compress_blocks(state, blocks);
     }
     #[cfg(target_pointer_width = "64")]

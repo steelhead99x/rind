@@ -15,15 +15,18 @@ rust-version.workspace = true
 targets = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu", "i686-unknown-linux-gnu"]
 
 [features]
-# Runs the rolled SHA-512 loop on the ESP32-S3, with its K table in flash,
-# instead of the unrolled body in IRAM and K in internal DRAM.
-# The default on `xtensa-esp32s3-espidf` places the unrolled compressor in IRAM
-# and K in internal DRAM, so that body does not shift later flash text. Enable
-# this when the image's IRAM is already full. The IRAM that costs, about
-# 18 KiB at opt-level 3, s, and z, is what the `ESP32-S3 SHA-512 layout`
-# workflow prints, and admin/esp32s3-sha512-layout caps it at 20 KiB. The
-# rolled loop is the same one every other 32-bit target runs. It does
-# nothing elsewhere.
+# Runs the unrolled SHA-512 body on the ESP32-S3 instead of the rolled loop
+# every 32-bit target runs by default. The unrolled body is about 18 KiB of
+# code against the rolled loop's 1.4 KiB. On `xtensa-esp32s3-espidf` it is
+# placed in IRAM (and `K` in internal DRAM), where it took 0.911 to 0.918 of
+# the rolled loop's cycles on the board; the IRAM that costs is what the
+# `ESP32-S3 SHA-512 layout` workflow prints, and admin/esp32s3-sha512-layout
+# caps it at 20 KiB. On `xtensa-esp32s3-none-elf` there is no IRAM placement,
+# the body runs from flash, and it is slower than the rolled loop: leave this
+# off there. It does nothing elsewhere.
+esp32s3-sha512-unrolled = []
+# Deprecated and empty. It used to select the rolled loop, which is now the
+# default; kept so a manifest that names it still resolves.
 esp32s3-sha512-flash = []
 __ctgrind = ["dep:crabgrind"]
 

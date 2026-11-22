@@ -1,10 +1,12 @@
 name: ESP32-S3 SHA-512 layout
 
-# Links the ESP32-S3 SHA-512 compressor the way ESP-IDF places `.iram1`
-# and `.dram1`, checks that only the ESP32-S3 ESP-IDF build leaves
-# `.flash.text`, records the IRAM block's size against its ceiling, and
-# runs the message load and FIPS 180-4 "abc" through the IRAM build on
-# QEMU. The toolchain is the one the board image uses (espup rustc 1.97.0.0).
+# Checks that the default ESP32-S3 SHA-512 compressor is the small rolled
+# loop in flash, with its size under a ceiling. With the
+# `esp32s3-sha512-unrolled` feature it links the unrolled body the way
+# ESP-IDF places `.iram1` and `.dram1`, checks that only that ESP-IDF
+# build leaves `.flash.text`, records the IRAM block's size against its
+# ceiling, and runs the message load and FIPS 180-4 "abc" through both
+# builds on QEMU. The toolchain is the one the board image uses (espup rustc 1.97.0.0).
 on:
   pull_request:
     # A draft skips every job until it is marked ready, and turning a PR back
