@@ -13,3 +13,7 @@ ChaCha20-Poly1305 and XChaCha20-Poly1305 earn the ✓ on x86_64 CPUs without SSE
 ## Required
 
 - [cipher::ChaCha20 is proven on x86_64](/quest/m4/verified/chacha20-poly1305-x86/cipher.md) - aws-lc's SSSE3 ChaCha20
+
+## Related
+
+- [The 26-bit limb Poly1305 is proven equal to RFC 8439](/quest/m5/verified/poly1305-26bit.md) - the proof of the 32-bit portable targets' Poly1305, which shares its limb arithmetic lemma with Graviola's 64-bit Poly1305 above
