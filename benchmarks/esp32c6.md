@@ -8,24 +8,24 @@ Cross-built for `riscv32imac-unknown-none-elf` at opt-level 3 with LTO, rustc 1.
 
 | algorithm | code over harness (B) | peak stack (B) | peak heap (B) | known answer |
 |---|---|---|---|---|
-| sha256 | 11997 | 800 | 32 | ok |
+| sha256 | 12005 | 800 | 32 | ok |
 | sha512 | 7329 | 852 | 64 | ok |
-| sha3-256 | 7487 | 808 | 32 | ok |
-| hmac-sha256 | 14586 | 1040 | 32 | ok |
-| hkdf-sha256 | 15768 | 1984 | 52 | ok |
-| chacha20poly1305 | 21477 | 2376 | 468 | ok |
-| aes128-gcm | 42829 | 2544 | 16 | ok |
-| aes256-gcm | 42847 | 2544 | 16 | ok |
-| x25519 | 65503 | 3800 | 64 | ok |
+| sha3-256 | 7495 | 808 | 32 | ok |
+| hmac-sha256 | 14594 | 1040 | 32 | ok |
+| hkdf-sha256 | 15776 | 2032 | 52 | ok |
+| chacha20poly1305 | 21473 | 2968 | 468 | ok |
+| aes128-gcm | 57007 | 3188 | 16 | ok |
+| aes256-gcm | 57025 | 3188 | 16 | ok |
+| x25519 | 65507 | 3800 | 64 | ok |
 | ed25519 | 96690 | 5816 | 64 | ok |
-| mlkem768 | 38125 | 41460 | 12288 | ok |
-| mldsa65 | 34554 | 40532 | 84992 | ok |
-| p256-ecdsa | 122135 | 17484 | 0 | ok |
-| sensor | 134643 | 11368 | 206 | ok |
+| mlkem768 | 38133 | 41444 | 12288 | ok |
+| mldsa65 | 34554 | 40516 | 84992 | ok |
+| p256-ecdsa | 122143 | 17484 | 0 | ok |
+| sensor | 134641 | 13736 | 206 | ok |
 | sha1 | 8635 | 516 | 20 | ok |
-| md5 | 7629 | 760 | 16 | ok |
-| pbkdf2-sha256 | 15964 | 2944 | 64 | ok |
-| p256-ecdh | 83145 | 4892 | 0 | ok |
+| md5 | 7637 | 760 | 16 | ok |
+| pbkdf2-sha256 | 15972 | 2928 | 64 | ok |
+| p256-ecdh | 83153 | 4892 | 0 | ok |
 
 `mlkem768` and `mldsa65` check a round trip, not a vector, and `p256-ecdsa` and `sensor` a round trip and a rejected change; the rest match published vectors. The randomness in that run is a fixed, insecure stream.
 

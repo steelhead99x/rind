@@ -25,6 +25,14 @@
 //! timings puts at about one cycle more than `mul`, and the key's halves
 //! are split and masked once, when the key is set. Its timing likewise rests on `mul` taking the
 //! same time for every operand.
+//!
+//! That holds where a 32-bit `mul` is fixed-time: riscv32imac, i686, and
+//! Arm cores whose `MUL` is single-cycle. It does not hold where `mul` is a
+//! library call (riscv32i without the M extension calls `__mulsi3`, which
+//! branches on its operands) or the core has the small, slow multiplier
+//! option (Cortex-M0). Only riscv32imac has been measured, and the 64-bit
+//! products the old 32-bit path formed had the same dependence on those
+//! cores.
 
 use crate::low;
 
