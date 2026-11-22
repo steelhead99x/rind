@@ -402,7 +402,7 @@ theorem aes_gcm_open (he : ∃ e, low.entry.Entry.new_secret = ok e)
     (key : List (BitVec 8)) (k : aead.Key) (hk : KeyReady alg key k) (nonce : aead.Nonce) (aad in_out : Slice U8)
     :
     k.open_in_place nonce aad in_out ⦃ r =>
-      if in_out.length < 16 then r.1 = .Err .DecryptFailed else
+      if in_out.length < 16 then r.1 = .Err .DecryptFailed ∧ r.2 = in_out else
       if 2 ^ 61 ≤ aad.length ∨ 2 ^ 36 - 32 < in_out.length - 16 then
         r.1 = .Err .WrongLength ∧ r.2.val = in_out.val.take (in_out.length - 16)
       else
@@ -413,7 +413,7 @@ theorem aes_gcm_open (he : ∃ e, low.entry.Entry.new_secret = ok e)
   unfold aead.Key.open_in_place
   by_cases hs : in_out.length < 16
   · rw [ite_eq_left hs]
-    exact (WP.spec_ok _).2 (by rw [ite_eq_left hs])
+    exact (WP.spec_ok _).2 (by rw [ite_eq_left hs]; exact ⟨rfl, rfl⟩)
   · rw [ite_eq_right hs]
     have hd : (in_out.val.drop (in_out.length - 16)).length = 16 := by simp [Slice.length] at *; omega
     rw [dite_eq_left hd]

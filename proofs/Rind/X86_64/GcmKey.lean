@@ -647,7 +647,7 @@ theorem gcm_key_open (he : ∃ e, low.entry.Entry.new_secret = ok e)
     (iv : aead.gcm.Iv) (hiv : 0 < iv.bytes.length ∧ iv.bytes.length < 2 ^ 61)
     (aad in_out : Slice U8) :
     k.open_in_place iv aad in_out ⦃ r =>
-      if in_out.length < k.tag_len.val then r.1 = .Err .DecryptFailed else
+      if in_out.length < k.tag_len.val then r.1 = .Err .DecryptFailed ∧ r.2 = in_out else
       if 2 ^ 61 ≤ aad.length ∨ 2 ^ 36 - 32 < in_out.length - k.tag_len.val then
         r.1 = .Err .WrongLength ∧ r.2.val = in_out.val.take (in_out.length - k.tag_len.val)
       else
