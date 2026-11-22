@@ -29,7 +29,7 @@ Root cause, from the source and the image's disassembly (no hardware was touched
 
 What this quest changes (each its own PR, stacked on #275):
 
-1. `portable::cpu::zero_bytes` is one `memset` and an opaque use of the pointer (`black_box`), not a volatile byte loop. All portable targets.
+1. On Xtensa, `portable::cpu::zero_bytes` uses one `memset` and an assembly barrier that can read through the pointer. Other portable targets retain the volatile byte loop.
 2. ChaCha20 on Xtensa: `ssai` once and `src` four times per rotate step, in `portable::chacha20`.
 3. Poly1305 on Xtensa: each limb product split at bit 28 into a low and a high `u32` sum so no `u64` add exists, and the tag's `+ s` in 16-bit halves. Same limbs and carries as the `u64` version, checked by a test.
 
