@@ -129,8 +129,20 @@ fn rounds4(st: &mut [u32; 16]) {
     }
     let mut x = *st;
     for _ in 0..10 {
-        round(&mut x, [0, 1, 2, 3], [4, 5, 6, 7], [8, 9, 10, 11], [12, 13, 14, 15]);
-        round(&mut x, [0, 1, 2, 3], [5, 6, 7, 4], [10, 11, 8, 9], [15, 12, 13, 14]);
+        round(
+            &mut x,
+            [0, 1, 2, 3],
+            [4, 5, 6, 7],
+            [8, 9, 10, 11],
+            [12, 13, 14, 15],
+        );
+        round(
+            &mut x,
+            [0, 1, 2, 3],
+            [5, 6, 7, 4],
+            [10, 11, 8, 9],
+            [15, 12, 13, 14],
+        );
     }
     *st = x;
 }
@@ -235,7 +247,7 @@ fn words<const B: usize, const W: usize>(bytes: &[u8; B]) -> [u32; W] {
 mod tests {
     use super::*;
     use crate::low::ct;
-    use crate::low::generic::chacha20::cipher;
+    use crate::low::generic::chacha20::{cipher, rounds as generic_rounds};
 
     // `rounds4`, the schedule Xtensa runs with `rotr4` in Rust, against the
     // proven generic rounds: RFC 8439 section 2.3.2's block and random states.
@@ -244,11 +256,13 @@ mod tests {
         let mut st: [u32; 16] = core::array::from_fn(|i| 0x6170_7865u32.wrapping_mul(i as u32 + 1));
         for _ in 0..1000 {
             let mut want = st;
-            crate::low::generic::chacha20::rounds(&mut want);
-            let mut got = st;
+            generic_rounds(&mut want);
+            let mut got = ct::into_secret(st);
             rounds4(&mut got);
-            assert_eq!(got, want);
-            st = core::array::from_fn(|i| want[i].rotate_left(i as u32).wrapping_add(st[(i + 5) % 16]));
+            assert_eq!(ct::into_public(got), want);
+            st = core::array::from_fn(|i| {
+                want[i].rotate_left(i as u32).wrapping_add(st[(i + 5) % 16])
+            });
         }
         let key: [u8; 32] = core::array::from_fn(|i| i as u8);
         let nonce = [1, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0, 0x4a, 0, 0, 0, 0];
@@ -262,7 +276,7 @@ mod tests {
         let mut a = input;
         rounds4(&mut a);
         let mut b = input;
-        crate::low::generic::chacha20::rounds(&mut b);
+        generic_rounds(&mut b);
         assert_eq!(a, b);
     }
 
