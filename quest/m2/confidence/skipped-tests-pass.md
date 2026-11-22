@@ -12,9 +12,10 @@ Found by the `tests` audit's run on `main` at `253c93f6`. Verified by reading ea
 - 11 sites read `SLOW_TESTS` and `return` or skip their long vectors when it is unset (`tests/wycheproof.rs` `pbkdf2_tests`, `tests/heap_scratch.rs` `rsa_generate`, `high/digest.rs`, `high/ecdsa.rs`, `high/kem.rs`, `tests/crosschecks.rs`). The merge gate's `cargo nextest run` does not set it, so those vectors run only in `build.yml`'s release step and the artificial-CPU tiers' filtered rerun, and a gate log shows them as passed.
 - `rind-fips/tests/fork.rs` and `rind/src/fips_rng.rs`'s fork test poll `waitpid(WNOHANG)` against a 10 s `Instant` deadline and a 1000 x 10 ms loop, so a loaded runner fails them as a hang. `quest context`'s rule is that unit tests mock time instead.
 
-Recommended: give the early returns one helper, `crate::test::skipped(why)`, that prints `skipped: <why>` to stdout and returns, so a nextest log names what did not run, and have the SLOW_TESTS ones call it (rejected: `#[ignore]`, which would need `--include-ignored` in every job that now sets `SLOW_TESTS`). For the two fork tests, block in `waitpid` and let nextest's per-test `slow-timeout` (a `.config/nextest.toml` with `terminate-after`) kill a hang, which a child that never exits would still cause (rejected: a longer deadline, which only moves the flake).
+Decided by the owner on 2026-11-21: one shared helper, `crate::test::skipped(why)`, prints `skipped: <why>` to stdout and returns, so a nextest log names what did not run; the SLOW_TESTS sites and the CPU early returns call it (rejected: `#[ignore]`, which would need `--include-ignored` in every job that now sets `SLOW_TESTS`; asserting on tiers, which breaks every runner without AVX2 or SHA-3). The 43 sites are too many for the audit's PR.
+
+For the two fork tests, recommended: block in `waitpid` and let nextest's per-test `slow-timeout` (a `.config/nextest.toml` with `terminate-after`) kill a hang (rejected: a longer deadline, which only moves the flake).
 
 ## Waiting
 
-- Maintainer: decide whether a CPU skip should fail instead of print on the tiers that name the feature (recommended: print only, since `detects_the_expected_cpu` already fails a mis-detected tier; the alternative is `assert!` as `ct_sde_hmac` does, which breaks every runner without AVX2 or SHA-3).
 - Maintainer: decide whether nextest's `slow-timeout` may stand in for the fork tests' deadline (recommended: yes; the alternative keeps the deadline and accepts the flake).
