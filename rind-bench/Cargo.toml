@@ -23,7 +23,7 @@ ed25519-dalek = { version = "3", features = ["alloc", "pkcs8", "rand_core"] }
 fips205 = "0.5"
 getrandom = { version = "0.4", features = ["sys_rng"] }
 hkdf = "0.13"
-hex = { version = "0.4", features = ["serde"] }
+hex = "0.4"
 hmac = "0.13"
 hpke = { version = "0.15", features = ["aes", "hkdfsha2"] }
 hpke-rs = { version = "0.8", features = ["libcrux"] }
@@ -46,14 +46,11 @@ ml-kem = { version = "0.3", features = ["getrandom"] }
 p256 = { version = "0.14", features = ["ecdh", "getrandom"] }
 p384 = { version = "0.14", features = ["ecdh", "getrandom", "oprf"] }
 p521 = { version = "0.14", features = ["ecdh", "getrandom"] }
-proptest = "1.5.0"
 ring = "0.17"
 rind-jsonwebtoken = { path = "../rind-jsonwebtoken" }
 rind-rustls = { path = "../rind-rustls" }
 rsa = { version = "0.10", features = ["pkcs1v15"] }
 rustls = { version = "0.23.36", default-features = false, features = ["aws-lc-rs", "ring", "std"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
 sha1 = "0.11"
 sha2 = "0.11"
 sha3 = "0.12"
