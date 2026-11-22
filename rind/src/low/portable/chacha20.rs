@@ -43,51 +43,57 @@ impl ChaCha20 {
     }
 }
 
-/// ChaCha20's twenty rounds on Xtensa, where four rotates by one distance
-/// share one `ssai` and take one `src` each, not the shift pair and `or`
-/// LLVM's backend emits (960 of a block's 2,200 instructions were rotates).
-/// Same arithmetic as `generic::chacha20::rounds`, which `matches_generic`
-/// and the firmware's RFC 8439 known answer check it against; nothing here
-/// is proven.
+/// Rotates four words right by `R`.
+///
+/// On Xtensa one `ssai` and four `src`, where LLVM's backend emits the shift
+/// pair and `or` a rotate: 960 of a block's 2,200 instructions were rotates.
+/// Elsewhere (host tests) the same function in Rust, so `rounds4`'s schedule
+/// runs under test; only this asm block is checked by the board alone.
+#[cfg(target_arch = "xtensa")]
+#[inline(always)]
+fn rotr4<const R: u32>([w0, w1, w2, w3]: [u32; 4]) -> [u32; 4] {
+    let (y0, y1, y2, y3);
+    // SAFETY: `ssai` and `src` are base Xtensa instructions; `R` is one of
+    // 16, 20, 24, 25 (the call sites), in `ssai`'s 0..32 range. The block
+    // writes only SAR and its four operands, which are `inout`, each its own
+    // register read and written in place (`lateout` would let an output
+    // share an input's register before every input was read), loads and
+    // stores nothing, and reads SAR only after its own `ssai`.
+    unsafe {
+        core::arch::asm!(
+            "ssai {r}",
+            "src {a}, {a}, {a}",
+            "src {b}, {b}, {b}",
+            "src {c}, {c}, {c}",
+            "src {d}, {d}, {d}",
+            r = const R,
+            a = inout(reg) w0 => y0,
+            b = inout(reg) w1 => y1,
+            c = inout(reg) w2 => y2,
+            d = inout(reg) w3 => y3,
+            out("sar") _,
+            options(nomem, nostack),
+        );
+    }
+    [y0, y1, y2, y3]
+}
+
+#[cfg(all(test, not(target_arch = "xtensa")))]
+#[inline(always)]
+fn rotr4<const R: u32>(w: [u32; 4]) -> [u32; 4] {
+    w.map(|w| w.rotate_right(R))
+}
+
+/// ChaCha20's twenty rounds as Xtensa runs them: four quarter rounds at once,
+/// step by step, so each rotate distance is shared by the four. Same
+/// arithmetic as `generic::chacha20::rounds` (a test checks it against them);
+/// the Xtensa form is not proven.
 ///
 /// Every operation is an add, an xor, or a fixed rotate: no branch or index
 /// depends on the state, and `ssai`'s distance is an immediate, not data.
-#[cfg(target_arch = "xtensa")]
+#[cfg(any(target_arch = "xtensa", test))]
 #[inline(never)]
-fn rounds_xtensa(st: &mut [u32; 16]) {
-    // Rotates four words left by `32 - R`, which is right by `R`.
-    //
-    // SAFETY: `ssai` and `src` are base Xtensa instructions; `R` is one of
-    // 16, 20, 24, 25 (the call sites), in `ssai`'s 0..32 range. The block
-    // writes only SAR and the four words, loads and stores nothing, and
-    // reads SAR only after its own `ssai`, so no other write to SAR matters.
-    #[inline(always)]
-    fn rotl4<const R: u32>([w0, w1, w2, w3]: [u32; 4]) -> [u32; 4] {
-        let (y0, y1, y2, y3);
-        unsafe {
-            core::arch::asm!(
-                "ssai {r}",
-                "src {y0}, {w0}, {w0}",
-                "src {y1}, {w1}, {w1}",
-                "src {y2}, {w2}, {w2}",
-                "src {y3}, {w3}, {w3}",
-                r = const R,
-                w0 = in(reg) w0,
-                w1 = in(reg) w1,
-                w2 = in(reg) w2,
-                w3 = in(reg) w3,
-                y0 = lateout(reg) y0,
-                y1 = lateout(reg) y1,
-                y2 = lateout(reg) y2,
-                y3 = lateout(reg) y3,
-                out("sar") _,
-                options(nomem, nostack),
-            );
-        }
-        [y0, y1, y2, y3]
-    }
-    // Four quarter rounds at once, step by step, so each rotate distance
-    // is shared by the four.
+fn rounds4(st: &mut [u32; 16]) {
     #[inline(always)]
     fn round(x: &mut [u32; 16], a: [usize; 4], b: [usize; 4], c: [usize; 4], d: [usize; 4]) {
         let mut va = a.map(|i| x[i]);
@@ -98,22 +104,22 @@ fn rounds_xtensa(st: &mut [u32; 16]) {
             va[i] = va[i].wrapping_add(vb[i]);
             vd[i] ^= va[i];
         }
-        vd = rotl4::<16>(vd);
+        vd = rotr4::<16>(vd);
         for i in 0..4 {
             vc[i] = vc[i].wrapping_add(vd[i]);
             vb[i] ^= vc[i];
         }
-        vb = rotl4::<20>(vb);
+        vb = rotr4::<20>(vb);
         for i in 0..4 {
             va[i] = va[i].wrapping_add(vb[i]);
             vd[i] ^= va[i];
         }
-        vd = rotl4::<24>(vd);
+        vd = rotr4::<24>(vd);
         for i in 0..4 {
             vc[i] = vc[i].wrapping_add(vd[i]);
             vb[i] ^= vc[i];
         }
-        vb = rotl4::<25>(vb);
+        vb = rotr4::<25>(vb);
         for i in 0..4 {
             x[a[i]] = va[i];
             x[b[i]] = vb[i];
@@ -123,20 +129,8 @@ fn rounds_xtensa(st: &mut [u32; 16]) {
     }
     let mut x = *st;
     for _ in 0..10 {
-        round(
-            &mut x,
-            [0, 1, 2, 3],
-            [4, 5, 6, 7],
-            [8, 9, 10, 11],
-            [12, 13, 14, 15],
-        );
-        round(
-            &mut x,
-            [0, 1, 2, 3],
-            [5, 6, 7, 4],
-            [10, 11, 8, 9],
-            [15, 12, 13, 14],
-        );
+        round(&mut x, [0, 1, 2, 3], [4, 5, 6, 7], [8, 9, 10, 11], [12, 13, 14, 15]);
+        round(&mut x, [0, 1, 2, 3], [5, 6, 7, 4], [10, 11, 8, 9], [15, 12, 13, 14]);
     }
     *st = x;
 }
@@ -147,7 +141,7 @@ fn rounds_xtensa(st: &mut [u32; 16]) {
 fn keystream(input: &[u32; 16]) -> [u32; 16] {
     let mut st = *input;
     #[cfg(target_arch = "xtensa")]
-    rounds_xtensa(&mut st);
+    rounds4(&mut st);
     #[cfg(not(target_arch = "xtensa"))]
     rounds(&mut st);
     for (s, i) in st.iter_mut().zip(input) {
@@ -242,6 +236,35 @@ mod tests {
     use super::*;
     use crate::low::ct;
     use crate::low::generic::chacha20::cipher;
+
+    // `rounds4`, the schedule Xtensa runs with `rotr4` in Rust, against the
+    // proven generic rounds: RFC 8439 section 2.3.2's block and random states.
+    #[test]
+    fn rounds4_matches_generic() {
+        let mut st: [u32; 16] = core::array::from_fn(|i| 0x6170_7865u32.wrapping_mul(i as u32 + 1));
+        for _ in 0..1000 {
+            let mut want = st;
+            crate::low::generic::chacha20::rounds(&mut want);
+            let mut got = st;
+            rounds4(&mut got);
+            assert_eq!(got, want);
+            st = core::array::from_fn(|i| want[i].rotate_left(i as u32).wrapping_add(st[(i + 5) % 16]));
+        }
+        let key: [u8; 32] = core::array::from_fn(|i| i as u8);
+        let nonce = [1, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0, 0x4a, 0, 0, 0, 0];
+        let input = {
+            let mut input = [0u32; 16];
+            input[..4].copy_from_slice(&SIGMA);
+            input[4..12].copy_from_slice(&words::<32, 8>(&key));
+            input[12..].copy_from_slice(&words::<16, 4>(&nonce));
+            input
+        };
+        let mut a = input;
+        rounds4(&mut a);
+        let mut b = input;
+        crate::low::generic::chacha20::rounds(&mut b);
+        assert_eq!(a, b);
+    }
 
     // `cipher32` against `generic::chacha20::cipher`, the proven loop: every
     // length up to 300 bytes, starting at each offset from a word, so the
