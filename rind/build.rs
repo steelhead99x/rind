@@ -62,7 +62,6 @@ use std::path::{Path, PathBuf};
 
 fn main() {
     println!("cargo::rerun-if-changed=build.rs");
-    println!("cargo::rerun-if-env-changed=RUST_TARGET_PATH");
     println!(
         r#"cargo::rustc-check-cfg=cfg(rind_backend, values("x86_64", "aarch64", "arm", "portable"))"#
     );
@@ -73,6 +72,7 @@ fn main() {
     println!("cargo::rustc-check-cfg=cfg(rind_mul16_top)");
     println!("cargo::rustc-check-cfg=cfg(rind_mul16_soft)");
     println!("cargo::rustc-check-cfg=cfg(rind_reg_asm)");
+    println!("cargo::rerun-if-env-changed=RUST_TARGET_PATH");
 
     let os = env::var("CARGO_CFG_TARGET_OS").expect("cargo sets the target os");
     let libc = env::var("CARGO_CFG_TARGET_ENV").is_ok_and(|e| !e.is_empty());
