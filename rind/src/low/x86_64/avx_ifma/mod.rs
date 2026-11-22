@@ -9,8 +9,8 @@
 //! and where VG's ladder holds three 256-bit accumulators in ymm16 to ymm18,
 //! which VEX cannot name, it renames each live range onto a ymm register dead
 //! throughout it, or spills one around it to a 96-byte stack frame the ladder
-//! allocates at its entry (not the red zone, which Windows lacks), zeroes
-//! before it returns, and frees. No other instruction, branch, or memory
+//! allocates at its entry (not the red zone, which Windows lacks) and frees
+//! before it returns, without wiping it, as with any stack temporary. No other instruction, branch, or memory
 //! access changes, so the routines compute what VG's do. `admin/ct-sde`
 //! checks the ladder's trace under an Arrow Lake model, as `admin/ctgrind`
 //! cannot decode AVX-IFMA, and `rind/tests` check them against s2n-bignum,

@@ -2029,10 +2029,6 @@ call {vg_gf25519_r64_invert}
 .Lx25519_ifma_14dd:
 .byte 0x4c,0x89,0x5e,0x18
 .Lx25519_ifma_14e1:
-vpxor %ymm0,%ymm0,%ymm0
-vmovdqu %ymm0,0(%rsp)
-vmovdqu %ymm0,32(%rsp)
-vmovdqu %ymm0,64(%rsp)
 lea 96(%rsp), %rsp
 .byte 0xc3
 .p2align 6"#,

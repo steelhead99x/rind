@@ -647,7 +647,7 @@ register to its VEX form and nothing else, except that VG's X25519 ladder
 holds three accumulators in ymm16 to ymm18, which VEX cannot name, so each
 live range of one moves onto a ymm register dead throughout it, or else
 around a spill of one to a 96-byte stack frame the ladder allocates, which it
-zeroes and frees before it returns. They are not VG's proven bytes, so they carry no ✓. VG's key
+frees before it returns without wiping it. They are not VG's proven bytes, so they carry no ✓. VG's key
 generation and signing, and X25519's public key, use 512-bit registers, so
 those stay on s2n-bignum. Ed25519 verification uses VG's variant for CPUs
 without the SHA-512 instructions, so no `vsha512` instruction runs. On a Core

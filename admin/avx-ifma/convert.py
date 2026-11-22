@@ -12,8 +12,8 @@ usage: convert.py REPO NAME CONVERTED_SIBLINGS(comma separated)
 Writes rind/src/low/x86_64/avx_ifma/NAME.rs. Needs binutils (as, objdump, nm).
 Every EVEX `vpmadd52luq`, `vpmadd52huq`, and `vpxorq` on ymm0 to ymm15 becomes its
 `{vex}` form; a register above ymm15 is renamed onto a ymm register dead across its
-whole live range, or else spilled around that range to a stack frame the routine allocates (no red zone, so Windows is safe), zeroed again before
-`ret`; 512-bit zeroing becomes `vzeroall`. Anything else EVEX fails the run.
+whole live range, or else spilled around that range to a stack frame the routine allocates (no red zone, so Windows is safe) and frees before
+`ret`, unwiped like any stack temporary; 512-bit zeroing becomes `vzeroall`. Anything else EVEX fails the run.
 """
 REPO = sys.argv[1]
 V = REPO + "/rind/src/low/x86_64/vg/"
@@ -247,8 +247,6 @@ for i, (a, b, t) in enumerate(ins):
         out.append("call {" + stubaddr[tgt] + "}")
     elif op == "ret":
         if spills:
-            out.append("vpxor %ymm0,%ymm0,%ymm0")
-            out += [f"vmovdqu %ymm0,{k * 32}(%rsp)" for k in range(nslots)]
             out.append(f"lea {FRAME}(%rsp), %rsp")
         out.append(".byte 0xc3")
     elif b[0] == "62":
