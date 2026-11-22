@@ -878,9 +878,13 @@ mod tests {
         // On a big.LITTLE host the thread can move between cores, and each
         // core reads its own MIDR_EL1. Compare only when both reads around
         // the detection agree.
+        //
+        // `RIND_TEST_MIDR` replaces the register, as `admin/ctgrind`'s narrow
+        // pass sets it under valgrind (which hides the register), so there is
+        // nothing native to compare.
         let midr = read_midr();
         let detected = detect_wide_multiplier().0;
-        if read_midr() == midr {
+        if std::env::var_os("RIND_TEST_MIDR").is_none() && read_midr() == midr {
             assert_eq!(detected, midr.is_none_or(wide_from_midr));
         }
         // qemu-user shows the host's sysfs, which has no aarch64 registers,
