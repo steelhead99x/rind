@@ -349,7 +349,7 @@ pub fn run_all<C: Clock>(
         ));
     }
     #[cfg(feature = "p256-ecdsa")]
-    if fits(clock, "p256", &["p256-ecdsa-sign/{lib}", "p256-ecdsa-verify/{lib}"], "rind", &mut emit) {
+    if fits(clock, "p256", &["p256-ecdsa-sign/{lib}", "p256-ecdsa-verify-parsed/{lib}"], "rind", &mut emit) {
         use rind::ecdsa::{KeyPair, PublicKey, sign, verify};
         let kp = KeyPair::generate(&sign::P256_SHA256_FIXED).unwrap();
         let sig = kp.sign(&buf[..64]).unwrap();
@@ -364,7 +364,7 @@ pub fn run_all<C: Clock>(
         ));
         push!(time(
             clock,
-            "p256-ecdsa-verify/{lib}",
+            "p256-ecdsa-verify-parsed/{lib}",
             "rind",
             rounds,
             it(1),
@@ -373,17 +373,24 @@ pub fn run_all<C: Clock>(
     }
     #[cfg(feature = "mlkem768")]
     if fits(clock, "mlkem768", &["mlkem768-encaps/{lib}", "mlkem768-decaps/{lib}"], "rind", &mut emit) {
-        use rind::kem::{DecapsulationKey, MlKem768};
+        use rind::kem::{DecapsulationKey, EncapsulationKey, MlKem768};
         let dk = DecapsulationKey::<MlKem768>::generate().unwrap();
         let ek = dk.public_key();
         let (ct, _) = ek.encapsulate().unwrap();
+        // As rind-bench's `mlkem768-encaps`: the encoded key is parsed inside the timed closure.
+        let ek_bytes = ek.as_ref().to_vec();
         push!(time(
             clock,
             "mlkem768-encaps/{lib}",
             "rind",
             rounds,
             it(1),
-            || black_box(&ek).encapsulate().map_or(0, |(_, s)| s.as_ref()[0]),
+            || {
+                EncapsulationKey::<MlKem768>::new(black_box(&ek_bytes))
+                    .ok()
+                    .and_then(|k| k.encapsulate().ok())
+                    .map_or(0, |(_, s)| s.as_ref()[0])
+            },
         ));
         push!(time(
             clock,
