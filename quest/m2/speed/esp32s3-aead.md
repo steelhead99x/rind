@@ -29,7 +29,7 @@ Root cause, from the source and the image's disassembly (no hardware was touched
 
 What this quest changes (each its own PR, stacked on #275):
 
-1. `portable::cpu::zero_bytes` is one `memset` and an opaque use of the pointer (`black_box`), not a volatile byte loop. All portable targets.
+1. On Xtensa, `portable::cpu::zero_bytes` uses one `memset` and an assembly barrier that can read through the pointer. Other portable targets retain the volatile byte loop.
 2. ChaCha20 on Xtensa: `ssai` once and `src` four times per rotate step, in `portable::chacha20`.
 3. Poly1305 on Xtensa: each limb product split at bit 28 into a low and a high `u32` sum so no `u64` add exists, and the tag's `+ s` in 16-bit halves. Same limbs and carries as the `u64` version, checked by a test.
 
@@ -39,7 +39,7 @@ Validation plan: unit tests on the host for each change (RFC 8439, the existing 
 
 ## Waiting
 
-- steelhead99x: flash the images listed in the PR, interleaved with the control, with `run-board.sh`, and send the logs. Check: the PR body's table holds board medians for every image.
+- steelhead99x: the S3 board numbers are measured at the current heads and are in the PR bodies (80 MHz, 1500 B seal 1020.8 us against RustCrypto's 1857.6 us; 16 B seal 107.1 against 99.4 us). The C6 was measured too (160 MHz, #275 head against #280 head): the 16-bit tag add in `finish` is neutral on seal and costs a fixed 2.5 us on open on riscv32, cause not understood. Decide: (a) accept it, (b) gate the tag add to Xtensa only, (c) investigate first (disassemble `open` in both C6 images). Cortex-M is unmeasured.
 - Maintainer: whether the 26-bit Poly1305 stays on every 32-bit portable target or narrows to riscv32 with the M extension (the open decision in [the C6 ChaCha20 quest](/quest/m2/speed/esp32c6-chacha20poly1305.md)). The S3's `mull` and `muluh` are fixed-time on this core as far as the ISA manual says; only the S3's timing has not been measured for operand dependence.
 
 ## Related

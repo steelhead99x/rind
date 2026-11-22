@@ -406,6 +406,7 @@ fn mulhi(a: u32, b: u32) -> u32 {
 
 /// The sum of the 64-bit products of `a`'s and `b`'s limbs, pairwise: each
 /// one `mul` and one `mulhu` on riscv32imac.
+#[cfg(any(not(target_arch = "xtensa"), test))]
 #[inline(always)]
 fn dot(a: [u32; 5], b: [u32; 5]) -> u64 {
     a.iter().zip(b).fold(0, |sum, (a, b)| {
@@ -431,8 +432,9 @@ impl Zeroable for Poly1305 {}
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use core::cell::Cell;
+
     use super::*;
-    use std::cell::Cell;
 
     thread_local! {
         /// Makes `reduce` take `reduce_split`, as Xtensa does.
@@ -707,7 +709,7 @@ mod tests {
             let r: [u32; 5] = core::array::from_fn(|k| {
                 let v = next() & rmax[k];
                 if i % 3 == 0 {
-                    rmax[k] - (v & 3 & rmax[k]) & rmax[k]
+                    (rmax[k] - (v & 3 & rmax[k])) & rmax[k]
                 } else {
                     v
                 }

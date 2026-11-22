@@ -14,18 +14,23 @@ pub(crate) fn leave_cpu_state(_old: u32) {}
 /// There must be `len` writable bytes at `ptr`; with no alignment
 /// requirement.
 pub(in crate::low) unsafe fn zero_bytes(ptr: *mut u8, len: usize) {
-    // One `memset`, which runs a word or more at a time, then an opaque use
-    // of `ptr`. `black_box` lowers to an empty `asm!` that may read through
-    // it, so the compiler cannot call the stores dead when the value is
-    // about to be freed. A volatile store a byte at a time (the loop this
-    // was) costs four instructions a byte on Xtensa, with a `memw` in front
-    // of each, and the per-call cost of a short-lived AEAD key on the S3 was at most about 88 us of it (see the quest).
-    //
-    // SAFETY: the caller guarantees `len` writable bytes at `ptr`.
-    unsafe { ptr.write_bytes(0, len) };
-    core::hint::black_box(ptr);
-    // `black_box` is best effort; the fence orders the stores before whatever follows.
-    core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::SeqCst);
+    #[cfg(target_arch = "xtensa")]
+    {
+        // Xtensa puts a `memw` before each volatile store. Write the buffer
+        // in one memset and expose its address to assembly that can read
+        // memory, so the compiler must retain the stores.
+        // SAFETY: the caller guarantees `len` writable bytes at `ptr`.
+        // The assembly emits only a comment and touches no memory or stack.
+        unsafe {
+            ptr.write_bytes(0, len);
+            core::arch::asm!("/* {ptr} */", ptr = in(reg) ptr, options(readonly, nostack));
+        }
+    }
+    #[cfg(not(target_arch = "xtensa"))]
+    for i in 0..len {
+        // SAFETY: the caller guarantees `len` writable bytes at `ptr`.
+        unsafe { ptr.add(i).write_volatile(0) };
+    }
 }
 
 /// Compares the first `min(a.len(), b.len())` bytes of `a` and `b`, reading
