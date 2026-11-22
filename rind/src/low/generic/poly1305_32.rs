@@ -241,16 +241,20 @@ impl Blocks {
 /// limb is under 2^26 but the second, which is under 2^26 + 2^6. Xtensa takes
 /// `reduce_split`, the rest `reduce_wide`; they agree on every input within the
 /// bounds in `Blocks::block`, which a test checks.
-#[cfg(not(target_arch = "xtensa"))]
 #[inline(always)]
 fn reduce(h: [u32; 5], r: [u32; 5], s: [u32; 4]) -> [u32; 5] {
-    reduce_wide(h, r, s)
-}
-
-#[cfg(target_arch = "xtensa")]
-#[inline(always)]
-fn reduce(h: [u32; 5], r: [u32; 5], s: [u32; 4]) -> [u32; 5] {
-    reduce_split(h, r, s)
+    #[cfg(target_arch = "xtensa")]
+    return reduce_split(h, r, s);
+    // A test can force the split form on the host, so the RFC 8439, aws-lc and
+    // HACL* tests run it end to end.
+    #[cfg(all(not(target_arch = "xtensa"), test))]
+    return if tests::FORCE_SPLIT.with(|f| f.get()) {
+        reduce_split(h, r, s)
+    } else {
+        reduce_wide(h, r, s)
+    };
+    #[cfg(all(not(target_arch = "xtensa"), not(test)))]
+    return reduce_wide(h, r, s);
 }
 
 /// `reduce` over 64-bit sums: five 26-bit products' sums in `u64`s, then
@@ -306,7 +310,7 @@ fn reduce_wide(
 /// data, and a taken one costs cycles. Nothing here is wider than 32 bits
 /// but the multiplies, `mull` and `muluh`.
 ///
-/// Each product `h * r`, both under 2^28, is split at bit 28 into
+/// Each product `h * r`, with `h` under 2^28 and `r` or `s` under 5 * 2^26 (about 2^28.3), is split at bit 28 into
 /// `lo = h * r mod 2^28` and `hi = h * r >> 28`, from `h << 4` times `r`:
 /// its low word is `16 * lo` and its high word is `hi`. A limb's sum is then
 /// `a + 2^28 * b`, `a` the five `lo`s (under 5 * 2^28) and `b` the five `hi`s,
@@ -389,6 +393,25 @@ impl Zeroable for Poly1305 {}
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+    use std::cell::Cell;
+
+    thread_local! {
+        /// Makes `reduce` take `reduce_split`, as Xtensa does.
+        pub(super) static FORCE_SPLIT: Cell<bool> = const { Cell::new(false) };
+    }
+
+    // Every test above that checks a tag, with `reduce_split` doing the
+    // reductions, as it does on Xtensa.
+    #[test]
+    fn through_split() {
+        FORCE_SPLIT.with(|f| f.set(true));
+        aws_lc();
+        rfc8439();
+        finish_carries_far();
+        matches_hacl_and_generic();
+        FORCE_SPLIT.with(|f| f.set(false));
+    }
+
     use crate::low::ct;
     use crate::test::file_test;
 

@@ -129,8 +129,20 @@ fn rounds4(st: &mut [u32; 16]) {
     }
     let mut x = *st;
     for _ in 0..10 {
-        round(&mut x, [0, 1, 2, 3], [4, 5, 6, 7], [8, 9, 10, 11], [12, 13, 14, 15]);
-        round(&mut x, [0, 1, 2, 3], [5, 6, 7, 4], [10, 11, 8, 9], [15, 12, 13, 14]);
+        round(
+            &mut x,
+            [0, 1, 2, 3],
+            [4, 5, 6, 7],
+            [8, 9, 10, 11],
+            [12, 13, 14, 15],
+        );
+        round(
+            &mut x,
+            [0, 1, 2, 3],
+            [5, 6, 7, 4],
+            [10, 11, 8, 9],
+            [15, 12, 13, 14],
+        );
     }
     *st = x;
 }
@@ -248,7 +260,9 @@ mod tests {
             let mut got = st;
             rounds4(&mut got);
             assert_eq!(got, want);
-            st = core::array::from_fn(|i| want[i].rotate_left(i as u32).wrapping_add(st[(i + 5) % 16]));
+            st = core::array::from_fn(|i| {
+                want[i].rotate_left(i as u32).wrapping_add(st[(i + 5) % 16])
+            });
         }
         let key: [u8; 32] = core::array::from_fn(|i| i as u8);
         let nonce = [1, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0, 0x4a, 0, 0, 0, 0];
