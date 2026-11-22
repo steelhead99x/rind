@@ -10,6 +10,14 @@
 //! product is a full 64-bit multiply. It takes at most `u32::MAX` bytes,
 //! which a 32-bit address space cannot exceed. Tests check the others
 //! against it.
+//!
+//! The 26-bit path is accepted and not yet proven: the proof is planned (the
+//! portable ChaCha20-Poly1305 proof quest), and until then differential tests
+//! and ctgrind cover it. Its limb products are 32 by 32 to 64-bit multiplies,
+//! fixed-time on riscv32imac and i686 but not on a core with an
+//! operand-dependent long multiply (Cortex-M3) or no hardware multiply
+//! (riscv32i); only riscv32imac has been measured. HACL*'s path had the same
+//! property there.
 
 #[cfg(any(rind_backend = "arm", test))]
 use libcrux_hacl_rs::streaming_types::error_code;
