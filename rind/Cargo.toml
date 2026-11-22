@@ -18,12 +18,13 @@ targets = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu", "i686-unknow
 # Runs the unrolled SHA-512 body on the ESP32-S3 instead of the rolled loop
 # every 32-bit target runs by default. The unrolled body is about 18 KiB of
 # code against the rolled loop's 1.4 KiB. On `xtensa-esp32s3-espidf` it is
-# placed in IRAM (and `K` in internal DRAM), where it took 0.911 to 0.918 of
-# the rolled loop's cycles on the board; the IRAM that costs is what the
+# placed in IRAM (and `K` in internal DRAM); it was 0.911 to 0.918 of the
+# rolled loop's cycles at 240 MHz and about 8.7% faster than it at 80 MHz
+# (one board; see ALGORITHMS.md); the IRAM that costs is what the
 # `ESP32-S3 SHA-512 layout` workflow prints, and admin/esp32s3-sha512-layout
 # caps it at 20 KiB. On `xtensa-esp32s3-none-elf` there is no IRAM placement,
-# the body runs from flash, and it is slower than the rolled loop: leave this
-# off there. It does nothing elsewhere.
+# the body runs from flash and measured the same speed as from IRAM at 80 MHz,
+# for 17 KiB more flash text than the default. It does nothing elsewhere.
 esp32s3-sha512-unrolled = []
 # Deprecated and empty. It used to select the rolled loop, which is now the
 # default; kept so a manifest that names it still resolves.

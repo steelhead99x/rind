@@ -9,7 +9,9 @@
 //! code from flash. On that board the rolled loop takes about 0.033×
 //! main's unrolled HACL* body, about 30×. That figure is the rolled loop
 //! against that HACL* body. Against the rolled loop on the board, the IRAM
-//! placement of the unrolled body takes 0.911 to 0.918 of its cycles.
+//! placement of the unrolled body took 0.911 to 0.918 of its cycles in the
+//! 2026-11-18 run at 240 MHz; the later 80 MHz board A/B below supersedes
+//! that for this default.
 //!
 //! Two bodies, both following [`sha256`](sha256.rs) with one 16-word
 //! window. `rolled` is a single 80-round loop that stays in a few
@@ -29,9 +31,16 @@
 //! flash, and which took 0.911 to 0.918 of the rolled loop's cycles on the
 //! board (2026-11-18 run; the raw logs are in the PR discussion that
 //! introduced the placement). `xtensa-esp32s3-none-elf` has no IRAM
-//! placement, so there `unrolled` stays in the ordinary flash sections and
-//! measured 11.3 to 13.1 times slower than the rolled loop: do not enable
-//! the feature on that target for speed. The driver
+//! placement, so there `unrolled` stays in the ordinary flash sections.
+//! MEASURED on one ESP32-S3 at 80 MHz, with interleaved controls repeating
+//! within 0.1% and every KAT passing: unrolled from flash and unrolled from
+//! IRAM (a bench-only placement) were equal within 0.01%, and the rolled
+//! loop was about 8.7% slower than both at every size (16 B 322.8 us
+//! against 296.9 us, 16 KB 40.73 ms against 37.42 ms). The default trades
+//! about 8.7% of SHA-512 speed for 17,136 B of text. The earlier 11.3 to
+//! 13.1 times slowdown of unrolled-from-flash is the 2026-11-19 run at
+//! 240 MHz; this A/B supersedes it, and why the two differ is not
+//! established. The driver
 //! `sha512_compress_blocks` stays in ordinary flash text, so the update path
 //! is not a cache-off API. `esp32s3-sha512-flash`, the feature that
 //! selected `rolled` when `unrolled` was the default, is now empty. For the

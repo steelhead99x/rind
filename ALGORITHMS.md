@@ -242,8 +242,9 @@ with portable Rust in place of the assembly armv7 runs regardless.
   `.dram1`; the driver `sha512_compress_blocks` stays in ordinary flash
   text, so the update path is not a cache-off API. On
   `xtensa-esp32s3-none-elf` there is no IRAM placement, so the feature
-  leaves the unrolled body and `K` in ordinary flash, where the body is
-  slower than the rolled loop; leave the feature off there. The unrolled
+  leaves the unrolled body and `K` in ordinary flash, where the body
+  costs 17 KiB of flash text for a speed that, at 80 MHz, matched the IRAM
+  placement (below); leave the feature off there unless you need the speed. The unrolled
   body was the default until PR 94 made the smaller one the default: `esp32s3-sha512-flash`, which used to select the rolled
   loop, is now an empty feature kept so a manifest that names it resolves.
   MEASURED object sizes (esp rustc 1.97.0.0, 8ea53bcd7; `.o` linked with
@@ -259,11 +260,21 @@ with portable Rust in place of the assembly armv7 runs regardless.
   | `esp32s3-sha512-unrolled`, none-elf, flash text | 18,633 | 17,889 | 17,897 |
 
   Board time of the IRAM unrolled placement against the rolled loop was
-  measured on the board: 0.911 to 0.918 of its cycles for SHA-512 and
-  HMAC-SHA384. The unrolled body from flash was 11.3 to 13.1 times slower
-  than that loop. The raw logs are in the PR discussion that introduced
-  the placement. Those are old-default numbers; no new timing was taken
-  for the default change.
+  measured on the board in the 2026-11-18 and 2026-11-19 runs at 240 MHz:
+  0.911 to 0.918 of its cycles for SHA-512 and HMAC-SHA384, and the unrolled
+  body from flash 11.3 to 13.1 times slower than that loop. The raw logs are
+  in the PR discussion that introduced the placement. A later board A/B,
+  MEASURED on one S3 at 80 MHz (interleaved controls within 0.1%, SHA-512
+  KATs including one million `a` passing for rind and RustCrypto on every
+  image), supersedes those two figures for this default. rind SHA-512 at
+  16 B / 243 B / 1500 B / 16 KB: old unrolled-from-flash 297.0 / 876.2 /
+  3,489 / 37,420 us; new rolled default 322.8 / 954.9 / 3,797 / 40,725 us;
+  unrolled in IRAM (bench-only placement on bare metal) 296.9 / 876.2 /
+  3,490 / 37,422 us. Unrolled from flash and from IRAM are equal within
+  0.01% there: on that S3 and clock the cache hides flash. The default is
+  about 8.7% slower at every size, so it trades about 8.7% of SHA-512 speed
+  for 17,136 B of text. Why the 240 MHz runs differ is not established.
+  RustCrypto sha2 on the same board took 6.43 ms (16 B) to 803 ms (16 KB).
   `admin/esp32s3-sha512-layout` checks the default objects (no IRAM or DRAM
   section, no `l32i` byte swap, compressor and driver under 4,096 bytes of
   text and literals at opt-level 3, s, and z) and the unrolled ones (sections,
