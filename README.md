@@ -37,7 +37,7 @@
 </picture>
 
 Each row is an operation and each column a library, with one square per
-machine: x86_64 from Haswell to Zen 3 and Arrow Lake, and an Apple M4.
+machine: x86_64 from Haswell to Zen 5 and Arrow Lake, and an Apple M4.
 Green is the fastest library on that machine, or within 10% of it, and
 red is over 8× slower. A shield marks formally verified code. Where
 another library leads, mostly at short messages on Apple silicon, where

@@ -321,25 +321,26 @@ closes them. The report's "Measure coverage" step lists each file.
 ## `unsafe`
 
 `unsafe` appears only in `low`, the FIPS build's DRBG handle, the bindings,
-rind-openssl, and test code. Every block in `rind`, rind-dart, and
+rind-openssl, rind-aws-lc-rs's `Send` and `Sync` impls, and test code. Every block in `rind`, rind-dart, and
 rind-openssl carries a `SAFETY:` comment, which clippy's
 `undocumented_unsafe_blocks` lint enforces in CI.
-Counted outside comments and literals by `admin/audit unsafe` at `2abc90e9`:
+Counted outside comments and literals by `admin/audit unsafe` at `1b2ae8abc`:
 
 | Area | `unsafe` | What it is | What justifies it |
 |---|---|---|---|
-| `rind/src/low/x86_64` | 453 | `asm!`, naked functions, and intrinsics | [`rind::doc::inline_assembly_safety`](rind/src/low/inline_assembly_safety.rs), with the calling-convention, bounds, and `admin/prove bytes` checks above |
-| `rind/src/low/aarch64` | 304 | the same | the same |
-| `rind/src/low/arm` | 89 | `global_asm!` and the calls into it | the same |
-| `rind/src/low/generic` | 22 | SSE2 intrinsics in `aes_nohw`, `ReuseCache`'s one-time initialization, the volatile wipe, a cast between same-layout arrays, and MD5's empty `asm!` barrier | each block's `SAFETY:` comment; Miri checks `ReuseCache` and the wipe |
-| `rind/src/low/portable` | 3 | volatile writes and reads for the wipe and the constant-time compare | the same |
-| other `rind/src/low` files | 89 | test harnesses (`abi`, `guard_pages`, `ct_binsec`, `tests`, `vartime_planted`), the `asm_call!` macro, and `Mcdt`'s MXCSR loads and `cpuid` | test code, but for the macro and `Mcdt`, which `SAFETY:` comments and `admin/ct-vartime` cover |
+| `rind/src/low/x86_64` | 720 | `asm!`, naked functions, and intrinsics | [`rind::doc::inline_assembly_safety`](rind/src/low/inline_assembly_safety.rs), with the calling-convention, bounds, and `admin/prove bytes` checks above |
+| `rind/src/low/aarch64` | 492 | the same | the same |
+| `rind/src/low/arm` | 113 | `global_asm!` and the calls into it | the same |
+| `rind/src/low/generic` | 23 | SSE2 intrinsics in `aes_nohw`, `ReuseCache`'s one-time initialization, the volatile wipe, a cast between same-layout arrays, and MD5's empty `asm!` barrier | each block's `SAFETY:` comment; Miri checks `ReuseCache` and the wipe |
+| `rind/src/low/portable` | 13 | volatile writes and reads for the wipe and the constant-time compare, and the ESP-IDF Xtensa SHA-256's `asm!` (`sha256_iram.rs`) | each block's `SAFETY:` comment |
+| other `rind/src/low` files | 90 | test harnesses (`abi`, `guard_pages`, `ct_binsec`, `tests`, `vartime_planted`), the `asm_call!` macro, and `Mcdt`'s MXCSR loads and `cpuid` | test code, but for the macro and `Mcdt`, which `SAFETY:` comments and `admin/ct-vartime` cover |
 | `rind/src/mid` | 2 | a test's call into aws-lc | test code |
-| `rind/src` | 10 | the FIPS build's DRBG handle, its test's `fork`, and a test helper | `SAFETY:` comments |
-| `rind-dart` | 235 | the C ABI Dart's FFI calls | `SAFETY:` comments, `dart test`, and ctgrind over its exports |
+| `rind/src` | 12 | the FIPS build's DRBG handle, its test's `fork`, and a test helper | `SAFETY:` comments |
+| `rind-dart` | 236 | the C ABI Dart's FFI calls | `SAFETY:` comments, `dart test`, and ctgrind over its exports |
 | `rind-python` | 6 | Python's buffer protocol | `SAFETY:` comments |
-| `rind-openssl` | 245 | the C ABI OpenSSL's core calls, and the `OSSL_PARAM` arrays it passes | `SAFETY:` comments, `fuzz::openssl`, and OpenSSL's own tests with it loaded |
-| `rind-fips` | 608 | the unpublished FIPS module's C ABI | out of scope until published |
+| `rind-aws-lc-rs` | 4 | `unsafe impl Send` and `Sync` for the ML-KEM keys, bounded by `AlgorithmIdentifier` as aws-lc-rs bounds them | `SAFETY:` comments |
+| `rind-openssl` | 258 | the C ABI OpenSSL's core calls, and the `OSSL_PARAM` arrays it passes | `SAFETY:` comments, `fuzz::openssl`, and OpenSSL's own tests with it loaded |
+| `rind-fips` | 634 | the unpublished FIPS module's C ABI | out of scope until published |
 
-The rest, in `rind/tests`, rind-rcgen's tests, the fuzz targets, `admin`,
+The rest, in `rind/tests`, rind-rcgen's and rind-rustls's tests, the fuzz targets, `admin`,
 and the unpublished bench, timing, and cpuid crates, is test code or tooling.
