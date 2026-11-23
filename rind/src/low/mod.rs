@@ -147,15 +147,23 @@ mod generic {
     // The portable backend's group orders, picked from by modulus.
     #[cfg(any(rind_backend = "arm", rind_backend = "portable"))]
     pub(crate) mod order;
-    // x86_64's separate-pass Poly1305 and the 64-bit portable backend's.
-    // aarch64 runs Poly1305 only in aws-lc's one-pass ChaCha20-Poly1305,
-    // whose tests check it against this.
+    // x86_64's separate-pass Poly1305 and the 64-bit portable backend's,
+    // which 32-bit portable tests check theirs against. aarch64 runs
+    // Poly1305 only in aws-lc's one-pass ChaCha20-Poly1305, whose tests
+    // check it against this.
     #[cfg(any(
         rind_backend = "x86_64",
-        all(rind_backend = "portable", target_pointer_width = "64"),
+        all(rind_backend = "portable", any(target_pointer_width = "64", test)),
         all(rind_backend = "aarch64", test)
     ))]
     pub(crate) mod poly1305;
+    // Xtensa's Poly1305, also built in other tests to check it against the
+    // 64-bit one and HACL*'s.
+    #[cfg(any(
+        all(rind_backend = "portable", target_arch = "xtensa"),
+        all(test, not(rind_backend = "arm"))
+    ))]
+    pub(crate) mod poly1305_32;
     pub(super) mod reuse_cache;
     // The portable backend's SHA-1 and SHA-256 (but ESP-IDF Xtensa's
     // SHA-256, in `portable::sha`), and both in armv7 and x86_64 tests to
