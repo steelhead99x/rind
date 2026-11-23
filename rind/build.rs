@@ -217,8 +217,10 @@ fn arm_early_mul() -> bool {
         return false;
     }
     // Those Linux triples are ARMv6. Stable cfg hides `v6`, and `+v5te` on
-    // top of one does not retarget it. A custom JSON is not in this list.
+    // top of one does not retarget it. A custom JSON is not in this list,
+    // even one whose file takes such a name: its `llvm-target` decides.
     if let Ok(target) = env::var("TARGET")
+        && target_json_text().is_none()
         && matches!(
             target.as_str(),
             "arm-unknown-linux-gnueabi"
@@ -257,10 +259,10 @@ fn arm_early_mul() -> bool {
     if later {
         return false;
     }
-    // A custom 32-bit ARM specification the script could not find: the early
-    // core is possible and the top bit costs the others only a little time,
-    // so take it.
-    early || custom_target_unlocated()
+    // A custom 32-bit ARM specification the script could not find, or found
+    // without an `llvm-target`: the early core is possible and the top bit
+    // costs the others only a little time, so take it.
+    early || custom_target_unlocated() || custom_target_unclassified()
 }
 
 /// `thumbv6m`, `thumbv7m`, and `thumbv8m.base`: one fixed-time 32-bit `mul`
@@ -311,18 +313,30 @@ fn classify_arm_arch(name: &str) -> ArmKind {
     ArmKind::Other
 }
 
-/// The triple's arch component, and a custom target's `llvm-target` arch.
+/// The arch that names the core: a custom target's `llvm-target` arch, which
+/// is what LLVM compiles for whatever the specification's file is called, or
+/// else the built-in triple's. A file name is a label anyone can choose, so it
+/// never overrides the specification it names: `armv7-board.json` holding an
+/// ARMv5TE `llvm-target` is ARMv5TE. Empty for a specification without an
+/// `llvm-target`, which `custom_target_unclassified` makes fail closed.
 fn arch_names() -> Vec<String> {
-    let mut names = Vec::new();
-    if let Ok(target) = env::var("TARGET") {
-        names.push(arch_component(target_file_stem(&target)).to_string());
+    target_arch_label().into_iter().collect()
+}
+
+/// See [`arch_names`].
+fn target_arch_label() -> Option<String> {
+    if let Some(text) = target_json_text() {
+        return json_string_field(&text, "llvm-target")
+            .map(|llvm| arch_component(&llvm).to_string());
     }
-    if let Some(text) = target_json_text()
-        && let Some(llvm) = json_string_field(&text, "llvm-target")
-    {
-        names.push(arch_component(&llvm).to_string());
-    }
-    names
+    let target = env::var("TARGET").ok()?;
+    Some(arch_component(target_file_stem(&target)).to_string())
+}
+
+/// Whether `TARGET` is a custom specification this script read but whose
+/// `llvm-target` it could not find, so its core is unknown.
+fn custom_target_unclassified() -> bool {
+    target_json_text().is_some() && target_arch_label().is_none()
 }
 
 fn target_file_stem(target: &str) -> &str {
@@ -499,8 +513,9 @@ fn json_string_field(text: &str, key: &str) -> Option<String> {
 /// `arm-unknown-linux-gnueabi`, is for an earlier core.
 /// See UPSTREAM.md, "Build scripts cannot see ARM's `v7` target feature".
 fn armv7_or_later() -> bool {
-    let target = env::var("TARGET").expect("cargo sets the target");
-    let arch = target.split('-').next().unwrap_or_default();
+    // A custom target's `llvm-target`, not its file name (`arch_names`).
+    let arch = target_arch_label().unwrap_or_default();
+    let arch = arch.as_str();
     let version = arch
         .strip_prefix("arm")
         .or_else(|| arch.strip_prefix("thumb"))
@@ -515,8 +530,8 @@ fn armv7_or_later() -> bool {
 /// `thumbv8m.main-none-eabihf` or `thumbv8.1m.main-none-eabihf`: Thumb only,
 /// without NEON.
 fn m_profile() -> bool {
-    let target = env::var("TARGET").expect("cargo sets the target");
-    let arch = target.split('-').next().unwrap_or_default();
+    let arch = target_arch_label().unwrap_or_default();
+    let arch = arch.as_str();
     let Some(version) = arch.strip_prefix("thumbv") else {
         return false;
     };
