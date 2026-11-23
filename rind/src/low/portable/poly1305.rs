@@ -1,38 +1,84 @@
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
 //! Poly1305 for the portable backend: 26-bit limbs in `u32`s
-//! (`generic::poly1305_32`) on 32-bit targets, and rind's 64-bit limbs in
-//! `generic::poly1305` on 64-bit ones, as x86_64 runs it without SSE4.1.
+//! (`generic::poly1305_32`) on riscv32 with the M extension, HACL*'s on other
+//! 32-bit targets, and rind's 64-bit limbs in `generic::poly1305` on 64-bit
+//! ones, as x86_64 runs it without SSE4.1.
 //!
 //! HACL*'s verified streaming `Hacl_MAC_Poly1305`, as libcrux-poly1305 ships
-//! it, is what armv7 runs without NEON, and what 32-bit portable targets ran
-//! until its 26-bit limbs in `u64`s measured slower: on riscv32imac each limb
-//! product is a full 64-bit multiply. It takes at most `u32::MAX` bytes,
-//! which a 32-bit address space cannot exceed. Tests check the others
-//! against it.
+//! it, is what armv7 runs without NEON, and what riscv32 ran until its 26-bit
+//! limbs in `u64`s measured slower: on riscv32imac each limb product is a full
+//! 64-bit multiply. It takes at most `u32::MAX` bytes, which a 32-bit address
+//! space cannot exceed. Tests check the others against it.
 //!
 //! The 26-bit path is accepted and not yet proven: the proof is planned (the
 //! portable ChaCha20-Poly1305 proof quest), and until then differential tests
 //! and ctgrind cover it. Its limb products are 32 by 32 to 64-bit multiplies,
-//! fixed-time on riscv32imac and i686 but not on a core with an
-//! operand-dependent long multiply (Cortex-M3) or no hardware multiply
-//! (riscv32i); only riscv32imac has been measured. HACL*'s path had the same
-//! property there.
+//! fixed-time on riscv32imac (`mul` and `mulhu`) but not on a core with an
+//! operand-dependent long multiply (Cortex-M3's `umull`) or no hardware
+//! multiply (riscv32i calls `__mulsi3`). So it is selected only where that
+//! multiply is known fixed-time and was measured, riscv32 with `m`; every
+//! other 32-bit portable target keeps HACL*'s Poly1305, as before this change,
+//! until one is measured. HACL*'s limb products are the same multiplies, so
+//! this keeps those targets where they were rather than making them
+//! fixed-time.
 
-#[cfg(any(rind_backend = "arm", test))]
+#[cfg(any(
+    rind_backend = "arm",
+    test,
+    all(
+        rind_backend = "portable",
+        target_pointer_width = "32",
+        not(all(target_arch = "riscv32", target_feature = "m"))
+    )
+))]
 use libcrux_hacl_rs::streaming_types::error_code;
-#[cfg(any(rind_backend = "arm", test))]
+#[cfg(any(
+    rind_backend = "arm",
+    test,
+    all(
+        rind_backend = "portable",
+        target_pointer_width = "32",
+        not(all(target_arch = "riscv32", target_feature = "m"))
+    )
+))]
 use libcrux_poly1305::hacl::mac_poly1305::{self, state_t};
 
 #[cfg(all(rind_backend = "portable", target_pointer_width = "64"))]
 pub(crate) use crate::low::generic::poly1305::Poly1305;
-#[cfg(all(rind_backend = "portable", target_pointer_width = "32"))]
+#[cfg(all(
+    rind_backend = "portable",
+    target_arch = "riscv32",
+    target_feature = "m"
+))]
 pub(crate) use crate::low::generic::poly1305_32::Poly1305;
+#[cfg(all(
+    rind_backend = "portable",
+    target_pointer_width = "32",
+    not(all(target_arch = "riscv32", target_feature = "m"))
+))]
+pub(crate) use Hacl as Poly1305;
 
-#[cfg(any(rind_backend = "arm", test))]
+#[cfg(any(
+    rind_backend = "arm",
+    test,
+    all(
+        rind_backend = "portable",
+        target_pointer_width = "32",
+        not(all(target_arch = "riscv32", target_feature = "m"))
+    )
+))]
 pub(crate) struct Hacl([state_t; 1]);
 
-#[cfg(any(rind_backend = "arm", test))]
+#[cfg(any(
+    rind_backend = "arm",
+    test,
+    all(
+        rind_backend = "portable",
+        target_pointer_width = "32",
+        not(all(target_arch = "riscv32", target_feature = "m"))
+    )
+))]
 impl Hacl {
     pub(crate) fn new(key: &[u8; 32]) -> Self {
         let mut state = [state_t {
