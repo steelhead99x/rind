@@ -40,7 +40,7 @@ Validation plan: unit tests on the host for each change (RFC 8439, the existing 
 ## Waiting
 
 - steelhead99x: the S3 board numbers are measured at the current heads and are in the PR bodies (80 MHz, 1500 B seal 1020.8 us against RustCrypto's 1857.6 us; 16 B seal 107.1 against 99.4 us). The C6 was measured too (160 MHz, #275 head against #280 head): the 16-bit tag add in `finish` is neutral on seal and costs a fixed 2.5 us on open on riscv32, cause not understood. Decide: (a) accept it, (b) gate the tag add to Xtensa only, (c) investigate first (disassemble `open` in both C6 images). Cortex-M is unmeasured.
-- Maintainer: whether the 26-bit Poly1305 stays on every 32-bit portable target or narrows to riscv32 with the M extension (the open decision in [the C6 ChaCha20 quest](/quest/m2/speed/esp32c6-chacha20poly1305.md)). The S3's `mull` and `muluh` are fixed-time on this core as far as the ISA manual says; only the S3's timing has not been measured for operand dependence.
+- Maintainer: the 26-bit Poly1305 now runs on riscv32 with the M extension (narrowed on #275 after review, HACL*'s elsewhere) and on Xtensa, added here. The S3's `mull` and `muluh` are fixed-time on this core as far as the ISA manual says, and HACL*'s `u64` limbs get the same carry branches from LLVM there, so it is no better; only the S3's timing has not been measured for operand dependence. Decide whether Xtensa stays on it.
 
 ## Related
 
