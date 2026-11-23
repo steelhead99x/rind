@@ -301,16 +301,16 @@ fn clmul16_shift(x: u32, y: &[u32; 3]) -> u32 {
     not(all(target_arch = "riscv32", not(target_feature = "m")))
 ))]
 use clmul16_mul as clmul16;
+// Tests run [`polyval_k16`] on the multiply, and check the two products
+// against each other.
+#[cfg(all(test, not(all(rind_backend = "portable", target_pointer_width = "32"))))]
+use clmul16_mul as clmul16;
 #[cfg(all(
     rind_backend = "portable",
     target_arch = "riscv32",
     not(target_feature = "m")
 ))]
 use clmul16_shift as clmul16;
-// Tests run [`polyval_k16`] on the multiply, and check the two products
-// against each other.
-#[cfg(all(test, not(all(rind_backend = "portable", target_pointer_width = "32"))))]
-use clmul16_mul as clmul16;
 
 /// The carry-less product of `w` and the key's 32-bit operand whose
 /// leaves are `h`, as its low and high words.
@@ -561,7 +561,10 @@ mod tests {
             let want = clmul16_mul(x, &y);
             let got = into_public(clmul16_shift(into_secret(x), &into_secret(y)));
             assert_eq!(got, want, "{x:x} {y:x?}");
-            assert_eq!(into_public(clmul16_mul(into_secret(x), &into_secret(y))), want);
+            assert_eq!(
+                into_public(clmul16_mul(into_secret(x), &into_secret(y))),
+                want
+            );
         }
     }
 
