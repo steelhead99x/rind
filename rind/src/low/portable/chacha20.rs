@@ -4,14 +4,16 @@
 //! time, as x86_64 runs it without SSSE3, but on Xtensa, whose rounds are
 //! `rounds4` below, with each rotate one `src`.
 //!
-//! On Xtensa the keystream goes from registers straight into the buffer a
-//! word at a time, never through a 64-byte array that is stored a byte at a
-//! time and loaded back to XOR a byte at a time. Every other target runs
-//! `generic::chacha20::cipher`.
+//! On Xtensa and riscv32 the keystream goes from registers straight into the
+//! buffer a word at a time (`cipher_words`), never through a 64-byte array
+//! that is stored a byte at a time and loaded back to XOR a byte at a time:
+//! on the ESP32-C6 (riscv32imac, which has no fast misaligned loads) that
+//! array cost a fifth of each block's instructions. riscv32 keeps HACL*'s
+//! rounds. Every other target runs `generic::chacha20::cipher`.
 
 #[cfg(any(not(target_arch = "xtensa"), test))]
 use crate::low::generic::chacha20;
-#[cfg(any(target_arch = "xtensa", test))]
+#[cfg(any(target_arch = "xtensa", target_arch = "riscv32", test))]
 use crate::low::generic::chacha20::SIGMA;
 
 pub(crate) struct ChaCha20 {
@@ -32,9 +34,9 @@ impl ChaCha20 {
     /// XORs the keystream into `buffer`, starting at the current block, then
     /// moves the counter past every block it touched.
     pub(crate) fn cipher(&mut self, buffer: &mut [u8]) {
-        #[cfg(target_arch = "xtensa")]
+        #[cfg(any(target_arch = "xtensa", target_arch = "riscv32"))]
         cipher_words(&self.key, &self.counter_nonce, buffer);
-        #[cfg(not(target_arch = "xtensa"))]
+        #[cfg(not(any(target_arch = "xtensa", target_arch = "riscv32")))]
         chacha20::cipher(&self.key, &self.counter_nonce, buffer);
         self.counter_nonce[0] =
             self.counter_nonce[0].wrapping_add(buffer.len().div_ceil(64) as u32);
@@ -145,12 +147,16 @@ fn rounds4(st: &mut [u32; 16]) {
     *st = x;
 }
 
-/// The keystream block for the state `input`, as words.
-#[cfg(any(target_arch = "xtensa", test))]
+/// The keystream block for the state `input`, as words: `rounds4` on Xtensa
+/// and in host tests, HACL*'s rounds on riscv32, which has no rotate to share.
+#[cfg(any(target_arch = "xtensa", target_arch = "riscv32", test))]
 #[inline(always)]
 fn keystream(input: &[u32; 16]) -> [u32; 16] {
     let mut st = *input;
+    #[cfg(not(target_arch = "riscv32"))]
     rounds4(&mut st);
+    #[cfg(target_arch = "riscv32")]
+    chacha20::rounds(&mut st);
     for (s, i) in st.iter_mut().zip(input) {
         *s = s.wrapping_add(*i);
     }
@@ -164,7 +170,7 @@ fn keystream(input: &[u32; 16]) -> [u32; 16] {
 /// not start on a word, each word takes the keystream's bytes across two of
 /// its words, shifted by the misalignment, which is public. One keystream
 /// call site keeps one copy of the unrolled rounds in the instruction cache.
-#[cfg(any(target_arch = "xtensa", test))]
+#[cfg(any(target_arch = "xtensa", target_arch = "riscv32", test))]
 fn cipher_words(key: &[u32; 8], counter_nonce: &[u32; 4], buffer: &mut [u8]) {
     let mut input = [0u32; 16];
     input[..4].copy_from_slice(&SIGMA);
@@ -206,7 +212,7 @@ fn cipher_words(key: &[u32; 8], counter_nonce: &[u32; 4], buffer: &mut [u8]) {
 
 /// XORs the keystream `ks` into `head`, then `words`, then `tail`, which are
 /// one run of at most 64 bytes.
-#[cfg(any(target_arch = "xtensa", test))]
+#[cfg(any(target_arch = "xtensa", target_arch = "riscv32", test))]
 #[inline(never)]
 fn xor_any(head: &mut [u8], words: &mut [u32], tail: &mut [u8], ks: &[u32; 16]) {
     let byte = |i: usize| (ks[i / 4] >> (8 * (i % 4))) as u8;
