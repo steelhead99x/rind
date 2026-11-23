@@ -27,13 +27,25 @@
 //! this keeps those targets where they were rather than making them
 //! fixed-time.
 
+#[cfg(all(
+    rind_backend = "portable",
+    target_pointer_width = "32",
+    not(any(
+        all(target_arch = "riscv32", target_feature = "m"),
+        target_arch = "xtensa"
+    ))
+))]
+pub(crate) use Hacl as Poly1305;
 #[cfg(any(
     rind_backend = "arm",
     test,
     all(
         rind_backend = "portable",
         target_pointer_width = "32",
-        not(any(all(target_arch = "riscv32", target_feature = "m"), target_arch = "xtensa"))
+        not(any(
+            all(target_arch = "riscv32", target_feature = "m"),
+            target_arch = "xtensa"
+        ))
     )
 ))]
 use libcrux_hacl_rs::streaming_types::error_code;
@@ -43,7 +55,10 @@ use libcrux_hacl_rs::streaming_types::error_code;
     all(
         rind_backend = "portable",
         target_pointer_width = "32",
-        not(any(all(target_arch = "riscv32", target_feature = "m"), target_arch = "xtensa"))
+        not(any(
+            all(target_arch = "riscv32", target_feature = "m"),
+            target_arch = "xtensa"
+        ))
     )
 ))]
 use libcrux_poly1305::hacl::mac_poly1305::{self, state_t};
@@ -58,12 +73,6 @@ pub(crate) use crate::low::generic::poly1305::Poly1305;
     )
 ))]
 pub(crate) use crate::low::generic::poly1305_32::Poly1305;
-#[cfg(all(
-    rind_backend = "portable",
-    target_pointer_width = "32",
-    not(any(all(target_arch = "riscv32", target_feature = "m"), target_arch = "xtensa"))
-))]
-pub(crate) use Hacl as Poly1305;
 
 #[cfg(any(
     rind_backend = "arm",
@@ -71,7 +80,10 @@ pub(crate) use Hacl as Poly1305;
     all(
         rind_backend = "portable",
         target_pointer_width = "32",
-        not(any(all(target_arch = "riscv32", target_feature = "m"), target_arch = "xtensa"))
+        not(any(
+            all(target_arch = "riscv32", target_feature = "m"),
+            target_arch = "xtensa"
+        ))
     )
 ))]
 pub(crate) struct Hacl([state_t; 1]);
@@ -82,7 +94,10 @@ pub(crate) struct Hacl([state_t; 1]);
     all(
         rind_backend = "portable",
         target_pointer_width = "32",
-        not(any(all(target_arch = "riscv32", target_feature = "m"), target_arch = "xtensa"))
+        not(any(
+            all(target_arch = "riscv32", target_feature = "m"),
+            target_arch = "xtensa"
+        ))
     )
 ))]
 impl Hacl {
