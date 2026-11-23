@@ -85,9 +85,11 @@ fn bench(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("spake2plus-p256-prover-start");
     group.throughput(Throughput::Elements(1));
-    group.bench_function("rind", |b| {
-        b.iter(|| black_box(secrets.start(&RFC9383, &SESSION).unwrap()));
-    });
+    for (lib, _dit) in criterion::rind_rows() {
+        group.bench_function(lib, |b| {
+            b.iter(|| black_box(secrets.start(&RFC9383, &SESSION).unwrap()));
+        });
+    }
     group.bench_function("rustcrypto", |b| {
         let mut rng = rng();
         b.iter(|| black_box(Prover::start(&rc_secret, &context, &mut rng)));
@@ -97,10 +99,12 @@ fn bench(c: &mut Criterion) {
     // The verifier's share and its confirmation of the prover's share.
     let mut group = c.benchmark_group("spake2plus-p256-verifier-start");
     group.throughput(Throughput::Elements(1));
-    group.bench_function("rind", |b| {
-        let (share_p, _) = secrets.start(&RFC9383, &SESSION).unwrap();
-        b.iter(|| black_box(record.start(&RFC9383, &SESSION, &share_p).unwrap()));
-    });
+    for (lib, _dit) in criterion::rind_rows() {
+        group.bench_function(lib, |b| {
+            let (share_p, _) = secrets.start(&RFC9383, &SESSION).unwrap();
+            b.iter(|| black_box(record.start(&RFC9383, &SESSION, &share_p).unwrap()));
+        });
+    }
     group.bench_function("rustcrypto", |b| {
         let mut rng = rng();
         let (_, share_p) = Prover::start(&rc_secret, &context, &mut rng);
@@ -115,17 +119,22 @@ fn bench(c: &mut Criterion) {
     // steps before it, untimed.
     let mut group = c.benchmark_group("spake2plus-p256-prover-finish");
     group.throughput(Throughput::Elements(1));
-    group.bench_function("rind", |b| {
-        b.iter_batched(
-            || {
-                let (share_p, prover) = secrets.start(&RFC9383, &SESSION).unwrap();
-                let (share_v, confirm_v, _) = record.start(&RFC9383, &SESSION, &share_p).unwrap();
-                (prover, share_v, confirm_v)
-            },
-            |(prover, share_v, confirm_v)| black_box(prover.finish(&share_v, &confirm_v).unwrap()),
-            BatchSize::SmallInput,
-        );
-    });
+    for (lib, _dit) in criterion::rind_rows() {
+        group.bench_function(lib, |b| {
+            b.iter_batched(
+                || {
+                    let (share_p, prover) = secrets.start(&RFC9383, &SESSION).unwrap();
+                    let (share_v, confirm_v, _) =
+                        record.start(&RFC9383, &SESSION, &share_p).unwrap();
+                    (prover, share_v, confirm_v)
+                },
+                |(prover, share_v, confirm_v)| {
+                    black_box(prover.finish(&share_v, &confirm_v).unwrap())
+                },
+                BatchSize::SmallInput,
+            );
+        });
+    }
     group.bench_function("rustcrypto", |b| {
         let mut rng = rng();
         b.iter_batched(
@@ -151,19 +160,21 @@ fn bench(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("spake2plus-p256-verifier-finish");
     group.throughput(Throughput::Elements(1));
-    group.bench_function("rind", |b| {
-        b.iter_batched(
-            || {
-                let (share_p, prover) = secrets.start(&RFC9383, &SESSION).unwrap();
-                let (share_v, confirm_v, verifier) =
-                    record.start(&RFC9383, &SESSION, &share_p).unwrap();
-                let (confirm_p, _) = prover.finish(&share_v, &confirm_v).unwrap();
-                (verifier, confirm_p)
-            },
-            |(verifier, confirm_p)| black_box(verifier.finish(&confirm_p).unwrap()),
-            BatchSize::SmallInput,
-        );
-    });
+    for (lib, _dit) in criterion::rind_rows() {
+        group.bench_function(lib, |b| {
+            b.iter_batched(
+                || {
+                    let (share_p, prover) = secrets.start(&RFC9383, &SESSION).unwrap();
+                    let (share_v, confirm_v, verifier) =
+                        record.start(&RFC9383, &SESSION, &share_p).unwrap();
+                    let (confirm_p, _) = prover.finish(&share_v, &confirm_v).unwrap();
+                    (verifier, confirm_p)
+                },
+                |(verifier, confirm_p)| black_box(verifier.finish(&confirm_p).unwrap()),
+                BatchSize::SmallInput,
+            );
+        });
+    }
     group.bench_function("rustcrypto", |b| {
         let mut rng = rng();
         b.iter_batched(

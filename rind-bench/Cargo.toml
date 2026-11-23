@@ -133,6 +133,10 @@ name = "sha3"
 harness = false
 
 [[bench]]
+name = "dit_toggle"
+harness = false
+
+[[bench]]
 name = "aes_gcm"
 harness = false
 

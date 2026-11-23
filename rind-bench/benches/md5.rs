@@ -71,9 +71,11 @@ fn md5(c: &mut Criterion) {
             &input,
             |b, input| b.iter(|| test_rc_md5(input)),
         );
-        group.bench_with_input(BenchmarkId::new("rind", size_name), &input, |b, input| {
-            b.iter(|| test_rind_md5(input))
-        });
+        for (lib, _dit) in criterion::rind_rows() {
+            group.bench_with_input(BenchmarkId::new(lib, size_name), &input, |b, input| {
+                b.iter(|| test_rind_md5(input))
+            });
+        }
         assert_eq!(
             {
                 let mut ctx = verified_garbage::hashes::md5::Md5::new();

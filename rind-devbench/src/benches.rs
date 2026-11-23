@@ -17,6 +17,8 @@ pub mod ed25519;
 pub mod hkdf;
 #[path = "../../rind-bench/benches/hmac.rs"]
 pub mod hmac;
+#[path = "../../rind-bench/benches/dit_toggle.rs"]
+pub mod dit_toggle;
 #[path = "../../rind-bench/benches/hpke.rs"]
 pub mod hpke;
 #[path = "../../rind-bench/benches/jsonwebtoken.rs"]
@@ -71,6 +73,7 @@ pub const FILES: &[(&str, fn())] = &[
     ("blind_rsa", blind_rsa::main),
     ("chacha20poly1305", chacha20poly1305::main),
     ("cipher", cipher::main),
+    ("dit_toggle", dit_toggle::main),
     ("ed25519", ed25519::main),
     ("hkdf", hkdf::main),
     ("hmac", hmac::main),

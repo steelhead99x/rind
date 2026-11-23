@@ -15,6 +15,7 @@ extern char *devbench_status_json(void);
 extern void devbench_stop(void);
 extern void devbench_free(char *p);
 extern void devbench_setenv(const char *key, const char *value);
+extern void devbench_apply_denies(void);
 
 static id JSON(char *p) {
   if (!p) return nil;
@@ -255,5 +256,7 @@ static BOOL Reachable(NSString *host, int port, int ms) {
 @end
 
 int main(int argc, char *argv[]) {
+  // Before UIApplicationMain starts any thread: setenv is not thread safe.
+  devbench_apply_denies();
   @autoreleasepool { return UIApplicationMain(argc, argv, nil, NSStringFromClass([AppDelegate class])); }
 }

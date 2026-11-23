@@ -112,10 +112,12 @@ fn bench_chacha20poly1305(c: &mut Criterion) {
             let key = chacha20poly1305::XChaCha20Poly1305::new_from_slice(&key).unwrap();
             b.iter(|| test_rc_chacha(&key, aad, &mut buf[..size]));
         });
-        group.bench_function(BenchmarkId::new("rind", size_name), |b| {
-            let key = rind::aead::RandomizedNonceKey::new(&key);
-            b.iter(|| test_rind_chacha(&key, aad, &mut buf, size));
-        });
+        for (lib, _dit) in criterion::rind_rows() {
+            group.bench_function(BenchmarkId::new(lib, size_name), |b| {
+                let key = rind::aead::RandomizedNonceKey::new(&key);
+                b.iter(|| test_rind_chacha(&key, aad, &mut buf, size));
+            });
+        }
         #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
         group.bench_function(BenchmarkId::new("graviola", size_name), |b| {
             let key = graviola::aead::XChaCha20Poly1305::new(key);
