@@ -23,8 +23,11 @@ namespace rind.x86_64
 /-- None of pyca/verified-garbage's P-256 checks passes, so P-256 runs the
 code these theorems state: `check`, for verification, `check_ecdh`, for ECDH,
 and `check_public_key`, for the public key's derivation. VG's routines are proven
-in that project, not here. Both checks fail on exactly the x86-64 CPUs
-without BMI2, ADX, AVX, or AVX2; every 64-bit Arm CPU passes them. -/
+in that project, not here. On x86-64, `check` and `check_ecdh` fail on
+exactly the CPUs without BMI2, ADX, AVX, or AVX2, and `check_public_key` fails
+there and on AMD without AVX-512 IFMA too. On 64-bit Arm, `check` passes on
+every CPU, and `check_ecdh` and `check_public_key` fail on a Cortex-A72 or
+Cortex-A76. -/
 def NoVgP256 : Prop :=
   low.x86_64.p256_vg.P256.check = ok none ∧ low.x86_64.p256_vg.P256.check_public_key = ok none ∧
     low.x86_64.p256_vg.P256.check_ecdh = ok none
