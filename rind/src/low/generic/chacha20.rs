@@ -204,10 +204,7 @@ fn keystream(input: &[u32; 16]) -> [u8; 64] {
 // Indexes, as `state` does, so `proofs/` can prove it.
 #[cfg(any(
     rind_backend = "x86_64",
-    all(
-        rind_backend = "portable",
-        any(not(target_arch = "xtensa"), test)
-    ),
+    all(rind_backend = "portable", any(not(target_arch = "xtensa"), test)),
     all(test, rind_backend = "aarch64")
 ))]
 pub(crate) fn cipher(key: &[u32; 8], counter_nonce: &[u32; 4], buffer: &mut [u8]) {
