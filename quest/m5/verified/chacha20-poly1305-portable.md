@@ -16,4 +16,4 @@ ChaCha20-Poly1305 and XChaCha20-Poly1305 earn the ✓ on x86_64 CPUs without SSE
 
 ## Related
 
-- [The 26-bit limb Poly1305 is proven equal to RFC 8439](/quest/m5/verified/poly1305-26bit.md) - the proof of the 32-bit portable targets' Poly1305, which shares its limb arithmetic lemma with Graviola's 64-bit Poly1305 above
+- [The 26-bit limb Poly1305 is proven equal to RFC 8439](/quest/m5/verified/poly1305-26bit.md) - the proof of the Poly1305 the portable backend runs on riscv32 with the M extension and on Xtensa, which shares its limb arithmetic lemma with Graviola's 64-bit Poly1305 above

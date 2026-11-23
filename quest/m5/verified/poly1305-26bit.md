@@ -2,7 +2,7 @@
 
 ## Goal
 
-`low::generic::poly1305_32::Poly1305`, rind's Poly1305 in five 26-bit limbs held in `u32`s that every 32-bit portable target runs (steelhead99x/rind#275), is proven in Lean, through Aeneas's translation of the Rust, to compute the tag of `Rind/Spec.lean`'s `poly1305.mac` (RFC 8439 section 2.5.1) for every key and every split of the message into `add_bytes` calls. That includes `reduce_split`, the Xtensa reduction whose limb sums are `u32` pairs with no `u64` carry (steelhead99x/rind#280), and `finish`'s 16-bit-halves tag addition. Constant time is a separate property and is not claimed here.
+`low::generic::poly1305_32::Poly1305`, rind's Poly1305 in five 26-bit limbs held in `u32`s that the portable backend runs on riscv32 with the M extension (steelhead99x/rind#275) and on Xtensa (steelhead99x/rind#278), is proven in Lean, through Aeneas's translation of the Rust, to compute the tag of `Rind/Spec.lean`'s `poly1305.mac` (RFC 8439 section 2.5.1) for every key and every split of the message into `add_bytes` calls. That includes `reduce_split`, the Xtensa reduction whose limb sums are `u32` pairs with no `u64` carry (steelhead99x/rind#280), and `finish`'s 16-bit-halves tag addition. Constant time is a separate property and is not claimed here.
 
 ## Plan
 
