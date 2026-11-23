@@ -23,6 +23,12 @@
 //! this keeps those targets where they were rather than making them
 //! fixed-time.
 
+#[cfg(all(
+    rind_backend = "portable",
+    target_pointer_width = "32",
+    not(all(target_arch = "riscv32", target_feature = "m"))
+))]
+pub(crate) use Hacl as Poly1305;
 #[cfg(any(
     rind_backend = "arm",
     test,
@@ -52,12 +58,6 @@ pub(crate) use crate::low::generic::poly1305::Poly1305;
     target_feature = "m"
 ))]
 pub(crate) use crate::low::generic::poly1305_32::Poly1305;
-#[cfg(all(
-    rind_backend = "portable",
-    target_pointer_width = "32",
-    not(all(target_arch = "riscv32", target_feature = "m"))
-))]
-pub(crate) use Hacl as Poly1305;
 
 #[cfg(any(
     rind_backend = "arm",
