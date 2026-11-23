@@ -316,7 +316,37 @@ fn sha256_updates(c: &mut Criterion) {
     }
 }
 
+// rind's one-shot `digest` beside its `Context` path, to show the guard's
+// cost: `digest` enters DIT once, while `Context::update` (on a full block)
+// and `finish` enter it once each. Not a like-for-like row against the other
+// libraries, which hash through a context, so the report never reads it.
 #[cfg(not(target_arch = "xtensa"))]
-criterion_group!(benches, sha256, sha512, sha512_256, sha256_updates);
+fn sha256_oneshot(c: &mut Criterion) {
+    let mut group = c.benchmark_group("sha256-oneshot");
+    for (size, size_name) in criterion::HASH_SIZES {
+        let input = vec![0u8; size];
+        group.throughput(Throughput::Bytes(size as u64));
+        for (lib, _dit) in criterion::rind_rows() {
+            group.bench_with_input(BenchmarkId::new(lib, size_name), &input, |b, input| {
+                b.iter(|| {
+                    black_box(rind::digest::digest(
+                        &rind::digest::SHA256,
+                        black_box(input),
+                    ))
+                })
+            });
+        }
+    }
+}
+
+#[cfg(not(target_arch = "xtensa"))]
+criterion_group!(
+    benches,
+    sha256,
+    sha512,
+    sha512_256,
+    sha256_updates,
+    sha256_oneshot
+);
 #[cfg(not(target_arch = "xtensa"))]
 criterion_main!(benches);

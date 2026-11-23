@@ -87,7 +87,29 @@ fn sha1(c: &mut Criterion) {
     }
 }
 
+// rind's one-shot `digest` beside its `Context` path, to show the guard's
+// cost: `digest` enters DIT once, `Context::update` (on a full block) and
+// `finish` once each. Not a like-for-like row, so the report never reads it.
 #[cfg(not(target_arch = "xtensa"))]
-criterion_group!(benches, sha1);
+fn sha1_oneshot(c: &mut Criterion) {
+    let mut group = c.benchmark_group("sha1-oneshot");
+    for (size, size_name) in criterion::HASH_SIZES {
+        let input = vec![0u8; size];
+        group.throughput(Throughput::Bytes(size as u64));
+        for (lib, _dit) in criterion::rind_rows() {
+            group.bench_with_input(BenchmarkId::new(lib, size_name), &input, |b, input| {
+                b.iter(|| {
+                    black_box(rind::digest::digest(
+                        &rind::digest::legacy::SHA1,
+                        black_box(input),
+                    ))
+                })
+            });
+        }
+    }
+}
+
+#[cfg(not(target_arch = "xtensa"))]
+criterion_group!(benches, sha1, sha1_oneshot);
 #[cfg(not(target_arch = "xtensa"))]
 criterion_main!(benches);
