@@ -6,21 +6,31 @@
 //! `u32::MAX` bytes, which a 32-bit address space cannot exceed. 64-bit
 //! targets run rind's 64-bit limbs in `generic::poly1305` instead, as x86_64
 //! does without SSE4.1, since AEAD messages there can be longer.
+//!
+//! Xtensa runs rind's 26-bit limbs in `u32`s, `generic::poly1305_32`: HACL*'s
+//! limbs in `u64`s take a 64x64-bit multiply each there, and LLVM adds two
+//! `u64`s as an `add` and a branch on the carry, a branch on the secret.
 
-#[cfg(all(rind_backend = "portable", target_pointer_width = "32"))]
+#[cfg(all(
+    rind_backend = "portable",
+    target_pointer_width = "32",
+    not(target_arch = "xtensa")
+))]
 pub(crate) use Hacl as Poly1305;
-#[cfg(any(target_pointer_width = "32", test))]
+#[cfg(any(all(target_pointer_width = "32", not(target_arch = "xtensa")), test))]
 use libcrux_hacl_rs::streaming_types::error_code;
-#[cfg(any(target_pointer_width = "32", test))]
+#[cfg(any(all(target_pointer_width = "32", not(target_arch = "xtensa")), test))]
 use libcrux_poly1305::hacl::mac_poly1305::{self, state_t};
 
 #[cfg(all(rind_backend = "portable", target_pointer_width = "64"))]
 pub(crate) use crate::low::generic::poly1305::Poly1305;
+#[cfg(all(rind_backend = "portable", target_arch = "xtensa"))]
+pub(crate) use crate::low::generic::poly1305_32::Poly1305;
 
-#[cfg(any(target_pointer_width = "32", test))]
+#[cfg(any(all(target_pointer_width = "32", not(target_arch = "xtensa")), test))]
 pub(crate) struct Hacl([state_t; 1]);
 
-#[cfg(any(target_pointer_width = "32", test))]
+#[cfg(any(all(target_pointer_width = "32", not(target_arch = "xtensa")), test))]
 impl Hacl {
     pub(crate) fn new(key: &[u8; 32]) -> Self {
         let mut state = [state_t {
