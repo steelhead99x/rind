@@ -305,6 +305,7 @@ LIBRARIES = {
     "libcrux-ml-kem": "libcrux",
     "openssl": "openssl",
     "verified-garbage": "verified-garbage",
+    "verified-garbage-dit-held": "verified-garbage-dit-held",
 }
 
 # The CPU features by architecture, as rind-cpuid names them, without which a
@@ -1028,7 +1029,11 @@ def summary(args):
     if not measured:
         return
     print()
-    print("Each cell is rind's time, then that over the fastest other library's, and which library that is.")
+    print(
+        "Each cell is rind's time, then that over the fastest other library's, and which library that is; "
+        "where the host timed rind with DIT held, that time and ratio follow. rind's own time sets DIT around "
+        "each call on Apple's CPUs, which aws-lc-rs, ring, RustCrypto, libcrux, and OpenSSL never do."
+    )
     print()
     print("| operation | " + " | ".join(name for name, _ in measured) + " |")
     print("|---|" + "---|" * len(measured))
@@ -1042,7 +1047,11 @@ def summary(args):
                 continue
             best = min(others, key=others.get)
             ratio = times["rind"] / others[best]
-            cells.append(f"{human(times['rind'])}, {ratio:.2f}× {best}")
+            cell = f"{human(times['rind'])}, {ratio:.2f}× {best}"
+            if "rind-dit-held" in times:
+                held = times["rind-dit-held"]
+                cell += f"; DIT held {human(held)}, {held / others[best]:.2f}×"
+            cells.append(cell)
         print(f"| {op.replace('/{lib}', '')} | " + " | ".join(cells) + " |")
 
 
@@ -1070,12 +1079,90 @@ COLUMNS = {
     "libcrux": "libcrux",
     "openssl": "OpenSSL",
     "verified-garbage": "verified-garbage",
+    "verified-garbage-dit-held": "verified-garbage (DIT held)",
 }
 
 # Rows that time a library's own code another way, by that library. Each
 # shows beside the library, with its proofs, but never counts as the fastest
-# or as a rival in a gap. rind's DIT-held row is timed only on a CPU with DIT.
-VARIANTS = {"rind-dit-held": "rind"}
+# or as a rival in a gap. The DIT-held rows hold the library's own guard
+# across the timed loop (`rind::cpu::Dit::hold()`,
+# `verified_garbage::dit::scope`), and are timed only on a CPU with DIT:
+# rind's only on Apple's, verified-garbage's on any aarch64 CPU with it.
+VARIANTS = {"rind-dit-held": "rind", "verified-garbage-dit-held": "verified-garbage"}
+
+# How each library sets aarch64's data-independent timing (DIT) in the
+# versions rind-bench pins, read from their sources. A library that sets it
+# around each call pays a toggle per call that one which never sets it does
+# not, so its default row and another library's are not like for like on a
+# CPU with DIT; its DIT-held row, where it has a guard, is the closer match.
+DIT_MODES = {
+    "rind": "around each call that handles a secret, on Apple's platforms only; `rind::cpu::Dit` holds it",
+    "verified-garbage": (
+        "around each keyed call (MACs, AEADs, ciphers), on any aarch64 CPU with DIT, and never for an unkeyed "
+        "hash; `verified_garbage::dit::scope` holds it"
+    ),
+    "graviola": "around each call, on any aarch64 CPU with DIT, with no guard to hold it",
+    "aws-lc-rs": "never: aws-lc-sys builds aws-lc without `ENABLE_DATA_INDEPENDENT_TIMING`",
+    "ring": "never",
+    "rustcrypto": "never",
+    "libcrux": "never",
+    "openssl": "never",
+}
+
+
+def dit_pairs(host):
+    """Each operation a host timed both a library's default row and its
+    DIT-held row for: (row, library, default ns, held ns), in report order."""
+    host_times = times(host)
+    out = []
+    for op in OPERATIONS:
+        row = row_name(op)
+        libs = host_times.get(row, {})
+        for held, base in VARIANTS.items():
+            if held in libs and base in libs:
+                out.append((row, base, libs[base], libs[held]))
+    return out
+
+
+def dit_pair_table(host):
+    """A host's DIT pairs as a table of their own, so a reader sees each
+    default time beside its held one, and never one standing for the other."""
+    pairs = dit_pairs(host)
+    if not pairs:
+        return []
+    lines = [
+        "| Operation | Library | Default (DIT set per call) | DIT held | Held over default |",
+        "|---|---|---|---|---|",
+    ]
+    for row, lib, default, held in pairs:
+        lines.append(f"| {label(row)} | {COLUMNS[lib]} | {human(default)} | {human(held)} | {held / default:.2f}× |")
+    return lines
+
+
+def dit_note(libs):
+    """What the report says about DIT, for the libraries `libs` it shows."""
+    held = [lib for lib in VARIANTS if lib in libs]
+    if not held:
+        return []
+    modes = "; ".join(f"{COLUMNS[lib]}, {DIT_MODES[lib]}" for lib in COLUMNS if lib in libs and lib in DIT_MODES)
+    return [
+        "rind (DIT held) times rind with `rind::cpu::Dit::hold()` held across the timed loop, as a "
+        "caller batching calls does, so that DIT is set once rather than around each call. Only an Apple "
+        "CPU times it, since elsewhere it runs the same code as rind's own column, and it never "
+        "counts as the fastest library."
+        + (
+            " verified-garbage (DIT held) does the same with `verified_garbage::dit::scope`, on any aarch64 CPU "
+            "with DIT, for its keyed rows only."
+            if "verified-garbage-dit-held" in held
+            else ""
+        ),
+        "",
+        "How each library sets DIT on aarch64, from its source at the pinned version: " + modes + ". So on a "
+        "CPU with DIT a library's default row pays a DIT toggle per call that a library which never sets it "
+        "does not: compare a held row with those libraries, and default rows with each other. Each host "
+        "with both rows lists them side by side under its times.",
+        "",
+    ]
 
 
 def fastest(libs):
@@ -2508,17 +2595,7 @@ def report(hosts, tiers, verified, gaps):
             "Over rustls's aws-lc-rs provider it makes 214 through Rust's allocator and about 90 more in AWS-LC's C "
             "code, which only a process-wide count such as valgrind's sees (2026-11-13).",
             "",
-            *(
-                [
-                    "rind (DIT held) times rind with `rind::cpu::Dit::hold()` held across the timed loop, as a "
-                    "caller batching calls does, so that DIT is set once rather than around each call. Only an Apple "
-                    "CPU times it, since elsewhere it runs the same code as rind's own column, and it never "
-                    "counts as the fastest library.",
-                    "",
-                ]
-                if "rind-dit-held" in columns(*hosts.values())
-                else []
-            ),
+            *dit_note(columns(*hosts.values())),
             *picture("overview", "Time over the fastest library's, by operation, library, and host"),
             "",
         ]
@@ -2551,6 +2628,11 @@ def report(hosts, tiers, verified, gaps):
             "",
             "</details>",
             "",
+            *(
+                [f"DIT pairs on `{name}`: each library's default time beside its DIT-held one.", "", *pairs, ""]
+                if (pairs := dit_pair_table(h))
+                else []
+            ),
         ]
         for theme, suffix in (("light", ""), ("dark", "-dark")):
             files[f"{name}{suffix}.svg"] = host_svg(name, h, verified, theme)

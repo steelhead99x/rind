@@ -215,6 +215,63 @@ class Render(unittest.TestCase):
         self.assertEqual(kixtop["fastest"], {"x25519-ecdh": "rind"})
         self.assertEqual(kixtop["times"]["x25519-ecdh"][1], ["10.00 µs", 0, 0.5])
 
+    def test_dit_pairs_show_apart_and_never_set_the_fastest(self):
+        everyone = hosts()
+        held_rows = [
+            ("hmac-sha256/{lib}/64B", "rind", 120.0),
+            ("hmac-sha256/{lib}/64B", "rind-dit-held", 70.0),
+            ("hmac-sha256/{lib}/64B", "verified-garbage", 110.0),
+            ("hmac-sha256/{lib}/64B", "verified-garbage-dit-held", 60.0),
+            ("hmac-sha256/{lib}/64B", "ring", 90.0),
+        ]
+        everyone["kixtop"]["results"] += [{"operation": op, "library": lib, "ns": ns} for op, lib, ns in held_rows]
+        kixtop = everyone["kixtop"]
+        self.assertEqual(
+            br.dit_pairs(kixtop),
+            [("hmac-sha256/64B", "rind", 120.0, 70.0), ("hmac-sha256/64B", "verified-garbage", 110.0, 60.0)],
+        )
+        # Neither held row is a rival: ring is the fastest, and rind's gap is
+        # against ring, never against a held row.
+        self.assertEqual(br.fastest(br.times(kixtop)["hmac-sha256/64B"]), "ring")
+        self.assertIn(("hmac-sha256/64B", "kixtop"), br.gaps_of(everyone, None))
+        self.assertEqual(br.gaps_of(everyone, None)[("hmac-sha256/64B", "kixtop")], (120.0 / 90.0, "ring"))
+        table = br.dit_pair_table(kixtop)
+        self.assertEqual(table[0], "| Operation | Library | Default (DIT set per call) | DIT held | Held over default |")
+        self.assertIn("| HMAC-SHA256, 64 B | rind | 120 ns | 70 ns | 0.58× |", table)
+        self.assertIn("| HMAC-SHA256, 64 B | verified-garbage | 110 ns | 60 ns | 0.55× |", table)
+        text = br.report(everyone, None, VERIFIED, [])[br.REPORT]
+        self.assertIn("DIT pairs on `kixtop`: each library's default time beside its DIT-held one.", text)
+        self.assertNotIn("DIT pairs on `nixos`", text)
+        self.assertIn("verified-garbage (DIT held) does the same with `verified_garbage::dit::scope`", text)
+        self.assertIn("How each library sets DIT on aarch64", text)
+        self.assertIn("ring, never", text)
+        self.assertIn("| Operation | rind | rind (DIT held) | ring | verified-garbage | verified-garbage (DIT held) |", br.host_table(kixtop, VERIFIED))
+        # Without a held row, the report says nothing of DIT.
+        plain = br.report(hosts(), None, VERIFIED, [])[br.REPORT]
+        self.assertNotIn("How each library sets DIT", plain)
+        self.assertNotIn("DIT pairs on", plain)
+
+    def test_every_library_documents_how_it_sets_dit(self):
+        # A library added to the report must say whether it sets DIT, so its
+        # rows are never silently compared with a held or unheld one.
+        self.assertEqual(set(br.DIT_MODES), set(br.COLUMNS) - set(br.VARIANTS))
+        self.assertTrue(all(br.LIBRARIES[held] == held for held in br.VARIANTS))
+        self.assertTrue(all(base in br.COLUMNS for base in br.VARIANTS.values()))
+
+    def test_summary_gives_the_held_time_beside_rinds(self):
+        everyone = hosts()
+        everyone["kixtop"]["results"].append({"operation": "x25519-ecdh/{lib}", "library": "rind-dit-held", "ns": 10000.0})
+        with tempfile.TemporaryDirectory() as src:
+            for name in ("nixos", "kixtop"):
+                with open(os.path.join(src, f"{name}.json"), "w") as f:
+                    json.dump(everyone[name], f)
+            with io.StringIO() as out, contextlib.redirect_stdout(out):
+                br.summary(type("Args", (), {"dir": src})())
+                text = out.getvalue()
+        self.assertIn("20.00 µs, 0.50× ring; DIT held 10.00 µs, 0.25×", text)
+        self.assertIn("30.00 µs, 0.91× ring |", text)
+        self.assertIn("which aws-lc-rs, ring, RustCrypto, libcrux, and OpenSSL never do", text)
+
     def test_fastest_bin_holds_within_ten_percent(self):
         self.assertEqual(br.bin_of(1.0, br.SPEED_BINS), 0)
         self.assertEqual(br.bin_of(1.1, br.SPEED_BINS), 0)

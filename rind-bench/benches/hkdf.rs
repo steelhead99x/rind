@@ -240,21 +240,33 @@ fn vg<V: verified_garbage::hmac::HmacHash>(
     extract_expand(&mut out);
     assert_eq!(out, expected);
 
-    group.bench_function("extract-expand/verified-garbage", |b| {
-        b.iter(|| {
-            let mut out = [0u8; 32];
-            extract_expand(&mut out);
-            black_box(out)
-        })
-    });
+    // Each HMAC this glue runs sets DIT on its own, so the held row saves
+    // a toggle per HMAC, not per HKDF call.
+    for (lib, held) in criterion::vg_rows() {
+        group.bench_function(format!("extract-expand/{lib}"), |b| {
+            vg_scope!(
+                held,
+                b.iter(|| {
+                    let mut out = [0u8; 32];
+                    extract_expand(&mut out);
+                    black_box(out)
+                })
+            )
+        });
+    }
     let prk = verified_garbage::hmac::Hmac::<V>::mac(b"salt", secret);
-    group.bench_function("expand/verified-garbage", |b| {
-        b.iter(|| {
-            let mut out = [0u8; 32];
-            vg_expand::<V>(prk.as_ref(), info, &mut out);
-            black_box(out)
-        })
-    });
+    for (lib, held) in criterion::vg_rows() {
+        group.bench_function(format!("expand/{lib}"), |b| {
+            vg_scope!(
+                held,
+                b.iter(|| {
+                    let mut out = [0u8; 32];
+                    vg_expand::<V>(prk.as_ref(), info, &mut out);
+                    black_box(out)
+                })
+            )
+        });
+    }
 }
 
 #[cfg(not(target_arch = "xtensa"))]

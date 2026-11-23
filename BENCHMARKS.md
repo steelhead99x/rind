@@ -25,6 +25,8 @@ The rustls rows run both peers in one process. The every-logical-CPU rows run on
 
 rind (DIT held) times rind with `rind::cpu::Dit::hold()` held across the timed loop, as a caller batching calls does, so that DIT is set once rather than around each call. Only an Apple CPU times it, since elsewhere it runs the same code as rind's own column, and it never counts as the fastest library.
 
+How each library sets DIT on aarch64, from its source at the pinned version: rind, around each call that handles a secret, on Apple's platforms only; `rind::cpu::Dit` holds it; aws-lc-rs, never: aws-lc-sys builds aws-lc without `ENABLE_DATA_INDEPENDENT_TIMING`; ring, never; RustCrypto + dalek, never; graviola, around each call, on any aarch64 CPU with DIT, with no guard to hold it; libcrux, never; OpenSSL, never. So on a CPU with DIT a library's default row pays a DIT toggle per call that a library which never sets it does not: compare a held row with those libraries, and default rows with each other. Each host with both rows lists them side by side under its times.
+
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="benchmarks/overview-dark.svg">
   <img alt="Time over the fastest library's, by operation, library, and host" src="benchmarks/overview.svg">
@@ -535,6 +537,39 @@ Not timed on `kixtop`: full handshake, X25519, every logical CPU, resumed handsh
 | Argon2id 64 MiB t=3 p=4 | - | - | - | - | - | - | - | - |
 
 </details>
+
+DIT pairs on `kixtop`: each library's default time beside its DIT-held one.
+
+| Operation | Library | Default (DIT set per call) | DIT held | Held over default |
+|---|---|---|---|---|
+| AES-128-GCM seal, 32 B | rind | 57 ns | 11 ns | 0.19× |
+| AES-128-GCM seal, 1350 B | rind | 209 ns | 161 ns | 0.77× |
+| AES-128-GCM seal, 16 KB | rind | 1.48 µs | 1.43 µs | 0.97× |
+| AES-128-GCM open, 32 B | rind | 47 ns | 13 ns | 0.27× |
+| AES-128-GCM open, 1350 B | rind | 210 ns | 178 ns | 0.85× |
+| AES-128-GCM open, 16 KB | rind | 1.58 µs | 1.56 µs | 0.99× |
+| AES-256-GCM seal, 32 B | rind | 61 ns | 12 ns | 0.19× |
+| AES-256-GCM seal, 1350 B | rind | 232 ns | 188 ns | 0.81× |
+| AES-256-GCM seal, 16 KB | rind | 1.73 µs | 1.69 µs | 0.97× |
+| AES-256-GCM open, 32 B | rind | 48 ns | 13 ns | 0.27× |
+| AES-256-GCM open, 1350 B | rind | 231 ns | 197 ns | 0.85× |
+| AES-256-GCM open, 16 KB | rind | 1.84 µs | 1.81 µs | 0.98× |
+| ChaCha20-Poly1305 seal, 32 B | rind | 179 ns | 145 ns | 0.81× |
+| ChaCha20-Poly1305 seal, 1350 B | rind | 773 ns | 741 ns | 0.96× |
+| ChaCha20-Poly1305 seal, 16 KB | rind | 7.60 µs | 7.50 µs | 0.99× |
+| AES-128 header protection | rind | 34 ns | 3 ns | 0.08× |
+| AES-256 header protection | rind | 38 ns | 3 ns | 0.08× |
+| ChaCha20 header protection | rind | 88 ns | 58 ns | 0.66× |
+| SHA-256, 64 B | rind | 90 ns | 37 ns | 0.41× |
+| SHA-256, 1350 B | rind | 485 ns | 409 ns | 0.84× |
+| SHA-256, 16 KB | rind | 4.93 µs | 5.01 µs | 1.02× |
+| SHA-512, 64 B | rind | 108 ns | 75 ns | 0.69× |
+| SHA-512, 1350 B | rind | 810 ns | 730 ns | 0.90× |
+| SHA-512, 16 KB | rind | 8.85 µs | 8.72 µs | 0.99× |
+| HMAC-SHA256, 64 B | rind | 189 ns | 110 ns | 0.58× |
+| HMAC-SHA256, 1350 B | rind | 559 ns | 487 ns | 0.87× |
+| HKDF-SHA256 extract and expand | rind | 338 ns | 226 ns | 0.67× |
+| HKDF-SHA256 expand | rind | 107 ns | 74 ns | 0.69× |
 
 ### `ovh-iad`: Intel Core Processor (Haswell, no TSX)
 

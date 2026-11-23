@@ -2,6 +2,7 @@
 fn main() {}
 
 #[cfg(not(target_arch = "xtensa"))]
+#[macro_use]
 mod criterion;
 #[cfg(not(target_arch = "xtensa"))]
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
@@ -36,10 +37,12 @@ fn bench_aes_ctr(c: &mut Criterion) {
                         .unwrap()
                 });
             });
-            group.bench_function(BenchmarkId::new("rind", size_name), |b| {
-                let key = rind::cipher::AesCtr::new(rind_aes(key_len), key, 128).unwrap();
-                b.iter(|| key.apply_keystream(&iv, &mut buf).unwrap());
-            });
+            for (lib, _dit) in criterion::rind_rows() {
+                group.bench_function(BenchmarkId::new(lib, size_name), |b| {
+                    let key = rind::cipher::AesCtr::new(rind_aes(key_len), key, 128).unwrap();
+                    b.iter(|| key.apply_keystream(&iv, &mut buf).unwrap());
+                });
+            }
             // verified-garbage takes the IV only with the key, so each
             // message expands the key again.
             group.bench_function(BenchmarkId::new("verified-garbage", size_name), |b| {
@@ -114,20 +117,22 @@ fn bench_aes_cbc(c: &mut Criterion) {
                         }
                     });
                 });
-                group.bench_function(BenchmarkId::new("rind", size_name), |b| {
-                    let enc = AesCbcEncryptingKey::new(algorithm, key).unwrap();
-                    let dec = AesCbcDecryptingKey::new(algorithm, key).unwrap();
-                    b.iter(|| {
-                        buf.clear();
-                        buf.extend_from_slice(&input);
-                        if op == "encrypt" {
-                            enc.encrypt(CbcIv::assume_unpredictable(iv), &mut buf)
-                                .unwrap();
-                        } else {
-                            dec.decrypt(&iv, &mut buf).unwrap();
-                        }
+                for (lib, _dit) in criterion::rind_rows() {
+                    group.bench_function(BenchmarkId::new(lib, size_name), |b| {
+                        let enc = AesCbcEncryptingKey::new(algorithm, key).unwrap();
+                        let dec = AesCbcDecryptingKey::new(algorithm, key).unwrap();
+                        b.iter(|| {
+                            buf.clear();
+                            buf.extend_from_slice(&input);
+                            if op == "encrypt" {
+                                enc.encrypt(CbcIv::assume_unpredictable(iv), &mut buf)
+                                    .unwrap();
+                            } else {
+                                dec.decrypt(&iv, &mut buf).unwrap();
+                            }
+                        });
                     });
-                });
+                }
                 // verified-garbage has no padding, so its row pads and unpads
                 // here, and takes the IV only with the key, so each message
                 // expands the key again.
@@ -196,10 +201,12 @@ fn bench_chacha20(c: &mut Criterion) {
         let mut buf = vec![0u8; size];
         group.throughput(Throughput::Bytes(size as u64));
 
-        group.bench_function(BenchmarkId::new("rind", size_name), |b| {
-            let key = rind::cipher::ChaCha20::new(&key);
-            b.iter(|| key.apply_keystream(&nonce, 0, &mut buf).unwrap());
-        });
+        for (lib, _dit) in criterion::rind_rows() {
+            group.bench_function(BenchmarkId::new(lib, size_name), |b| {
+                let key = rind::cipher::ChaCha20::new(&key);
+                b.iter(|| key.apply_keystream(&nonce, 0, &mut buf).unwrap());
+            });
+        }
         group.bench_function(BenchmarkId::new("verified-garbage", size_name), |b| {
             use verified_garbage::cipher::chacha20::ChaCha20;
             let mut expect = vec![0u8; size];
@@ -261,38 +268,40 @@ fn bench_header_protection(c: &mut Criterion) {
                 b.iter(|| key.mask(&sample));
             });
         }
-        group.bench_function(format!("{name}/verified-garbage"), |b| {
-            use rind::aead::quic::{AES_128, AES_256, CHACHA20, HeaderProtectionKey};
-            use verified_garbage::cipher::aes::AesEcb;
-            use verified_garbage::cipher::chacha20::ChaCha20;
-            let algorithm = match name {
-                "aes128" => &AES_128,
-                "aes256" => &AES_256,
-                _ => &CHACHA20,
-            };
-            let expect = HeaderProtectionKey::new(algorithm, key)
-                .unwrap()
-                .mask(&sample);
-            // As rustls does, the AES key is expanded once; ChaCha20 takes the
-            // sample as its counter and nonce, so each mask starts a cipher.
-            let aes = (name != "chacha20").then(|| AesEcb::new(key).unwrap());
-            let mut chacha = [0u8; 32];
-            chacha[..key_len].copy_from_slice(key);
-            let mask = || {
-                let mut mask = [0u8; 5];
-                match &aes {
-                    Some(aes) => {
-                        let mut block = sample;
-                        aes.encrypt(&mut block).unwrap();
-                        mask.copy_from_slice(&block[..5]);
+        for (lib, held) in criterion::vg_rows() {
+            group.bench_function(format!("{name}/{lib}"), |b| {
+                use rind::aead::quic::{AES_128, AES_256, CHACHA20, HeaderProtectionKey};
+                use verified_garbage::cipher::aes::AesEcb;
+                use verified_garbage::cipher::chacha20::ChaCha20;
+                let algorithm = match name {
+                    "aes128" => &AES_128,
+                    "aes256" => &AES_256,
+                    _ => &CHACHA20,
+                };
+                let expect = HeaderProtectionKey::new(algorithm, key)
+                    .unwrap()
+                    .mask(&sample);
+                // As rustls does, the AES key is expanded once; ChaCha20 takes the
+                // sample as its counter and nonce, so each mask starts a cipher.
+                let aes = (name != "chacha20").then(|| AesEcb::new(key).unwrap());
+                let mut chacha = [0u8; 32];
+                chacha[..key_len].copy_from_slice(key);
+                let mask = || {
+                    let mut mask = [0u8; 5];
+                    match &aes {
+                        Some(aes) => {
+                            let mut block = sample;
+                            aes.encrypt(&mut block).unwrap();
+                            mask.copy_from_slice(&block[..5]);
+                        }
+                        None => ChaCha20::new(&chacha, &sample).apply_keystream(&mut mask),
                     }
-                    None => ChaCha20::new(&chacha, &sample).apply_keystream(&mut mask),
-                }
-                mask
-            };
-            assert_eq!(mask(), expect);
-            b.iter(mask);
-        });
+                    mask
+                };
+                assert_eq!(mask(), expect);
+                vg_scope!(held, b.iter(mask));
+            });
+        }
     }
 }
 
