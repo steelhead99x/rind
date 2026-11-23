@@ -28,7 +28,8 @@ pub(in crate::low) unsafe fn zero_bytes(ptr: *mut u8, len: usize) {
     }
     #[cfg(not(target_arch = "xtensa"))]
     for i in 0..len {
-        // SAFETY: the caller guarantees `len` writable bytes at `ptr`.
+        // SAFETY: the caller guarantees `len` writable bytes at `ptr`, and a
+        // volatile write is one the compiler must keep.
         unsafe { ptr.add(i).write_volatile(0) };
     }
 }
