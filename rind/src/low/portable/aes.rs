@@ -2,21 +2,23 @@
 
 //! AES for the portable backend and armv7 without the crypto extension:
 //! aws-lc's bitsliced AES, several blocks a pass, with the round keys held
-//! bitsliced so each call skips that step. 32-bit portable targets run
+//! bitsliced so each call skips that step. Portable riscv32 targets run
 //! RustCrypto's fixsliced AES instead, which takes about a fifth fewer
-//! instructions there (`aes_fixslice32`).
+//! instructions on the ESP32-C6's riscv32imac (`aes_fixslice32`). Other 32-bit
+//! targets keep aws-lc's code until they are measured: the evidence for the
+//! switch is riscv32 only.
 
-#[cfg(all(rind_backend = "portable", target_pointer_width = "32"))]
+#[cfg(all(rind_backend = "portable", target_arch = "riscv32"))]
 use super::aes_fixslice32::Schedule;
-#[cfg(not(all(rind_backend = "portable", target_pointer_width = "32")))]
+#[cfg(not(all(rind_backend = "portable", target_arch = "riscv32")))]
 use super::aes_nohw::Schedule;
 use crate::low;
 
 /// Expands `key`, which must be 16, 24, or 32 bytes.
 fn schedule(key: &[u8]) -> Schedule {
-    #[cfg(all(rind_backend = "portable", target_pointer_width = "32"))]
+    #[cfg(all(rind_backend = "portable", target_arch = "riscv32"))]
     return Schedule::new(key);
-    #[cfg(not(all(rind_backend = "portable", target_pointer_width = "32")))]
+    #[cfg(not(all(rind_backend = "portable", target_arch = "riscv32")))]
     return super::aes_nohw::NohwKey::new(key).schedule();
 }
 

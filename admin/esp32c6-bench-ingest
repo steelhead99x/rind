@@ -178,6 +178,12 @@ def parse(text):
     names = [k for k, _ in first["kat"]]
     if len(set(names)) != len(names):
         raise Refused("a known-answer check is repeated in one summary")
+    # A declared row count is met by a repeated row as well as by a distinct
+    # one, so a summary with a missing measurement could pass as whole. One
+    # operation is timed once per library, so the pair must be unique.
+    ops = [(r[0], r[1]) for r in first["rows"]]
+    if len(set(ops)) != len(ops):
+        raise Refused("a benchmark row is repeated in one summary")
     first = dict(first, kat=dict(first["kat"]))
     # Boot lines may be a copy cut off by a capture that began mid-boot, but
     # every one that is there must agree with the summary.
@@ -338,6 +344,28 @@ def selftest():
     start = "RIND-FW v1 start target=esp32c6\nRIND-KAT v1 sha256 ok\n"
     assert len(parse(one + start + one)["results"]) == 1
     refuses(one + start + one.replace("median_ns=100", "median_ns=101"), "disagree")
+    # A repeated operation ID satisfies `rows=2` but measures one thing twice.
+    refuses(
+        "RIND-FW v1 done failed=0 cpu_mhz=160 rounds=7 kats=1 rows=2\n"
+        "RIND-KAT v1 sha256 ok\n" + row1 + row1,
+        "repeated",
+    )
+    refuses(good.replace(row1, row1 + row1) * 2, "repeated")
+    # The same operation for two libraries is two rows; for one library, in
+    # the older format with no `lib=` too, it is a repeat.
+    two_libs = (
+        "RIND-FW v1 done failed=0 cpu_mhz=160 rounds=7 kats=1 rows=2\n"
+        "RIND-KAT v1 sha256 ok\n" + row1 + row1.replace("lib=rind", "lib=sha2")
+    )
+    assert [r["id"] for r in parse(two_libs + two_libs)["results"]] == [
+        "sha256/rind/1350B",
+        "sha256/sha2/1350B",
+    ]
+    refuses(
+        "RIND-FW v1 done failed=0 cpu_mhz=160 rounds=7 kats=1 rows=2\n"
+        "RIND-KAT v1 sha256 ok\n" + row1 + row1.replace(" lib=rind", ""),
+        "repeated",
+    )
     leaked = dict(out, note="10:bd:a3:b4:2c:48")
     try:
         check_scrubbed(leaked)
