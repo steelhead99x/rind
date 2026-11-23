@@ -155,13 +155,16 @@ mod generic {
         all(rind_backend = "aarch64", test)
     ))]
     pub(crate) mod poly1305;
-    // The Poly1305 of the portable backend on riscv32 with the M extension,
-    // also built in other tests to check it against the 64-bit one.
+    // The Poly1305 of the portable backend on riscv32 with the M extension
+    // and on Xtensa, also built in other tests to check it against the 64-bit
+    // one.
     #[cfg(any(
         all(
             rind_backend = "portable",
-            target_arch = "riscv32",
-            target_feature = "m"
+            any(
+                all(target_arch = "riscv32", target_feature = "m"),
+                target_arch = "xtensa"
+            )
         ),
         all(test, not(rind_backend = "arm"))
     ))]

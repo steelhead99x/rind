@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
 //! Poly1305 for the portable backend: 26-bit limbs in `u32`s
-//! (`generic::poly1305_32`) on riscv32 with the M extension, HACL*'s on other
-//! 32-bit targets, and rind's 64-bit limbs in `generic::poly1305` on 64-bit
+//! (`generic::poly1305_32`) on riscv32 with the M extension and on Xtensa,
+//! HACL*'s on other 32-bit targets, and rind's 64-bit limbs in `generic::poly1305` on 64-bit
 //! ones, as x86_64 runs it without SSE4.1.
 //!
 //! HACL*'s verified streaming `Hacl_MAC_Poly1305`, as libcrux-poly1305 ships
@@ -19,7 +19,11 @@
 //! multiply (riscv32i calls `__mulsi3`). So it is selected only where that
 //! multiply is known fixed-time and was measured, riscv32 with `m`; every
 //! other 32-bit portable target keeps HACL*'s Poly1305, as before this change,
-//! until one is measured. HACL*'s limb products are the same multiplies, so
+//! until one is measured. Xtensa (the ESP32-S3, measured on the board) runs
+//! it too: its `mull` and `muluh` are fixed-time as far as the ISA manual
+//! says, and LLVM gives HACL*'s `u64` limbs there the same branch on each
+//! 64-bit add's carry that this path's sums have (`quest/m2/speed/esp32s3-aead.md`),
+//! so HACL*'s path is no better there. HACL*'s limb products are the same multiplies, so
 //! this keeps those targets where they were rather than making them
 //! fixed-time.
 
@@ -29,7 +33,7 @@
     all(
         rind_backend = "portable",
         target_pointer_width = "32",
-        not(all(target_arch = "riscv32", target_feature = "m"))
+        not(any(all(target_arch = "riscv32", target_feature = "m"), target_arch = "xtensa"))
     )
 ))]
 use libcrux_hacl_rs::streaming_types::error_code;
@@ -39,7 +43,7 @@ use libcrux_hacl_rs::streaming_types::error_code;
     all(
         rind_backend = "portable",
         target_pointer_width = "32",
-        not(all(target_arch = "riscv32", target_feature = "m"))
+        not(any(all(target_arch = "riscv32", target_feature = "m"), target_arch = "xtensa"))
     )
 ))]
 use libcrux_poly1305::hacl::mac_poly1305::{self, state_t};
@@ -48,14 +52,16 @@ use libcrux_poly1305::hacl::mac_poly1305::{self, state_t};
 pub(crate) use crate::low::generic::poly1305::Poly1305;
 #[cfg(all(
     rind_backend = "portable",
-    target_arch = "riscv32",
-    target_feature = "m"
+    any(
+        all(target_arch = "riscv32", target_feature = "m"),
+        target_arch = "xtensa"
+    )
 ))]
 pub(crate) use crate::low::generic::poly1305_32::Poly1305;
 #[cfg(all(
     rind_backend = "portable",
     target_pointer_width = "32",
-    not(all(target_arch = "riscv32", target_feature = "m"))
+    not(any(all(target_arch = "riscv32", target_feature = "m"), target_arch = "xtensa"))
 ))]
 pub(crate) use Hacl as Poly1305;
 
@@ -65,7 +71,7 @@ pub(crate) use Hacl as Poly1305;
     all(
         rind_backend = "portable",
         target_pointer_width = "32",
-        not(all(target_arch = "riscv32", target_feature = "m"))
+        not(any(all(target_arch = "riscv32", target_feature = "m"), target_arch = "xtensa"))
     )
 ))]
 pub(crate) struct Hacl([state_t; 1]);
@@ -76,7 +82,7 @@ pub(crate) struct Hacl([state_t; 1]);
     all(
         rind_backend = "portable",
         target_pointer_width = "32",
-        not(all(target_arch = "riscv32", target_feature = "m"))
+        not(any(all(target_arch = "riscv32", target_feature = "m"), target_arch = "xtensa"))
     )
 ))]
 impl Hacl {
