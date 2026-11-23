@@ -285,6 +285,18 @@ pyca/verified-garbage <https://github.com/pyca/verified-garbage>
   License: Apache-2.0 OR BSD-3-Clause, taken under Apache-2.0.
   verified-garbage has no NOTICE file.
 
+RustCrypto's aes <https://github.com/RustCrypto/block-ciphers>
+
+  What: rind/src/low/generic/aes_fixslice32.rs, aes 0.8.4's
+  src/soft/fixslice32.rs, the fixsliced AES that 32-bit portable targets
+  run, adapted from Alexandre Adomnicai's C code for "Fixslicing AES-like
+  Ciphers" <https://eprint.iacr.org/2020/1123.pdf>, with rind's wrapper
+  and tests below it.
+  Copyright (c) 2020-2023 Alexandre Adomnicai and the RustCrypto
+  developers.
+  License: MIT OR Apache-2.0, which the file keeps, taken under
+  Apache-2.0. RustCrypto's block-ciphers has no NOTICE file.
+
 SPHINCS+ <https://github.com/sphincs/sphincsplus>
 
   What: rind/src/mid/slhdsa.rs, a port of the SPHINCS+ team's FIPS 205
