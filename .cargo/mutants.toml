@@ -292,7 +292,7 @@ exclude_re = [
   # Pinned to its line: the `cpu_forced` of a release build, one without an
   # OS, or the FIPS module, which mutation runs never are. The debug build's,
   # under the same name, is caught.
-  'rind/src/low/aarch64/cpu\.rs:495:\d+: replace cpu_forced -> bool with true$',
+  'rind/src/low/aarch64/cpu\.rs:529:\d+: replace cpu_forced -> bool with true$',
   # The portable backend has no CPU state to save, so `leave_cpu_state`
   # ignores it.
   'rind/src/low/portable/cpu\.rs:\d+:\d+: replace enter_cpu_state -> u32 with 1$',
@@ -391,6 +391,6 @@ exclude_re = [
   'rind/src/mid/mlkem\.rs:\d+:\d+: replace vg_ran -> Option<T> with None$',
   # Refusing VG's P-256 runs rind's own, which computes the same result;
   # only the time differs.
-  'rind/src/low/(x86_64|aarch64)/p256_vg\.rs:\d+:\d+: replace P256::(check|check_public_key) -> Option<Self> with None$',
+  'rind/src/low/(x86_64|aarch64)/p256_vg\.rs:\d+:\d+: replace P256::(check|check_public_key|check_ecdh) -> Option<Self> with None$',
   'rind/src/low/x86_64/p256_vg\.rs:\d+:\d+: replace \|\| with && in P256::check_public_key$',
 ]

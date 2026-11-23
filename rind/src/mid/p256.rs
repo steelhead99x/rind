@@ -144,7 +144,7 @@ impl PrivateKey {
     /// Returns a [`SharedSecret`].  May return an error in fault conditions.
     pub(crate) fn diffie_hellman(&self, peer: &PublicKey) -> Result<SharedSecret, Error> {
         let _entry = low::Entry::new_secret();
-        if let Some(vg) = low::p256_vg::P256::check() {
+        if let Some(vg) = low::p256_vg::P256::check_ecdh() {
             return self.vg_diffie_hellman(vg, peer);
         }
         let result = peer.point.multiply(&self.scalar);
@@ -1545,6 +1545,71 @@ mod tests {
             0x8571_ff18_2588_5d85,
         ],
     };
+
+    /// Splits keygen's time into its slices, to find which one trails
+    /// aws-lc-rs (#141). Run on the host in question, pinned to one core:
+    ///
+    /// `cargo test -p rind --release --lib keygen_split -- --ignored --nocapture`
+    ///
+    /// Prints the median of nine rounds, in nanoseconds per call. Every
+    /// input is a public test value, so nothing here is checked for
+    /// constant time.
+    #[test]
+    #[ignore = "timing, not a correctness test"]
+    fn keygen_split() {
+        use core::hint::black_box;
+        use std::time::Instant;
+
+        const CALLS: u32 = 2000;
+
+        fn median_ns(mut f: impl FnMut()) -> f64 {
+            let mut rounds = [0f64; 9];
+            for round in &mut rounds {
+                let start = Instant::now();
+                for _ in 0..CALLS {
+                    f();
+                }
+                *round = start.elapsed().as_nanos() as f64 / f64::from(CALLS);
+            }
+            rounds.sort_by(f64::total_cmp);
+            rounds[4]
+        }
+
+        let key = PrivateKey::generate(&mut SystemRandom).unwrap();
+        let scalar = Scalar::from_bytes_checked(&key.secret_bytes()).unwrap();
+        let point = AffineMontPoint::base_multiply(&scalar);
+
+        let rng = median_ns(|| {
+            let mut r = [0u8; Scalar::BYTES];
+            SystemRandom.fill(&mut r).unwrap();
+            black_box(r);
+        });
+        let generate = median_ns(|| {
+            black_box(PrivateKey::generate(&mut SystemRandom).unwrap());
+        });
+        let multiply = median_ns(|| {
+            black_box(AffineMontPoint::base_multiply(black_box(&scalar)));
+        });
+        let on_curve = median_ns(|| {
+            black_box(black_box(&point).on_curve());
+        });
+        let encode = median_ns(|| {
+            black_box(black_box(&point).as_bytes_uncompressed());
+        });
+        let public_key = median_ns(|| {
+            black_box(black_box(&key).public_key_uncompressed());
+        });
+
+        println!("keygen_split (ns/call, median of 9 rounds x {CALLS} calls)");
+        println!("  rng fill 32 bytes        {rng:8.1}");
+        println!("  PrivateKey::generate     {generate:8.1}  (rng + range check)");
+        println!("  base_multiply            {multiply:8.1}");
+        println!("  on_curve                 {on_curve:8.1}");
+        println!("  as_bytes_uncompressed    {encode:8.1}");
+        println!(
+            "  public key, end to end   {public_key:8.1}  (multiply + as_mont + on_curve + encode)"
+        );
+    }
 
     #[test]
     fn generator_on_curve() {

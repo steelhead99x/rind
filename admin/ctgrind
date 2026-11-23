@@ -199,6 +199,9 @@ fi
 # both run whatever the host, and `RIND_TEST_ARM_WIDE_MUL` makes
 # `detects_the_expected_cpu` check that each pass got the one it forced.
 # `--cfg rind_cpu_disable` keeps the variables alive in a `--release` build.
+# The narrow pass also sets `RIND_TEST_MIDR=narrow`, so the P-256 selection
+# that follows the core (rind's own keygen, signing, and ECDH on a Cortex-A72
+# or A76, VG's elsewhere) runs both ways under valgrind.
 # The FIPS module honours only the denial, never a force, so its first pass
 # forces nothing and asserts nothing. The portable backend has no narrow
 # schedule, so a `rind_portable` run takes one pass, but for the fips suite,
@@ -256,6 +259,11 @@ echo "ctgrind: narrow multiplier (RIND_CPU_DISABLE_wide_mul=1)" >&2
     set -e
     # shellcheck disable=SC2031 # as above
     export RIND_CPU_DISABLE_wide_mul=1 RIND_TEST_ARM_WIDE_MUL=0
+    # Valgrind hides the core, so this pass names a Cortex-A76 (the debug
+    # fixture, live under `rind_cpu_disable`): the `_alt` override above sets
+    # only the schedule, and P-256's key generation, signing nonce, and ECDH
+    # take rind's own routines only where the core is one of the narrow ones.
+    export RIND_TEST_MIDR=narrow
     run_suites "$@"
 )
 narrow=$?

@@ -20,18 +20,25 @@ namespace rind.x86_64
 
 /-! ## What the theorems state -/
 
-/-- Neither of pyca/verified-garbage's P-256 checks passes, so P-256 runs the
-code these theorems state: `check`, for ECDH and verification, and
-`check_public_key`, for the public key's derivation. VG's routines are proven
-in that project, not here. Both checks fail on exactly the x86-64 CPUs
-without BMI2, ADX, AVX, or AVX2; every 64-bit Arm CPU passes them. -/
+/-- None of pyca/verified-garbage's P-256 checks passes, so P-256 runs the
+code these theorems state: `check`, for verification, `check_ecdh`, for ECDH,
+and `check_public_key`, for the public key's derivation. VG's routines are proven
+in that project, not here. On x86-64, `check` and `check_ecdh` fail on
+exactly the CPUs without BMI2, ADX, AVX, or AVX2, and `check_public_key` fails
+there and on AMD without AVX-512 IFMA too. On 64-bit Arm, `check` passes on
+every CPU, and `check_ecdh` and `check_public_key` fail on a Cortex-A72 or
+Cortex-A76. -/
 def NoVgP256 : Prop :=
-  low.x86_64.p256_vg.P256.check = ok none ∧ low.x86_64.p256_vg.P256.check_public_key = ok none
+  low.x86_64.p256_vg.P256.check = ok none ∧ low.x86_64.p256_vg.P256.check_public_key = ok none ∧
+    low.x86_64.p256_vg.P256.check_ecdh = ok none
 
 theorem NoVgP256.eq (hvg : NoVgP256) : low.x86_64.p256_vg.P256.check = ok none := hvg.1
 
 theorem NoVgP256.eq_public_key (hvg : NoVgP256) :
-    low.x86_64.p256_vg.P256.check_public_key = ok none := hvg.2
+    low.x86_64.p256_vg.P256.check_public_key = ok none := hvg.2.1
+
+theorem NoVgP256.eq_ecdh (hvg : NoVgP256) : low.x86_64.p256_vg.P256.check_ecdh = ok none :=
+  hvg.2.2
 
 /-- The coordinates an encoded point names, read big-endian after its tag byte. -/
 def x962Coords (bytes : List U8) : Nat × Nat :=
@@ -638,7 +645,7 @@ theorem diffie_hellman_spec (h : Runs) (hvg : NoVgP256) (k : mid.p256.PrivateKey
       | none => r = .Err .Fault ⦄ := by
   unfold mid.p256.PrivateKey.diffie_hellman low.ct.into_public
   step
-  simp only [hvg.eq, bind_ok]
+  simp only [hvg.eq_ecdh, bind_ok]
   step with multiply_spec h _ _ P hP hrep as ⟨q, rx, ry, hz, hq⟩
   have hl : (q.xy.val).length = 8 := q.xy.property
   step as ⟨b, hb⟩
