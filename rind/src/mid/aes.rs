@@ -541,10 +541,11 @@ mod tests {
     // armv7's AES block and AES-CTR, on the crypto extension under qemu's
     // `max` CPU and on NEON (vpaes and bsaes) under the Cortex-A15, which
     // valgrind hides, for each key size, with a secret key, block, and
-    // message, for `admin/ct-qemu`. The message's 11 blocks take the NEON
-    // CTR's 8-block bsaes batch and 3-block vpaes tail, and the crypto
-    // extension's 3-block loop and 2-block tail; its partial block is a
-    // 1-block call.
+    // message, for `admin/ct-qemu`. A message of 11 blocks takes the NEON
+    // CTR's 8-block bsaes batch and 3-block vpaes tail, and one of 14 bsaes
+    // alone, a whole batch then a 6-block partial one; both take the crypto
+    // extension's 3-block loop and 2-block tail. Each one's partial block is
+    // a 1-block call.
     #[cfg(rind_backend = "arm")]
     #[test]
     #[ignore = "admin/ct-qemu runs it under qemu-arm"]
@@ -567,8 +568,10 @@ mod tests {
             ct_qemu::traced(|| aes.encrypt_block(&mut block));
             let mut counter_block: [u8; 16] = bytes(16).try_into().unwrap();
             counter_block[12..].copy_from_slice(&7u32.to_be_bytes());
-            let mut msg = bytes(11 * 16 + 8);
-            ct_qemu::traced(|| ctr.apply_keystream(&counter_block, &mut msg)).unwrap();
+            for blocks in [11, 14] {
+                let mut msg = bytes(blocks * 16 + 8);
+                ct_qemu::traced(|| ctr.apply_keystream(&counter_block, &mut msg)).unwrap();
+            }
         }
     }
 }

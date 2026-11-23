@@ -493,10 +493,11 @@ mod tests {
 
     // armv7's AES-CBC, on the crypto extension under qemu's `max` CPU and on
     // NEON (vpaes and bsaes) under the Cortex-A15, which valgrind hides, for
-    // each key size, with a secret key and message, for `admin/ct-qemu`. The
-    // message's 11 padded blocks take the NEON decryption's 8-block bsaes
-    // batch and 3-block vpaes tail, and the crypto extension's 3-block loop
-    // and its tail.
+    // each key size, with a secret key and message, for `admin/ct-qemu`. A
+    // message of 11 padded blocks takes the NEON decryption's 8-block bsaes
+    // batch and 3-block vpaes tail, and one of 14 bsaes alone, a whole batch
+    // then a 6-block partial one; both take the crypto extension's 3-block
+    // loop and its tail.
     #[cfg(rind_backend = "arm")]
     #[test]
     #[ignore = "admin/ct-qemu runs it under qemu-arm"]
@@ -516,9 +517,11 @@ mod tests {
             }
 
             let iv = bytes(16).try_into().unwrap();
-            let mut msg = bytes(10 * 16 + 5);
-            ct_qemu::traced(|| enc.encrypt(CbcIv::assume_unpredictable(iv), &mut msg)).unwrap();
-            ct_qemu::traced(|| dec.decrypt(&iv, &mut msg)).unwrap();
+            for blocks in [11, 14] {
+                let mut msg = bytes((blocks - 1) * 16 + 5);
+                ct_qemu::traced(|| enc.encrypt(CbcIv::assume_unpredictable(iv), &mut msg)).unwrap();
+                ct_qemu::traced(|| dec.decrypt(&iv, &mut msg)).unwrap();
+            }
         }
     }
 }
