@@ -15,5 +15,4 @@ Planned with the maintainer on 2026-11-21 (`/quest-plan`): ✅ fuzz the FFI C AB
 
 ## Related
 
-- [pyrind takes rind 0.4's shape](/quest/m2/api/pyrind-shape.md)
-- [rind for Dart takes rind 0.4's shape](/quest/m2/api/rind-dart-shape.md)
+- pyrind takes rind 0.4's shape, and rind for Dart takes rind 0.4's shape: both done on this fork (commits c4c0b542 and 812fa745), so their quest files are gone here.
