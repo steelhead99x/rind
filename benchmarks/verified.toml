@@ -75,11 +75,13 @@
 # imports; its message hash is its own row. PSS's MGF1 and H' hash inside the
 # scheme, so RSA-2048 PSS verification earns it, IFMA or not, only where the
 # CPU also has the SHA extensions.
+# A CPU with AVX-IFMA runs X25519 on verified-garbage's routines re-encoded by
+# `admin/avx-ifma`, whose bytes no proof covers, so it earns no check mark.
 [[verified]]
 library = "rind"
 operations = ["x25519-ecdh"]
 arch = "x86_64"
-cpu = ["!avx512ifma"]
+cpu = ["!avx512ifma", "!avxifma"]
 proof = "rind's Lean proof, through Aeneas and a hand model of the function-pointer dispatch Aeneas cannot translate, which assumes each key's dispatch table holds its own curve's functions, the only table rind builds, of its agreement API's X25519 down to s2n-bignum's routines, which rind runs on CPUs without AVX-512 IFMA, composed with s2n-bignum's HOL Light proofs of curve25519_x25519, curve25519_x25519base, their _alt forms without BMI2 and ADX, and bignum_eq, of s2n-bignum's own object code, which rind transliterates"
 link = "https://github.com/kixel-ai/rind/blob/main/proofs/Rind/X86_64/X25519.lean"
 

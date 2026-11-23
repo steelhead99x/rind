@@ -11,6 +11,7 @@ pub(crate) mod aes_gcm_vaes;
 #[path = "../generic/aes_nohw.rs"]
 pub(crate) mod aes_nohw;
 pub(crate) mod argon2;
+pub(crate) mod avx_ifma;
 pub(crate) mod bignum_add;
 pub(crate) mod bignum_add_p25519;
 pub(crate) mod bignum_add_p256;
@@ -86,6 +87,7 @@ pub(crate) mod chacha20poly1305;
 pub(crate) mod cpu;
 #[cfg(test)]
 pub(crate) mod ct_sde;
+pub(crate) mod curve25519_avx_ifma;
 pub(crate) mod curve25519_ifma;
 pub(crate) mod curve25519_x25519;
 pub(crate) mod curve25519_x25519_alt;

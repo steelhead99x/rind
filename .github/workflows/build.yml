@@ -152,6 +152,10 @@ jobs:
           # test Vale's aes-gcm and avx2 ML-KEM without avx512 or vaes, and
           # RSA's CRT one exponentiation at a time on a runner with AVX-512 IFMA
           tier RIND_CPU_DISABLE_avx512bw=1 RIND_CPU_DISABLE_avx512f=1 RIND_CPU_DISABLE_vaes=1 RIND_TEST_X86_AVX512_RSA=0
+          # test s2n-bignum's mulx X25519 and the Ed25519 verification that
+          # follows, on a CPU with AVX-IFMA, which runs the re-encoded
+          # AVX-512 IFMA routines instead
+          tier RIND_CPU_DISABLE_avxifma=1
           # test s2n-bignum's _alt routines, and aws-lc's Montgomery
           # multiplication and RSAZ exponentiation, for CPUs with AVX2 but
           # without BMI2 and ADX, such as Haswell; the last variables fail the

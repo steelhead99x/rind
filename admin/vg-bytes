@@ -408,9 +408,15 @@ def main():
     # cosimulation runs, so an encoding of the same instruction that differs
     # from VG's, which may need another CPU feature, fails here. A routine
     # is VG's by its name, wherever rind puts it; any function of a `vg`
-    # module must be one, so a routine an older pin had fails here.
+    # module must be one, so a routine an older pin had fails here. The
+    # functions of `avx_ifma` keep VG's names but are VEX re-encodings of
+    # VG's EVEX code, which `admin/avx-ifma/generate` makes, so they are not
+    # compared byte for byte.
+    def vendored_here(path, name):
+        return "::avx_ifma::" not in path and (name in text or "::vg::" in path)
+
     for obj in a.rind:
-        vendored = disassemble(a.arch, obj, lambda path, name: name in text or "::vg::" in path)
+        vendored = disassemble(a.arch, obj, vendored_here)
         for name, insns in vendored.items():
             if name not in text:
                 fail(f"rind's {name} is not a routine of VG's text at this commit")

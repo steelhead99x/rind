@@ -30,6 +30,7 @@ MARKS = ["52430001:repeat", "52430002:repeat"]
 MODELS = {
     "vaes_avx2": "-adl",  # Alder Lake: VAES without AVX-512.
     "hmac": "-arl",  # Arrow Lake: the SHA extensions. SHA-384/512 take AVX2.
+    "_avx_ifma": "-arl",  # Arrow Lake: AVX-IFMA without AVX-512.
     "_ifma_": "-icx",  # Ice Lake server: AVX-512 IFMA without AVX512_FP16.
 }
 # Far below where the program maps its thread stacks and heaps.

@@ -78,7 +78,7 @@ impl SigningKey {
                 &self.verifying_key.bytes,
                 msg,
             )),
-            Path::Rind(_) => self.sign_rind(msg),
+            Path::Rind(_) | Path::AvxIfma(_) => self.sign_rind(msg),
         }
     }
 
@@ -157,6 +157,7 @@ pub(crate) struct VerifyingKey {
 enum Path {
     Rind(EdwardsPoint) = 0,
     Ifma(low::Curve25519Ifma),
+    AvxIfma(low::Curve25519AvxIfma),
 }
 
 impl VerifyingKey {
@@ -175,6 +176,12 @@ impl VerifyingKey {
                 path: Path::Ifma(ifma),
             });
         }
+        if let Some(avx_ifma) = low::Curve25519AvxIfma::check() {
+            return Ok(Self {
+                bytes: *bytes,
+                path: Path::AvxIfma(avx_ifma),
+            });
+        }
         Ok(Self {
             bytes: *bytes,
             path: Path::Rind(point),
@@ -185,6 +192,7 @@ impl VerifyingKey {
     pub(crate) fn verify(&self, sig: &[u8; 64], msg: &[u8]) -> Result<(), Error> {
         let ok = match &self.path {
             Path::Ifma(ifma) => ifma.ed25519_verify(&self.bytes, msg, sig),
+            Path::AvxIfma(avx_ifma) => avx_ifma.ed25519_verify(&self.bytes, msg, sig),
             Path::Rind(point) => self.verify_rind(point, sig, msg),
         };
         match ok {
@@ -657,6 +665,50 @@ mod test {
             }
             assert!(vk.verify(&sigs[0], &msg).is_ok());
 
+            msg.push(rng.next::<1>()[0]);
+        }
+    }
+
+    /// On a CPU with AVX-IFMA and no AVX-512, the re-encoded VG verdicts
+    /// against rind's own, for the same signatures as `ifma_matches_rind`.
+    #[test]
+    fn avx_ifma_matches_rind() {
+        let _entry = low::Entry::new_public();
+        if low::Curve25519Ifma::check().is_some() || low::Curve25519AvxIfma::check().is_none() {
+            return;
+        }
+        let mut rng = TestRng::new(202611181);
+        let mut msg = vec![];
+        for round in 0..300 {
+            let seed = rng.next::<32>();
+            let rind = SigningKey::from_seed_rind(&seed);
+            let sig = rind.sign_rind(&msg);
+            let vk = VerifyingKey::from_bytes(&rind.verifying_key.bytes).unwrap();
+            assert!(matches!(vk.path, Path::AvxIfma(_)));
+            let Path::Rind(point) = &rind.verifying_key.path else {
+                unreachable!()
+            };
+            let mut sigs = vec![sig];
+            let bit = round * 37 % 512;
+            let mut flipped = sig;
+            flipped[bit / 8] ^= 1 << (bit % 8);
+            sigs.push(flipped);
+            let mut non_canonical = sig;
+            non_canonical[..31].fill(0xff);
+            non_canonical[0] = 0xed + (round % 19) as u8;
+            non_canonical[31] = 0x7f;
+            sigs.push(non_canonical);
+            let mut ones = sig;
+            ones[32..].fill(0xff);
+            sigs.push(ones);
+            for (i, sig) in sigs.iter().enumerate() {
+                assert_eq!(
+                    vk.verify(sig, &msg).is_ok(),
+                    vk.verify_rind(point, sig, &msg),
+                    "{round} {i} {sig:x?}"
+                );
+            }
+            assert!(vk.verify(&sigs[0], &msg).is_ok());
             msg.push(rng.next::<1>()[0]);
         }
     }

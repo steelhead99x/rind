@@ -26,6 +26,10 @@ opaque low.x86_64.p256_vg.P256 : Type
 and Ed25519, which no proof here covers. -/
 opaque low.x86_64.curve25519_ifma.Curve25519Ifma : Type
 
+/-- The token proving the CPU runs the AVX-IFMA re-encoding of
+pyca/verified-garbage's X25519 and Ed25519, which no proof here covers. -/
+opaque low.x86_64.curve25519_avx_ifma.Curve25519AvxIfma : Type
+
 /-- The token proving the CPU has BMI2 and ADX. -/
 opaque low.x86_64.cpu.HaveBmi2Adx : Type
 
