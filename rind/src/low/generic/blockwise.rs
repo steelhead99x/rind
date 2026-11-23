@@ -63,7 +63,12 @@ impl<const N: usize> Blockwise<N> {
         rind_backend = "x86_64",
         all(
             rind_backend = "portable",
-            any(target_pointer_width = "64", target_arch = "xtensa", test)
+            any(
+                target_pointer_width = "64",
+                target_arch = "xtensa",
+                target_arch = "riscv32",
+                test
+            )
         ),
         all(rind_backend = "aarch64", test)
     ))]
@@ -85,7 +90,12 @@ impl<const N: usize> Blockwise<N> {
         rind_backend = "x86_64",
         all(
             rind_backend = "portable",
-            any(target_pointer_width = "64", target_arch = "xtensa", test)
+            any(
+                target_pointer_width = "64",
+                target_arch = "xtensa",
+                target_arch = "riscv32",
+                test
+            )
         ),
         all(rind_backend = "aarch64", test)
     ))]
@@ -103,7 +113,12 @@ impl<const N: usize> Blockwise<N> {
         rind_backend = "x86_64",
         all(
             rind_backend = "portable",
-            any(target_pointer_width = "64", target_arch = "xtensa", test)
+            any(
+                target_pointer_width = "64",
+                target_arch = "xtensa",
+                target_arch = "riscv32",
+                test
+            )
         ),
         all(rind_backend = "aarch64", test)
     ))]
@@ -125,7 +140,12 @@ impl<const N: usize> Blockwise<N> {
         rind_backend = "x86_64",
         all(
             rind_backend = "portable",
-            any(target_pointer_width = "64", target_arch = "xtensa", test)
+            any(
+                target_pointer_width = "64",
+                target_arch = "xtensa",
+                target_arch = "riscv32",
+                test
+            )
         ),
         all(rind_backend = "aarch64", test)
     ))]
