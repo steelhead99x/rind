@@ -115,6 +115,13 @@ VPS_NOTE = "OVH VPS in {}, 4 shared vCPUs: other tenants add noise that a dedica
 COLLECT_HOSTS = {
     "nixos": {"jobs": 16},
     "desktop": {"jobs": 12},
+    "fedora": {
+        "jobs": 16,
+        "note": "The maintainer's Fedora workstation and the report's only AVX-512 host, so the one whose table "
+        "times rind's AVX-512 AES-GCM, IFMA RSA, and 8-way ML-KEM sampler against every library. It also runs CI "
+        "runners and agent sessions, so its times are noisier than the other dedicated hosts'. Zen 5 keeps its "
+        "clock with 512-bit vectors, so this host cannot show what they cost on the Intel cores that slow down.",
+    },
     "kixtop": {
         "jobs": 4,
         "note": "The maintainer's MacBook, in daily use. Its cores have DIT, and this run timed rind two ways. "

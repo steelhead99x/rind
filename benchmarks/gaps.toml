@@ -51,17 +51,17 @@ reason = "rind's portable SHA-1 trails aws-lc's C by 1.1 to 1.25× from 1200 B u
 [[gap]]
 operations = ["sha256/*", "sha256-updates/*", "hmac-sha256/*", "sha512*", "hmac-sha384/*"]
 on = ["portable"]
-quest = "/quest/m2/speed/portable-sha2.md"
+reason = "Closed after this run: [kixel-ai/rind#944](https://github.com/kixel-ai/rind/pull/944), which landed after the run's commit, replaces HACL*'s SHA-2 with aws-lc's C block functions ported to Rust, which measured 0.80 to 0.91× aws-lc-rs's time for SHA-256 and 0.90 to 0.99× for SHA-512 on an Intel core in this row's configuration. The next refresh measures it."
 
 [[gap]]
 operations = ["aes*", "quic-header-protection/aes*", "rustls-bulk/aes*", "hpke-*-aes128-gcm-*"]
 on = ["armv7 NEON"]
-quest = "/quest/m2/speed/armv7-neon-aes.md"
+reason = "The weekly data predates [kixel-ai/rind#913](https://github.com/kixel-ai/rind/pull/913), which moved these to aws-lc's NEON assembly: on this tier in [run 44702869568](https://github.com/kixel-ai/rind/actions/runs/44702869568), at its head, rind ran them in 0.28 to 1.09× aws-lc-rs's time, CTR and CBC decryption from 1200 B in 0.28 to 0.37× on bitsliced AES, which aws-lc-rs's one-shot cipher keys do not take. The first refresh after it drops this entry."
 
 [[gap]]
 operations = ["aes*-kw-unwrap/*/16B", "aes*-kwp-unwrap/*/16B"]
 on = ["x86_64", "no AVX2"]
-reason = "Unwrapping a 16-byte key takes 35 to 55 ns more than aws-lc-rs's 280 to 400 ns on the EPYC runners of [run 43646114817](https://github.com/kixel-ai/rind/actions/runs/43646114817), 1.11 to 1.20× its time; wrapping, every longer key, and the other x86_64 tiers are within 10%, armv7 NEON unwraps it in about 2.02× and has its own decision above, and aarch64 unwraps in 0.68× aws-lc-rs's time. Key wrap is rare and runs once per stored key, so the fixed cost stays without a quest; the next refresh rechecks it."
+reason = "Unwrapping a 16-byte key takes 35 to 55 ns more than aws-lc-rs's 280 to 400 ns on the EPYC runners of [run 43646114817](https://github.com/kixel-ai/rind/actions/runs/43646114817), 1.11 to 1.20× its time; wrapping, every longer key, and the other x86_64 tiers are within 10%, armv7 NEON's entry above covers that tier, and aarch64 unwraps in 0.68× aws-lc-rs's time. Key wrap is rare and runs once per stored key, so the fixed cost stays without a quest; the next refresh rechecks it."
 
 [[gap]]
 operations = ["mlkem768-keygen"]
@@ -92,3 +92,28 @@ reason = "Closed after this run: pyca/verified-garbage measured 30.6 µs against
 operations = ["rsa2048-pkcs1-sha256-sign", "rustls-bulk/chacha20poly1305", "rustls-resumed-handshake/x25519", "sha3-256/16KB", "sha3-512/16KB"]
 on = ["nixos"]
 reason = "Noise: CI jobs on `nixos` kept about 4 CPUs busy through this run, and a second run of the same commit right after it, under more load elsewhere, measured each of these within 10% of the fastest: PKCS#1 signing 0.97× graviola's time (PSS signing 0.94× in this run), ChaCha20-Poly1305 bulk 1.03× ring's, the resumed handshake 1.00× graviola's, and SHA3-256 and SHA3-512 at 16 KB 0.96 and 1.04× aws-lc-rs's. The next refresh rechecks them."
+
+[[gap]]
+operations = ["aes*-gcm*"]
+on = ["fedora"]
+reason = "These rows time pyca/verified-garbage's public API. [kixel-ai/rind#955](https://github.com/kixel-ai/rind/pull/955) ran its prepared AVX-512 kernels, `vg_aes_gcm_{seal,open}_prepared_vaes_vpclmul_avx512`, under rind's glue on the Xeon 6975P runners in [run 44984309951](https://github.com/kixel-ai/rind/actions/runs/44984309951): VG took 1.08 to 1.77× rind's time below 8 KB in every direction and key size, 1350 B included, and AES-256 0.99 to 1.09× from 8 KB; only AES-128 and AES-192 from 12 KB came out ahead, at 0.88 to 0.99×. `fedora` ran under a load average of 20 to 40 throughout, and its cells, from 0.46 to 1.59×, could not settle Zen 5. VG's key-power table also took rind's key setup from the fastest of the libraries to 257 to 274 ns, against aws-lc-rs's 95 to 132, so rind keeps its code. The next refresh rechecks it."
+
+[[gap]]
+operations = ["chacha20poly1305/*", "rustls-bulk/chacha20poly1305"]
+on = ["fedora"]
+reason = "`fedora`'s data predates [#953](https://github.com/kixel-ai/rind/pull/953), which runs pyca/verified-garbage's AVX-512 IFMA one pass: with it, `fedora` measured rind's seal within 1.09 of the fastest library at every size, 16 KB in 2.81 µs against OpenSSL's 2.67 (from 4.71), and the 1 MB rustls transfer in 397 µs against OpenSSL's provider's 423 (from 615). Drop this entry once `fedora`'s next run shows the gap within 10%."
+
+[[gap]]
+operations = ["rsa2048-pkcs1-sha256-verify", "rsa2048-pss-sha256-verify"]
+on = ["fedora"]
+reason = "`fedora`'s data predates [#952](https://github.com/kixel-ai/rind/pull/952), which runs pyca/verified-garbage's `R² mod n` on key load: there these verifications measured 5.30 and 5.67 µs against VG's 4.83 and 5.30 (1.10 and 1.07×), from 6.00 and 6.26. What remains is in key loading around it, as VG's rows start from parsed components: the DER parse and re-encoding, the wipe of the key on drop that AGENTS.md requires, and the modulus's conversion to the routine's big-endian bytes. Drop this entry once `fedora`'s next run shows the gap within 10%."
+
+[[gap]]
+operations = ["p384-ecdsa-sign"]
+on = ["fedora"]
+reason = "1.10× pyca/verified-garbage's time in both of `fedora`'s quiet runs (16.7 and 16.8 µs against 15.2; aws-lc-rs 43.6). rind already runs VG's `d·G` for each signature's `k·G` ([#847](https://github.com/kixel-ai/rind/pull/847)), so the difference is in rind's other steps, among them its hedged nonce: fresh randomness for each signature, as aws-lc-rs draws, where VG derives its nonce deterministically by RFC 6979. That behavior is deliberate, so it stays; the next refresh rechecks the margin."
+
+[[gap]]
+operations = ["sha3-256/64B"]
+on = ["fedora"]
+reason = "SHA3-256 at 64 B measured 1.04 and 1.11× pyca/verified-garbage's time in `fedora`'s two quiet runs (184 and 195 ns against 175 and 176), while rind was faster at 1350 B and 16 KB (1.66 against 1.69 µs, 19.7 against 20.2 µs). x86_64 runs one Keccak-f on every CPU, and [#851](https://github.com/kixel-ai/rind/pull/851) kept rind's proven one, since VG measured 1.01 to 1.05× rind's time from 1200 B on Zen 3 and Zen 4; Zen 5 agrees at the long sizes. AGENTS.md takes a verified source only where it is as fast at every size, so rind's stays. The next refresh rechecks it."

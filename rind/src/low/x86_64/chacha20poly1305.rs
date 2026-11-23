@@ -1,34 +1,41 @@
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
-//! ChaCha20-Poly1305: aws-lc's `chacha20_poly1305_x86_64`, which interleaves
-//! ChaCha20 with Poly1305 in one pass, imported by `admin/import-aws-lc`,
-//! with AVX2 where the CPU has it and SSE4.1 otherwise. Without SSE4.1,
-//! ChaCha20 and Poly1305 run in separate passes.
+//! ChaCha20-Poly1305 in one pass: pyca/verified-garbage's AVX-512 IFMA
+//! routines, imported by `admin/import-vg`, where the CPU has AVX512_IFMA,
+//! at every length, since they matched or beat aws-lc's at every size
+//! measured on Zen 5 and Granite Rapids. Otherwise aws-lc's
+//! `chacha20_poly1305_x86_64`, which interleaves ChaCha20 with Poly1305,
+//! imported by `admin/import-aws-lc`, with AVX2 where the CPU has it and
+//! SSE4.1 otherwise; CPUs with AVX-512 but no IFMA, which no measurement
+//! covered, keep it too. Without SSE4.1, ChaCha20 and Poly1305 run in
+//! separate passes.
 //!
-//! On a CPU with AVX-512 IFMA, from `IFMA_MIN_LEN` bytes of message, they
-//! run in separate passes instead, as OpenSSL runs them there:
-//! verified-garbage's AVX-512 VL ChaCha20 and OpenSSL's base 2^44 Poly1305
-//! (`poly1305_ifma`), a chunk at a time so the second pass reads what the
-//! first left in L1. aws-lc's one pass interleaves a scalar Poly1305, which
-//! takes about as long as both vector passes together. `one_pass` makes
-//! that choice, below `seal` and `open`, so the dispatch `proofs/` checks
-//! is unchanged, and its `OnePass` hypothesis covers both.
+//! VG proves in Lean that its routines meet RFC 8439 and take the same
+//! branches and memory addresses whatever the key, nonce, and data, but for
+//! whether open authenticated, which its contract lets it reveal. Those
+//! proofs are over its models of the instructions, which `admin/prove vg`
+//! cosimulates. The aws-lc assembly is not formally verified: its
+//! correctness rests on its use and testing in BoringSSL and aws-lc. rind
+//! tests both against RFC 8439, Wycheproof, aws-lc-rs, and separate
+//! ChaCha20 and Poly1305 passes.
 //!
-//! The aws-lc assembly is not formally verified: its correctness rests on its
-//! use and testing in BoringSSL and aws-lc, and on rind's tests of it against
-//! RFC 8439, Wycheproof, aws-lc-rs, and the separate passes.
+//! VG's routines zero their stack scratch before returning, which AGENTS.md
+//! allows an imported proven routine: VG defines each routine with that
+//! wipe, offers none without it, and its proofs are of the instructions as
+//! emitted. They outrun aws-lc's code with that cost included.
 
-use super::cpu::{HaveAvx2, HaveAvx512Ifma, HaveSse41};
-use super::poly1305_ifma::Poly1305;
-use crate::low::chacha20::ChaCha20;
-use crate::low::ct_equal;
+use super::cpu::{HaveAvx2, HaveIfmaForVgChaCha20Poly1305, HaveSse41};
+use super::vg::vg_chacha20_poly1305_open_ifma::vg_chacha20_poly1305_open_ifma;
+use super::vg::vg_chacha20_poly1305_seal_ifma::vg_chacha20_poly1305_seal_ifma;
 use crate::low::generic::chacha20poly1305 as separate;
+use crate::low::{Mcdt, ct_equal};
 
 /// Encrypts `inout` in place, returning the tag over `aad` and the ciphertext.
 pub(crate) fn seal(key: &[u8; 32], nonce: &[u8; 12], aad: &[u8], inout: &mut [u8]) -> [u8; 16] {
-    match HaveSse41::check() {
-        Some(sse41) => one_pass(sse41, HaveAvx2::check(), key, nonce, aad, inout, true),
-        None => separate::seal(key, nonce, aad, inout),
+    match (HaveIfmaForVgChaCha20Poly1305::check(), HaveSse41::check()) {
+        (Some(ifma), _) => seal_ifma(ifma, key, nonce, aad, inout),
+        (None, Some(sse41)) => one_pass(sse41, HaveAvx2::check(), key, nonce, aad, inout, true),
+        (None, None) => separate::seal(key, nonce, aad, inout),
     }
 }
 
@@ -41,71 +48,59 @@ pub(crate) fn open(
     inout: &mut [u8],
     tag: &[u8; 16],
 ) -> bool {
-    match HaveSse41::check() {
-        Some(sse41) => ct_equal(
+    match (HaveIfmaForVgChaCha20Poly1305::check(), HaveSse41::check()) {
+        (Some(ifma), _) => open_ifma(ifma, key, nonce, aad, inout, tag),
+        (None, Some(sse41)) => ct_equal(
             &one_pass(sse41, HaveAvx2::check(), key, nonce, aad, inout, false),
             tag,
         ),
-        None => separate::open(key, nonce, aad, inout, tag),
+        (None, None) => separate::open(key, nonce, aad, inout, tag),
     }
 }
 
-/// The shortest message the separate passes take on a CPU with AVX-512
-/// IFMA. Below it, the Poly1305 key's powers, the separate key block, and
-/// VG taking what follows its eight-block loop one block at a time can cost
-/// more than the one pass saves: on an AVX-512 IFMA Xeon, 1350 bytes took
-/// 5% longer in separate passes, and 2048 bytes 30% less time.
-const IFMA_MIN_LEN: usize = 2048;
+// VG's routines hash with `vpmadd52luq` and `vpmuludq`, which Intel's MXCSR
+// mitigation covers. They enter it themselves where they run those, and
+// leave MXCSR as they set it, so each wrapper holds a restoring `Mcdt`:
+// never inlined, holding it throughout, as `low::mcdt` requires.
 
-/// How much of the message each pass takes before the other: a multiple of
-/// VG's eight-block loop, so a TLS record is one chunk, and small enough
-/// that the second pass finds the first's output in L1.
-const IFMA_CHUNK: usize = 16384;
-
-/// ChaCha20 then Poly1305 for sealing, or Poly1305 then ChaCha20 for opening,
-/// a chunk at a time: VG's AVX-512 VL ChaCha20 (`ChaCha20::new` picks it, as
-/// the token proves AVX-512 VL) and OpenSSL's IFMA Poly1305.
-// Never inlined, holding its `Mcdt` throughout, as `low::mcdt` requires.
 #[inline(never)]
-fn ifma_passes(
-    ifma: HaveAvx512Ifma,
+fn seal_ifma(
+    _: HaveIfmaForVgChaCha20Poly1305,
     key: &[u8; 32],
     nonce: &[u8; 12],
     aad: &[u8],
     inout: &mut [u8],
-    seal: bool,
 ) -> [u8; 16] {
-    // `vpmadd52luq` and `vpmadd52huq` multiply the Poly1305 key `r`, its
-    // powers, and the accumulator, all secret.
-    let _mcdt = crate::low::Mcdt::enter();
-    let mut counter_nonce = [0u8; 16];
-    counter_nonce[4..].copy_from_slice(nonce);
+    let _mcdt = Mcdt::enter_restoring();
+    let mut tag = [0u8; 16];
+    let (data, len) = (inout.as_mut_ptr(), inout.len());
+    // SAFETY: each pointer is to a distinct Rust object of the length the
+    // routine reads or writes, none of which overlaps the stack below the
+    // return address or wraps the address space, as no object does, and the
+    // token proves AVX, AVX2, AVX-512 F and VL, and AVX512_IFMA.
+    unsafe {
+        asm_call!(unsafe extern "sysv64" vg_chacha20_poly1305_seal_ifma(key, nonce, aad.as_ptr(), aad.len(), data, len, &mut tag))
+    };
+    tag
+}
 
-    // Block 0's first half keys Poly1305.
-    let mut chacha = ChaCha20::new(key, &counter_nonce);
-    let mut poly_key = [0u8; 32];
-    chacha.cipher(&mut poly_key);
-    let mut poly = Poly1305::new(ifma, &poly_key);
-
-    // AAD || pad(AAD) || ciphertext || pad(ciphertext) || len_64(AAD) || len_64(ciphertext)
-    poly.add_padded(aad);
-    let len = inout.len();
-    // Every chunk but the last is whole 64-byte blocks, so the counter
-    // `cipher` moves on is the next chunk's.
-    for chunk in inout.chunks_mut(IFMA_CHUNK) {
-        if seal {
-            chacha.cipher(chunk);
-            poly.add_padded(chunk);
-        } else {
-            poly.add_padded(chunk);
-            chacha.cipher(chunk);
-        }
-    }
-    let mut lengths = [0u8; 16];
-    lengths[..8].copy_from_slice(&(aad.len() as u64).to_le_bytes());
-    lengths[8..].copy_from_slice(&(len as u64).to_le_bytes());
-    poly.add_padded(&lengths);
-    poly.finish()
+/// As `open`, and zeroes `inout` when `tag` is not its tag.
+#[inline(never)]
+fn open_ifma(
+    _: HaveIfmaForVgChaCha20Poly1305,
+    key: &[u8; 32],
+    nonce: &[u8; 12],
+    aad: &[u8],
+    inout: &mut [u8],
+    tag: &[u8; 16],
+) -> bool {
+    let _mcdt = Mcdt::enter_restoring();
+    let (data, len) = (inout.as_mut_ptr(), inout.len());
+    // SAFETY: as in `seal_ifma`.
+    let valid = unsafe {
+        asm_call!(unsafe extern "sysv64" vg_chacha20_poly1305_open_ifma(key, nonce, aad.as_ptr(), aad.len(), data, len, tag))
+    };
+    valid == 1
 }
 
 /// The routines' argument block: aws-lc's `chacha20_poly1305_seal_data`,
@@ -126,29 +121,7 @@ struct Data {
 /// AVX2 half.
 const IA32CAP_AVX2_BMI2: u32 = (1 << 5) | (1 << 8);
 
-/// aws-lc's one pass, or from `IFMA_MIN_LEN` bytes on a CPU with AVX-512
-/// IFMA, `ifma_passes`. Sealing returns the tag over `aad` and the
-/// ciphertext it leaves in `inout`, and opening the tag over `aad` and the
-/// ciphertext it was given. `proofs/` takes what it computes as a
-/// hypothesis, `OnePass`, which neither path is proven to meet.
 fn one_pass(
-    sse41: HaveSse41,
-    avx2: Option<HaveAvx2>,
-    key: &[u8; 32],
-    nonce: &[u8; 12],
-    aad: &[u8],
-    inout: &mut [u8],
-    seal: bool,
-) -> [u8; 16] {
-    match HaveAvx512Ifma::check() {
-        Some(ifma) if inout.len() >= IFMA_MIN_LEN => {
-            ifma_passes(ifma, key, nonce, aad, inout, seal)
-        }
-        _ => aws_lc_one_pass(sse41, avx2, key, nonce, aad, inout, seal),
-    }
-}
-
-fn aws_lc_one_pass(
     _: HaveSse41,
     avx2: Option<HaveAvx2>,
     key: &[u8; 32],
@@ -283,18 +256,72 @@ mod tests {
     use crate::low::x86_64::adx_mux::tests::Rng;
     use crate::low::x86_64::ct_sde;
 
+    type Seal = fn(&[u8; 32], &[u8; 12], &[u8], &mut [u8]) -> [u8; 16];
+    type Open = fn(&[u8; 32], &[u8; 12], &[u8], &mut [u8], &[u8; 16]) -> bool;
+
+    /// Each one-pass path the CPU can run, by name.
+    fn paths() -> Vec<(&'static str, Seal, Open)> {
+        let mut paths: Vec<(&'static str, Seal, Open)> = Vec::new();
+        if HaveIfmaForVgChaCha20Poly1305::check().is_some() {
+            paths.push((
+                "vg ifma",
+                |key, nonce, aad, inout| {
+                    let t = HaveIfmaForVgChaCha20Poly1305::check().unwrap();
+                    seal_ifma(t, key, nonce, aad, inout)
+                },
+                |key, nonce, aad, inout, tag| {
+                    let t = HaveIfmaForVgChaCha20Poly1305::check().unwrap();
+                    open_ifma(t, key, nonce, aad, inout, tag)
+                },
+            ));
+        }
+        if HaveSse41::check().is_some() && HaveAvx2::check().is_some() {
+            paths.push((
+                "aws-lc avx2",
+                |key, nonce, aad, inout| {
+                    let (sse41, avx2) = (HaveSse41::check().unwrap(), HaveAvx2::check());
+                    one_pass(sse41, avx2, key, nonce, aad, inout, true)
+                },
+                |key, nonce, aad, inout, tag| {
+                    let (sse41, avx2) = (HaveSse41::check().unwrap(), HaveAvx2::check());
+                    ct_equal(&one_pass(sse41, avx2, key, nonce, aad, inout, false), tag)
+                },
+            ));
+        }
+        if HaveSse41::check().is_some() {
+            paths.push((
+                "aws-lc sse4.1",
+                |key, nonce, aad, inout| {
+                    one_pass(
+                        HaveSse41::check().unwrap(),
+                        None,
+                        key,
+                        nonce,
+                        aad,
+                        inout,
+                        true,
+                    )
+                },
+                |key, nonce, aad, inout, tag| {
+                    let sse41 = HaveSse41::check().unwrap();
+                    ct_equal(&one_pass(sse41, None, key, nonce, aad, inout, false), tag)
+                },
+            ));
+        }
+        paths
+    }
+
     // The CPU's fastest path hides the others from every other test, so each
-    // half of the routines the CPU runs, and the IFMA passes at every length,
-    // is checked against separate passes directly, under a key
-    // `admin/ctgrind` keeps secret: every message length through the AVX2
-    // half's 512-byte loop and the tails after it, AAD lengths around
-    // aws-lc's 13-byte TLS case and its 16-byte blocks, and long messages
-    // across the IFMA passes' chunks.
+    // path the CPU runs is checked against separate passes directly, under a
+    // key `admin/ctgrind` keeps secret: every message length through the
+    // AVX2 half's 512-byte loop and the tails after it, AAD lengths around
+    // aws-lc's 13-byte TLS case and its 16-byte blocks, and longer messages
+    // through VG's wider loops, and opening under a tag one bit off, which
+    // VG's routine answers by zeroing the message. Valgrind hides AVX-512,
+    // so ctgrind checks only aws-lc's routines, and `ct_sde_chacha20poly1305`
+    // VG's.
     #[test]
     fn paths_match() {
-        let Some(sse41) = HaveSse41::check() else {
-            return;
-        };
         let key = core::array::from_fn(|i| i as u8);
         ct::secret_slice(&key);
         let nonce = core::array::from_fn(|i| (i * 7) as u8);
@@ -302,86 +329,85 @@ mod tests {
         let lens = (0..=1100)
             .map(|len| (len, 13))
             .chain((0..=48).map(|aad| (300, aad)))
-            .chain((0..=48).map(|aad| (IFMA_MIN_LEN + 1, aad)));
-        let long = [4095, 4096, 4097, 8191, 8192 + 64, 16384, 16384 + 15];
-        for (len, aad_len) in lens.chain(long.map(|len| (len, 13))) {
+            .chain([2047, 4097, 8191, 16384 + 15].map(|len| (len, 13)));
+        let before = crate::low::mcdt::mxcsr();
+        for (len, aad_len) in lens {
             let aad = &input[..aad_len];
             let mut sealed = input[..len].to_vec();
             let tag = ct::into_public(separate::seal(&key, &nonce, aad, &mut sealed));
             ct::public_slice(&sealed);
-            let halves = [
-                HaveAvx2::check().map(|avx2| ("avx2", Some(avx2))),
-                Some(("sse4.1", None)),
-            ];
-            for (path, avx2) in halves.into_iter().flatten() {
+            for (path, seal, open) in paths() {
                 let mut ours = input[..len].to_vec();
-                let ours_tag = ct::into_public(aws_lc_one_pass(
-                    sse41, avx2, &key, &nonce, aad, &mut ours, true,
-                ));
+                let ours_tag = ct::into_public(seal(&key, &nonce, aad, &mut ours));
                 ct::public_slice(&ours);
                 assert_eq!(
                     ours_tag, tag,
                     "{path} seal tag, {len} bytes, {aad_len} of AAD"
                 );
                 assert_eq!(ours, sealed, "{path} seal, {len} bytes, {aad_len} of AAD");
-                let ours_tag = ct::into_public(aws_lc_one_pass(
-                    sse41, avx2, &key, &nonce, aad, &mut ours, false,
-                ));
+                let valid = ct::into_public(open(&key, &nonce, aad, &mut ours, &tag));
                 ct::public_slice(&ours);
-                assert_eq!(
-                    ours_tag, tag,
-                    "{path} open tag, {len} bytes, {aad_len} of AAD"
-                );
+                assert!(valid, "{path} open, {len} bytes, {aad_len} of AAD");
                 assert_eq!(
                     ours,
                     input[..len],
                     "{path} open, {len} bytes, {aad_len} of AAD"
                 );
-            }
-            if let Some(ifma) = HaveAvx512Ifma::check() {
-                let mut ours = input[..len].to_vec();
-                let ours_tag =
-                    ct::into_public(ifma_passes(ifma, &key, &nonce, aad, &mut ours, true));
-                ct::public_slice(&ours);
-                assert_eq!(
-                    ours_tag, tag,
-                    "ifma seal tag, {len} bytes, {aad_len} of AAD"
-                );
-                assert_eq!(ours, sealed, "ifma seal, {len} bytes, {aad_len} of AAD");
-                let ours_tag =
-                    ct::into_public(ifma_passes(ifma, &key, &nonce, aad, &mut ours, false));
-                ct::public_slice(&ours);
-                assert_eq!(
-                    ours_tag, tag,
-                    "ifma open tag, {len} bytes, {aad_len} of AAD"
-                );
-                assert_eq!(
-                    ours,
-                    input[..len],
-                    "ifma open, {len} bytes, {aad_len} of AAD"
-                );
+
+                let mut wrong = tag;
+                wrong[len % 16] ^= 1 << (len % 8);
+                let mut forged = sealed.clone();
+                let valid = ct::into_public(open(&key, &nonce, aad, &mut forged, &wrong));
+                assert!(!valid, "{path} forged, {len} bytes, {aad_len} of AAD");
             }
         }
+        // VG's routines set MXCSR's status flags where they hash with
+        // vectors, which their wrappers undo.
+        assert_eq!(crate::low::mcdt::mxcsr(), before);
     }
 
-    // valgrind cannot run AVX-512, so `admin/ct-sde` checks the IFMA passes:
-    // the key and the message are secret, and their lengths public. The
-    // message runs past one chunk into a second whose last block is partial,
-    // after AAD whose last block is too, sealed and then opened.
+    // Intel SDE runs VG's routines, which valgrind cannot, under
+    // `admin/ct-sde`, with a secret key, nonce, AAD, message, and tag,
+    // sealing, then opening under the right tag and a wrong one, which only
+    // the result may tell apart. The routines branch on the lengths, which
+    // are public, so these take the short and long AAD paths and each
+    // message path: a partial block, the one-block-group and the four-group
+    // loops with tails, a run long enough for the widest loop, and open's
+    // AVX-512 VL body for 449 to 639 bytes, whole blocks and with a tail.
     #[test]
     #[ignore = "admin/ct-sde runs it under Intel SDE"]
-    fn ct_sde_chacha20_poly1305_ifma_passes() {
+    fn ct_sde_chacha20poly1305() {
+        let t = HaveIfmaForVgChaCha20Poly1305::check().expect("AVX512_IFMA");
         let mut rng = Rng(ct_sde::seed());
-        let ifma = HaveAvx512Ifma::check().expect("AVX-512 IFMA");
-        let key: [u8; 32] = core::array::from_fn(|_| rng.next() as u8);
-        let nonce: [u8; 12] = core::array::from_fn(|_| rng.next() as u8);
-        let aad: Vec<u8> = (0..29).map(|_| rng.next() as u8).collect();
-        let mut msg: Vec<u8> = (0..IFMA_CHUNK + 512 + 64 + 9)
-            .map(|_| rng.next() as u8)
-            .collect();
-        ct_sde::traced(|| {
-            ifma_passes(ifma, &key, &nonce, &aad, &mut msg, true);
-            ifma_passes(ifma, &key, &nonce, &aad, &mut msg, false)
-        });
+        let mut bytes = |n| (0..n).map(|_| rng.next() as u8).collect::<Vec<u8>>();
+        let key = bytes(32).try_into().unwrap();
+        let nonce = bytes(12).try_into().unwrap();
+        let wrong = bytes(16).try_into().unwrap();
+        for (aad_len, msg_len) in [
+            (0, 0),
+            (13, 9),
+            (5, 64),
+            (29, 300),
+            (13, 512),
+            (7, 601),
+            (13, 1350),
+            (77, 4097),
+        ] {
+            let aad = bytes(aad_len);
+            let mut msg = bytes(msg_len);
+            let tag = ct_sde::traced(|| seal_ifma(t, &key, &nonce, &aad, &mut msg));
+            let mut forged = msg.clone();
+            assert!(ct_sde::traced(|| open_ifma(
+                t, &key, &nonce, &aad, &mut msg, &tag
+            )));
+            assert!(!ct_sde::traced(|| open_ifma(
+                t,
+                &key,
+                &nonce,
+                &aad,
+                &mut forged,
+                &wrong
+            )));
+        }
     }
 }

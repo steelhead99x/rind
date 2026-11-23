@@ -334,16 +334,16 @@ impl HaveAvx512Vl {
     }
 }
 
-/// Proof that the CPU has AVX-512 IFMA, with what `HaveAvx512Vl` proves:
-/// what OpenSSL's base 2^44 Poly1305 needs (F, VL, and IFMA, the check
-/// OpenSSL's `poly1305_init` makes), beside verified-garbage's AVX-512 VL
-/// ChaCha20.
+/// Proof that the CPU has what pyca/verified-garbage's AVX-512 IFMA
+/// ChaCha20-Poly1305 runs: AVX-512 F and IFMA, with AVX, for its seal, and
+/// AVX2 and AVX-512 VL too for its open, whose AVX-512 VL body takes 449 to
+/// 639 bytes.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct HaveAvx512Ifma(());
+pub(crate) struct HaveIfmaForVgChaCha20Poly1305(());
 
-impl HaveAvx512Ifma {
+impl HaveIfmaForVgChaCha20Poly1305 {
     pub(crate) fn check() -> Option<Self> {
-        has(AVX2_KERNELS | AVX512F | AVX512VL | AVX512IFMA).then_some(Self(()))
+        has(AVX | AVX2 | AVX512F | AVX512VL | AVX512IFMA).then_some(Self(()))
     }
 }
 
@@ -1030,6 +1030,10 @@ mod tests {
                 adx && available!("bmi2", "avx", "avx2")
                     && available!("avx512f", "avx512vl", "avx512ifma"),
             ),
+            (
+                HaveIfmaForVgChaCha20Poly1305::check().is_some(),
+                available!("avx", "avx2") && available!("avx512f", "avx512vl", "avx512ifma"),
+            ),
         ];
         for (i, (check, expected)) in checks.into_iter().enumerate() {
             assert_eq!(check, expected, "check {i}");
@@ -1043,6 +1047,14 @@ mod tests {
             is_intel(),
             vendor.as_flattened() == b"GenuineIntel" && !crate::low::cpu_denied("intel")
         );
+    }
+
+    // admin/x86-cpu groups the SDE models by what this and `low::mcdt`'s
+    // report print: models that print the same take every `has` decision
+    // alike, and so every path this file picks.
+    #[test]
+    fn reports_dispatch() {
+        println!("rind dispatch: features {:#x}", features());
     }
 
     // CI runs the suite again with features denied, and names the path each
@@ -1087,9 +1099,14 @@ mod tests {
             assert_eq!(HaveAvx512ForRsa::check().is_some(), expected == "1");
         }
         // Every CPU and SDE model with AVX-512 IFMA has the rest of what
-        // either needs, so RSA's tiers name X25519's and Ed25519's too.
+        // each needs, so RSA's tiers name X25519's and Ed25519's, and
+        // ChaCha20-Poly1305's, too.
         if let Some(expected) = std::env::var_os("RIND_TEST_X86_AVX512_RSA") {
             assert_eq!(HaveIfmaForCurve25519::check().is_some(), expected == "1");
+            assert_eq!(
+                HaveIfmaForVgChaCha20Poly1305::check().is_some(),
+                expected == "1"
+            );
         }
     }
 }

@@ -11,10 +11,13 @@
 #   imported-vector test, every test in `rind/tests/zeroing.rs`, and every
 #   Wycheproof and CAVP file the tests load is named in the table;
 # - every row with a constant-time check names a zeroing test, or says why not;
+# - every row names its independent oracle, or says why it has none, and
+#   every name there in backticks is one of rind's dev-dependencies, or, with
+#   a slash, a file in the repository;
 # - every function, fuzz target, and vector file the table names exists;
 # - every other fuzz target is an adapter's, named on the adapters line.
 #
-# A backticked name in the table's other columns is one of:
+# A backticked name in the table's other columns, but the oracle's, is one of:
 # - `fuzz::NAME`, a fuzz target;
 # - `crosschecks::[MOD::]FN`, a test in `rind/tests/crosschecks.rs`;
 # - `zeroing::FN`, a test in `rind/tests/zeroing.rs`;
@@ -23,12 +26,13 @@
 # - `STEM_test`, a Wycheproof file, where `*` matches any run of characters;
 # - `cavp/DIR` or `cavp-sha1`, a CAVP directory.
 
-import fnmatch, pathlib, re, sys
+import fnmatch, pathlib, re, sys, tomllib
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SRC = ROOT / "rind/src"
 PAGE = ROOT / "TESTING.md"
-COLUMNS = ["Primitive", "Exports", "Vectors", "Fuzz target", "Differential test", "Constant time", "Zeroing"]
+COLUMNS = ["Primitive", "Exports", "Vectors", "Fuzz target", "Differential test", "Independent oracle", "Constant time", "Zeroing"]
+ORACLE = "Independent oracle"
 NOT_PRIMITIVES = "Exports that are not primitives:"
 ADAPTERS = "Adapter fuzz targets:"
 
@@ -159,11 +163,26 @@ vector_tests = {
     if re.match(r"(aws_lc|boringssl|cctv)(_|$)", name)
 }
 
+manifest = tomllib.loads((ROOT / "rind/Cargo.toml").read_text())
+dev_dependencies = set(manifest.get("dev-dependencies", {}))
+for target in manifest.get("target", {}).values():
+    dev_dependencies |= set(target.get("dev-dependencies", {}))
+
 seen = {kind: set() for kind in ["fuzz", "crosschecks", "wycheproof", "cavp", "ct", "vectors", "zeroing", *vector_suites]}
 for row in rows:
     if row["Constant time"] and not (row["Zeroing"].startswith("`zeroing::") or row["Zeroing"].startswith("none: ")):
         errors.append(f"{row['Primitive']}: marks a secret but names no zeroing test, nor says why")
+    if not row[ORACLE]:
+        errors.append(f"{row['Primitive']}: names no independent oracle, nor says why")
+    for token in re.findall(r"`([^`]+)`", row[ORACLE]):
+        if "/" in token:
+            if not (ROOT / token).is_file():
+                errors.append(f"{row['Primitive']}, {ORACLE}: no file `{token}`")
+        elif token not in dev_dependencies:
+            errors.append(f"{row['Primitive']}, {ORACLE}: `{token}` is not a dev-dependency of rind")
     for column in COLUMNS[2:]:
+        if column == ORACLE:
+            continue
         for token in re.findall(r"`([^`]+)`", row[column]):
             where = f"{row['Primitive']}, {column}: `{token}`"
             segments = token.split("::")

@@ -5,11 +5,12 @@ name: prove
 # cosimulates rind's additions to s2n-bignum's x86 model against the runner's
 # CPU, cosimulates pyca/verified-garbage's models against the code rind takes
 # from it, checks that the NEON vectors the Lean proofs test their aarch64
-# intrinsic models with are what an aarch64 CPU computes, and translates
-# rind's Rust under proof to Lean and checks the proofs in `proofs/`. Too slow
-# for `just ci`, so it runs nightly and on pull requests that change rind's
-# source or build, the proofs, the checks, rind's fork of s2n-bignum, or the
-# flake that pins their tools.
+# intrinsic models with are what an aarch64 CPU computes, translates rind's
+# Rust under proof to Lean and checks the proofs in `proofs/`, and tests the
+# Lean specs those proofs trust against the published vectors and rind. Too
+# slow for `just ci`, so it runs nightly and on pull requests that change
+# rind's source or build, the proofs, the checks, the vectors, rind's fork of
+# s2n-bignum, or the flake that pins their tools.
 #
 # Each HOL Light target's proofs and the cosimulation are cached: a pull
 # request skips one that main already passed on the same inputs, which
@@ -48,6 +49,8 @@ on:
       - admin/import-vg-models
       - admin/vg-bytes
       - admin/vg-cosim-runner.rs
+      - admin/spec-tests/**
+      - thirdparty/vectors/**
       - ALGORITHMS.md
       - flake.nix
       - flake.lock
@@ -55,6 +58,7 @@ on:
       - .github/workflows/prove.yml
       - .github/actions/nix/**
       - .github/actions/prove/**
+      - sh/changed.sh
   push:
     branches: [main]
     paths: *paths
@@ -301,3 +305,47 @@ jobs:
 
       - name: Prove
         run: nix develop .#prove --command admin/prove lean
+
+  # The spec tests: nightly and when dispatched unsampled, on every vector the
+  # driver's filters admit and on random inputs from the run's own seed; on a
+  # pull request that changes the specs, their driver, their vectors, or the
+  # tools that build them, a fixed sample. Linking `spec-server` compiles
+  # every Mathlib module it imports to C, about 15 minutes that Mathlib's
+  # cache does not save, so this job keeps that out of the lean job's time.
+  # A pull request that changes only rind's code skips it: Wycheproof and the
+  # differential tests check rind there, and the nightly checks it here.
+  spec-tests:
+    if: github.event_name != 'push' && !github.event.pull_request.draft
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # A pull request's diff, for sh/changed.sh.
+          fetch-depth: ${{ github.event_name == 'pull_request' && '0' || '1' }}
+
+      - id: reach
+        shell: bash
+        run: |
+          set -euo pipefail
+          run=true
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            changed=$(sh/changed.sh)
+            if ! grep -qE '^(proofs/|admin/spec-tests/|thirdparty/vectors/|admin/prove$|flake\.(nix|lock)$|sh/changed\.sh$|\.github/(workflows/prove\.yml|actions/nix/))' <<<"$changed"; then
+              echo "The diff changes nothing the spec tests test."
+              run=false
+            fi
+          fi
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+
+      - uses: ./.github/actions/nix
+        if: steps.reach.outputs.run == 'true'
+
+      - name: Test the specs
+        if: steps.reach.outputs.run == 'true'
+        run: nix develop .#prove --command admin/prove spec-tests
+        env:
+          SPEC_TESTS_FULL: ${{ github.event_name != 'pull_request' && '1' || '' }}
+          SPEC_TESTS_SEED: ${{ github.event_name == 'pull_request' && '1' || github.run_id }}
+          SPEC_TESTS_RANDOM: ${{ github.event_name == 'pull_request' && '8' || '64' }}

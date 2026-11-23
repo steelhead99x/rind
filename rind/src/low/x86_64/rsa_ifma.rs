@@ -172,13 +172,14 @@ impl RsaIfma {
 
 impl IfmaCrt {
     /// The values VG's CRT takes for the key of `n`, `p`, and `q`, little-endian
-    /// words: if the CPU runs it, and it is the fastest there, for 2048- and
+    /// words, given `n`'s `R^2 mod n` for `R = 2^(64w)` and `n`'s `w` words:
+    /// if the CPU runs it, and it is the fastest there, for 2048- and
     /// 4096-bit moduli of primes as wide as each other, as aws-lc's dual RSAZ
     /// requires, and 3072-bit ones on CPUs with AVX512_FP16. Otherwise, or if
     /// `n` is even or not `p q`, a value
     /// that [`IfmaCrt::runs`] refuses.
-    pub(crate) fn new(n: &[u64], p: &[u64], q: &[u64]) -> Self {
-        Self::try_new(n, p, q).unwrap_or(Self {
+    pub(crate) fn new(n: &[u64], n_montifier: &[u64], p: &[u64], q: &[u64]) -> Self {
+        Self::try_new(n, n_montifier, p, q).unwrap_or(Self {
             w: 0,
             pre: [0; 6 * MAX_PRIME_WORDS],
             p: [0; MAX_PRIME_WORDS],
@@ -186,20 +187,21 @@ impl IfmaCrt {
         })
     }
 
-    fn try_new(n: &[u64], p: &[u64], q: &[u64]) -> Option<Self> {
+    fn try_new(n: &[u64], n_montifier: &[u64], p: &[u64], q: &[u64]) -> Option<Self> {
         let token = HaveAvx512ForRsa::check()?;
         let w = p.len();
         let sized = matches!(w, 16 | 32) || (w == 24 && token.fp16());
-        if !sized || q.len() != w || n.len() != 2 * w {
+        if !sized || q.len() != w || n.len() != 2 * w || n_montifier.len() != 2 * w {
             return None;
         }
-        Self::precompute(n, p, q)
+        Self::precompute(n, n_montifier, p, q)
     }
 
     /// [`IfmaCrt::try_new`] past its CPU and size checks, for `p` and `q` of
-    /// `w` words and `n` of `2 w`. It runs on any CPU, so `admin/ctgrind`
-    /// checks it, as Valgrind hides AVX-512 IFMA from `try_new`.
-    fn precompute(n: &[u64], p: &[u64], q: &[u64]) -> Option<Self> {
+    /// `w` words and `n` and `n_montifier` of `2 w`. It runs on any CPU, so
+    /// `admin/ctgrind` checks it, as Valgrind hides AVX-512 IFMA from
+    /// `try_new`.
+    fn precompute(n: &[u64], n_montifier: &[u64], p: &[u64], q: &[u64]) -> Option<Self> {
         let w = p.len();
         let n = low::PosInt::<{ 2 * MAX_PRIME_WORDS }>::from_words(n).ok()?;
         let p = low::PosInt::<MAX_PRIME_WORDS>::from_words(p).ok()?;
@@ -226,7 +228,7 @@ impl IfmaCrt {
         ifma.q[..w].copy_from_slice(q.as_words());
         let (pre_n, pre_p) = ifma.pre[..6 * w].split_at_mut(4 * w);
         pre_n[..2 * w].copy_from_slice(n.as_words());
-        pre_n[2 * w..].copy_from_slice(n.pub_montifier().as_words());
+        pre_n[2 * w..].copy_from_slice(n_montifier);
         pre_p[..w].copy_from_slice(p.montifier().as_words());
         pre_p[w..].copy_from_slice(q.montifier().as_words());
         Some(ifma)
@@ -372,10 +374,13 @@ mod tests {
             let n: low::PosInt<{ 2 * MAX_PRIME_WORDS }> = low::PosInt::mul(&pi, &qi);
             low::ct::secret_slice(&p);
             low::ct::secret_slice(&q);
-            let ifma = IfmaCrt::precompute(n.as_words(), &p[..w], &q[..w]).unwrap();
+            let montifier = n.pub_montifier();
+            let ifma =
+                IfmaCrt::precompute(n.as_words(), montifier.as_words(), &p[..w], &q[..w]).unwrap();
             assert_eq!(ifma.w, w);
             let pre = low::ct::into_public(ifma.pre);
             assert_eq!(&pre[..2 * w], n.as_words());
+            assert_eq!(&pre[2 * w..4 * w], montifier.as_words());
             assert_eq!(
                 &pre[4 * w..5 * w],
                 low::ct::into_public(pi.montifier()).as_words()
@@ -440,7 +445,7 @@ mod tests {
         let pi = low::PosInt::<MAX_PRIME_WORDS>::from_words(&p[..w]).unwrap();
         let qi = low::PosInt::<MAX_PRIME_WORDS>::from_words(&q[..w]).unwrap();
         let n: low::PosInt<{ 2 * MAX_PRIME_WORDS }> = low::PosInt::mul(&pi, &qi);
-        let ifma = IfmaCrt::new(n.as_words(), &p[..w], &q[..w]);
+        let ifma = IfmaCrt::new(n.as_words(), n.pub_montifier().as_words(), &p[..w], &q[..w]);
         assert!(ifma.runs(), "AVX-512 IFMA");
         let token = HaveAvx512ForRsa::check().unwrap();
         assert_eq!(token.fp16(), fp16, "the SDE model takes the other routine");

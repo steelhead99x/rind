@@ -121,7 +121,12 @@ impl RsaPrivateKey {
 
         Ok(Self {
             #[cfg(rind_backend = "x86_64")]
-            ifma: low::IfmaCrt::new(public.n.as_words(), p.as_words(), q.as_words()),
+            ifma: low::IfmaCrt::new(
+                public.n.as_words(),
+                public.montifier_words(),
+                p.as_words(),
+                q.as_words(),
+            ),
             public,
             p,
             q,

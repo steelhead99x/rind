@@ -25,12 +25,12 @@ Planned with the maintainer on 2026-11-13: ✅ recurring, every 2 weeks by date 
   - HACL\* `f5572590`, still its head.
   - s2n-bignum `3f01260f`, the base [kixel-ai/rind#782](https://github.com/kixel-ai/rind/pull/782) moved to from `b4f17ee7`, which holds every upstream commit to 2026-11-14 but `421518d` (#462, AVX-512 decoding for routines rind doesn't run). Start from whatever base RIND.md names; #462 edits the three x86 model files rind changes, so take it with the next routine change rather than alone. #415, #420, #439, and #450 were still open.
   - mlkem-native `d1b2fe78` and mldsa-native v2.0.0, each still its newest release.
-  - libcrux: libcrux-hacl-rs 0.0.6, libcrux-macros 0.0.4, libcrux-poly1305 0.0.7, libcrux-sha2 0.0.9, and the 0.0.10 ChaCha20 rounds, each still its newest, and the copied source unchanged to `124d5987`.
+  - libcrux: libcrux-hacl-rs 0.0.6, libcrux-macros 0.0.4, libcrux-poly1305 0.0.7, and the 0.0.10 ChaCha20 rounds, each still its newest, and the copied source unchanged to `124d5987`.
   - curve25519-dalek 5.0.0 and fiat-crypto 0.3.0, each still its newest; dalek's unreleased `cb0d157` speeds up its serial squaring, which rind's portable build gets with 5.1.
   - rind-ring's ring tests `2723abbc` (0.17.14, still ring's newest release). ring's main has `840167e1`, errors implementing `core::error::Error`, which rind-ring must mirror when it ships.
   - Wycheproof `65ca494`, CAVP `0220357e`, CCTV `b88c4b20`, `thirdparty/cavp-sha1`'s NIST zip (byte-identical on 2026-11-14, served as last modified 2024-09-29), ACVP-Server `975de31e` (v1.1.0.43), and `admin/sync-vectors`'s HPKE `b1f7cb0c`, hash-to-curve `664b1359`, blind RSA `45d0abfa`, and VOPRF `5d7d94c8`, each its upstream's head or newest release.
   - Reviewed through 2026-11-14, with no pin: Graviola (with rustls-graviola), cifra, RustCrypto, ring, and libsodium.
-  - Crates: `cargo deny check advisories` was clean. num-bigint 0.5 was taken. Left, each with a reason: crabgrind 0.6.0 (published 2026-11-12, inside the cooldown: take it next run); jsonwebtoken 12 and pkcs1 0.8 (an adapter release, [planned](/quest/m2/adoption/rind-jsonwebtoken-12.md)); p256, p384, and p521 0.13 and rand_core 0.6, which voprf 0.5, its newest, still requires; foreign-types 0.3, the openssl crate's; and untrusted 0.7, which rind-aws-lc-rs mirrors from aws-lc-rs.
+  - Crates: `cargo deny check advisories` was clean. num-bigint 0.5 was taken. Left, each with a reason: crabgrind 0.6.0 (published 2026-11-12, inside the cooldown: take it next run); jsonwebtoken 12 and pkcs1 0.8 (an adapter release, which [kixel-ai/rind#948](https://github.com/kixel-ai/rind/pull/948) took); p256, p384, and p521 0.13 and rand_core 0.6, which voprf 0.5, its newest, still requires; foreign-types 0.3, the openssl crate's; and untrusted 0.7, which rind-aws-lc-rs mirrors from aws-lc-rs.
 
 ## Scheduled
 

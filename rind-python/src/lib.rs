@@ -22,6 +22,7 @@ use pyo3::ffi;
 use pyo3::prelude::*;
 use pyo3::sync::PyOnceLock;
 use pyo3::types::{PyBytes, PyDict};
+use zeroize::Zeroize;
 
 mod aead;
 mod agreement;
@@ -144,6 +145,37 @@ impl core::ops::Deref for Bytes<'_> {
 
     fn deref(&self) -> &[u8] {
         &self.0
+    }
+}
+
+/// A bytes-like secret argument, such as a key, seed, password, or private
+/// key's encoding: a [`Bytes`] whose copy, if it made one, is wiped when
+/// dropped. Messages and public values stay [`Bytes`], unwiped, as rind
+/// leaves them.
+pub(crate) struct Secret<'a>(Bytes<'a>);
+
+impl<'a, 'py> FromPyObject<'a, 'py> for Secret<'a> {
+    type Error = PyErr;
+
+    fn extract(obj: Borrowed<'a, 'py, PyAny>) -> PyResult<Self> {
+        Bytes::extract(obj).map(Self)
+    }
+}
+
+impl core::ops::Deref for Secret<'_> {
+    type Target = [u8];
+
+    fn deref(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+impl Drop for Secret<'_> {
+    fn drop(&mut self) {
+        // A borrowed `bytes` is Python's to free.
+        if let Cow::Owned(copy) = &mut self.0.0 {
+            copy.zeroize();
+        }
     }
 }
 

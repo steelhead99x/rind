@@ -1126,7 +1126,10 @@ mod tests {
             }
             (Expected::Invalid, Err(_))
                 if test.has_flag("InvalidPublic") || test.has_flag("MissingOctetString") => {}
-            (Expected::Valid | Expected::Acceptable, Ok(shared)) => {
+            // A zero shared secret must be refused, never returned.
+            (Expected::Valid | Expected::Acceptable, Ok(shared))
+                if !test.has_flag("ZeroSharedSecret") =>
+            {
                 assert_eq!(shared, &test.shared, "{}", test.id)
             }
             _ => panic!("{}: expected {:?} got {:?}", test.id, test.result, result),

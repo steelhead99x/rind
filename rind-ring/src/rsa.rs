@@ -5,6 +5,7 @@
 //! encoding them as DER here, which branches on their secret leading bytes.
 //! Load the key as PKCS#1 or PKCS#8 instead.
 
+use alloc::boxed::Box;
 use core::fmt;
 use core::marker::PhantomData;
 

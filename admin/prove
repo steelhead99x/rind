@@ -13,10 +13,11 @@
 # own `Pbkdf2Vg.lean`. The portable backend,
 # translated for x86_64 into `proofs/Rind/Portable/`, takes the hash, HMAC,
 # HKDF, PBKDF2, and ChaCha20 header protection proofs the same way, over
-# HACL*'s SHA-2 instead of aws-lc's. So does armv7, its header-protection model
+# its own SHA-2 block functions' contracts instead of aws-lc's assembly's. So
+# does armv7, its header-protection model
 # and ChaCha20 proof.
 #
-# Usage: admin/prove [bytes | hol-light [<arch>] | cosim | vg | lean | session <arch> [<file>] | key <check>]
+# Usage: admin/prove [bytes | hol-light [<arch>] | cosim | vg | lean | spec-tests | session <arch> [<file>] | key <check>]
 #
 # An argument checks only those proofs, `bytes` only that the assembly rind
 # imports is the object code its upstream's proofs checked, and declares
@@ -29,7 +30,11 @@
 # an x86_64 CPU with AVX2 too, to test the intrinsic models. `vg`, which no
 # other run includes either, checks pyca/verified-garbage's code for this
 # CPU's target against VG's Lean models, as `vg` below describes, in the
-# flake's `vg` dev shell: `nix develop .#vg --command admin/prove vg`. `session` checks
+# flake's `vg` dev shell: `nix develop .#vg --command admin/prove vg`. A run
+# of everything ends by testing the Lean specs the proofs trust on a fixed
+# sample, as `spec_tests` below describes, and `lean` alone does not;
+# `spec-tests` runs those tests alone, which the nightly does unsampled, as
+# `SPEC_TESTS_FULL=1 admin/prove spec-tests` does. `session` checks
 # nothing: it starts a HOL Light session for developing the proofs of `arch`,
 # `x86_64` or `aarch64`, which `session` below describes. Run it in the flake's
 # `prove` dev shell: `nix develop .#prove --command admin/prove`, or for the
@@ -39,7 +44,7 @@
 # check's result is cached under, which `result_key` below describes.
 set -euo pipefail
 
-usage="usage: admin/prove [bytes | hol-light [x86_64 | aarch64 | armv7] | cosim | vg | lean | session <x86_64 | aarch64> [<file>] | key <hol-light <x86_64 | aarch64 | armv7> | cosim>]"
+usage="usage: admin/prove [bytes | hol-light [x86_64 | aarch64 | armv7] | cosim | vg | lean | spec-tests | session <x86_64 | aarch64> [<file>] | key <hol-light <x86_64 | aarch64 | armv7> | cosim>]"
 key_only=
 if [[ ${1:-} == key ]]; then
     if [[ ! (($# -eq 3 && $2 == hol-light && $3 != '') || ($# -eq 2 && $2 == cosim)) ]]; then
@@ -51,6 +56,14 @@ if [[ ${1:-} == key ]]; then
 fi
 case "${1:-}" in
 '' | bytes | cosim | vg | lean) only=${1:-} ;;
+spec-tests)
+    # Its settings come from the environment, as `spec_tests` says.
+    if [[ $# -gt 1 ]]; then
+        echo "$usage" >&2
+        exit 2
+    fi
+    only=$1
+    ;;
 hol-light)
     if [[ $# -gt 2 || ($# -eq 2 && $2 != x86_64 && $2 != aarch64 && $2 != armv7) ]]; then
         echo "$usage" >&2
@@ -368,7 +381,6 @@ result_key() {
 # an axiom beyond HOL Light's.
 hol_light_proofs=(
     "aarch64 bignum_eq.bin rind::low::aarch64::bignum_eq::bignum_eq"
-    "aarch64 sha256_block_data_order_hw.o rind::low::aarch64::sha256::sha256_block_data_order_hw"
     "aarch64 sha512_block_data_order_hw.o rind::low::aarch64::sha512::sha512_block_data_order_hw"
     "aarch64 bn_mul_mont.o rind::low::aarch64::mont::bn_mul_mont"
     "aarch64 ct_compare_bytes.bin rind::low::aarch64::cpu::ct_compare_bytes"
@@ -530,7 +542,9 @@ cosim() {
 # instruction of VG's code, for `VG_COSIM_CASES` random states each from the
 # seed `VG_COSIM_SEED`, on this CPU, or where it lacks a feature the
 # instruction needs, under Intel SDE or qemu-aarch64, and fails unless every
-# end state is the one VG's model gives. The groups split into a fixed number
+# end state is the one VG's model gives; on aarch64, also each instruction of
+# the functions rind proves in its own extension of that model
+# (`proofs/verified-garbage/RindIsa/`). The groups split into a fixed number
 # of parts, each seeded from its index, so a seed gives the same cases on
 # every machine.
 vg() {
@@ -586,12 +600,105 @@ vg() {
             "$cpu" "$dir/part.$part.cpu" "$emulated" "$dir/part.$part.emu" &
         pids+=($!)
     done
+    # On aarch64, the instructions of the functions rind proves in its own
+    # extension of VG's model too, as one more part.
+    if [[ $arch == aarch64 ]]; then
+        "$cosim" aarch64 --rind "$cases" $((seed * parts + parts)) \
+            "$cpu" "$dir/part.rind.cpu" "$emulated" "$dir/part.rind.emu" &
+        pids+=($!)
+    fi
     for pid in "${pids[@]}"; do
         wait "$pid" || failed=1
     done
-    "$dir/runner" "$dir"/part.??.cpu || failed=1
-    "${emu[@]}" "$dir/runner" "$dir"/part.??.emu || failed=1
+    "$dir/runner" "$dir"/part.*.cpu || failed=1
+    "${emu[@]}" "$dir/runner" "$dir"/part.*.emu || failed=1
     return $failed
+}
+
+# Fetches Mathlib and Aeneas for the Lean proofs, from `proofs/`. Mathlib's
+# cache unpacks a copy into each checkout, so take Mathlib and Aeneas from
+# Lake's artifact cache, which `lakefile.toml` turns on, when another checkout
+# already put them there. `--no-cache` keeps Lake from unpacking a copy of
+# Aeneas's release archive. Otherwise start from clean, so Lake fetches that
+# archive rather than building Aeneas's modules the cache lacks, and put all
+# of Mathlib and Aeneas in the cache for the next checkout. See UPSTREAM.md,
+# "Mathlib's cache unpacks a copy into each checkout".
+lean_deps() {
+    local status=0
+    lake build --no-build --no-cache Mathlib Aeneas || status=$?
+    if ((status == 3)); then
+        lake clean
+        lake exe cache get
+        lake build Mathlib Aeneas
+    elif ((status != 0)); then
+        return "$status"
+    fi
+}
+
+# Tests the Lean specs the proofs trust, as `admin/spec-tests` describes:
+# builds them as `proofs/`'s `spec-server`, and runs each on its published
+# vectors in `thirdparty/vectors/` and on `SPEC_TESTS_RANDOM` random inputs
+# from the seed `SPEC_TESTS_SEED`, compared with rind's output, failing on any
+# disagreement. A run samples the larger vector files and the slowest specs'
+# vectors; `SPEC_TESTS_FULL` set samples nothing, as the nightly does, and
+# runs every vector the driver's filters admit.
+spec_tests() {
+    local random=${SPEC_TESTS_RANDOM:-8} seed=${SPEC_TESTS_SEED:-1} full=()
+    [[ -z ${SPEC_TESTS_FULL:-} ]] || full=(full)
+    (cd proofs && lake build spec-server)
+    CARGO_TARGET_DIR=$PWD/target cargo run --release --locked -q -p spec-tests -- \
+        proofs/.lake/build/bin/spec-server thirdparty/vectors "$seed" "$random" "${full[@]}"
+}
+
+# Checks that each function rind proves in its own extension of VG's AArch64
+# model, `proofs/verified-garbage/RindIsa/`, is in rind's build the machine
+# code its theorem is about: `rind-asm` prints each function's words and
+# relocations, from the program the theorem names, and the words each static
+# it reads begins with; this prints the same of rind's release build, from
+# the object `asm_function` writes and the statics `rind_static` writes, and
+# fails unless the two are the same. A relocation must reach the start of the
+# one read-only section `asm_function` keeps, which must be the static the
+# program names.
+rind_isa() {
+    local dir=$out/rind-isa kind a b c n=0 rodata sym
+    local -A statics=()
+    hold scratch
+    rm -rf "$dir"
+    mkdir -p "$dir"
+    (cd proofs/verified-garbage && lake build -q rind-asm)
+    proofs/verified-garbage/.lake/build/bin/rind-asm >"$dir/want"
+    build_asm aarch64
+    # Each static's Rust symbol, to the program's name for it.
+    while read -r kind a b _; do
+        if [[ $kind == static ]]; then
+            read -r _ sym <<<"$(rind_symbol aarch64 "$b")"
+            statics[$sym]=$a
+        fi
+    done <"$dir/want"
+    while read -r kind a b c; do
+        case $kind in
+        function)
+            n=$((n + 1))
+            echo "function $a"
+            asm_function aarch64 "$a" "$dir/$n.o"
+            "$tools/llvm-objcopy" -O binary --only-section=.text "$dir/$n.o" "$dir/$n.text"
+            od -An -v -tx4 -w4 "$dir/$n.text" | awk '{ print "insn " $1 }'
+            rodata=$("$tools/llvm-objdump" -t "$dir/$n.o" | awk '$1 ~ /^0+$/ && $3 == "O" && $4 == ".rodata" { print $NF }')
+            relocations "$dir/$n.o" .text | while read -r off type target; do
+                if [[ $target == .rodata && -n $rodata && -n ${statics[$rodata]:-} ]]; then
+                    target=${statics[$rodata]}
+                fi
+                echo "reloc $((16#$off)) $type $target"
+            done
+            ;;
+        static)
+            rind_static aarch64 "$b" "$dir/static"
+            echo "static $a $b $(od -An -v -tx1 "$dir/static" | tr -d ' \n' | head -c ${#c})"
+            ;;
+        esac
+    done <"$dir/want" >"$dir/got"
+    release scratch
+    diff -u --label rind-asm --label "rind's build" "$dir/want" "$dir/got"
 }
 
 # The file each target's proofs load first, which its session images hold
@@ -852,6 +959,10 @@ fi
 if [[ $only == session ]]; then
     session "$session_arch" "$session_file"
 fi
+if [[ $only == spec-tests ]]; then
+    (cd proofs && lean_deps)
+    spec_tests
+fi
 if [[ -n $only && $only != lean ]]; then
     exit 0
 fi
@@ -939,6 +1050,7 @@ aes_gcm_items() {
 }
 check_quote X86_64/AesGcmModel aes_gcm_items
 check_quote X86_64/TypesExternal items rind/src/low/x86_64/chacha20.rs 'struct VgState('
+check_quote Aarch64/TypesExternal items rind/src/low/aarch64/chacha20.rs 'struct VgState('
 aarch64_aes_gcm_items() {
     items rind/src/low/aarch64/ghash.rs 'macro_rules! mul {' 'macro_rules! reduce {' \
         '    pub(crate) fn add(&mut self, bytes: &[u8]) {' '    fn one_block(' '    fn eight_blocks(' \
@@ -1092,9 +1204,10 @@ only_quoted rind/src/aead.rs "$out/AeadDispatch.rs" '= Algorithm \{'
 # On x86_64, RSA verification is translated from `high::rsa::VerifyingKey`
 # down to `low::posint` and the Montgomery products' dispatch in
 # `low::x86_64::mont`, whose s2n-bignum and aws-lc routines are opaque, and
-# to `RsaIfma::check`, over its opaque CPU check. pyca/verified-garbage's
-# AVX-512 IFMA public operation and CRT are opaque behind `RsaIfma::public`
-# and `IfmaCrt::crt`, which `VgRsa.lean`'s axioms state. Its DER parsing and
+# to `RsaIfma::check` and `rsa_vg::Precompute::check`, over their opaque CPU
+# checks. pyca/verified-garbage's AVX-512 IFMA public operation and CRT, and
+# its `R² mod n`, are opaque behind `RsaIfma::public`, `IfmaCrt::crt`, and
+# `Precompute::precompute`, which `VgRsa.lean`'s axioms state. Its DER parsing and
 # encoding, which the ✓ leaves out, are opaque too, and `RsaDispatch.lean`
 # models `signature::rsa::PublicKey` above it.
 # x86_64's RSA reaches `Digest::ct_equal`, so every target starts from it,
@@ -1471,6 +1584,8 @@ extract x86_64 X86_64 "${hashes[@]}" "${assembly[@]}" \
     --include 'crate::low::x86_64::rsa_ifma::_::check' \
     --include crate::low::x86_64::rsa_ifma::IfmaCrt \
     --start-from crate::low::x86_64::rsa_ifma::IfmaCrt::crt \
+    --include crate::low::x86_64::rsa_vg::Precompute \
+    --include 'crate::low::x86_64::rsa_vg::_::check' \
     --include crate::low::posint \
     --include crate::low::x86_64::mont::mont_mul \
     --include crate::low::x86_64::mont::mont_sqr \
@@ -1550,6 +1665,14 @@ extract aarch64 Aarch64 "${hashes[@]}" "${assembly[@]}" \
     --start-from crate::low::aarch64::chacha20poly1305::open \
     --include crate::low::aarch64::chacha20poly1305::seal \
     --include crate::low::aarch64::chacha20poly1305::open \
+    --start-from crate::mid::chacha20::ChaCha20::apply_keystream \
+    --include crate::low::aarch64::chacha20 \
+    --opaque crate::low::aarch64::chacha20::VgState \
+    --opaque 'crate::low::aarch64::chacha20::_::uninit' \
+    --opaque 'crate::low::aarch64::chacha20::_::init' \
+    --opaque 'crate::low::aarch64::chacha20::_::apply_neon' \
+    --opaque 'crate::low::aarch64::chacha20::_::apply_sve2' \
+    --opaque crate::low::aarch64::chacha20::cipher_neon \
     --start-from crate::mid::aes_gcm::AesGcm::new \
     --start-from crate::mid::aes_gcm::AesGcm::encrypt \
     --start-from crate::mid::aes_gcm::AesGcm::decrypt \
@@ -1577,9 +1700,9 @@ extract_kdf aarch64 Aarch64 --include crate::mid::pbkdf2_vg \
 extract_armv7
 
 # The portable backend, which builds only under the cfg CI's portable jobs
-# build with, here on x86_64: the hashes, down to HACL*'s SHA-2 block
-# functions, which are opaque (see UPSTREAM.md, "Charon panics on HACL*'s
-# unrolled SHA-2"), and the Keccak-f. `proofs/Rind/Portable/Compare.lean`
+# build with, here on x86_64: the hashes, down to the SHA-2 block functions in
+# `low::generic`, which are opaque, and the Keccak-f.
+# `proofs/Rind/Portable/Compare.lean`
 # models its constant-time compares, which read through raw pointers and
 # `black_box`. The error type and `into_public`, which the other targets reach
 # through their curves, are start points of their own here.
@@ -1613,7 +1736,8 @@ sed -i '/-- BEGIN vg/,/-- END vg/d' proofs/Rind/Aarch64/Kdf/TypesExternal.lean p
 sed -i 's/^public import Rind.Aarch64.HkdfExpand$/&\npublic import Rind.Aarch64.Kdf.VgExternal/' proofs/Rind/Aarch64/Kdf/FunsExternal.lean
 # The portable backend's hash, HMAC, KDF, and header-protection proofs are the
 # x86_64 ones with the target renamed, over its own block functions' contracts
-# in `Hacl.lean` and `ShaBlocks.lean`, and its compares' proof in `CtEqual.lean`.
+# in `Sha512Entry.lean` and `ShaBlocks.lean`, and its compares' proof in
+# `CtEqual.lean`.
 mkdir -p proofs/Rind/Portable/Kdf
 for file in QuicDispatch DigestAlgorithm DigestDispatch Sha512 ChaCha20 Blockwise Sha Hmac HmacDispatch \
     HkdfExpand Kdf/TypesExternal Kdf/FunsExternal HmacApi DigestApi Hkdf Pbkdf2; do
@@ -1664,22 +1788,15 @@ if [[ -n $untested ]]; then
     exit 1
 fi
 
+rind_isa
+
 cd proofs
-# Mathlib's cache unpacks a copy into each checkout, so take Mathlib and Aeneas
-# from Lake's artifact cache, which `lakefile.toml` turns on, when another
-# checkout already put them there. `--no-cache` keeps Lake from unpacking a
-# copy of Aeneas's release archive. Otherwise start from clean, so Lake fetches
-# that archive rather than building Aeneas's modules the cache lacks, and put
-# all of Mathlib and Aeneas in the cache for the next checkout. See
-# UPSTREAM.md, "Mathlib's cache unpacks a copy into each checkout".
-status=0
-lake build --no-build --no-cache Mathlib Aeneas || status=$?
-if ((status == 3)); then
-    lake clean
-    lake exe cache get
-    lake build Mathlib Aeneas
-elif ((status != 0)); then
-    exit "$status"
-fi
+lean_deps
 lake build
 lake env lean "../$out/SimdVectors.lean"
+cd ..
+# The spec tests compile Mathlib to C to link `spec-server`, so CI runs them
+# in a job of their own: `prove.yml`'s `spec-tests`.
+if [[ -z $only ]]; then
+    spec_tests
+fi

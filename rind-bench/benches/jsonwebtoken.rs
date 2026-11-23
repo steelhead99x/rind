@@ -116,8 +116,8 @@ fn keys() -> Vec<(Algorithm, EncodingKey, DecodingKey)> {
     vec![
         (
             Algorithm::HS256,
-            EncodingKey::from_secret(secret),
-            DecodingKey::from_secret(secret),
+            EncodingKey::from_secret(secret).unwrap(),
+            DecodingKey::from_secret(secret).unwrap(),
         ),
         (Algorithm::ES256, es256_private, es256_public),
         (Algorithm::ES384, es384_private, es384_public),

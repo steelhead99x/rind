@@ -17,6 +17,7 @@ import Rind.Aarch64.MlKemCoding
 import Rind.Aarch64.GhashPmull
 import Rind.Aarch64.AesGcm
 import Rind.Aarch64.VgChaCha20Poly1305
+import Rind.Aarch64.VgChaCha20
 open rind.aarch64
 
 /-!
@@ -25,13 +26,19 @@ in `Rind.Aarch64.S2nBignum` for X25519, P-256, P-384, Ed25519, and the
 Keccak-f of SHA-3 and ML-KEM's SHAKE; for the SHA-512 family, for HMAC,
 HKDF, and PBKDF2, which cover SHA-384 and SHA-512, and for Ed25519's hashes,
 aws-lc's scalar routine's in `Rind.Aarch64.AwsLc` and rind's HOL Light proof
-there of aws-lc's routine for the SHA-512 instructions; rind's HOL Light proof
-of SHA-256's routine for the crypto extension in `Rind.Aarch64.Sha256Hw`, for
-the theorems over every HMAC algorithm; rind's HOL Light proofs of its
+there of aws-lc's routine for the SHA-512 instructions; the restatement in
+`Rind.Aarch64.Sha256Hw` of rind's Lean proof of SHA-256's routine for the
+crypto extension, a trusted axiom: the kernel checks the proof,
+`sha256_block_data_order_hw_correct`, but not the restatement, since Aeneas
+cannot reach the routine through the opaque wrapper, for the theorems over
+every HMAC algorithm; rind's HOL Light proofs of its
 constant-time compares in `Rind.Aarch64.CtEqual` for HMAC's and PBKDF2's
 `verify` and key wrap's `unwrap` and `unwrap_padded`; for P-256's public
 key, ECDH, and ECDSA verification, pyca/verified-garbage's Lean proofs of its
-routines, which `Rind.Aarch64.VgP256` restates; for PBKDF2 on
+routines, which `Rind.Aarch64.VgP256` restates; for P-384's `d·G`, which
+key generation and each ECDSA signature's nonce point take, and its ECDSA
+verification, pyca/verified-garbage's Lean proofs of its routines, which
+`Rind.Aarch64.VgP384` restates; for PBKDF2 on
 pyca/verified-garbage's routines, its contracts in `Rind.Aarch64.VgPbkdf2`;
 and nothing else.
 P-384's comb table select rests on no axiom, only on the hand model in
@@ -43,6 +50,10 @@ ML-KEM's decompression and message coding rest on no axiom.
 ChaCha20-Poly1305's one pass on SVE2 rests on the axioms restating
 pyca/verified-garbage's theorems for its routines in
 `Rind.Aarch64.VgChaCha20Poly1305`.
+ChaCha20's `apply_keystream` rests on the axioms restating
+pyca/verified-garbage's theorems for its routines in `Rind.Aarch64.VgChaCha20`;
+at every length it also takes rind's NEON code's contract as the hypothesis
+`Neon`, which no axiom states.
 A change here is a change to the trust base.
 -/
 
@@ -136,7 +147,8 @@ A change here is a change to the trust base.
  bignum_neg_p384_spec,
  bignum_tomont_p384_spec,
  p384_montjdouble_spec,
- p384_montjmixadd_spec] -/
+ p384_montjmixadd_spec,
+ vg_p384_public_key_spec] -/
 #guard_msgs in
 #print axioms p384_generate
 
@@ -154,7 +166,8 @@ A change here is a change to the trust base.
  bignum_neg_p384_spec,
  bignum_tomont_p384_spec,
  p384_montjdouble_spec,
- p384_montjmixadd_spec] -/
+ p384_montjmixadd_spec,
+ vg_p384_public_key_spec] -/
 #guard_msgs in
 #print axioms p384_from_scalar
 
@@ -503,7 +516,8 @@ A change here is a change to the trust base.
  bignum_neg_p384_spec,
  bignum_tomont_p384_spec,
  p384_montjdouble_spec,
- p384_montjmixadd_spec] -/
+ p384_montjmixadd_spec,
+ vg_p384_public_key_spec] -/
 #guard_msgs in
 #print axioms p384_ecdsa_generate
 
@@ -521,7 +535,8 @@ A change here is a change to the trust base.
  bignum_neg_p384_spec,
  bignum_tomont_p384_spec,
  p384_montjdouble_spec,
- p384_montjmixadd_spec] -/
+ p384_montjmixadd_spec,
+ vg_p384_public_key_spec] -/
 #guard_msgs in
 #print axioms p384_ecdsa_from_scalar_and_public_key
 
@@ -545,7 +560,8 @@ A change here is a change to the trust base.
  compress_nohw_spec,
  p384_montjdouble_spec,
  p384_montjmixadd_spec,
- sha512_block_data_order_hw_spec] -/
+ sha512_block_data_order_hw_spec,
+ vg_p384_public_key_spec] -/
 #guard_msgs in
 #print axioms p384_ecdsa_sign
 
@@ -571,7 +587,8 @@ A change here is a change to the trust base.
  p384_montjadd_spec,
  p384_montjdouble_spec,
  p384_montjmixadd_spec,
- sha512_block_data_order_hw_spec] -/
+ sha512_block_data_order_hw_spec,
+ vg_p384_verify_spec] -/
 #guard_msgs in
 #print axioms p384_ecdsa_key_pair_verify
 
@@ -594,7 +611,8 @@ A change here is a change to the trust base.
  p384_montjadd_spec,
  p384_montjdouble_spec,
  p384_montjmixadd_spec,
- sha512_block_data_order_hw_spec] -/
+ sha512_block_data_order_hw_spec,
+ vg_p384_verify_spec] -/
 #guard_msgs in
 #print axioms p384_ecdsa_public_key_new
 
@@ -827,3 +845,21 @@ A change here is a change to the trust base.
  vg_chacha20_poly1305_open_sve2_spec] -/
 #guard_msgs in
 #print axioms chacha20_poly1305_open_sve2_spec
+
+/-- info: 'rind.aarch64.chacha20_apply_keystream_vg' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ vg_chacha20_apply_neon_spec,
+ vg_chacha20_apply_sve2_spec,
+ vg_chacha20_init_spec] -/
+#guard_msgs in
+#print axioms chacha20_apply_keystream_vg
+
+/-- info: 'rind.aarch64.chacha20_apply_keystream' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ vg_chacha20_apply_neon_spec,
+ vg_chacha20_apply_sve2_spec,
+ vg_chacha20_init_spec] -/
+#guard_msgs in
+#print axioms chacha20_apply_keystream

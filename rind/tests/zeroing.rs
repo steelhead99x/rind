@@ -479,12 +479,21 @@ fn key_wrap() {
     }
 }
 
-fn check_zeroed_on_drop<T: Unpin>(value: Pin<Box<T>>) {
+// With the `zeroize` feature, every type this file checks claims
+// `ZeroizeOnDrop`, and the check proves the claim.
+#[cfg(feature = "zeroize")]
+use zeroize::ZeroizeOnDrop as Wipes;
+#[cfg(not(feature = "zeroize"))]
+trait Wipes {}
+#[cfg(not(feature = "zeroize"))]
+impl<T> Wipes for T {}
+
+fn check_zeroed_on_drop<T: Unpin + Wipes>(value: Pin<Box<T>>) {
     check_span_zeroed_on_drop(value, 0, size_of::<T>());
 }
 
 /// Checks that dropping `value` zeroes its `len` bytes from offset `at`.
-fn check_span_zeroed_on_drop<T: Unpin>(value: Pin<Box<T>>, at: usize, len: usize) {
+fn check_span_zeroed_on_drop<T: Unpin + Wipes>(value: Pin<Box<T>>, at: usize, len: usize) {
     assert!(at + len <= size_of::<T>());
     // SAFETY: `at + len` is within `value`.
     let ptr = unsafe { (value.deref() as *const T as *const u8).add(at) };

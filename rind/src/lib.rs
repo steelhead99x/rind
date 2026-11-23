@@ -70,6 +70,9 @@ mod high;
 /// Errors.  Common to all layers.
 mod error;
 
+#[cfg(feature = "zeroize")]
+mod zeroize_on_drop;
+
 /// The FIPS module's random generator, which [`mid::rng`] draws from in the
 /// module's build.
 #[cfg(any(test, rind_fips))]

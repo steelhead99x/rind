@@ -109,16 +109,6 @@
             };
           };
 
-          timing-shell = {
-            packages = [
-              rust-stable.minimal
-              # admin/timing finds the binary cargo built.
-              pkgs.jq
-            ]
-            # taskset pins the tests to one core.
-            ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.util-linux ];
-          };
-
           # rind itself builds for armv7 without C. Only its tests need this
           # ARM C toolchain, for the aws-lc-rs dev-dependency they check
           # against, so it lives in `devShells.armv7` and nothing rind ships
@@ -563,6 +553,10 @@
                   cmake
                   pkg-config
                   openssl
+                  # admin/build-cost's vendored OpenSSL configures with it. A
+                  # host's own can lack core modules, as Fedora's lacks FindBin;
+                  # git already brings this one.
+                  perl
                   cargo-deny
                   # admin/mutants and the mutants workflow.
                   cargo-mutants
@@ -600,13 +594,13 @@
               };
             };
 
-            # dudect needs only Rust, without Marvin's Python and toolkit fetches.
-            dudect = mkDevShell timing-shell;
-
             # The Marvin toolkit's RSA ciphertexts, timed by rind-timing and
             # analysed by tlsfuzzer.
             timing = mkDevShell {
-              packages = timing-shell.packages ++ [
+              packages = [
+                rust-stable.minimal
+                # admin/timing finds the binary cargo built.
+                pkgs.jq
                 (
                   (pkgs.python3.override {
                     packageOverrides = _: super: {
@@ -645,7 +639,9 @@
                 )
                 # The Marvin keys and certificates.
                 pkgs.openssl
-              ];
+              ]
+              # taskset pins the test to one core.
+              ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.util-linux ];
 
               env = {
                 MARVIN_TOOLKIT = pkgs.fetchFromGitHub {

@@ -269,11 +269,17 @@ jobs:
           name: fuzz-corpus-${{ matrix.target }}
           path: ${{ env.CORPUS }}
 
+      # SDE emulates every instruction, so an SLH-DSA-SHA2-128s signature that
+      # takes about 1 s natively takes 44 s here. The per-input timeout is
+      # seven times that, and libFuzzer stops at the first hang, which costs at
+      # most 300 s more. Each of the two tiers replays the whole corpus, so the
+      # job's 60 minutes hold while it has fewer than about 40 such inputs. The
+      # other replays run natively and keep -timeout=30.
       - name: Replay the corpus
         run: |
           chmod +x "bin/$TARGET"
           mkdir -p "$ARTIFACTS"
-          nix develop .#sde --command sh/fuzz-replay.sh x86_64-sde "bin/$TARGET" "$CORPUS" -timeout=30 -rss_limit_mb=2048 -artifact_prefix="$ARTIFACTS/"
+          nix develop .#sde --command sh/fuzz-replay.sh x86_64-sde "bin/$TARGET" "$CORPUS" -timeout=300 -rss_limit_mb=2048 -artifact_prefix="$ARTIFACTS/"
 
       - name: Upload the crashing input
         if: failure()

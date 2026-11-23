@@ -180,6 +180,10 @@ pub(crate) mod vg_poly1305_finalize_scratch;
 #[rustfmt::skip]
 pub(crate) mod vg_poly1305_init;
 #[rustfmt::skip]
+pub(crate) mod vg_rsa_public_precompute;
+#[rustfmt::skip]
+pub(crate) mod vg_rsa_square_4_4;
+#[rustfmt::skip]
 pub(crate) mod vg_sha1_compress_sha2;
 #[rustfmt::skip]
 pub(crate) mod vg_sha1_finalize_scratch_sha2;

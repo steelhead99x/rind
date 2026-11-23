@@ -753,7 +753,7 @@ class AnyHost(unittest.TestCase):
     def test_published_data_still_loads_in_report_order(self):
         self.assertEqual(
             list(br.load_hosts(br.DATA_DIR)),
-            ["nixos", "desktop", "kixtop", "ovh-iad", "ovh-sea"],
+            ["nixos", "desktop", "fedora", "kixtop", "ovh-iad", "ovh-sea"],
         )
 
     def test_run_accepts_any_host_and_collect_keeps_its_list(self):

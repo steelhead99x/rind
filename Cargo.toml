@@ -13,6 +13,7 @@ members = [
   "rind-fips/module",
   "rind-object-store",
   "rind-openmls",
+  "rind-rand-core",
   "rind-rcgen",
   "rind-ring",
   "rind-rustls",
@@ -21,6 +22,7 @@ members = [
   "rind-openssl",
   "rind-python",
   "fuzz",
+  "admin/spec-tests",
   "admin/wasm-fixture"
 ]
 # Vendored upstream forks, built only through `[patch.crates-io]`.

@@ -1,0 +1,13 @@
+[package]
+name = "spec-tests"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Tests the Lean specs the proofs trust, compiled as `proofs/`'s `spec-server`,
+# against the published vectors and against rind: `admin/prove spec-tests` runs it.
+[dependencies]
+rind = { path = "../../rind" }
+serde_json = "1"
+# Implicit rejection's key, J(z || c), computed apart from rind and the spec.
+shake = "0.1"

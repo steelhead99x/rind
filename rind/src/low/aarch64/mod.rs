@@ -157,6 +157,7 @@ pub(crate) mod p521_jmixadd_narrow;
 pub(crate) mod p521_jscalarmul;
 pub(crate) mod p521_jscalarmul_narrow;
 pub(crate) mod pbkdf2_vg;
+pub(crate) mod rsa_vg;
 #[cfg(test)]
 mod schedules;
 pub(crate) mod sha1;

@@ -18,7 +18,7 @@ renames [rind-aws-lc-rs](#rind-aws-lc-rs) to `aws-lc-rs` the same way.
 | An allocated `Document`, `Vec`, or `Box` output | an owned value of fixed capacity, such as `encoding::Pkcs8` |
 | `error::Unspecified`, `error::KeyRejected` | `rind::Error`, by kind of call (see [error](#error)) |
 | One `signature` module for every algorithm | a module for each: [ecdsa](#ecdsa), [ed25519](#ed25519), [ml_dsa](#ml_dsa), [rsa](#rsa), and [slh_dsa](#slh_dsa) (see [signature](#signature)) |
-| aws-lc-rs wipes keys and keyed state on drop; ring doesn't | rind wipes them too, always |
+| aws-lc-rs wipes keys and keyed state on drop; ring doesn't | rind wipes them too, always, and its `zeroize` feature marks each such type `zeroize::ZeroizeOnDrop` |
 
 ## digest
 
@@ -355,6 +355,11 @@ No rind call takes a random source, so there is nothing to pass one to.
 | `generate::<[u8; N]>(rng)?.expose()` | `rand::fill` into a `[u8; N]` |
 | `SecureRandom`, `RandomlyConstructable`, `Random` | none |
 
+For a crate that takes a `rand_core` RNG, such as RustCrypto's,
+[rind-rand-core](rind-rand-core/README.md)'s `SystemRandom` is a `rand_core`
+`TryCryptoRng` over `rand::fill`; wrap it in `rand_core::UnwrapErr` where the
+crate takes an infallible `CryptoRng`.
+
 ## error
 
 aws-lc-rs's `error::Unspecified` and `error::KeyRejected` become one
@@ -596,7 +601,7 @@ install ring's if nothing is installed first.
 | x509-parser 0.18 | `verify` is ring, `verify-aws` aws-lc-rs | **Patch**: `verify`, or verify `tbs_certificate` with the key's module, such as `rind::ecdsa::PublicKey::verify` |
 | x509-certificate 0.25, cryptographic-message-syntax 0.28 | ring types in their public API | **Patch** |
 | sigstore 0.14, tough 0.24 | aws-lc-rs, unconditionally | Unsupported |
-| jsonwebtoken 11 | optional `aws_lc_rs` | **rind-jsonwebtoken**, every algorithm. `rust_crypto` is the pure-Rust alternative |
+| jsonwebtoken 12 | optional `aws_lc_rs` | **rind-jsonwebtoken**, every algorithm. `rust_crypto` is the pure-Rust alternative |
 | jwtk 0.5 | default `aws-lc` for RSA verification and JWK conversion | Adapter, for caller-held keys only |
 | biscuit 0.8, rusty_paseto 0.10 | ring, unconditionally | **Patch** |
 | paseto 2 | ring 0.16 and OpenSSL | Unsupported |

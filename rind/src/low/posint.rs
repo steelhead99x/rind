@@ -67,12 +67,14 @@ impl<const N: usize> PosInt<N> {
     }
 
     /// Makes a value from little-endian `words`, `words.len()` wide.
+    // Checks the length rather than `?` on `get_mut`, whose translation
+    // Lean cannot check, so `proofs/` can prove RSA's key loading.
     pub(crate) fn from_words(words: &[u64]) -> Result<Self, Error> {
+        if words.len() > N {
+            return Err(Error::WrongLength);
+        }
         let mut r = Self::zero();
-        r.words
-            .get_mut(..words.len())
-            .ok_or(Error::WrongLength)?
-            .copy_from_slice(words);
+        r.words[..words.len()].copy_from_slice(words);
         r.used = words.len();
         Ok(r)
     }
@@ -170,7 +172,6 @@ impl<const N: usize> PosInt<N> {
     /// Writes the low `out.len()` bytes of the value to `out`, big-endian,
     /// reading the same words whatever the value.
     // Indexes, as `to_bytes` does, which Aeneas can translate.
-    #[cfg(rind_backend = "x86_64")]
     pub(crate) fn to_bytes_fixed(&self, out: &mut [u8]) {
         let len = out.len();
         for i in 0..len {
