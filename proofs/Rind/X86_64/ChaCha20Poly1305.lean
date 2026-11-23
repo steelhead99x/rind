@@ -29,10 +29,7 @@ a message of at most 2^38 - 64 bytes, as many as its 32-bit block counter
 covers from block 1: sealing leaves the ChaCha20 ciphertext in place and
 returns the Poly1305 tag over the AAD and it, and opening leaves the
 plaintext and returns the tag over the AAD and the ciphertext it was given.
-Either half, AVX2 or SSE4.1, computes the same, and so do the separate
-passes `one_pass` runs instead from 2 KiB on a CPU with AVX-512 IFMA:
-verified-garbage's ChaCha20 and OpenSSL's Poly1305, which no proof covers
-either. -/
+Either half, AVX2 or SSE4.1, computes the same. -/
 def OnePass : Prop :=
   ∀ sse41 avx2 (key : Std.Array U8 32#usize) (nonce : Std.Array U8 12#usize) (aad inout : Slice U8),
     inout.length ≤ 2 ^ 38 - 64 →
