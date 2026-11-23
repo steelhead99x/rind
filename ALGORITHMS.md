@@ -194,12 +194,14 @@ with portable Rust in place of the assembly armv7 runs regardless.
   check its Rust fallbacks against FIPS 180-4, `generic::sha256`, and
   aws-lc, and `admin/esp32s3-sha256-layout` checks the linked placement.
 - portable: ChaCha20-Poly1305's Poly1305 is Graviola's on 64-bit targets
-  and rind's on 32-bit ones, in poly1305-donna-32's five 26-bit limbs held
-  in `u32`s, so each limb product is one 32x32->64-bit multiply. HACL*'s
-  verified one, which armv7 runs without NEON, also has 26-bit limbs but
-  keeps them in `u64`s: on riscv32imac it ran 590 instructions a block
-  against rind's 206, half of a ChaCha20-Poly1305 seal. Nothing proves
-  rind's; its tests check it against HACL*'s and Graviola's. On 32-bit
+  rind's on riscv32 with the M extension, in poly1305-donna-32's five
+  26-bit limbs held in `u32`s, so each limb product is one 32x32->64-bit
+  multiply, and HACL*'s ✓ on other 32-bit targets, whose long multiply may
+  not be fixed-time (Cortex-M3's `umull`) and which nobody has measured.
+  HACL*'s verified one, which armv7 runs without NEON, also has 26-bit
+  limbs but keeps them in `u64`s: on riscv32imac it ran 590 instructions a
+  block against rind's 206, half of a ChaCha20-Poly1305 seal. Nothing
+  proves rind's; its tests check it against HACL*'s and Graviola's. On 32-bit
   targets ChaCha20 XORs HACL*'s keystream words into the buffer a word at
   a time, shifting them where the buffer is misaligned. SHA-3's, ML-KEM's, and
   ML-DSA's Keccak-f is rind's, s2n-bignum's Keccak spec in Rust, which
