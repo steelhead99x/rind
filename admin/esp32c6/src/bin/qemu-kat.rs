@@ -167,9 +167,11 @@ extern "C" fn rust_main() -> ! {
         // Paint everything below this frame, run, find the lowest dirty byte.
         // `origin` is the caller's true sp: depth is measured from it. The
         // painted region stops `GUARD` bytes lower, because the painting call
-        // itself needs stack. A run that dirties nothing painted therefore
-        // reports `GUARD`, an upper bound for it, and never less than the
-        // truth.
+        // itself needs stack, so `GUARD` is the floor of every reading: a run
+        // that dirties nothing painted reports `GUARD`. Below that floor the
+        // reading is a high-water mark of bytes written, an estimate: stack
+        // reserved but never written, or written with the paint byte itself,
+        // does not show, so the true depth can be larger.
         let origin = sp();
         let here = origin - GUARD;
         unsafe { core::ptr::write_bytes(lo as *mut u8, PAINT, here - lo) };
