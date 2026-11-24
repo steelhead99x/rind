@@ -18,4 +18,8 @@ Still to do, on the merged head:
 
 ## Waiting
 
-- Maintainer: say whether to open the upstream pull request on kixel-ai/rind. Options: send it once the noq packet path passes (recommended: a published rind-rustls that keeps rustls's default breaks every stack that calls these methods, including moq's noq), or keep the fix on this fork. An agent cannot send it. Kyle has to approve first. Check: a comment on the fork PR that says to send it or not.
+- Maintainer: say whether to open the upstream pull request on kixel-ai/rind. Options: send it once the noq packet path passes (recommended: a published rind-rustls that keeps rustls's default breaks every stack that calls these methods, including moq's noq), or keep the fix on this fork. An agent cannot send it. Kyle has to approve first. Check: a comment on [steelhead99x/rind#312](https://github.com/steelhead99x/rind/pull/312) that says to send it or not.
+
+## Related
+
+- [steelhead99x/rind#312](https://github.com/steelhead99x/rind/pull/312) - the multipath methods and this quest
