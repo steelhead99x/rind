@@ -29,3 +29,4 @@ When the board is here: time that operation with the cycle counter, and record l
 ## Related
 
 - [steelhead99x/rind#154](https://github.com/steelhead99x/rind/pull/154) - the build-script change that selects the portable backend on M-profile
+- [steelhead99x/rind#313](https://github.com/steelhead99x/rind/pull/313) - this quest's pull request
