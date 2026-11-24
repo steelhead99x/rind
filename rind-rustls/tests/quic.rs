@@ -132,6 +132,10 @@ fn handshake(
         seal_open(&*client_next.local, &*server_next.remote);
         seal_open(&*server_next.local, &*client_next.remote);
     }
+
+    // Multipath nonces (draft-ietf-quic-multipath-11), which noq uses for every packet.
+    seal_open_for_path(&*client_1rtt.local.packet, &*server_1rtt.remote.packet);
+    seal_open_for_path(&*server_1rtt.local.packet, &*client_1rtt.remote.packet);
 }
 
 /// Drives `send` until it changes keys or runs dry, and feeds its output to `recv`.
@@ -207,6 +211,32 @@ fn seal_open(send: &dyn PacketKey, recv: &dyn PacketKey) {
     packet.extend_from_slice(tag.as_ref());
     let plain = recv.decrypt_in_place(9, b"header", &mut packet).unwrap();
     assert_eq!(plain, b"after a key update");
+}
+
+fn seal_open_for_path(send: &dyn PacketKey, recv: &dyn PacketKey) {
+    for path_id in [0, 1, 7] {
+        let mut packet = b"on a path".to_vec();
+        let tag = send
+            .encrypt_in_place_for_path(path_id, 9, b"header", &mut packet)
+            .unwrap();
+        packet.extend_from_slice(tag.as_ref());
+
+        // Path id 0 is the single-path nonce. A nonzero id is not.
+        let mut single = b"on a path".to_vec();
+        let single_tag = send.encrypt_in_place(9, b"header", &mut single).unwrap();
+        single.extend_from_slice(single_tag.as_ref());
+        assert_eq!(packet == single, path_id == 0);
+
+        let mut wrong = packet.clone();
+        assert!(
+            recv.decrypt_in_place_for_path(path_id + 1, 9, b"header", &mut wrong)
+                .is_err()
+        );
+        let plain = recv
+            .decrypt_in_place_for_path(path_id, 9, b"header", &mut packet)
+            .unwrap();
+        assert_eq!(plain, b"on a path");
+    }
 }
 
 fn server_config(provider: Arc<CryptoProvider>) -> Arc<ServerConfig> {

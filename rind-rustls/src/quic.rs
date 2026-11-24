@@ -93,6 +93,41 @@ impl quic::PacketKey for PacketKey {
         Ok(plain)
     }
 
+    // draft-ietf-quic-multipath-11: the nonce is the IV XOR the big-endian
+    // path id and packet number. rustls's defaults return an error, and noq
+    // calls these on every packet.
+    fn encrypt_in_place_for_path(
+        &self,
+        path_id: u32,
+        packet_number: u64,
+        header: &[u8],
+        payload: &mut [u8],
+    ) -> Result<quic::Tag, Error> {
+        let nonce =
+            aead::Nonce::assume_unique_for_key(Nonce::for_path(path_id, &self.iv, packet_number).0);
+        let tag = self
+            .key
+            .seal_in_place_separate_tag(nonce, header, payload)
+            .map_err(|_| Error::EncryptError)?;
+        Ok(quic::Tag::from(tag.as_ref()))
+    }
+
+    fn decrypt_in_place_for_path<'a>(
+        &self,
+        path_id: u32,
+        packet_number: u64,
+        header: &[u8],
+        payload: &'a mut [u8],
+    ) -> Result<&'a [u8], Error> {
+        let nonce =
+            aead::Nonce::assume_unique_for_key(Nonce::for_path(path_id, &self.iv, packet_number).0);
+        let plain = self
+            .key
+            .open_in_place(nonce, header, payload)
+            .map_err(|_| Error::DecryptError)?;
+        Ok(plain)
+    }
+
     fn tag_len(&self) -> usize {
         TAG_LEN
     }
@@ -353,6 +388,53 @@ mod tests {
             assert!(open(8, b"header", &sealed).is_err());
             assert!(open(7, b"headex", &sealed).is_err());
             assert!(open(7, b"header", &sealed[..TAG_LEN - 1]).is_err());
+
+            // Path id 0 is the single-path nonce. Any other id, packet
+            // number, header, or a short tag does not open.
+            let mut on_path = b"payload".to_vec();
+            let path_tag = keys
+                .packet
+                .encrypt_in_place_for_path(3, 7, b"header", &mut on_path)
+                .unwrap();
+            on_path.extend_from_slice(path_tag.as_ref());
+            let mut single = b"payload".to_vec();
+            let single_tag = keys
+                .packet
+                .encrypt_in_place(7, b"header", &mut single)
+                .unwrap();
+            single.extend_from_slice(single_tag.as_ref());
+            let mut path_zero = b"payload".to_vec();
+            let zero_tag = keys
+                .packet
+                .encrypt_in_place_for_path(0, 7, b"header", &mut path_zero)
+                .unwrap();
+            path_zero.extend_from_slice(zero_tag.as_ref());
+            assert_eq!(path_zero, single);
+            assert_ne!(on_path, single);
+            let open_path = |path_id, packet_number, header: &[u8], sealed: &[u8]| {
+                let mut sealed = sealed.to_vec();
+                let plain = keys.packet.decrypt_in_place_for_path(
+                    path_id,
+                    packet_number,
+                    header,
+                    &mut sealed,
+                );
+                plain.map(<[u8]>::to_vec)
+            };
+            assert_eq!(open_path(3, 7, b"header", &on_path).unwrap(), b"payload");
+            let mut empty = Vec::new();
+            let empty_tag = keys
+                .packet
+                .encrypt_in_place_for_path(3, 1, b"header", &mut empty)
+                .unwrap();
+            empty.extend_from_slice(empty_tag.as_ref());
+            assert_eq!(open_path(3, 1, b"header", &empty).unwrap(), b"");
+            assert!(open_path(0, 7, b"header", &on_path).is_err());
+            assert!(open_path(4, 7, b"header", &on_path).is_err());
+            assert!(open_path(3, 8, b"header", &on_path).is_err());
+            assert!(open_path(3, 7, b"headex", &on_path).is_err());
+            assert!(open_path(3, 7, b"header", &on_path[..TAG_LEN - 1]).is_err());
+            assert!(open_path(3, 7, b"header", &[]).is_err());
         }
     }
 }
