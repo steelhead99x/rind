@@ -1,0 +1,743 @@
+#!/usr/bin/env python3
+"""Interleaved A/B rounds for the admin/hw scripts, and their summaries.
+
+Usage:
+  admin/hw/ab idle
+  admin/hw/ab executables BENCH... < cargo-json
+  admin/hw/ab cpuid FEATURE=0|1... < rind-cpuid-json
+  admin/hw/ab rounds --out DIR --pin CPU --variant NAME COMMIT CWD BIN[,BIN]... [options]
+  admin/hw/ab devbench CAPTURE --out DIR --device NAME --order A,B,C,D,A ...
+
+`idle` exits 2 when other work keeps the host busy, by admin/bench-report's
+rule (more than a tenth of the logical CPUs, or one CPU).
+
+`rounds` runs every variant's bench binaries once per round, pinned to one
+CPU with taskset, in an order rotated each round, so no variant always runs
+first. Each run writes criterion's estimates under DIR/raw/round-N/VARIANT/.
+A round is clean for an operation when no variant it reads ran while other
+work kept the host busy and every control agrees within --bound:
+`--control-lib LIB` compares LIB's row between the two compared variants (as
+the aws-lc-rs control in the same process), and `--control-variant CTL=BASE`
+compares a second run of BASE's binary with BASE (CTL's binaries must hash
+equal to BASE's). Two compared variants built from different commits must
+not hash equal. Rounds continue until every compared operation has --rounds
+clean rounds, or --max-rounds is reached, when it exits 3. DIR gets ab.md
+(the PR comment), ab.json, rounds.json, meta.json, and per variant a
+schema-1 host JSON (admin/bench-report's shape, median of its rounds).
+
+`devbench` checks and compares one iPad's rind-devbench runs of the
+A/B/C/D DIT and SHA-3 matrix (rind-devbench/README.md), read from a
+tools/listen-devbench.sh capture.
+
+Nothing here edits a measured number: every figure it prints is read from
+criterion's or the app's output.
+"""
+
+import argparse
+import datetime
+import glob
+import hashlib
+import importlib.machinery
+import importlib.util
+import json
+import os
+import platform
+import re
+import resource
+import shutil
+import statistics
+import subprocess
+import sys
+import time
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(os.path.dirname(HERE))
+
+
+def bench_report():
+    """admin/bench-report as a module, for its idle check and host metadata."""
+    path = os.path.join(ROOT, "admin", "bench-report")
+    loader = importlib.machinery.SourceFileLoader("bench_report", path)
+    spec = importlib.util.spec_from_loader("bench_report", loader)
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    return module
+
+
+def fail(message, code=1):
+    print(f"admin/hw/ab: {message}", file=sys.stderr)
+    sys.exit(code)
+
+
+def now():
+    return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
+
+
+def sha256(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+# --- small helpers the shell scripts call -----------------------------------
+
+
+def cmd_idle(_args):
+    br = bench_report()
+    busy = br.busy_cpus()
+    limit = br.busy_limit()
+    print(f"{busy:.1f} of {br.cpu_count()} CPUs busy (limit {limit:.1f})")
+    if busy > limit:
+        sys.exit(2)
+
+
+def cmd_executables(args):
+    """The bench executables of `cargo bench --no-run --message-format=json`, one per line, in BENCH order."""
+    found = {}
+    for line in sys.stdin:
+        try:
+            msg = json.loads(line)
+        except ValueError:
+            continue
+        if msg.get("reason") != "compiler-artifact" or not msg.get("executable"):
+            continue
+        target = msg.get("target", {})
+        if "bench" in target.get("kind", []):
+            found[target["name"]] = msg["executable"]
+    missing = [b for b in args.bench if b not in found]
+    if missing:
+        fail(f"cargo built no executable for bench {', '.join(missing)}")
+    for b in args.bench:
+        print(found[b])
+
+
+def cmd_cpuid(args):
+    """Checks rind-cpuid's JSON against FEATURE=0|1 expectations."""
+    cpuid = json.load(sys.stdin)["cpuid"]
+    wrong = []
+    for want in args.expect:
+        name, _, value = want.partition("=")
+        if name not in cpuid:
+            fail(f"rind-cpuid does not report {name!r} at this revision")
+        if str(cpuid[name]) != value:
+            wrong.append(f"{name}={cpuid[name]} (need {value})")
+    if wrong:
+        fail("rind detects the wrong CPU for this measurement: " + ", ".join(wrong), 4)
+    print("rind detects " + " ".join(args.expect))
+
+
+# --- rounds -------------------------------------------------------------------
+
+
+def split_id(full_id):
+    """(operation, library) of a criterion ID `group/library[/size]`."""
+    parts = full_id.split("/")
+    if len(parts) < 2:
+        return None
+    lib = parts[1]
+    return "/".join([parts[0], "{lib}"] + parts[2:]), lib
+
+
+def read_estimates(directory):
+    """{full_id: ns} for every row criterion wrote under `directory`, as admin/bench-report reads them."""
+    rows = {}
+    for path in glob.glob(os.path.join(directory, "**", "new", "benchmark.json"), recursive=True):
+        with open(path) as f:
+            meta = json.load(f)
+        with open(os.path.join(os.path.dirname(path), "estimates.json")) as f:
+            estimates = json.load(f)
+        estimate = estimates.get("slope") or estimates["mean"]
+        rows[meta["full_id"]] = estimate["point_estimate"]
+    return rows
+
+
+def parse_cell(text):
+    variant, sep, lib = text.partition(":")
+    if not sep or not variant or not lib:
+        fail(f"{text!r} is not VARIANT:LIBRARY")
+    return variant, lib
+
+
+def governor(cpu):
+    path = f"/sys/devices/system/cpu/cpu{cpu}/cpufreq/scaling_governor"
+    try:
+        with open(path) as f:
+            return f.read().strip()
+    except OSError:
+        return None
+
+
+def toolchain():
+    try:
+        return subprocess.run(["rustc", "-vV"], capture_output=True, text=True, check=True).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return None
+
+
+def within(ratio, bound):
+    return 1 / bound <= ratio <= bound
+
+
+def cmd_rounds(args):
+    br = bench_report()
+    variants = {}
+    for name, commit, cwd, bins in args.variant:
+        if name in variants:
+            fail(f"variant {name} given twice")
+        paths = bins.split(",")
+        for p in paths:
+            if not os.access(p, os.X_OK):
+                fail(f"{p} is not an executable")
+        variants[name] = {
+            "name": name,
+            "commit": commit,
+            "cwd": os.path.abspath(cwd),
+            "bins": [os.path.abspath(p) for p in paths],
+            "env": {},
+            "filter": args.filter,
+        }
+    for name, assignment in args.env:
+        key, sep, value = assignment.partition("=")
+        if name not in variants or not sep:
+            fail(f"--env {name} {assignment}: no such variant, or not KEY=VALUE")
+        variants[name]["env"][key] = value
+    for name, regex in args.filter_of:
+        if name not in variants:
+            fail(f"--filter-of {name}: no such variant")
+        variants[name]["filter"] = regex
+    for v in variants.values():
+        if not v["filter"]:
+            fail(f"variant {v['name']} has no criterion filter")
+        v["sha256"] = [sha256(p) for p in v["bins"]]
+
+    compares = []
+    for text in args.compare:
+        b, sep, a = text.partition("/")
+        if not sep:
+            fail(f"--compare {text!r} is not B:LIB/A:LIB")
+        compares.append((parse_cell(b), parse_cell(a)))
+    for (bv, _), (av, _) in compares:
+        for v in (bv, av):
+            if v not in variants:
+                fail(f"--compare names no variant {v}")
+        if variants[bv]["commit"] != variants[av]["commit"] and variants[bv]["sha256"] == variants[av]["sha256"]:
+            fail(
+                f"{bv} and {av} are different commits with identical binaries: a shared target dir timed one against itself"
+            )
+    controls = []
+    for text in args.control_variant:
+        ctl, sep, base = text.partition("=")
+        if not sep or ctl not in variants or base not in variants:
+            fail(f"--control-variant {text!r} is not CTL=BASE of two variants")
+        if variants[ctl]["sha256"] != variants[base]["sha256"]:
+            fail(f"control {ctl}'s binaries differ from {base}'s: the control must be {base}'s binaries run again")
+        controls.append((ctl, base))
+    if not compares:
+        fail("no --compare")
+
+    out = os.path.abspath(args.out)
+    os.makedirs(os.path.join(out, "raw"), exist_ok=True)
+    started = now()
+    order = list(variants)
+    rounds = []
+    limit = br.busy_limit()
+
+    def clean_counts():
+        counts = {}
+        for (bv, bl), (av, al) in compares:
+            for op, verdict in evaluate(rounds, (bv, bl), (av, al), args, controls).items():
+                counts[(bv, bl, av, al, op)] = sum(1 for r in verdict if r["clean"])
+        return counts
+
+    for r in range(1, args.max_rounds + 1):
+        shift = (r - 1) % len(order)
+        this = order[shift:] + order[:shift]
+        print(f"== round {r}: {' '.join(this)}", flush=True)
+        runs = {}
+        for name in this:
+            v = variants[name]
+            home = os.path.join(out, "raw", f"round-{r}", name)
+            shutil.rmtree(home, ignore_errors=True)
+            os.makedirs(home)
+            busy_before = br.busy_cpus()
+            env = dict(os.environ, **v["env"], CRITERION_HOME=home)
+            ticks0 = br.cpu_times()
+            ours0 = resource.getrusage(resource.RUSAGE_CHILDREN)
+            wall0 = time.monotonic()
+            for b in v["bins"]:
+                cmd = ["taskset", "-c", args.pin, b, "--bench"] + br.CRITERION_ARGS + [v["filter"]]
+                with open(os.path.join(home, "stdout.txt"), "a") as log:
+                    proc = subprocess.run(cmd, cwd=v["cwd"], env=env, stdout=log, stderr=subprocess.STDOUT)
+                if proc.returncode != 0:
+                    fail(f"round {r}, {name}: {os.path.basename(b)} exited {proc.returncode} (see {home}/stdout.txt)")
+            wall = time.monotonic() - wall0
+            ours1 = resource.getrusage(resource.RUSAGE_CHILDREN)
+            ours = (ours1.ru_utime + ours1.ru_stime) - (ours0.ru_utime + ours0.ru_stime)
+            other = round(max(0.0, br.busy_cpus_since(ticks0) - ours / wall), 2)
+            rows = read_estimates(home)
+            if not rows:
+                fail(f"round {r}, {name}: criterion wrote no estimates; the filter {v['filter']!r} matched no row")
+            noisy = busy_before > limit or other > limit
+            runs[name] = {
+                "busy_cpus_before": round(busy_before, 2),
+                "other_busy_cpus_during": other,
+                "noisy": noisy,
+                "seconds": round(wall, 1),
+                "ns": rows,
+            }
+            print(
+                f"   {name}: {len(rows)} rows in {wall:.0f} s, other work {other:.2f} CPUs"
+                + (" (noisy)" if noisy else ""),
+                flush=True,
+            )
+        rounds.append({"round": r, "order": this, "runs": runs})
+        counts = clean_counts()
+        short = {k: n for k, n in counts.items() if n < args.rounds}
+        print(f"   clean rounds so far: min {min(counts.values())} of {args.rounds} needed", flush=True)
+        if not short:
+            break
+
+    finished = now()
+    complete = all(n >= args.rounds for n in clean_counts().values())
+    write_rounds_outputs(out, args, br, variants, compares, controls, rounds, started, finished, complete)
+    if not complete:
+        fail(f"fewer than {args.rounds} clean rounds after {len(rounds)}: the summary in {out}/ab.md is incomplete", 3)
+
+
+def evaluate(rounds, b, a, args, controls):
+    """{op: [per-round verdict]} for one compared pair of cells."""
+    (bv, bl), (av, al) = b, a
+    ops = None
+    out = {}
+    for rnd in rounds:
+        runs = rnd["runs"]
+        mine = {}
+        for full_id, ns in runs[av]["ns"].items():
+            split = split_id(full_id)
+            if split and split[1] == al:
+                mine[split[0]] = ns
+        if ops is None:
+            ops = sorted(mine)
+        for op in ops:
+            a_ns = runs[av]["ns"].get(op.replace("{lib}", al))
+            b_ns = runs[bv]["ns"].get(op.replace("{lib}", bl))
+            if a_ns is None or b_ns is None:
+                fail(f"round {rnd['round']}: {op} is missing from {av}:{al} or {bv}:{bl}")
+            verdict = {"round": rnd["round"], "a_ns": a_ns, "b_ns": b_ns, "ratio": b_ns / a_ns, "controls": {}}
+            involved = {av, bv}
+            ok = True
+            if args.control_lib:
+                ca = runs[av]["ns"].get(op.replace("{lib}", args.control_lib))
+                cb = runs[bv]["ns"].get(op.replace("{lib}", args.control_lib))
+                if ca is None or cb is None:
+                    fail(f"round {rnd['round']}: control {args.control_lib} has no {op} row in {av} or {bv}")
+                ratio = cb / ca
+                verdict["controls"][f"{args.control_lib} {bv}/{av}"] = ratio
+                ok = ok and within(ratio, args.bound)
+            for ctl, base in controls:
+                if base not in (av, bv):
+                    continue
+                lib = al if base == av else bl
+                cv = runs[ctl]["ns"].get(op.replace("{lib}", lib))
+                bvns = runs[base]["ns"].get(op.replace("{lib}", lib))
+                ratio = cv / bvns
+                verdict["controls"][f"{ctl}/{base}"] = ratio
+                involved.add(ctl)
+                ok = ok and within(ratio, args.bound)
+            verdict["noisy"] = any(runs[v]["noisy"] for v in involved)
+            verdict["clean"] = ok and not verdict["noisy"]
+            out.setdefault(op, []).append(verdict)
+    return out
+
+
+def fmt_ns(ns):
+    if ns >= 1e6:
+        return f"{ns / 1e6:.3f} ms"
+    if ns >= 1e3:
+        return f"{ns / 1e3:.2f} µs"
+    return f"{ns:.1f} ns"
+
+
+def write_rounds_outputs(out, args, br, variants, compares, controls, rounds, started, finished, complete):
+    cpu = br.cpu_metadata()
+    tag = br.machine_tag()
+    host = args.host or br.resolve_host(None, cpu["model"])
+    meta = {
+        "schema": 1,
+        "host": host,
+        "machine": tag or None,
+        "started": started,
+        "finished": finished,
+        "cpu": cpu,
+        "os": br.os_name(),
+        "pin": args.pin,
+        "governor": governor(args.pin),
+        "toolchain": toolchain(),
+        "criterion_args": br.CRITERION_ARGS,
+        "bound": args.bound,
+        "clean_rounds_needed": args.rounds,
+        "rounds_run": len(rounds),
+        "complete": complete,
+        "label": args.label,
+        "variants": {
+            n: {k: v[k] for k in ("commit", "env", "filter", "sha256")}
+            | {"bins": [os.path.basename(b) for b in v["bins"]]}
+            for n, v in variants.items()
+        },
+    }
+    with open(os.path.join(out, "meta.json"), "w") as f:
+        json.dump(meta, f, indent=1)
+        f.write("\n")
+    with open(os.path.join(out, "rounds.json"), "w") as f:
+        json.dump(rounds, f, indent=1)
+        f.write("\n")
+
+    summary = []
+    for b, a in compares:
+        for op, verdicts in evaluate(rounds, b, a, args, controls).items():
+            clean = [v for v in verdicts if v["clean"]]
+            ratios = [v["ratio"] for v in clean]
+            summary.append(
+                {
+                    "b": f"{b[0]}:{b[1]}",
+                    "a": f"{a[0]}:{a[1]}",
+                    "operation": op,
+                    "clean_rounds": len(clean),
+                    "rounds": len(verdicts),
+                    "a_ns_median": statistics.median(v["a_ns"] for v in clean) if clean else None,
+                    "b_ns_median": statistics.median(v["b_ns"] for v in clean) if clean else None,
+                    "ratio_median": statistics.median(ratios) if ratios else None,
+                    "ratio_min": min(ratios) if ratios else None,
+                    "ratio_max": max(ratios) if ratios else None,
+                    "per_round": verdicts,
+                }
+            )
+    with open(os.path.join(out, "ab.json"), "w") as f:
+        json.dump({"meta": meta, "summary": summary}, f, indent=1)
+        f.write("\n")
+
+    # Per variant, a bench-report host result: each row's median over the rounds.
+    for name in variants:
+        per_id = {}
+        for rnd in rounds:
+            for full_id, ns in rnd["runs"][name]["ns"].items():
+                per_id.setdefault(full_id, []).append(ns)
+        results = []
+        for full_id, values in sorted(per_id.items()):
+            op, lib = split_id(full_id) or (full_id, "?")
+            results.append(
+                {
+                    "operation": op,
+                    "library": lib,
+                    "id": full_id,
+                    "ns": statistics.median(values),
+                    "ns_low": min(values),
+                    "ns_high": max(values),
+                    "runs_ns": values,
+                }
+            )
+        doc = {
+            "schema": 1,
+            "host": host,
+            "commit": variants[name]["commit"],
+            "started": started,
+            "finished": finished,
+            "cpu": cpu,
+            "os": meta["os"],
+            "toolchain": {"rustc": meta["toolchain"]},
+            "status": "ok",
+            "criterion_args": br.CRITERION_ARGS,
+            "pinned_cpus": args.pin,
+            "runs": len(rounds),
+            "spread_is": "runs",
+            "variant": name,
+            "env": variants[name]["env"],
+            "results": results,
+        }
+        if tag:
+            doc["machine"] = tag
+        os.makedirs(os.path.join(out, "variants", name), exist_ok=True)
+        with open(os.path.join(out, "variants", name, f"{host}.json"), "w") as f:
+            json.dump(doc, f, indent=1)
+            f.write("\n")
+
+    lines = [f"### {args.label}", ""]
+    if not complete:
+        lines += [
+            f"**Incomplete:** fewer than {args.rounds} clean rounds for some rows after {len(rounds)} rounds.",
+            "",
+        ]
+    lines += [
+        f"- Host: {cpu['model']} ({cpu['logical_cpus']} logical CPUs), {meta['os']}, pinned to CPU {args.pin}"
+        + (f", governor `{meta['governor']}`" if meta["governor"] else ""),
+        f"- Toolchain: `{(meta['toolchain'] or '?').splitlines()[0]}`",
+        f"- Criterion `{' '.join(br.CRITERION_ARGS)}`; {len(rounds)} rounds, variant order rotated each round; "
+        f"a round is clean when no run in it was busy (admin/bench-report's limit) and each control is within {args.bound}.",
+    ]
+    for n, v in variants.items():
+        env = " ".join(f"{k}={val}" for k, val in sorted(v["env"].items()))
+        lines.append(
+            f"- `{n}`: `{v['commit'][:12]}`"
+            + (f", `{env}`" if env else "")
+            + f", binaries sha256 {', '.join(h[:12] for h in v['sha256'])}"
+        )
+    lines += [
+        "",
+        "| B over A | Operation | A | B | B / A (median of clean) | range | clean rounds |",
+        "|---|---|---:|---:|---:|---|---:|",
+    ]
+    for s in summary:
+        s["shown"] = s["operation"].replace("/{lib}", "")
+    for s in summary:
+        if s["ratio_median"] is None:
+            lines.append(f"| {s['b']} / {s['a']} | `{s['shown']}` | | | | | 0 of {s['rounds']} |")
+            continue
+        lines.append(
+            f"| {s['b']} / {s['a']} | `{s['shown']}` | {fmt_ns(s['a_ns_median'])} | {fmt_ns(s['b_ns_median'])} | "
+            f"**{s['ratio_median']:.3f}** | {s['ratio_min']:.3f} to {s['ratio_max']:.3f} | {s['clean_rounds']} of {s['rounds']} |"
+        )
+    lines += [
+        "",
+        "<details><summary>Per round</summary>",
+        "",
+        "| Operation | B / A | Round | A | B | B / A | Controls | Clean |",
+        "|---|---|---:|---:|---:|---:|---|---|",
+    ]
+    for s in summary:
+        for v in s["per_round"]:
+            ctl = ", ".join(f"{k} {r:.3f}" for k, r in v["controls"].items())
+            why = "yes" if v["clean"] else ("busy" if v["noisy"] else "control")
+            lines.append(
+                f"| `{s['shown']}` | {s['b']} / {s['a']} | {v['round']} | {fmt_ns(v['a_ns'])} | {fmt_ns(v['b_ns'])} | {v['ratio']:.3f} | {ctl} | {why} |"
+            )
+    lines += ["", "</details>", ""]
+    with open(os.path.join(out, "ab.md"), "w") as f:
+        f.write("\n".join(lines))
+    print("\n".join(lines))
+
+
+# --- devbench (iPad) ------------------------------------------------------------
+
+
+def split_capture(path):
+    """Each run in a collector capture: its start line, every line, and its report."""
+    runs, cur = [], None
+    with open(path, errors="replace") as f:
+        for line in f:
+            text = line.strip()
+            if not text.startswith("{"):
+                continue
+            try:
+                d = json.loads(text)
+            except ValueError:
+                continue
+            if d.get("t") == "start":
+                cur = {"start": d, "lines": [text], "report": None}
+                runs.append(cur)
+            elif cur is not None:
+                cur["lines"].append(text)
+                if d.get("t") == "report":
+                    cur["report"] = d["report"]
+                    cur = None
+    return runs
+
+
+def cmd_devbench(args):
+    """Checks one device's finished runs against the expected order and writes the matrix."""
+    order = args.order.split(",")
+    labels = dict(x.split("=", 1) for x in args.denies)
+    want = {k: sorted(filter(None, v.split("+"))) for k, v in labels.items()}
+    runs = [r for r in split_capture(args.capture) if r["report"] is not None]
+    if args.wait_for is not None:
+        # How many runs have finished, for the shell's wait loop.
+        print(len(runs))
+        return
+    if len(runs) < len(order):
+        fail(f"{args.device}: {len(runs)} finished runs in {args.capture}, need {len(order)} ({args.order})")
+    if len(runs) > len(order):
+        fail(
+            f"{args.device}: {len(runs)} finished runs in {args.capture}, more than the {len(order)} expected: start again with an empty capture"
+        )
+    out = os.path.abspath(args.out)
+    os.makedirs(out, exist_ok=True)
+    reports = []
+    for i, (label, run) in enumerate(zip(order, runs, strict=True)):
+        rep = run["report"]
+        denied = rep.get("cpu_denied") or ""
+        denied = sorted(filter(None, denied.split(","))) if isinstance(denied, str) else sorted(denied)
+        if denied != want[label]:
+            fail(
+                f"{args.device} run {i + 1} should be {label} (denying {want[label] or 'nothing'}) but its build denied {denied or 'nothing'}: install the builds in the order {args.order}"
+            )
+        if rep.get("status") != "ok":
+            fail(f"{args.device} run {i + 1} ({label}) finished {rep.get('status')!r}, not ok")
+        t = {k: rep.get("timing", {}).get(k) for k in ("rounds", "warm_ms", "sample_ms", "samples")}
+        if t != {"rounds": 3, "warm_ms": 300, "sample_ms": 100, "samples": 10}:
+            fail(f"{args.device} run {i + 1} ({label}) is not a Full run: {t}")
+        feats = set(rep.get("device", {}).get("features") or [])
+        for need in ("FEAT_DIT", "FEAT_SHA3"):
+            if need not in feats:
+                fail(f"{args.device} reports no {need}: the matrix measures nothing on it")
+        ids = {r["id"] for r in rep["results"]}
+        if reports and ids != {r["id"] for r in reports[0][1]["results"]}:
+            fail(
+                f"{args.device} run {i + 1} ({label}) timed different rows from run 1: pick the same sections and libraries in every run"
+            )
+        if not any(x.startswith("dit-toggle/") for x in ids):
+            fail(f'{args.device} run {i + 1} ({label}) has no dit-toggle rows: turn on "More: dit_toggle"')
+        reports.append((label, rep))
+        name = f"{rep.get('host') or args.device}-{run['start'].get('run_id', i)}"
+        with open(os.path.join(out, f"{name}.json"), "w") as f:
+            json.dump(rep, f, indent=1)
+            f.write("\n")
+        with open(os.path.join(out, f"{name}.jsonl"), "w") as f:
+            f.write("\n".join(run["lines"]) + "\n")
+
+    def table(rep):
+        return {r["id"]: r["ns"] for r in rep["results"] if r.get("ns")}
+
+    by = {}
+    for label, rep in reports:
+        by.setdefault(label, []).append(table(rep))
+    first = {label: runs_[0] for label, runs_ in by.items()}
+
+    # The control: a second launch of the first build, read on the other
+    # libraries' rows, which no deny changes.
+    base = order[0]
+    ctl_lines = []
+    clean = True
+    if len(by[base]) > 1:
+        a, a2 = by[base][0], by[base][1]
+        ratios = sorted(a2[i] / a[i] for i in a if i in a2 and not re.search(r"/rind(-dit-held)?(/|$)", i))
+        if not ratios:
+            fail(f"{args.device}: no other library's rows to control with")
+        med = statistics.median(ratios)
+        clean = within(med, args.bound)
+        ctl_lines.append(
+            f"- Control: {base} launched again, other libraries' rows, second over first: median {med:.3f} "
+            f"(range {ratios[0]:.3f} to {ratios[-1]:.3f}, {len(ratios)} rows), "
+            + ("within" if clean else "**outside**")
+            + f" {args.bound}."
+        )
+
+    def rind_ids(pattern):
+        ids = sorted(first[base])
+        return [i for i in ids if re.search(pattern, i) and re.search(r"/rind(/|$)", i)]
+
+    def held(i):
+        return re.sub(r"/rind(/|$)", r"/rind-dit-held\1", i, count=1)
+
+    lines = [f"### {args.device}", ""]
+    dev = reports[0][1].get("device", {})
+    lines.append(
+        f"- Device: {dev.get('product', '?')}, {dev.get('cpu', '?')}, {reports[0][1].get('os', '?')}; rind `{str(reports[0][1].get('commit'))[:12]}`; Full runs (3 rounds of 10 x 100 ms)."
+    )
+    lines.append(f"- Launch order: {', '.join(order)}.")
+    lines += ctl_lines
+    if not clean:
+        lines.append("- **Not clean:** the control moved; rerun the matrix before reading it.")
+    lines += [
+        "",
+        "A against C (per-call DIT toggle):",
+        "",
+        "| Row | A rind | A rind-dit-held | C rind | A - C | A held / C |",
+        "|---|---:|---:|---:|---:|---:|",
+    ]
+    a, c = first["A"], first["C"]
+    for i in rind_ids(args.rows):
+        if i in c:
+            h = a.get(held(i))
+            lines.append(
+                f"| `{i}` | {fmt_ns(a[i])} | {fmt_ns(h) if h else ''} | {fmt_ns(c[i])} | {fmt_ns(a[i] - c[i]) if a[i] >= c[i] else '-' + fmt_ns(c[i] - a[i])} | {f'{h / c[i]:.3f}' if h else ''} |"
+            )
+    lines += [
+        "",
+        "A against B, and C against D (the SHA-3 extension, with and without the toggle):",
+        "",
+        "| Row | A | B | B / A | C | D | D / C |",
+        "|---|---:|---:|---:|---:|---:|---:|",
+    ]
+    b, d = first["B"], first["D"]
+    for i in rind_ids(r"^(sha3-|shake|sha512|sha384|hmac-sha512|mldsa|mlkem|slhdsa)"):
+        if all(i in t for t in (b, c, d)):
+            lines.append(
+                f"| `{i}` | {fmt_ns(a[i])} | {fmt_ns(b[i])} | {b[i] / a[i]:.3f} | {fmt_ns(c[i])} | {fmt_ns(d[i])} | {d[i] / c[i]:.3f} |"
+            )
+    lines += [
+        "",
+        "`dit-toggle/*` (one toggle with no work in A; in C they should agree):",
+        "",
+        "| Row | A | C |",
+        "|---|---:|---:|",
+    ]
+    for i in sorted(x for x in a if x.startswith("dit-toggle/")):
+        lines.append(f"| `{i}` | {fmt_ns(a[i])} | {fmt_ns(c[i]) if i in c else ''} |")
+    lines.append("")
+    with open(os.path.join(out, "matrix.md"), "w") as f:
+        f.write("\n".join(lines))
+    print("\n".join(lines))
+    if not clean:
+        sys.exit(3)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = parser.add_subparsers(required=True)
+
+    p = sub.add_parser("idle", help="exit 2 when the host is busy")
+    p.set_defaults(func=cmd_idle)
+
+    p = sub.add_parser("executables", help="bench executables from cargo's JSON on stdin")
+    p.add_argument("bench", nargs="+")
+    p.set_defaults(func=cmd_executables)
+
+    p = sub.add_parser("cpuid", help="check rind-cpuid's JSON on stdin")
+    p.add_argument("expect", nargs="+", metavar="FEATURE=0|1")
+    p.set_defaults(func=cmd_cpuid)
+
+    p = sub.add_parser("rounds", help="interleaved rounds of every variant")
+    p.add_argument("--out", required=True)
+    p.add_argument("--label", required=True, help="the summary's heading")
+    p.add_argument("--host", help="the host name results record (default: admin/bench-report's CPU slug)")
+    p.add_argument("--pin", required=True, help="the CPU taskset pins every run to")
+    p.add_argument("--rounds", type=int, default=5, help="clean rounds needed for every compared row (default 5)")
+    p.add_argument("--max-rounds", type=int, default=12)
+    p.add_argument("--bound", type=float, default=1.02, help="how far a control may move (default 1.02)")
+    p.add_argument("--variant", nargs=4, action="append", required=True, metavar=("NAME", "COMMIT", "CWD", "BINS"))
+    p.add_argument("--env", nargs=2, action="append", default=[], metavar=("NAME", "KEY=VALUE"))
+    p.add_argument("--filter", help="criterion filter for every variant")
+    p.add_argument("--filter-of", nargs=2, action="append", default=[], metavar=("NAME", "REGEX"))
+    p.add_argument("--compare", action="append", required=True, metavar="B:LIB/A:LIB")
+    p.add_argument("--control-lib", help="a library both compared variants time, which must not move")
+    p.add_argument("--control-variant", action="append", default=[], metavar="CTL=BASE")
+    p.set_defaults(func=cmd_rounds)
+
+    p = sub.add_parser("devbench", help="check and compare one iPad's A/B/C/D runs")
+    p.add_argument("capture")
+    p.add_argument("--out")
+    p.add_argument("--device", required=True)
+    p.add_argument("--order", required=True, help="the builds in launch order, as A,B,C,D,A")
+    p.add_argument(
+        "--denies", nargs="+", required=True, metavar="LABEL=ID+ID", help="each build's denied ids, as B=sha3"
+    )
+    p.add_argument(
+        "--rows",
+        default=r"^(sha1|sha256|sha512|hmac|sha3|spake2plus|chacha20|xchacha20|md5)",
+        help="rind rows to read A against C on",
+    )
+    p.add_argument("--bound", type=float, default=1.02)
+    p.add_argument("--wait-for", type=int, help="print how many runs have finished and exit")
+    p.set_defaults(func=cmd_devbench)
+
+    args = parser.parse_args()
+    if getattr(args, "func", None) is cmd_devbench and args.wait_for is None and not args.out:
+        parser.error("devbench needs --out")
+    if platform.system() == "Windows":
+        fail("run admin/hw/ab on Linux or macOS")
+    args.func(args)
+
+
+if __name__ == "__main__":
+    main()

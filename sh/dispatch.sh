@@ -747,7 +747,7 @@ step() {
             run sh/select-jobs.sh --check
             ;;
         check:shell)
-            files 'sh/*.sh'
+            files 'sh/*.sh' 'admin/hw/*.sh'
             run xargs -0 shellcheck <"$listed"
             ;;
         check:toolchain) run sh/toolchain.sh --self-test ;;
