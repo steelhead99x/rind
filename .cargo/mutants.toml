@@ -53,7 +53,7 @@ exclude_re = [
   'rind/src/low/aarch64/aes_gcm\.rs:\d+:\d+: replace \| with \^ in (inc32|lengths)$',
   'rind/src/mid/portable/aes_gcm\.rs:\d+:\d+: replace \| with \^ in (add32|lengths)$',
   'rind/src/low/aarch64/cpu\.rs:\d+:\d+: replace \| with \^ in (detect|detect_once)$',
-  'rind/src/low/generic/bignum\.rs:\d+:\d+: replace \| with \^ in (add_masked|bignum_add|bignum_cmp_lt|bignum_modadd|gcd_step|mod_halve|sub_masked)$',
+  'rind/src/low/generic/bignum\.rs:\d+:\d+: replace \| with \^ in (add_masked|bignum_add|bignum_cmp_lt|bignum_modadd|sub_masked)$',
   'rind/src/low/generic/mont\.rs:\d+:\d+: replace \| with \^ in (cmp_lt_limbs|mod_double|mont_mul_limbs|sub_limbs_masked)$',
   'rind/src/low/generic/limb32\.rs:\d+:\d+: replace \| with \^ in join$',
   'rind/src/low/generic/chacha20\.rs:\d+:\d+: replace \| with \^ in quarter_round$',
@@ -66,7 +66,7 @@ exclude_re = [
   'rind/src/low/generic/p384_mul32\.rs:\d+:\d+: replace \| with \^ in sqr_wide$',
   'rind/src/low/generic/p521\.rs:\d+:\d+: replace \| with \^ in (booth_w5|nonzero_u8|select_words)$',
   'rind/src/low/generic/poly1305\.rs:\d+:\d+: replace \| with \^ in (add|full_reduce|mul)$',
-  'rind/src/low/generic/poly1305_32\.rs:\d+:\d+: replace \| with \^ in Poly1305::(blocks|finish)$',
+  'rind/src/low/generic/poly1305_32\.rs:\d+:\d+: replace \| with \^ in (Poly1305::finish|Blocks::block|add_s_split)$',
   'rind/src/low/posint\.rs:\d+:\d+: replace \| with \^ in (PosInt<N>::from_bytes|PosInt<N>::pub_montifier|mul_word_mod)$',
   'rind/src/low/(portable|x86_64)/\.\./generic/aes_nohw\.rs:\d+:\d+: replace \| with \^ in word::(compact_block|rotate_rows_down|rotate_rows_twice|uncompact_block)$',
   'rind/src/low/(portable|x86_64)/\.\./generic/ghash_nohw\.rs:\d+:\d+: replace \| with \^ in (NohwTable::ghash|gcm_mul32_nohw)$',
@@ -282,10 +282,11 @@ exclude_re = [
   # `MCDT_NO`. x86-cpu.yml's SDE rows check `needed` on every model, and
   # `reads_the_vendor` checks `is_intel` on any host.
   'rind/src/low/mcdt\.rs:\d+:\d+: (replace (needed|detect_once|reports_mcdt_no) -> bool with (true|false)|.* in (needed|detect_once|reports_mcdt_no))$',
-  # DIT, which rind sets only on Apple's cores, where no campaign runs:
-  # elsewhere `enter_cpu_state` changes nothing for `Dit`, `Entry`, and
-  # `leave_cpu_state` to restore, and `dit` compiles only for Apple.
-  # `enables_dit_whenever_the_cpu_has_it` tests it on macOS.
+  # DIT, which the aarch64 campaign's runner hides, as GitHub's arm64
+  # runners' hypervisor does: there `enter_cpu_state` changes nothing for
+  # `Dit`, `Entry`, and `leave_cpu_state` to restore.
+  # `enables_dit_whenever_the_os_reports_it` tests it where the OS reports
+  # DIT, as macOS does.
   'rind/src/low/aarch64/cpu\.rs:\d+:\d+: (replace (enter_cpu_state -> u32 with [01]|leave_cpu_state with \(\))|.* dit::\w+( -> .*)?( with .*)?)$',
   'rind/src/low/cpu\.rs:\d+:\d+: (replace (Dit::hold -> Self with .*|<impl Drop for Dit>::drop with \(\))|.* in (Dit::hold|<impl Drop for Dit>::drop))$',
   'rind/src/low/entry\.rs:\d+:\d+: replace <impl Drop for Entry>::drop with \(\)$',
@@ -297,7 +298,7 @@ exclude_re = [
   # Pinned to its line: the `cpu_forced` of a release build, one without an
   # OS, or the FIPS module, which mutation runs never are. The debug build's,
   # under the same name, is caught.
-  'rind/src/low/aarch64/cpu\.rs:495:\d+: replace cpu_forced -> bool with true$',
+  'rind/src/low/aarch64/cpu\.rs:517:\d+: replace cpu_forced -> bool with true$',
   # The portable backend has no CPU state to save, so `leave_cpu_state`
   # ignores it.
   'rind/src/low/portable/cpu\.rs:\d+:\d+: replace enter_cpu_state -> u32 with 1$',
@@ -314,7 +315,7 @@ exclude_re = [
   # Pinned to its line: the `cpu_denied` of a release build or one without
   # an OS, which tests never are. The debug build's, under the same name, is
   # caught.
-  'rind/src/low/mod\.rs:273:\d+: replace cpu_denied -> bool with true$',
+  'rind/src/low/mod\.rs:275:\d+: replace cpu_denied -> bool with true$',
   # The FIPS module's `SystemRandom`, compiled only under `--cfg rind_fips`,
   # which no mutation run sets; `fips_rng`'s tests cover what it calls.
   # Pinned to its line: the other `fill`, under the same name, is caught.

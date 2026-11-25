@@ -12,7 +12,7 @@ readme = "README.md"
 
 [dependencies]
 rand_core = "0.10"
-rind = { version = "0.3.2", path = "../rind" }
+rind = { version = "0.3.2", path = "../rind", default-features = false }
 
 [dev-dependencies]
 # RustCrypto's key generation, the caller this crate is for.

@@ -1,5 +1,9 @@
+use alloc::boxed::Box;
+use alloc::format;
+use alloc::string::ToString;
+use alloc::sync::Arc;
+use alloc::vec::Vec;
 use core::fmt;
-use std::sync::Arc;
 
 use rind::ecdsa::{KeyPair as EcdsaKeyPair, SigningAlgorithm as EcdsaSigningAlgorithm};
 use rind::ed25519::KeyPair as Ed25519KeyPair;
@@ -313,8 +317,12 @@ impl fmt::Debug for Ed25519 {
 
 #[cfg(test)]
 mod tests {
+    use std::{println, vec};
+
     use rustls::pki_types;
     use rustls::pki_types::pem::PemObject;
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    use wasm_bindgen_test::wasm_bindgen_test as test;
 
     use super::*;
 
@@ -391,7 +399,6 @@ mod tests {
         let mut p256 = include_bytes!("../../rind/src/high/ecdsa/secp256r1.pkcs8.der").to_vec();
         *p256.last_mut().unwrap() ^= 1;
         let x25519 = rind::agreement::PrivateKey::generate(&rind::agreement::X25519).unwrap();
-        let ml_dsa = rind::ml_dsa::KeyPair::<rind::ml_dsa::MlDsa65>::generate().unwrap();
         for (pkcs8, reason) in [
             (
                 p256,
@@ -401,15 +408,34 @@ mod tests {
                 x25519.to_pkcs8().as_ref().to_vec(),
                 "unsupported PKCS#8 key: a key was rejected: an X25519 key, which cannot sign",
             ),
-            (
-                ml_dsa.to_pkcs8().as_ref().to_vec(),
-                "unsupported PKCS#8 key: MlDsa65(KeyPair { algorithm: ML-DSA-65, .. }), \
-                 which rind-rustls does not sign with",
-            ),
         ] {
             let err = load(pki_types::PrivateKeyDer::Pkcs8(pkcs8.into())).unwrap_err();
             assert_eq!(err, rustls::Error::General(reason.into()));
         }
+
+        // An ML-DSA-65 key in RFC 9881's seed form, which rind-rustls does
+        // not sign with. It builds rind without ML-DSA, so rind refuses the
+        // key unless another crate in the build turns ML-DSA on, and then
+        // this crate refuses the key rind loads.
+        let ml_dsa = [
+            &[0x30, 0x34, 0x02, 0x01, 0x00, 0x30, 0x0b, 0x06, 0x09][..],
+            &[0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x03, 0x12],
+            &[0x04, 0x22, 0x80, 0x20],
+            &[0x42; 32],
+        ]
+        .concat();
+        let err = load(pki_types::PrivateKeyDer::Pkcs8(ml_dsa.into())).unwrap_err();
+        assert!(
+            [
+                "unsupported PKCS#8 key: a key was rejected: a key of an algorithm this build \
+                 leaves out, rind's `ml-dsa` feature",
+                "unsupported PKCS#8 key: MlDsa65(KeyPair { algorithm: ML-DSA-65, .. }), which \
+                 rind-rustls does not sign with",
+            ]
+            .map(|reason| rustls::Error::General(reason.into()))
+            .contains(&err),
+            "{err}"
+        );
     }
 
     // Each key type's loader loads its own type in each encoding it comes in,

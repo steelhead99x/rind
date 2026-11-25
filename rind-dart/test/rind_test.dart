@@ -210,6 +210,50 @@ void main() {
       );
     });
 
+    test('AES-GCM takes IVs of any length', () {
+      // WebCrypto's seals, which the cryptography package's tests carry, and
+      // the GCM specification's test case 2 under a 12-byte IV.
+      final key = GcmKey(
+        CipherAlgorithm.aes256,
+        Uint8List(32)..fillRange(0, 32, 2),
+      );
+      final iv = GcmIv.assumeUniqueForKey(Uint8List(16)..fillRange(0, 16, 1));
+      expect(
+        key.seal(iv, Uint8List(0)),
+        hex('5d7416b36a2a3c98d340bac56cc5a449'),
+      );
+      final sealed = key.seal(iv, Uint8List.fromList([1, 2, 3]));
+      expect(sealed, hex('a31b4d 8b0891c9dd0af06b1cd1b3604042909f'));
+      expect(key.open(iv, sealed), [1, 2, 3]);
+      expect(
+        () => key.open(iv, flipped(sealed)),
+        throwsRind(RindError.decryptFailed),
+      );
+      expect(
+        () => key.open(GcmIv.assumeUniqueForKey(Uint8List(12)), sealed),
+        throwsRind(RindError.decryptFailed),
+      );
+      final nonce = Uint8List(12);
+      expect(
+        GcmKey(
+          CipherAlgorithm.aes128,
+          Uint8List(16),
+        ).seal(GcmIv.assumeUniqueForKey(nonce), Uint8List(16), aad: ascii('a')),
+        AeadKey(
+          AeadAlgorithm.aes128Gcm,
+          Uint8List(16),
+        ).seal(Nonce.assumeUniqueForKey(nonce), Uint8List(16), aad: ascii('a')),
+      );
+      expect(
+        () => key.seal(GcmIv.assumeUniqueForKey(Uint8List(0)), Uint8List(1)),
+        throwsRind(RindError.wrongLength),
+      );
+      expect(
+        () => GcmKey(CipherAlgorithm.aes192, Uint8List(16)),
+        throwsRind(RindError.wrongLength),
+      );
+    });
+
     test('a randomized nonce key picks fresh nonces', () {
       final key = RandomizedNonceKey(Uint8List(32));
       final first = key.seal(ascii('hello'), aad: ascii('a'));
@@ -799,6 +843,57 @@ void main() {
         message,
         pair.sign(rsa.SigningAlgorithm.pssSha256, message),
       );
+
+      // A custom salt length verifies only with that length.
+      for (final (signing, verification, hash, anySalt) in [
+        (
+          rsa.PssSigningAlgorithm.sha256,
+          rsa.PssVerificationAlgorithm.sha256,
+          rsa.VerificationAlgorithm.pssSha256,
+          rsa.VerificationAlgorithm.pssSha256AnySalt,
+        ),
+        (
+          rsa.PssSigningAlgorithm.sha384,
+          rsa.PssVerificationAlgorithm.sha384,
+          rsa.VerificationAlgorithm.pssSha384,
+          rsa.VerificationAlgorithm.pssSha384AnySalt,
+        ),
+        (
+          rsa.PssSigningAlgorithm.sha512,
+          rsa.PssVerificationAlgorithm.sha512,
+          rsa.VerificationAlgorithm.pssSha512,
+          rsa.VerificationAlgorithm.pssSha512AnySalt,
+        ),
+      ]) {
+        final algorithm = signing(16);
+        expect(algorithm.saltLength, 16);
+        expect(verification(16).saltLength, 16);
+        final signature = pair.sign(algorithm, message);
+        publicKey.verify(verification(16), message, signature);
+        publicKey.verify(anySalt, message, signature);
+        for (final other in [verification(17), verification(0), hash]) {
+          expect(
+            () => publicKey.verify(other, message, signature),
+            throwsRind(RindError.badSignature),
+          );
+        }
+        // A salt of none is deterministic.
+        expect(pair.sign(signing(0), message), pair.sign(signing(0), message));
+        expect(() => signing(-1), throwsRangeError);
+        expect(() => verification(0x10000), throwsRangeError);
+      }
+      publicKey.verify(
+        rsa.VerificationAlgorithm.pssSha256,
+        message,
+        pair.sign(rsa.PssSigningAlgorithm.sha256(32), message),
+      );
+      // 2048 bits hold a SHA-256 salt of at most 222 bytes.
+      pair.sign(rsa.PssSigningAlgorithm.sha256(222), message);
+      expect(
+        () => pair.sign(rsa.PssSigningAlgorithm.sha256(223), message),
+        throwsRind(RindError.keyRejected),
+      );
+
       // A PKCS#1 v1.5 signature is no PSS signature.
       expect(
         () => publicKey.verify(

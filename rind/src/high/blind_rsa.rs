@@ -362,6 +362,17 @@ impl Blinding {
     }
 }
 
+impl Drop for Blinding {
+    fn drop(&mut self) {
+        // The unblinder holds the blind's inverse, as good as the blind,
+        // which links the signature to the message the server signed.
+        low::zeroise_value(self);
+    }
+}
+
+// A public key, words, and bytes, all valid at zero.
+impl low::Zeroable for Blinding {}
+
 impl fmt::Debug for Blinding {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Blinding")

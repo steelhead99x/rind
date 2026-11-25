@@ -8,7 +8,7 @@ description = "Fast cryptography for Python from rind, a pure-Rust library: AEAD
 readme = "README.md"
 requires-python = ">=3.11"
 # rind's own licenses, and those of the code it copies (rind/LICENSE).
-license = "(Apache-2.0 OR ISC OR MIT-0) AND (Apache-2.0 OR ISC OR MIT) AND Apache-2.0 AND ISC AND BSD-3-Clause"
+license = "(Apache-2.0 OR ISC OR MIT-0) AND (Apache-2.0 OR ISC OR MIT) AND Apache-2.0 AND ISC AND BSD-3-Clause AND MIT"
 license-files = ["LICENSE"]
 keywords = ["cryptography", "aead", "ed25519", "ecdsa", "ml-kem"]
 classifiers = [

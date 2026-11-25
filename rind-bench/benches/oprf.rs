@@ -1,6 +1,11 @@
 //! RFC 9497's OPRF mode on ristretto255, and its VOPRF mode on P-384,
 //! Privacy Pass's privately verifiable tokens: the client's blind, the
 //! server's evaluation, and the client's finalize.
+//!
+//! rind's API takes and returns each message as its wire encoding, so the
+//! RustCrypto rows encode and decode theirs too: `voprf` hands over decoded
+//! points, and timing it without that would leave out the point decodings
+//! and encodings rind's rows pay, each about a tenth of a multiplication.
 #[cfg(target_arch = "xtensa")]
 fn main() {}
 
@@ -18,7 +23,10 @@ use p384::NistP384;
 #[cfg(not(target_arch = "xtensa"))]
 use rind::oprf::{RISTRETTO255_SHA512, voprf as rind_voprf};
 #[cfg(not(target_arch = "xtensa"))]
-use voprf::{OprfClient, OprfServer, Ristretto255, VoprfClient, VoprfServer};
+use voprf::{
+    BlindedElement, EvaluationElement, OprfClient, OprfServer, Proof, Ristretto255, VoprfClient,
+    VoprfServer,
+};
 
 #[cfg(not(target_arch = "xtensa"))]
 const INPUT: &[u8] = b"a Privacy Pass token input";
@@ -56,7 +64,10 @@ fn oprf(c: &mut Criterion) {
         b.iter(|| black_box(rind::oprf::Blind::new(&RISTRETTO255_SHA512, INPUT).unwrap()));
     });
     group.bench_function("rustcrypto", |b| {
-        b.iter(|| black_box(OprfClient::<Ristretto255>::blind(INPUT, &mut SysRng).unwrap()));
+        b.iter(|| {
+            let blinded = OprfClient::<Ristretto255>::blind(INPUT, &mut SysRng).unwrap();
+            black_box((blinded.state, blinded.message.serialize()))
+        });
     });
     group.finish();
 
@@ -69,7 +80,11 @@ fn oprf(c: &mut Criterion) {
     });
     group.bench_function("rustcrypto", |b| {
         let blinded = OprfClient::<Ristretto255>::blind(INPUT, &mut SysRng).unwrap();
-        b.iter(|| black_box(server.blind_evaluate(&blinded.message)));
+        let blinded = blinded.message.serialize();
+        b.iter(|| {
+            let blinded = BlindedElement::<Ristretto255>::deserialize(&blinded).unwrap();
+            black_box(server.blind_evaluate(&blinded).serialize())
+        });
     });
     group.finish();
 
@@ -90,8 +105,11 @@ fn oprf(c: &mut Criterion) {
     });
     group.bench_function("rustcrypto", |b| {
         let blinded = OprfClient::<Ristretto255>::blind(INPUT, &mut SysRng).unwrap();
-        let evaluated = server.blind_evaluate(&blinded.message);
-        b.iter(|| black_box(blinded.state.finalize(INPUT, &evaluated).unwrap()));
+        let evaluated = server.blind_evaluate(&blinded.message).serialize();
+        b.iter(|| {
+            let evaluated = EvaluationElement::<Ristretto255>::deserialize(&evaluated).unwrap();
+            black_box(blinded.state.finalize(INPUT, &evaluated).unwrap())
+        });
     });
 }
 
@@ -137,7 +155,10 @@ fn voprf(c: &mut Criterion) {
         b.iter(|| black_box(rind_voprf::Blind::new(suite, INPUT).unwrap()));
     });
     group.bench_function("rustcrypto", |b| {
-        b.iter(|| black_box(VoprfClient::<NistP384>::blind(INPUT, &mut SysRng).unwrap()));
+        b.iter(|| {
+            let blinded = VoprfClient::<NistP384>::blind(INPUT, &mut SysRng).unwrap();
+            black_box((blinded.state, blinded.message.serialize()))
+        });
     });
     group.finish();
 
@@ -151,7 +172,12 @@ fn voprf(c: &mut Criterion) {
     });
     group.bench_function("rustcrypto", |b| {
         let blinded = VoprfClient::<NistP384>::blind(INPUT, &mut SysRng).unwrap();
-        b.iter(|| black_box(server.blind_evaluate(&mut SysRng, &blinded.message)));
+        let blinded = blinded.message.serialize();
+        b.iter(|| {
+            let blinded = BlindedElement::<NistP384>::deserialize(&blinded).unwrap();
+            let evaluated = server.blind_evaluate(&mut SysRng, &blinded);
+            black_box((evaluated.message.serialize(), evaluated.proof.serialize()))
+        });
     });
     group.finish();
 
@@ -178,12 +204,15 @@ fn voprf(c: &mut Criterion) {
     group.bench_function("rustcrypto", |b| {
         let blinded = VoprfClient::<NistP384>::blind(INPUT, &mut SysRng).unwrap();
         let evaluated = server.blind_evaluate(&mut SysRng, &blinded.message);
+        let (message, proof) = (evaluated.message.serialize(), evaluated.proof.serialize());
         let public_key = server.get_public_key();
         b.iter(|| {
+            let message = EvaluationElement::<NistP384>::deserialize(&message).unwrap();
+            let proof = Proof::<NistP384>::deserialize(&proof).unwrap();
             black_box(
                 blinded
                     .state
-                    .finalize(INPUT, &evaluated.message, &evaluated.proof, public_key)
+                    .finalize(INPUT, &message, &proof, public_key)
                     .unwrap(),
             )
         });

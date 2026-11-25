@@ -15,7 +15,8 @@
 #   every name there in backticks is one of rind's dev-dependencies, or, with
 #   a slash, a file in the repository;
 # - every function, fuzz target, and vector file the table names exists;
-# - every other fuzz target is an adapter's, named on the adapters line.
+# - every other fuzz target is an adapter's or a binding's, named on the
+#   adapters or bindings line.
 #
 # A backticked name in the table's other columns, but the oracle's, is one of:
 # - `fuzz::NAME`, a fuzz target;
@@ -35,6 +36,7 @@ COLUMNS = ["Primitive", "Exports", "Vectors", "Fuzz target", "Differential test"
 ORACLE = "Independent oracle"
 NOT_PRIMITIVES = "Exports that are not primitives:"
 ADAPTERS = "Adapter fuzz targets:"
+BINDINGS = "Binding fuzz targets:"
 
 errors = []
 
@@ -226,17 +228,18 @@ for row in rows:
             else:
                 errors.append(f"{where} is not a name admin/testing knows")
 
-adapters = [line for line in PAGE.read_text().splitlines() if line.startswith(ADAPTERS)]
-if len(adapters) != 1:
-    sys.exit(f"admin/testing: TESTING.md needs one line starting {ADAPTERS!r}")
-for token in re.findall(r"`([^`]+)`", adapters[0]):
-    segments = token.split("::")
-    if len(segments) != 2 or segments[0] != "fuzz" or segments[1] not in fuzz_targets:
-        errors.append(f"adapters: `{token}` is no fuzz target")
-    elif segments[1] in seen["fuzz"]:
-        errors.append(f"adapters: `{token}` is also a primitive's")
-    else:
-        seen["fuzz"].add(segments[1])
+for label in [ADAPTERS, BINDINGS]:
+    lines = [line for line in PAGE.read_text().splitlines() if line.startswith(label)]
+    if len(lines) != 1:
+        sys.exit(f"admin/testing: TESTING.md needs one line starting {label!r}")
+    for token in re.findall(r"`([^`]+)`", lines[0]):
+        segments = token.split("::")
+        if len(segments) != 2 or segments[0] != "fuzz" or segments[1] not in fuzz_targets:
+            errors.append(f"{label} `{token}` is no fuzz target")
+        elif segments[1] in seen["fuzz"]:
+            errors.append(f"{label} `{token}` is also a primitive's or adapter's")
+        else:
+            seen["fuzz"].add(segments[1])
 
 for kind, names in [
     ("fuzz target", fuzz_targets - seen["fuzz"]),

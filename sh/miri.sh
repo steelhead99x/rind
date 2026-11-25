@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Run the portable backend's tests under Miri for TARGET, as `just miri`
 # runs it in the dev shell's `miri` shell: x86_64-unknown-linux-gnu, with the
-# backend forced, or s390x-unknown-linux-gnu, which is big-endian. Miri fails
-# a test on undefined behavior, such as an invalid value left for a drop, a
+# backend forced, s390x-unknown-linux-gnu, which is big-endian, or
+# i686-unknown-linux-gnu, which runs 32-bit limbs and pointers. Miri fails a
+# test on undefined behavior, such as an invalid value left for a drop, a
 # misaligned or out-of-bounds pointer, or a data race.
 set -euo pipefail
 
@@ -15,8 +16,8 @@ fi
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 # Tests too slow for Miri that repeat what a kept test runs: vector sets and
-# long loops over inputs, RSA private-key operations beyond one for each key
-# type, and many scalar multiplications. Each primitive keeps a quicker test
+# long loops over inputs, RSA key generation and private-key operations beyond
+# one for each key type, and many scalar multiplications. Each primitive keeps a quicker test
 # that reaches the same unsafe code and builds, uses, and drops its key types,
 # and the native runs keep these.
 slow=(
@@ -33,6 +34,7 @@ slow=(
     high::agreement::tests::wycheproof_x25519
     high::agreement::tests::wycheproof_x25519_pkcs8
     high::blind_rsa::tests::finalize_refuses_bad_replies
+    high::blind_rsa::tests::generated_keys_round_trip
     high::blind_rsa::tests::rfc9474_vectors
     high::blind_rsa::tests::round_trip
     high::blind_rsa::tests::signatures_are_bound_to_their_variant
@@ -47,6 +49,9 @@ slow=(
     high::ecdsa::tests::rfc6979_test_vectors
     high::ecdsa::tests::smoke_test_ecdsa_sign
     high::ecdsa::tests::smoke_test_loading_keys
+    high::frost::tests::any_threshold_signs
+    high::frost::tests::bad_shares_are_identified
+    high::frost::tests::refuses_altered_signatures
     high::hmac::tests::cavp
     high::hmac_drbg::tests::cavp
     high::hpke::tests::derives_from_any_length
@@ -60,6 +65,7 @@ slow=(
     high::kem::tests::cctv_accumulated
     high::kem::tests::cctv_modulus
     high::kem::tests::wycheproof_decaps
+    high::kem::tests::wycheproof_semi_expanded_decaps
     high::kem::tests::wycheproof_encaps
     high::kem::tests::wycheproof_keygen
     high::oaep::tests::every_failure_is_the_same
@@ -71,9 +77,11 @@ slow=(
     high::oprf::voprf::tests::refuses_bad_batches
     high::oprf::voprf::tests::rfc9497_voprf_vectors
     high::oprf::voprf::tests::stays_secret
+    high::pbkdf2::tests::vg_matches_rind
     high::rsa::tests::key_generation_known_answer
     high::rsa::tests::loads_d_above_lcm
     high::rsa::tests::loads_q_above_p
+    high::rsa::tests::loads_secret_integers_in_constant_time
     high::rsa::tests::loads_unbalanced_primes
     high::rsa::tests::pairwise_key_formatting
     high::rsa::tests::pairwise_odd_size_sign_verify
@@ -89,12 +97,15 @@ slow=(
     high::rsa::tests::refuses_mismatched_private_key
     high::rsa::tests::signs_with_crt_half_above_p
     high::rsa::tests::verify_rejects_signature_not_modulus_length
-    high::signature::tests::digests_refused_as_unsupported
+    high::signature::any::tests::accepts_exactly_what_each_type_does
+    high::signature::any::tests::loads_each_type_as_its_own_loader_does
     high::signature::tests::ecdsa_generated_public_key_agrees_whichever_reads_first
     high::signature::tests::ecdsa_private_key_round_trips
     high::signature::tests::ecdsa_signs_and_verifies_any_digest
     high::signature::tests::ecdsa_verifies_only_under_its_algorithm
     high::signature::tests::encodings_fit_the_largest_keys
+    high::signature::tests::keys_shared_across_threads
+    high::signature::tests::post_quantum_clones_verify
     high::signature::tests::rsa_public_key_components
     high::signature::tests::slh_dsa_rfc9909
     high::spake2plus::tests::connectedhomeip
@@ -158,6 +169,18 @@ filter="not (${filter}test(/::acvp/))"
 export RUSTFLAGS='--cfg rind_portable --cfg curve25519_dalek_backend="serial"'
 export MIRIFLAGS=-Zmiri-disable-isolation
 args=(-p rind --locked --target "$target" --lib --test cpu --test debug)
+
+# A 32-bit target checks what its width changes: the arithmetic on 32-bit
+# limbs and the lengths below `high`, and the encodings `high` parses.
+# `high`'s other tests compose those primitives, which the 64-bit runs check
+# whole, and would add hours. Miri gives each allocation a fresh address
+# unless it reuses a freed one, which by default it does half the time, so a
+# long test runs out of a 32-bit address space; reusing every one keeps it
+# within, while Miri still tells each allocation apart.
+if [[ $(rustc --print cfg --target "$target") == *'target_pointer_width="32"'* ]]; then
+    filter="$filter and not (test(/^high::/) and not test(/^high::(asn1|pkcs1|pkcs8|sec1|spki)::/))"
+    MIRIFLAGS+=" -Zmiri-address-reuse-rate=1"
+fi
 
 # A slow entry that names no test, such as one a rename left behind, would let
 # the renamed test back into the run unnoticed. The listing builds what the

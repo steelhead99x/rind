@@ -43,6 +43,13 @@ def core.slice.Slice.split_first {T : Type _} (s : Slice T) : Result (Option (T 
   | [] => Std.Result.ok none
   | x :: rest => Std.Result.ok (some (x, .from rest (by have := s.property; simp [h] at this; omega)))
 
+/-- `<[T]>::split_last`: the last element, then the ones before it. -/
+def core.slice.Slice.split_last {T : Type _} (s : Slice T) : Result (Option (T × Slice T)) :=
+  match s.val.getLast? with
+  | none => Std.Result.ok none
+  | some x => Std.Result.ok (some (x, .from s.val.dropLast (by
+      have := s.property; simp only [List.length_dropLast]; omega)))
+
 /-- `Option`'s `?`: continue with the value, or break with `None`. -/
 def core.option.Option.Insts.CoreOpsTry_traitTry.branch {T : Type _} :
     Option T → Result (core.ops.control_flow.ControlFlow (Option Never) T)

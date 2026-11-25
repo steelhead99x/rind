@@ -10,8 +10,9 @@
  * through, or -8, -4, 8, 12, or 16 when it branches to one of the slots around
  * it, the first two a backward branch's.
  * The section is writable, since `cosim_runner.c` writes each instruction into
- * the slot, and the state follows the code in the next page, so a store to it
- * never touches a page that holds code. */
+ * the slot, and the scratch buffer and the state follow the code in the next
+ * page, so a store to them never touches a page that holds code. The buffer
+ * comes early there, which puts its first words in reach of a literal load. */
 
 	.syntax unified
 	.arm
@@ -89,6 +90,9 @@ saved_r0:
 	.word	0
 landing:
 	.word	0
+	.global cosim_scratch
+cosim_scratch:			@ what the instruction under test reads and writes
+	.space	256
 	.global cosim_state
 cosim_state:			@ R0-R12, LR, APSR, SP, landing
 	.space	68

@@ -190,6 +190,7 @@ macro_rules! free {
 free! {
     rind_dart_aead_key_free: aead::Key;
     rind_dart_randomized_nonce_key_free: aead::RandomizedNonceKey;
+    rind_dart_gcm_key_free: aead::gcm::Key;
     rind_dart_aes_cbc_encrypting_key_free: cipher::AesCbcEncryptingKey;
     rind_dart_aes_cbc_decrypting_key_free: cipher::AesCbcDecryptingKey;
     rind_dart_aes_ctr_free: cipher::AesCtr;
@@ -395,16 +396,48 @@ fn ecdsa_algorithm(id: u32) -> Result<&'static ecdsa::SigningAlgorithm, Misuse> 
     })
 }
 
-fn rsa_signing_algorithm(id: u32) -> Result<&'static rsa::SigningAlgorithm, Misuse> {
-    Ok(match id {
+/// An RSA algorithm: one of rind's statics, or PSS with a custom salt length.
+pub enum RsaAlgorithm<T: 'static> {
+    Static(&'static T),
+    CustomPss(T),
+}
+
+impl<T> core::ops::Deref for RsaAlgorithm<T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        match self {
+            Self::Static(algorithm) => algorithm,
+            Self::CustomPss(algorithm) => algorithm,
+        }
+    }
+}
+
+/// The hash's PSS id and the salt length of an id the Dart side packs as
+/// `1 << 24 | salt << 8 | pss`, for PSS with a salt of `salt` bytes.
+fn custom_pss(id: u32) -> Option<(u32, rsa::PssSaltLength)> {
+    (id >> 24 == 1).then_some((id & 0xff, rsa::PssSaltLength::Custom((id >> 8) as u16)))
+}
+
+fn rsa_signing_algorithm(id: u32) -> Result<RsaAlgorithm<rsa::SigningAlgorithm>, Misuse> {
+    let unknown = Misuse("unknown RSA signing algorithm");
+    if let Some((pss, salt)) = custom_pss(id) {
+        return Ok(RsaAlgorithm::CustomPss(match pss {
+            3 => rsa::SigningAlgorithm::pss_sha256(salt),
+            4 => rsa::SigningAlgorithm::pss_sha384(salt),
+            5 => rsa::SigningAlgorithm::pss_sha512(salt),
+            _ => return Err(unknown),
+        }));
+    }
+    Ok(RsaAlgorithm::Static(match id {
         0 => &rsa::sign::PKCS1_SHA256,
         1 => &rsa::sign::PKCS1_SHA384,
         2 => &rsa::sign::PKCS1_SHA512,
         3 => &rsa::sign::PSS_SHA256,
         4 => &rsa::sign::PSS_SHA384,
         5 => &rsa::sign::PSS_SHA512,
-        _ => return Err(Misuse("unknown RSA signing algorithm")),
-    })
+        _ => return Err(unknown),
+    }))
 }
 
 fn ecdsa_verification_algorithm(id: u32) -> Result<&'static ecdsa::VerificationAlgorithm, Misuse> {
@@ -425,8 +458,18 @@ fn ecdsa_verification_algorithm(id: u32) -> Result<&'static ecdsa::VerificationA
     })
 }
 
-fn rsa_verification_algorithm(id: u32) -> Result<&'static rsa::VerificationAlgorithm, Misuse> {
-    Ok(match id {
+// RSA verification ids are 0..=8, 100..=104, and the custom PSS ones.
+fn rsa_verification_algorithm(id: u32) -> Result<RsaAlgorithm<rsa::VerificationAlgorithm>, Misuse> {
+    let unknown = Misuse("unknown RSA verification algorithm");
+    if let Some((pss, salt)) = custom_pss(id) {
+        return Ok(RsaAlgorithm::CustomPss(match pss {
+            3 => rsa::VerificationAlgorithm::pss_sha256(salt),
+            4 => rsa::VerificationAlgorithm::pss_sha384(salt),
+            5 => rsa::VerificationAlgorithm::pss_sha512(salt),
+            _ => return Err(unknown),
+        }));
+    }
+    Ok(RsaAlgorithm::Static(match id {
         0 => &rsa::verify::PKCS1_SHA256,
         1 => &rsa::verify::PKCS1_SHA384,
         2 => &rsa::verify::PKCS1_SHA512,
@@ -441,8 +484,8 @@ fn rsa_verification_algorithm(id: u32) -> Result<&'static rsa::VerificationAlgor
         102 => &rsa::verify::legacy::PKCS1_1024_SHA256,
         103 => &rsa::verify::legacy::PKCS1_1024_SHA512,
         104 => &rsa::verify::legacy::PKCS1_3072_SHA384,
-        _ => return Err(Misuse("unknown RSA verification algorithm")),
-    })
+        _ => return Err(unknown),
+    }))
 }
 
 fn oaep_algorithm(id: u32) -> Result<&'static rsa::OaepAlgorithm, Misuse> {
@@ -596,6 +639,80 @@ pub unsafe extern "C" fn rind_dart_aead_open(
             )
         };
         Ok(key.open_in_place(nonce(nonce_bytes)?, aad, in_out)?.len())
+    })
+}
+
+/// Expands an AES-GCM key for IVs of any length and full tags.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rind_dart_gcm_key_new(
+    algorithm: u32,
+    key: *const u8,
+    key_len: usize,
+    out: *mut *mut aead::gcm::Key,
+) -> isize {
+    run(|| {
+        let algorithm = cipher_algorithm(algorithm)?;
+        // SAFETY: forwarded from the caller.
+        let key = unsafe { input(key, key_len) };
+        let key = aead::gcm::Key::new(algorithm, key, aead::gcm::TagLength::Full)?;
+        // SAFETY: forwarded from the caller.
+        Ok(unsafe { store(out, key) })
+    })
+}
+
+/// Seals as `rind_dart_aead_seal` does, under an IV of any length.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rind_dart_gcm_seal(
+    key: *const aead::gcm::Key,
+    iv: *const u8,
+    iv_len: usize,
+    aad: *const u8,
+    aad_len: usize,
+    in_out: *mut u8,
+    in_out_len: usize,
+) -> isize {
+    run(|| {
+        // SAFETY: forwarded from the caller.
+        let (key, iv, aad, in_out) = unsafe {
+            (
+                handle(key),
+                input(iv, iv_len),
+                input(aad, aad_len),
+                output(in_out, in_out_len),
+            )
+        };
+        let (plaintext, tag) = in_out
+            .split_last_chunk_mut::<16>()
+            .ok_or(Misuse("no room for the tag"))?;
+        let iv = aead::gcm::Iv::assume_unique_for_key(iv)?;
+        tag.copy_from_slice(key.seal_in_place_separate_tag(iv, aad, plaintext)?.as_ref());
+        Ok(in_out_len)
+    })
+}
+
+/// Opens as `rind_dart_aead_open` does, under an IV of any length.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rind_dart_gcm_open(
+    key: *const aead::gcm::Key,
+    iv: *const u8,
+    iv_len: usize,
+    aad: *const u8,
+    aad_len: usize,
+    in_out: *mut u8,
+    in_out_len: usize,
+) -> isize {
+    run(|| {
+        // SAFETY: forwarded from the caller.
+        let (key, iv, aad, in_out) = unsafe {
+            (
+                handle(key),
+                input(iv, iv_len),
+                input(aad, aad_len),
+                output(in_out, in_out_len),
+            )
+        };
+        let iv = aead::gcm::Iv::assume_unique_for_key(iv)?;
+        Ok(key.open_in_place(iv, aad, in_out)?.len())
     })
 }
 
@@ -1475,7 +1592,7 @@ pub unsafe extern "C" fn rind_dart_rsa_sign(
                 output(out, out_len),
             )
         };
-        write(out, pair.sign(algorithm, message)?.as_ref())
+        write(out, pair.sign(&algorithm, message)?.as_ref())
     })
 }
 
@@ -1548,7 +1665,7 @@ pub unsafe extern "C" fn rind_dart_rsa_public_key_verify(
                 input(signature, signature_len),
             )
         };
-        key.verify(algorithm, message, signature)?;
+        key.verify(&algorithm, message, signature)?;
         Ok(0)
     })
 }

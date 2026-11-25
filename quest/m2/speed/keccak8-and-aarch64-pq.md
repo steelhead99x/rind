@@ -20,4 +20,3 @@ Planned with the maintainer on 2026-11-21 (`/quest-plan`): ✅ wire existing 8-w
 ## Related
 
 - [Avoid 512-bit kernels on Intel cores that downclock for them](/quest/m2/speed/avoid-zmm.md)
-- [Add missing Argon2id, SLH-DSA, unheld-DIT, and small-record TLS benchmark baselines](/quest/m2/bench/missing-baselines-and-dit-row.md)

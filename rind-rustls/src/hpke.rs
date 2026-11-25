@@ -1,6 +1,7 @@
-use std::fmt;
-use std::marker::PhantomData;
-use std::sync::Arc;
+use alloc::boxed::Box;
+use alloc::vec::Vec;
+use core::fmt;
+use core::marker::PhantomData;
 
 use rind::hpke::{self, Kem, PrivateKey, PublicKey, Recipient, Sender, Suite};
 use rustls::crypto::hpke::{
@@ -206,5 +207,26 @@ impl HpkeOpener for Opener {
 
 /// As rustls's aws-lc-rs provider reports its HPKE errors.
 fn other(err: rind::Error) -> Error {
-    Error::Other(OtherError(Arc::new(err)))
+    Error::Other(OtherError.build(err))
+}
+
+/// Builds rustls's `OtherError` from its constructor, which takes the cause
+/// only under rustls's `std`. Another crate can turn that on without this
+/// crate's `std`, so the constructor's shape picks the impl, not a feature.
+trait Build<Args> {
+    fn build(self, err: rind::Error) -> OtherError;
+}
+
+impl<F: FnOnce() -> OtherError> Build<()> for F {
+    fn build(self, _: rind::Error) -> OtherError {
+        self()
+    }
+}
+
+type Cause = alloc::sync::Arc<dyn core::error::Error + Send + Sync>;
+
+impl<F: FnOnce(Cause) -> OtherError> Build<Cause> for F {
+    fn build(self, err: rind::Error) -> OtherError {
+        self(alloc::sync::Arc::new(err))
+    }
 }

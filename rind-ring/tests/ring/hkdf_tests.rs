@@ -16,13 +16,10 @@
 
 use ring::{digest, error, hkdf};
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
-use wasm_bindgen_test::{wasm_bindgen_test as test, wasm_bindgen_test_configure};
+use wasm_bindgen_test::wasm_bindgen_test as test;
 
 #[allow(deprecated)]
 use crate::{test, test_file};
-
-#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
-wasm_bindgen_test_configure!(run_in_browser);
 
 #[test]
 fn hkdf_tests() {
@@ -71,7 +68,9 @@ fn hkdf_output_len_tests() {
             // Test zero length.
             let okm = prk.expand(&[b"info"], My(0)).unwrap();
             let result: My<Vec<u8>> = okm.into();
-            assert_eq!(&result.0, &[]);
+            // Typed, since wasm-bindgen-test's serde_json adds a
+            // `PartialEq` for `u8` on the browser's target.
+            assert_eq!(&result.0, &[0u8; 0]);
         }
 
         let max_out_len = MAX_BLOCKS * alg.hmac_algorithm().digest_algorithm().output_len();

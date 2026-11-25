@@ -5,32 +5,6 @@ on:
   schedule:
     - cron: "23 8 * * 0"
   workflow_dispatch:
-  pull_request:
-    # A draft skips every job until it is marked ready, and turning a PR back
-    # into a draft cancels its ready run: see CONTRIBUTING.md.
-    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
-    branches: [main]
-    # Every path that reaches the tests it runs: those `sh/backends.sh` counts
-    # as reaching every backend, but for ctgrind's own files and the
-    # justfile, which this never runs. The scope job then runs it only on a
-    # diff that reaches x86_64. sh/dispatch.sh reads these too, for the merge
-    # queue.
-    paths:
-      - rind/**
-      - rind-*/**
-      - thirdparty/**
-      - Cargo.toml
-      - Cargo.lock
-      - rust-toolchain
-      - rust-toolchain.toml
-      - .cargo/**
-      - flake.nix
-      - flake.lock
-      - sh/backends.sh
-      - sh/changed.sh
-      - admin/x86-cpu
-      - .github/actions/**
-      - .github/workflows/x86-cpu.yml
 
 permissions:
   contents: read
@@ -43,63 +17,22 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # A pull request runs the models only when sh/backends.sh says its diff can
-  # reach x86_64 code, and always when it changes this workflow or
-  # admin/x86-cpu. Its three models or none: each selects its own set of
-  # dispatch paths, and no map from a changed file to the paths that run it
-  # is kept.
-  # release-plz's release PR, which only bumps versions and changelogs, runs
-  # none: a `release-plz-` branch that moq-bot, release.yml's app, opened.
+  # Every model in `admin/x86-cpu`'s MODELS, one job each.
   scope:
-    if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     outputs:
-      run: ${{ steps.reach.outputs.run }}
-      models: ${{ steps.reach.outputs.models }}
+      models: ${{ steps.models.outputs.models }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: ${{ !(startsWith(github.head_ref, 'release-plz-') && github.event.pull_request.user.login == 'moq-bot[bot]') }}
         with:
           persist-credentials: false
-          # A pull request's diff, for sh/changed.sh.
-          fetch-depth: ${{ github.event_name == 'pull_request' && '0' || '1' }}
 
-      - id: reach
-        shell: bash
-        env:
-          RELEASE_PR: ${{ startsWith(github.head_ref, 'release-plz-') && github.event.pull_request.user.login == 'moq-bot[bot]' }}
-        run: |
-          set -euo pipefail
-          run=true
-          if [ "$RELEASE_PR" = true ]; then
-            echo "A release PR bumps only versions and changelogs."
-            run=false
-          elif [ "$GITHUB_EVENT_NAME" = pull_request ]; then
-            changed=$(sh/changed.sh)
-            if ! grep -qE '^(\.github/workflows/x86-cpu\.yml|admin/x86-cpu)$' <<<"$changed"; then
-              reach=$(sh/backends.sh - <<<"$changed")
-              echo "Backends the diff reaches: $(paste -sd' ' <<<"$reach")"
-              grep -qxE 'all|x86_64' <<<"$reach" || run=false
-            fi
-          fi
-          if [ "$run" = true ]; then
-            # A pull request runs three models, and the weekly run every one;
-            # the merge queue runs every path set (`CHECK_QUEUE` in
-            # sh/dispatch.sh).
-            if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
-              models=$(admin/x86-cpu matrix --pull-request)
-            else
-              models=$(admin/x86-cpu matrix)
-            fi
-            echo "models=$models" | tee -a "$GITHUB_OUTPUT"
-          fi
-          echo "run=$run" | tee -a "$GITHUB_OUTPUT"
+      - id: models
+        run: echo "models=$(admin/x86-cpu matrix)" | tee -a "$GITHUB_OUTPUT"
 
   # The release tests, built once for every model's job to run: a model
   # changes only which paths the same binaries take.
   build:
-    needs: scope
-    if: needs.scope.outputs.run == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -122,9 +55,8 @@ jobs:
           retention-days: 1
           if-no-files-found: error
 
-  # One job per SDE model in `admin/x86-cpu`'s MODELS, or on a pull request
-  # its PULL_REQUEST, each running the build job's tests and asserting the
-  # dispatch paths its model takes.
+  # One job per SDE model in `admin/x86-cpu`'s MODELS, each running the build
+  # job's tests and asserting the dispatch paths its model takes.
   #
   # A job each, not one job for all: SDE's speed depends on the host, and on
   # GitHub's AMD EPYC 7763 runners a model with the SHA extensions runs the
@@ -171,8 +103,6 @@ jobs:
   # test's CPU masks reach its paths without AVX-512, then the baseline the
   # module requires. The large-data hash tests run natively, in build.yml.
   acvp:
-    needs: scope
-    if: needs.scope.outputs.run == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

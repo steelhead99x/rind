@@ -2,7 +2,7 @@
 
 //! Variable-time operations on a secret that `admin/ct-vartime` must find, so a scan that
 //! finds nothing fails, and for the x86_64 backend one under Intel's MXCSR
-//! mitigation that it must not. Only that scan builds with `--cfg rind_vartime_planted`.
+//! mitigation that it must not, and two beside it that it must. Only that scan builds with `--cfg rind_vartime_planted`.
 
 /// A divide instruction, or on a 32-bit target, a call to the compiler's
 /// 64-bit division routine.
@@ -111,6 +111,33 @@ fn planted_mcdt_mitigated(secret: __m128i, by: __m128i) -> __m128i {
     mitigated_mcdt(secret, by)
 }
 
+/// The multiply in a function that enters the mitigation, but before it
+/// does, which a scan excusing all of such a function would miss.
+#[cfg(rind_backend = "x86_64")]
+#[inline(never)]
+fn planted_mcdt_before(secret: __m128i, by: __m128i) -> __m128i {
+    #[allow(unused_unsafe)]
+    // SAFETY: every x86_64 target enables SSE2.
+    let early = core::hint::black_box(unsafe { _mm_mul_epu32(secret, by) });
+    let _mcdt = super::Mcdt::enter();
+    mitigated_mcdt(early, by)
+}
+
+/// The multiply after the mitigation ends.
+#[cfg(rind_backend = "x86_64")]
+#[inline(never)]
+fn planted_mcdt_after(secret: __m128i, by: __m128i) -> __m128i {
+    let mitigated = {
+        let _mcdt = super::Mcdt::enter();
+        mitigated_mcdt(secret, by)
+    };
+    #[allow(unused_unsafe)]
+    // SAFETY: every x86_64 target enables SSE2.
+    unsafe {
+        _mm_mul_epu32(core::hint::black_box(mitigated), by)
+    }
+}
+
 #[cfg(rind_backend = "x86_64")]
 #[inline(never)]
 fn mitigated_mcdt(secret: __m128i, by: __m128i) -> __m128i {
@@ -130,3 +157,11 @@ static RIND_PLANTED_MCDT: fn(__m128i, __m128i) -> __m128i = planted_mcdt;
 #[unsafe(no_mangle)]
 #[used]
 static RIND_PLANTED_MCDT_MITIGATED: fn(__m128i, __m128i) -> __m128i = planted_mcdt_mitigated;
+#[cfg(rind_backend = "x86_64")]
+#[unsafe(no_mangle)]
+#[used]
+static RIND_PLANTED_MCDT_BEFORE: fn(__m128i, __m128i) -> __m128i = planted_mcdt_before;
+#[cfg(rind_backend = "x86_64")]
+#[unsafe(no_mangle)]
+#[used]
+static RIND_PLANTED_MCDT_AFTER: fn(__m128i, __m128i) -> __m128i = planted_mcdt_after;

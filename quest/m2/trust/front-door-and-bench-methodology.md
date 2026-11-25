@@ -18,7 +18,3 @@ Planned with the maintainer on 2026-11-21 (`/quest-plan`): ✅ polish the crates
   - Document benchmark methodology clearly in `BENCHMARKS.md`: exact competitor crate/OpenSSL versions pinned in each run, explicit disclosure of `Dit::hold()` in `rind-bench/benches/criterion/mod.rs:46` and how it relates to single-call latency, and plain `cargo bench` reproduction commands for reviewers who do not use Nix.
 - **Website polish (`site/`)**:
   - Add a favicon (`site/src/layouts/Base.astro`) and prominent navigation links to `AUDIT.md` and `SECURITY.md` (`site/src/layouts/Base.astro`, `site/src/lib/landing.ts`) so visitors can jump straight to safety evidence and vulnerability reporting.
-
-## Related
-
-- [Add missing Argon2id, SLH-DSA, unheld-DIT, and small-record TLS benchmark baselines](/quest/m2/bench/missing-baselines-and-dit-row.md)

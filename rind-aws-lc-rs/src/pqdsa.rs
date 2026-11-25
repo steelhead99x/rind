@@ -612,7 +612,7 @@ fn encode_mldsa_pkcs8(id: &AlgorithmID, private_key: &[u8]) -> Option<Vec<u8>> {
     let oid = der_tlv(0x06, &id.oid())?;
     let algorithm = der_tlv(0x30, &oid)?;
     let key = der_tlv(0x04, private_key)?;
-    let mut body = vec![0x02, 0x01, 0x00];
+    let mut body = alloc::vec![0x02, 0x01, 0x00];
     body.extend(algorithm);
     body.extend(key);
     der_tlv(0x30, &body)
@@ -677,7 +677,7 @@ fn padded_ec_scalar(pkcs8: &[u8]) -> Option<Vec<u8>> {
     if scalar.is_empty() || scalar.len() >= field {
         return None;
     }
-    let mut padded_scalar = vec![0u8; field - scalar.len()];
+    let mut padded_scalar = alloc::vec![0u8; field - scalar.len()];
     padded_scalar.extend_from_slice(scalar);
     let tail = rest.get(scalar_enc.len()..)?;
     let mut inner = version.to_vec();
@@ -688,7 +688,7 @@ fn padded_ec_scalar(pkcs8: &[u8]) -> Option<Vec<u8>> {
     algorithm.extend_from_slice(parts.parameters);
     let algorithm = der_tlv(0x30, &algorithm)?;
     let key = der_tlv(0x04, &sec1)?;
-    let mut body = vec![0x02, 0x01, 0x00];
+    let mut body = alloc::vec![0x02, 0x01, 0x00];
     body.extend(algorithm);
     body.extend(key);
     der_tlv(0x30, &body)

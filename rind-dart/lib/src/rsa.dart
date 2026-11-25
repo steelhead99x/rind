@@ -35,8 +35,14 @@ enum KeySize {
   String toString() => 'rsa.KeySize.$name';
 }
 
+/// What a [KeyPair] signs with: a [SigningAlgorithm], or a
+/// [PssSigningAlgorithm] of a salt length the caller picks.
+sealed class SigningScheme {
+  int get _id;
+}
+
 /// An algorithm a [KeyPair] signs with: a padding and a hash.
-enum SigningAlgorithm {
+enum SigningAlgorithm implements SigningScheme {
   /// RSASSA-PKCS1-v1_5 with SHA-256.
   pkcs1Sha256(0),
 
@@ -57,10 +63,59 @@ enum SigningAlgorithm {
 
   const SigningAlgorithm(this._id);
 
+  @override
   final int _id;
 
   @override
   String toString() => 'rsa.SigningAlgorithm.$name';
+}
+
+/// RSASSA-PSS with a salt of [saltLength] bytes, beside the hash's length
+/// that [SigningAlgorithm]'s PSS algorithms use. A signature verifies only
+/// with the salt length it was made with, as the [PssVerificationAlgorithm]
+/// of the same hash and length does, or with an `AnySalt`
+/// [VerificationAlgorithm].
+///
+/// A modulus too short for the salt refuses to sign with it.
+final class PssSigningAlgorithm implements SigningScheme {
+  /// RSASSA-PSS with SHA-256 and MGF1-SHA-256, throwing [RangeError] unless
+  /// [saltLength] is 0 to 65535.
+  PssSigningAlgorithm.sha256(this.saltLength)
+    : _id = _pss(3, saltLength),
+      _name = 'sha256';
+
+  /// RSASSA-PSS with SHA-384 and MGF1-SHA-384, throwing [RangeError] unless
+  /// [saltLength] is 0 to 65535.
+  PssSigningAlgorithm.sha384(this.saltLength)
+    : _id = _pss(4, saltLength),
+      _name = 'sha384';
+
+  /// RSASSA-PSS with SHA-512 and MGF1-SHA-512, throwing [RangeError] unless
+  /// [saltLength] is 0 to 65535.
+  PssSigningAlgorithm.sha512(this.saltLength)
+    : _id = _pss(5, saltLength),
+      _name = 'sha512';
+
+  /// The length of the salt, in bytes.
+  final int saltLength;
+
+  @override
+  final int _id;
+
+  final String _name;
+
+  @override
+  String toString() => 'rsa.PssSigningAlgorithm.$_name($saltLength)';
+}
+
+// The id of PSS with the hash of PSS id [pss] and a salt of [saltLength]
+// bytes, as `rind_dart_rsa_sign` and `rind_dart_rsa_public_key_verify`
+// decode it.
+int _pss(int pss, int saltLength) {
+  if (saltLength < 0 || saltLength > 0xffff) {
+    throw RangeError.range(saltLength, 0, 0xffff, 'saltLength');
+  }
+  return 1 << 24 | saltLength << 8 | pss;
 }
 
 /// An algorithm a [PublicKey] verifies with: a padding, a hash, and the
@@ -135,6 +190,38 @@ final class VerificationAlgorithm {
 
   @override
   String toString() => _name;
+}
+
+/// RSASSA-PSS with a salt of exactly [saltLength] bytes, as the
+/// [PssSigningAlgorithm] of the same hash and length signs, for keys of 2048
+/// to 8192 bits.
+final class PssVerificationAlgorithm extends VerificationAlgorithm {
+  /// RSASSA-PSS with SHA-256 and MGF1-SHA-256, throwing [RangeError] unless
+  /// [saltLength] is 0 to 65535.
+  PssVerificationAlgorithm.sha256(this.saltLength)
+    : super._(
+        _pss(3, saltLength),
+        'rsa.PssVerificationAlgorithm.sha256($saltLength)',
+      );
+
+  /// RSASSA-PSS with SHA-384 and MGF1-SHA-384, throwing [RangeError] unless
+  /// [saltLength] is 0 to 65535.
+  PssVerificationAlgorithm.sha384(this.saltLength)
+    : super._(
+        _pss(4, saltLength),
+        'rsa.PssVerificationAlgorithm.sha384($saltLength)',
+      );
+
+  /// RSASSA-PSS with SHA-512 and MGF1-SHA-512, throwing [RangeError] unless
+  /// [saltLength] is 0 to 65535.
+  PssVerificationAlgorithm.sha512(this.saltLength)
+    : super._(
+        _pss(5, saltLength),
+        'rsa.PssVerificationAlgorithm.sha512($saltLength)',
+      );
+
+  /// The length of the salt, in bytes.
+  final int saltLength;
 }
 
 /// RSASSA-PKCS1-v1_5 with SHA-1, for old signatures by keys of 2048 to 8192
@@ -265,7 +352,7 @@ final class KeyPair extends Handle {
   );
 
   /// Signs [message] with [algorithm].
-  Uint8List sign(SigningAlgorithm algorithm, Uint8List message) =>
+  Uint8List sign(SigningScheme algorithm, Uint8List message) =>
       nativeCopy(message, (input) {
         return _modulusOut(
           (out) => _rsaSign(

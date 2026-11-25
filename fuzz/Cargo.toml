@@ -14,6 +14,10 @@ build = "build.rs"
 [package.metadata]
 cargo-fuzz = true
 
+[lints.rust]
+# Set by cargo fuzz.
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(fuzzing)"] }
+
 [dependencies]
 libfuzzer-sys = { version = "0.4", features = ["arbitrary-derive"] }
 aws-lc-rs = { version = "1.19", features = ["non-fips", "ring-io"], default-features = false }
@@ -77,9 +81,31 @@ p256-voprf = { package = "p256", version = "0.13", default-features = false, fea
 p384-voprf = { package = "p384", version = "0.13", default-features = false, features = ["hash2curve", "voprf"] }
 p521-voprf = { package = "p521", version = "0.13.3", default-features = false, features = ["hash2curve", "voprf"] }
 rand_core-voprf = { package = "rand_core", version = "0.6", features = ["getrandom"] }
+# SPAKE2+, which aws-lc-rs does not offer; `test-utils` takes the ephemeral
+# scalars the fuzzer writes.
+pakery-crypto = { version = "0.6.2", default-features = false, features = ["std", "p256"] }
+pakery-spake2plus = { version = "0.6.2", default-features = false, features = ["std", "test-utils"] }
+# RFC 9591's FROST, which aws-lc-rs does not offer.
+frost-ed25519 = { version = "3", default-features = false }
+frost-ristretto255 = { version = "3", default-features = false }
+frost-p256 = { version = "3", default-features = false }
 
 [dependencies.rind]
 path = "../rind"
+
+# The bindings whose C ABIs the `dart`, `python`, and `fips` targets drive.
+[dependencies.rind-dart]
+path = "../rind-dart"
+
+# CPython, linked only under cargo fuzz, so a workspace build needs no
+# libpython.
+[target.'cfg(all(fuzzing, target_os = "linux", target_env = "gnu", target_pointer_width = "64"))'.dependencies]
+rind-python = { path = "../rind-python" }
+pyo3 = { version = "0.30", features = ["auto-initialize"] }
+
+# The FIPS module builds only here, as rind-fips's build script decides.
+[target.'cfg(all(target_os = "linux", target_env = "gnu", target_endian = "little", target_pointer_width = "64", any(target_arch = "x86_64", target_arch = "aarch64")))'.dependencies]
+rind-fips = { path = "../rind-fips" }
 
 [[bin]]
 name = "legacy"
@@ -252,6 +278,41 @@ bench = false
 [[bin]]
 name = "openssl"
 path = "fuzzer/openssl.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "dart"
+path = "fuzzer/dart.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fips"
+path = "fuzzer/fips.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "python"
+path = "fuzzer/python.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "spake2plus"
+path = "fuzzer/spake2plus.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "frost"
+path = "fuzzer/frost.rs"
 test = false
 doc = false
 bench = false

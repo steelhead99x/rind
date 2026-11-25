@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # The rind backends a diff can break: x86_64, aarch64, arm (armv7), and
-# portable. Under RIND_SCOPE, admin/ctgrind runs in full for a backend the
-# diff reaches and skips one it does not, and `just check`'s cross, msrv, and
-# vartime modules check only the reached backends' builds.
+# portable. `just check`'s cross, msrv, and vartime modules check only the
+# reached backends' builds.
 #
 # Usage: sh/backends.sh CHANGED_FILE
 #

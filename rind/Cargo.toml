@@ -4,7 +4,7 @@ version = "0.3.2"
 edition = "2024"
 repository = "https://github.com/kixel-ai/rind"
 homepage = "https://rind.kixel.ai"
-license = "(Apache-2.0 OR ISC OR MIT-0) AND (Apache-2.0 OR ISC OR MIT) AND Apache-2.0 AND ISC AND BSD-3-Clause"
+license = "(Apache-2.0 OR ISC OR MIT-0) AND (Apache-2.0 OR ISC OR MIT) AND Apache-2.0 AND ISC AND BSD-3-Clause AND MIT"
 readme = "README.md"
 description = "Pure-Rust cryptography for MoQ, forked from graviola"
 categories = ["network-programming", "cryptography"]
@@ -16,6 +16,15 @@ targets = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu", "i686-unknow
 features = ["zeroize"]
 
 [features]
+# Every algorithm. `rind::KeyPair::from_pkcs8` links each signing algorithm
+# built in, so a dependent that never loads these keys leaves them out with
+# `default-features = false`. Every other algorithm is linked only when the
+# program names it, and so has no feature.
+default = ["ml-dsa", "slh-dsa"]
+# ML-DSA (FIPS 204): `rind::ml_dsa` and the `rind::KeyPair` variants.
+ml-dsa = []
+# SLH-DSA (FIPS 205): `rind::slh_dsa` and the `rind::KeyPair` variants.
+slh-dsa = []
 # zeroize's `ZeroizeOnDrop` on every type that wipes itself on drop.
 zeroize = ["dep:zeroize"]
 __ctgrind = ["dep:crabgrind"]
@@ -153,6 +162,27 @@ p256-voprf = { package = "p256", version = "0.13", default-features = false, fea
 p384-voprf = { package = "p384", version = "0.13", default-features = false, features = ["hash2curve", "voprf"] }
 p521-voprf = { package = "p521", version = "0.13.3", default-features = false, features = ["hash2curve", "voprf"] }
 rand_core-voprf = { package = "rand_core", version = "0.6", features = ["getrandom"] }
+
+# These cover every algorithm, so a build that leaves one out skips them.
+[[test]]
+name = "crosschecks"
+required-features = ["ml-dsa", "slh-dsa"]
+
+[[test]]
+name = "debug"
+required-features = ["ml-dsa", "slh-dsa"]
+
+[[test]]
+name = "heap_scratch"
+required-features = ["ml-dsa", "slh-dsa"]
+
+[[test]]
+name = "wycheproof"
+required-features = ["ml-dsa", "slh-dsa"]
+
+[[test]]
+name = "zeroing"
+required-features = ["ml-dsa", "slh-dsa"]
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = [

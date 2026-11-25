@@ -1,0 +1,44 @@
+# The published functions `admin/coverage-gate check` lets no test run, each
+# for its reason. An entry is a path, or a directory ending in `/`, then the
+# names of the functions it allows there, or none to allow every function in
+# it; a name, such as `sign` or `Key::sign`, matches the end of the path that
+# defines a function, and also allows the closures inside it. An entry that
+# allows no unrun function fails the gate, so this list stays current.
+
+# The unpublished crates, rind-fips and rind-openssl, and rind's FIPS code,
+# which its unit tests compile but only rind-fips runs, and what only that
+# code calls.
+rind-fips/
+rind-openssl/
+rind/src/fips.rs
+rind/src/fips/
+rind/src/fips_rng.rs
+rind/src/high/signature/rsa.rs PublicKey::modulus_bits
+rind/src/mid/mldsa.rs VerifyingKey::verify_mu
+
+# The decryption keys' wipes but the first variant's: only `AesDecKey` holds
+# one, and its drop wipes the whole enum, tag included, so the drop glue after
+# it reaches only the first variant. Each key keeps its own wipe, as every key
+# type does.
+rind/src/low/aarch64/vpaes_armv8.rs VpaesDecKey::drop
+rind/src/low/arm/aesv8_armx.rs AesHwDecKey::drop
+rind/src/low/arm/vpaes_armv7.rs NeonDecKey::drop
+rind/src/low/x86_64/vpaes_x86_64.rs VpaesDecKey::drop
+
+# Error mappings for a failure no test can cause: signing failing with a key
+# that loaded, a message past a cipher's length limit or `isize::MAX`, and
+# rind-object-store's arm for an algorithm a later object_store adds.
+rind-object-store/src/lib.rs Rs256::sign unsupported
+rind-python/src/lib.rs bytes_with
+rind-rustls/src/sign.rs RsaSigner::sign Ecdsa::sign
+rind-str0m/src/srtp.rs Cm::apply Gcm::seal
+
+# rind-rustls's `OtherError` builder for a rustls without `std`, which no test
+# builds: the workspace's dependencies turn rustls's `std` on.
+rind-rustls/src/hpke.rs build
+
+# Bindings that pyrind's and rind for Dart's 0.4 reshapes rewrite, which
+# /quest/m2/confidence/uncovered-functions.md then tests.
+rind-dart/src/lib.rs PublicKey::to_spki rind_dart_public_key_new
+rind-python/src/rsa.rs DecryptingKey::from_pkcs1 DecryptingKey::to_pkcs8 EncryptingKey::from_components EncryptingKey::to_spki
+rind-python/src/signature.rs Ed25519KeyPair::from_seed_and_public_key Ed25519KeyPair::to_spki

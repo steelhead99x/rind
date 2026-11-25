@@ -31,7 +31,8 @@ cover SHA-384 and SHA-512, and for Ed25519's hashes, aws-lc's AVX routine's in
 `Rind.X86_64.AwsLc` and rind's HOL Light proof there of OpenSSL's AVX2
 routine; for SHA-256, which the theorems over every HMAC algorithm cover,
 rind's HOL Light proofs of its routines for the SHA extensions in
-`Rind.X86_64.Sha256Shaext`; Vale's in
+`Rind.X86_64.Sha256Shaext` and of OpenSSL's AVX2 routine in
+`Rind.X86_64.ShaBlocks`; Vale's in
 `Rind.X86_64.ValeAesGcm` for AES-GCM, rind's HOL Light proofs of its
 constant-time compares in `Rind.X86_64.CtEqual` for HMAC's and PBKDF2's
 `verify`, AES-GCM's tag check, ChaCha20-Poly1305's and XChaCha20-Poly1305's
@@ -261,6 +262,7 @@ change to the trust base.
  Quot.sound,
  compress_avx_spec,
  finish_padded_spec,
+ sha256_compress_blocks_avx2_spec,
  sha256_compress_blocks_shaext_spec,
  sha512_block_data_order_avx2_spec] -/
 #guard_msgs in
@@ -271,6 +273,7 @@ change to the trust base.
  Quot.sound,
  compress_avx_spec,
  finish_padded_spec,
+ sha256_compress_blocks_avx2_spec,
  sha256_compress_blocks_shaext_spec,
  sha512_block_data_order_avx2_spec] -/
 #guard_msgs in
@@ -283,6 +286,7 @@ change to the trust base.
  ct_compare_16_spec,
  ct_compare_bytes_spec,
  finish_padded_spec,
+ sha256_compress_blocks_avx2_spec,
  sha256_compress_blocks_shaext_spec,
  sha512_block_data_order_avx2_spec] -/
 #guard_msgs in
@@ -293,6 +297,7 @@ change to the trust base.
  Quot.sound,
  compress_avx_spec,
  finish_padded_spec,
+ sha256_compress_blocks_avx2_spec,
  sha256_compress_blocks_shaext_spec,
  sha512_block_data_order_avx2_spec] -/
 #guard_msgs in
@@ -303,6 +308,7 @@ change to the trust base.
  Quot.sound,
  compress_avx_spec,
  finish_padded_spec,
+ sha256_compress_blocks_avx2_spec,
  sha256_compress_blocks_shaext_spec,
  sha512_block_data_order_avx2_spec] -/
 #guard_msgs in
@@ -313,6 +319,7 @@ change to the trust base.
  Quot.sound,
  compress_avx_spec,
  finish_padded_spec,
+ sha256_compress_blocks_avx2_spec,
  sha256_compress_blocks_shaext_spec,
  sha512_block_data_order_avx2_spec] -/
 #guard_msgs in
@@ -323,6 +330,7 @@ change to the trust base.
  Quot.sound,
  compress_avx_spec,
  finish_padded_spec,
+ sha256_compress_blocks_avx2_spec,
  sha256_compress_blocks_shaext_spec,
  sha512_block_data_order_avx2_spec] -/
 #guard_msgs in
@@ -333,6 +341,7 @@ change to the trust base.
  Quot.sound,
  compress_avx_spec,
  finish_padded_spec,
+ sha256_compress_blocks_avx2_spec,
  sha256_compress_blocks_shaext_spec,
  sha512_block_data_order_avx2_spec] -/
 #guard_msgs in
@@ -343,6 +352,7 @@ change to the trust base.
  Quot.sound,
  compress_avx_spec,
  finish_padded_spec,
+ sha256_compress_blocks_avx2_spec,
  sha256_compress_blocks_shaext_spec,
  sha512_block_data_order_avx2_spec] -/
 #guard_msgs in
@@ -353,6 +363,7 @@ change to the trust base.
  Quot.sound,
  compress_avx_spec,
  finish_padded_spec,
+ sha256_compress_blocks_avx2_spec,
  sha256_compress_blocks_shaext_spec,
  sha512_block_data_order_avx2_spec] -/
 #guard_msgs in
@@ -363,6 +374,7 @@ change to the trust base.
  Quot.sound,
  compress_avx_spec,
  finish_padded_spec,
+ sha256_compress_blocks_avx2_spec,
  sha256_compress_blocks_shaext_spec,
  sha512_block_data_order_avx2_spec] -/
 #guard_msgs in
@@ -375,6 +387,7 @@ change to the trust base.
  ct_compare_16_spec,
  ct_compare_bytes_spec,
  finish_padded_spec,
+ sha256_compress_blocks_avx2_spec,
  sha256_compress_blocks_shaext_spec,
  sha512_block_data_order_avx2_spec] -/
 #guard_msgs in
@@ -715,6 +728,7 @@ change to the trust base.
  bignum_tomont_p256_spec,
  finish_padded_spec,
  p256_point_add_affine_spec,
+ sha256_compress_blocks_avx2_spec,
  sha256_compress_blocks_shaext_spec,
  vg_p256_public_key_spec] -/
 #guard_msgs in
@@ -749,6 +763,7 @@ change to the trust base.
  p256_montjdouble_spec,
  p256_montjmixadd_alt_spec,
  p256_montjmixadd_spec,
+ sha256_compress_blocks_avx2_spec,
  sha256_compress_blocks_shaext_spec,
  vg_p256_verify_spec] -/
 #guard_msgs in
@@ -780,6 +795,7 @@ change to the trust base.
  p256_montjdouble_spec,
  p256_montjmixadd_alt_spec,
  p256_montjmixadd_spec,
+ sha256_compress_blocks_avx2_spec,
  sha256_compress_blocks_shaext_spec,
  vg_p256_verify_spec] -/
 #guard_msgs in
@@ -966,6 +982,7 @@ change to the trust base.
  bignum_negmodinv_spec,
  finish_padded_spec,
  rsa_ifma_public_spec,
+ sha256_compress_blocks_avx2_spec,
  sha256_compress_blocks_shaext_spec] -/
 #guard_msgs in
 #print axioms rsa_pkcs1_sha256_verify_spec
@@ -980,6 +997,7 @@ change to the trust base.
  ct_compare_bytes_spec,
  finish_padded_spec,
  rsa_ifma_public_spec,
+ sha256_compress_blocks_avx2_spec,
  sha256_compress_blocks_shaext_spec] -/
 #guard_msgs in
 #print axioms rsa_pss_sha256_verify_spec

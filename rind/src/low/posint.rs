@@ -114,17 +114,22 @@ impl<const N: usize> PosInt<N> {
     /// zeroes included, and `fit` sets the width it needs.
     // Indexes, as `to_bytes_fixed` does, which Aeneas can translate, so
     // `proofs/` can prove RSA's public operation on AVX-512 IFMA.
+    #[allow(clippy::needless_range_loop)]
     pub(crate) fn from_secret_bytes(bytes: &[u8]) -> Result<Self, Error> {
-        // A DER integer this wide fits only with a zero sign byte, so the
-        // check reveals only whether it is too wide to be valid.
-        let bytes = if bytes.len() == N * 8 + 1 {
+        // Bytes beyond the words fit only if all are zero, as aws-lc's
+        // `BN_bin2bn` accepts, so the check reveals only whether the value is
+        // too wide to be valid.
+        let bytes = if bytes.len() > N * 8 {
+            let excess = bytes.len() - N * 8;
+            let mut high = 0u8;
+            for i in 0..excess {
+                high |= bytes[i];
+            }
             // `eq`, a `bool`, where Aeneas reads `==` as a proposition.
-            if !low::ct::into_public(bytes[0].eq(&0)) {
+            if !low::ct::into_public(high.eq(&0)) {
                 return Err(Error::WrongLength);
             }
-            &bytes[1..]
-        } else if bytes.len() > N * 8 {
-            return Err(Error::WrongLength);
+            &bytes[excess..]
         } else {
             bytes
         };
@@ -1070,7 +1075,7 @@ mod tests {
     /// `admin/ctgrind` neither branches on the bytes.
     #[test]
     fn from_secret_bytes_and_fit() {
-        for len in 0..=17 {
+        for len in 0..=19 {
             for zeroes in 0..=len {
                 let mut bytes = vec![0u8; len];
                 for (i, b) in bytes.iter_mut().enumerate().skip(zeroes) {
@@ -1088,9 +1093,9 @@ mod tests {
                     (Ok(want), Ok(got)) => (want, got),
                     (want, got) => {
                         // Only a nonzero byte above two words is refused.
-                        assert_eq!(len, 17, "{len} bytes, {zeroes} leading zeroes");
-                        assert_eq!(want.is_err(), zeroes == 0);
-                        assert_eq!(got.is_err(), zeroes == 0);
+                        assert!(len > 16, "{len} bytes, {zeroes} leading zeroes");
+                        assert_eq!(want.is_err(), zeroes < len - 16);
+                        assert_eq!(got.is_err(), zeroes < len - 16);
                         continue;
                     }
                 };
