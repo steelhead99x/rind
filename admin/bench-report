@@ -373,15 +373,85 @@ def fail(message):
     sys.exit(f"bench-report: {message}")
 
 
-def operation_regex(refused=()):
+# rustls groups that time every logical CPU at once. A process pinned by
+# taskset cannot satisfy their available_parallelism assert, so when
+# RIND_PINNED_CPUS is set they run in a second, unpinned pass.
+THREADED_RUSTLS_GROUPS = (
+    "rustls-full-handshake-threads",
+    "rustls-resumed-handshake-threads",
+)
+
+
+def is_threaded_rustls(op):
+    return op.split("/")[0] in THREADED_RUSTLS_GROUPS
+
+
+def pinned_pass_operations():
+    return [op for op in OPERATIONS if not is_threaded_rustls(op)]
+
+
+def threaded_pass_operations():
+    return [op for op in OPERATIONS if is_threaded_rustls(op)]
+
+
+def operation_regex(refused=(), operations=None):
     """A criterion filter matching exactly the report's operations, without
-    the libraries in `refused`."""
+    the libraries in `refused`. `operations` defaults to every report row."""
     lib = "[^/]+"
     if refused:
         # The regex crate has no lookahead, so name the rest.
         lib = "(" + "|".join(re.escape(row) for row, name in LIBRARIES.items() if name not in refused) + ")"
-    ops = "|".join(re.escape(op).replace(re.escape("{lib}"), lib) for op in OPERATIONS)
-    return f"^({ops})$"
+    ops = OPERATIONS if operations is None else list(operations)
+    if not ops:
+        fail("no operations in the criterion filter")
+    pattern = "|".join(re.escape(op).replace(re.escape("{lib}"), lib) for op in ops)
+    return f"^({pattern})$"
+
+
+def pinned_cpus_on(platform, value):
+    """The CPU list a Linux run should pin, or None when the env is unset."""
+    if platform != "linux":
+        return None
+    raw = (value or "").strip()
+    return raw or None
+
+
+def pinned_cpus():
+    """`RIND_PINNED_CPUS` on Linux, or None when unset or not Linux."""
+    return pinned_cpus_on(sys.platform, os.environ.get("RIND_PINNED_CPUS"))
+
+
+def bench_passes(refused, pin):
+    """The cargo-bench passes for a run: (taskset CPU list or None, criterion args).
+
+    When `pin` is set, the first pass times every report row except the
+    threaded rustls groups under `taskset -c`, and the second pass times
+    only those groups, unpinned, into the same criterion directory. Criterion
+    still calls each group's setup function even when the filter skips its
+    rows, so the first pass omits `RIND_BENCH_CPUS` to leave rustls.rs's
+    assert unchanged rather than fire it under the pin. The second pass
+    keeps `RIND_BENCH_CPUS` as the host's logical count.
+    """
+    if pin:
+        return [
+            (pin, CRITERION_ARGS + [operation_regex(refused, pinned_pass_operations())]),
+            (None, CRITERION_ARGS + [operation_regex(refused, threaded_pass_operations())]),
+        ]
+    return [(None, CRITERION_ARGS + [operation_regex(refused)])]
+
+
+def run_cargo_bench(bench, criterion_args, env, pin=None):
+    cmd = list(bench) + ["--"] + list(criterion_args)
+    if pin:
+        cmd = ["taskset", "-c", pin] + cmd
+    pass_env = dict(env)
+    if pin:
+        pass_env.pop("RIND_BENCH_CPUS", None)
+    try:
+        subprocess.run(cmd, env=pass_env, check=True)
+    except FileNotFoundError as e:
+        program = cmd[0]
+        fail(f"{program}: {e}")
 
 
 def operation_of(full_id):
@@ -729,11 +799,16 @@ def run(args):
 
     criterion_dir = os.path.join(env["CARGO_TARGET_DIR"], "criterion")
     shutil.rmtree(criterion_dir, ignore_errors=True)
+    # The saved filter lists every report row, as a single-pass run does.
+    # When RIND_PINNED_CPUS is set on Linux, the suite itself is two cargo
+    # bench processes writing into this same criterion directory.
+    pin = pinned_cpus()
     criterion_args = CRITERION_ARGS + [operation_regex(result["refused"])]
     wall0 = time.monotonic()
     ticks0 = cpu_times()
     ours0 = resource.getrusage(resource.RUSAGE_CHILDREN)
-    subprocess.run(bench + ["--"] + criterion_args, env=env, check=True)
+    for pass_pin, pass_args in bench_passes(result["refused"], pin):
+        run_cargo_bench(bench, pass_args, env, pin=pass_pin)
     ours1 = resource.getrusage(resource.RUSAGE_CHILDREN)
     wall = time.monotonic() - wall0
 
@@ -773,6 +848,7 @@ def run(args):
     order = {op: i for i, op in enumerate(OPERATIONS)}
     results.sort(key=lambda r: (order[r["operation"]], r["library"]))
     finished = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
+    extra = {"pinned_cpus": pin} if pin else {}
     finish(
         "ok",
         finished=finished,
@@ -780,6 +856,7 @@ def run(args):
         load=load,
         results=results,
         build_cost=build_cost(env, args.jobs, result["refused"]),
+        **extra,
     )
 
 

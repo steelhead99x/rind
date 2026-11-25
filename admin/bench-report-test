@@ -337,6 +337,115 @@ class Render(unittest.TestCase):
                         ET.fromstring(content)
 
 
+class PinnedCpus(unittest.TestCase):
+    def sample_ids(self):
+        libs = list(br.LIBRARIES)
+        ids = [op.replace("{lib}", lib) for op in br.OPERATIONS for lib in libs]
+        ids.extend(
+            [
+                "rustls-full-handshake-group/x25519/rind/extra",
+                "rustls-full-handshake-threads/x25519",
+                "not-a-bench/rind",
+            ]
+        )
+        return ids
+
+    def test_threaded_groups_are_exactly_the_two_rustls_thread_rows(self):
+        self.assertEqual(
+            br.threaded_pass_operations(),
+            [
+                "rustls-full-handshake-threads/x25519/{lib}",
+                "rustls-resumed-handshake-threads/x25519/{lib}",
+            ],
+        )
+        self.assertEqual(
+            len(br.pinned_pass_operations()) + len(br.threaded_pass_operations()),
+            len(br.OPERATIONS),
+        )
+        self.assertEqual(
+            sorted(br.pinned_pass_operations() + br.threaded_pass_operations()),
+            sorted(br.OPERATIONS),
+        )
+
+    def test_exclusion_skips_only_the_threaded_rustls_groups(self):
+        pinned = re.compile(br.operation_regex(operations=br.pinned_pass_operations()))
+        threaded = re.compile(br.operation_regex(operations=br.threaded_pass_operations()))
+        full = re.compile(br.operation_regex())
+        # Near names stay in the pinned pass, not the threaded one.
+        for row in [
+            "rustls-full-handshake-group/x25519/rind",
+            "rustls-full-handshake-group/x25519mlkem768/aws-lc-rs",
+            "rustls-full-handshake-key/ed25519/openssl",
+            "rustls-resumed-handshake/x25519/rind",
+            "rustls-bulk/aes128-gcm/rind",
+        ]:
+            self.assertTrue(pinned.match(row), row)
+            self.assertFalse(threaded.match(row), row)
+            self.assertTrue(full.match(row), row)
+        for row in [
+            "rustls-full-handshake-threads/x25519/rind",
+            "rustls-resumed-handshake-threads/x25519/aws-lc-rs",
+        ]:
+            self.assertFalse(pinned.match(row), row)
+            self.assertTrue(threaded.match(row), row)
+            self.assertTrue(full.match(row), row)
+        self.assertFalse(pinned.match("rustls-full-handshake-threads/x25519/rind/extra"))
+        self.assertFalse(threaded.match("rustls-full-handshake-group/x25519/rind"))
+
+    def test_two_pass_filters_cover_the_same_rows_as_a_single_pass(self):
+        ids = self.sample_ids()
+        full = re.compile(br.operation_regex())
+        pinned = re.compile(br.operation_regex(operations=br.pinned_pass_operations()))
+        threaded = re.compile(br.operation_regex(operations=br.threaded_pass_operations()))
+        matched_full = [i for i in ids if full.match(i)]
+        matched_pinned = [i for i in ids if pinned.match(i)]
+        matched_threaded = [i for i in ids if threaded.match(i)]
+        self.assertEqual(set(matched_pinned) & set(matched_threaded), set())
+        self.assertEqual(sorted(matched_pinned + matched_threaded), sorted(matched_full))
+        # One ID per operation per library.
+        self.assertEqual(len(matched_full), len(br.OPERATIONS) * len(br.LIBRARIES))
+        self.assertEqual(len(matched_threaded), 2 * len(br.LIBRARIES))
+
+    def test_refused_libraries_apply_to_both_passes(self):
+        refused = {"graviola": ["adx"]}
+        pinned = re.compile(br.operation_regex(refused, br.pinned_pass_operations()))
+        threaded = re.compile(br.operation_regex(refused, br.threaded_pass_operations()))
+        self.assertTrue(pinned.match("rustls-resumed-handshake/x25519/rind"))
+        self.assertFalse(pinned.match("rustls-resumed-handshake/x25519/graviola"))
+        self.assertTrue(threaded.match("rustls-full-handshake-threads/x25519/rind"))
+        self.assertFalse(threaded.match("rustls-full-handshake-threads/x25519/graviola"))
+
+    def test_pinned_cpus_only_on_linux_when_the_env_is_set(self):
+        self.assertEqual(br.pinned_cpus_on("linux", "0"), "0")
+        self.assertEqual(br.pinned_cpus_on("linux", "2,3"), "2,3")
+        self.assertIsNone(br.pinned_cpus_on("linux", None))
+        self.assertIsNone(br.pinned_cpus_on("linux", ""))
+        self.assertIsNone(br.pinned_cpus_on("linux", "  "))
+        self.assertIsNone(br.pinned_cpus_on("darwin", "0"))
+        self.assertIsNone(br.pinned_cpus_on("darwin", "2,3"))
+
+    def test_a_pin_splits_into_taskset_then_unpinned_thread_pass(self):
+        one = br.bench_passes({}, None)
+        self.assertEqual(len(one), 1)
+        self.assertIsNone(one[0][0])
+        self.assertEqual(one[0][1], br.CRITERION_ARGS + [br.operation_regex()])
+
+        two = br.bench_passes({}, "0")
+        self.assertEqual(len(two), 2)
+        self.assertEqual(two[0][0], "0")
+        self.assertEqual(
+            two[0][1],
+            br.CRITERION_ARGS + [br.operation_regex(operations=br.pinned_pass_operations())],
+        )
+        self.assertIsNone(two[1][0])
+        self.assertEqual(
+            two[1][1],
+            br.CRITERION_ARGS + [br.operation_regex(operations=br.threaded_pass_operations())],
+        )
+        # A no-pin run is still a single cargo bench, including on Linux.
+        self.assertEqual(br.bench_passes({"graviola": ["adx"]}, None)[0][0], None)
+
+
 class Verified(unittest.TestCase):
     def load(self, text):
         with tempfile.NamedTemporaryFile("w", suffix=".toml", delete=False) as f:
