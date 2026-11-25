@@ -13,7 +13,7 @@
 //! Xtensa LLVM adds two `u64`s as an `add` and a branch on the carry, a branch
 //! on the secret. Its limb products are 32x32->64-bit multiplies, fixed-time
 //! on riscv32imac's `mul` and `mulhu` and Xtensa's `mull` and `muluh`, but a
-//! `__mulsi3` call, which branches on its operands, on riscv32 without M; there
+//! `__muldi3` call, which branches on its operands, on riscv32 without M; there
 //! and on every other 32-bit portable target HACL*'s Poly1305 stays, whose limb
 //! products are the same multiplies, until one is measured.
 
