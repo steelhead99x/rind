@@ -17,36 +17,32 @@
 //! BoringSSL and aws-lc, and on rind's tests of it against SSSE3, the
 //! portable model, Wycheproof, and aws-lc-rs.
 //!
-//! The portable backend on 32-bit targets multiplies differently, in rind's
-//! own arrangement of the same idea ([`polyval_k16`]): Karatsuba three
-//! levels down to 27 products of 16-bit halves, each by nine 32-bit `mul`s
-//! of operands masked to every third bit, whose whole product fits the low
+//! The portable backend on riscv32 multiplies differently, in rind's own
+//! arrangement of the same idea ([`polyval_k16`]): Karatsuba three levels
+//! down to 27 products of 16-bit halves, each by nine 32-bit `mul`s of
+//! operands masked to every third bit, whose whole product fits the low
 //! word. riscv32imac then needs no `mulhu`, which a fit of ESP32-C6 board
 //! timings puts at about one cycle more than `mul`, and the key's halves
-//! are split and masked once, when the key is set. Its timing likewise rests on `mul` taking the
-//! same time for every operand.
-//!
-//! That holds where a 32-bit `mul` is fixed-time: riscv32imac, i686, and
-//! Arm cores whose `MUL` is single-cycle. Where `mul` is a library call
-//! (riscv32 without the M extension calls `__mulsi3`, which branches on its
-//! operands) the 16-bit products are formed by shifts and masks instead
-//! ([`clmul16_shift`]), with no multiply at all. A core whose `MUL` itself
-//! takes an operand-dependent time (ARMv4T and ARMv5TE end it early) is not
-//! covered; only riscv32imac has been measured, and the 64-bit products the
-//! old 32-bit path formed had the same dependence on those cores.
+//! are split and masked once, when the key is set. Its timing likewise
+//! rests on `mul` taking the same time for every operand, as riscv32imac's
+//! does. riscv32 without the M extension, where `mul` is a call to
+//! `__mulsi3`, which branches on its operands, forms the 16-bit products by
+//! shifts and masks instead ([`clmul16_shift`]), with no multiply at all.
+//! Other 32-bit portable targets keep the 32-bit configuration above until
+//! the new arrangement is measured on them: only riscv32imac has been.
 
 use crate::low;
 
 /// A GHASH key as POLYVAL multiplies by it: aws-lc's `u128 Htable[16]`'s
 /// first entry, the only one it uses, holding H times x.
 pub(crate) struct NohwTable {
-    #[cfg(not(all(rind_backend = "portable", target_pointer_width = "32")))]
+    #[cfg(not(all(rind_backend = "portable", target_arch = "riscv32")))]
     hi: u64,
-    #[cfg(not(all(rind_backend = "portable", target_pointer_width = "32")))]
+    #[cfg(not(all(rind_backend = "portable", target_arch = "riscv32")))]
     lo: u64,
     /// The same key as [`leaves`] splits it, each leaf masked by [`M0`],
     /// [`M1`], and [`M2`], for [`polyval_k16`].
-    #[cfg(all(rind_backend = "portable", target_pointer_width = "32"))]
+    #[cfg(all(rind_backend = "portable", target_arch = "riscv32"))]
     leaves: Leaves,
 }
 
@@ -68,9 +64,9 @@ impl NohwTable {
         // conditionally add 0xc200...0001.
         lo ^= carry & 1;
         hi ^= carry & 0xc200_0000_0000_0000;
-        #[cfg(not(all(rind_backend = "portable", target_pointer_width = "32")))]
+        #[cfg(not(all(rind_backend = "portable", target_arch = "riscv32")))]
         return Self { hi, lo };
-        #[cfg(all(rind_backend = "portable", target_pointer_width = "32"))]
+        #[cfg(all(rind_backend = "portable", target_arch = "riscv32"))]
         return Self {
             leaves: key_leaves(hi, lo),
         };
@@ -78,7 +74,7 @@ impl NohwTable {
 
     /// Folds whole blocks of `input` into the GHASH state `xi`, held in the
     /// byte order of a block.
-    #[cfg(all(rind_backend = "portable", target_pointer_width = "32"))]
+    #[cfg(all(rind_backend = "portable", target_arch = "riscv32"))]
     pub(crate) fn ghash(&self, xi: &mut [u8; 16], input: &[[u8; 16]]) {
         let mut x = [
             be_word(xi, 0),
@@ -94,7 +90,7 @@ impl NohwTable {
 
     /// Folds whole blocks of `input` into the GHASH state `xi`, held in the
     /// byte order of a block.
-    #[cfg(not(all(rind_backend = "portable", target_pointer_width = "32")))]
+    #[cfg(not(all(rind_backend = "portable", target_arch = "riscv32")))]
     pub(crate) fn ghash(&self, xi: &mut [u8; 16], input: &[[u8; 16]]) {
         let x = u128::from_be_bytes(*xi);
         let mut swapped = [x as u64, (x >> 64) as u64];
@@ -118,7 +114,10 @@ impl Drop for NohwTable {
 
 impl low::generic::zeroise::Zeroable for NohwTable {}
 
-#[cfg(all(target_pointer_width = "32", not(rind_backend = "portable")))]
+#[cfg(all(
+    target_pointer_width = "32",
+    not(all(rind_backend = "portable", target_arch = "riscv32"))
+))]
 use gcm_mul64_split as gcm_mul64_nohw;
 #[cfg(not(target_pointer_width = "32"))]
 use gcm_mul64_wide as gcm_mul64_nohw;
@@ -171,12 +170,18 @@ fn gcm_mul64_wide(a: u64, b: u64) -> (u64, u64) {
     (lo, hi)
 }
 
-/// The carry-less product of `a` and `b`, by 32-bit multiplies, for
-/// armv7's portable path. The portable backend on 32-bit targets
-/// multiplies by [`polyval_k16`] instead: there, out of line, this took 16
+/// The carry-less product of `a` and `b`, by 32-bit multiplies, for armv7
+/// and 32-bit portable targets other than riscv32. The portable backend on
+/// riscv32 multiplies by [`polyval_k16`] instead: there, out of line, this took 16
 /// `mulhu` a call on riscv32imac, and inlined three times into
 /// `gcm_mul64_split`, LLVM issued all 96 multiplies first and spilled.
-#[cfg(any(all(target_pointer_width = "32", not(rind_backend = "portable")), test))]
+#[cfg(any(
+    all(
+        target_pointer_width = "32",
+        not(all(rind_backend = "portable", target_arch = "riscv32"))
+    ),
+    test
+))]
 fn gcm_mul32_nohw(a: u32, b: u32) -> u64 {
     // One term every four bits means the largest term is 32/4 = 8, which
     // does not overflow into the next term.
@@ -204,23 +209,23 @@ fn gcm_mul32_nohw(a: u32, b: u32) -> u64 {
 
 /// Every third bit of a word, from bit 0; [`M1`] and [`M2`] from bits 1
 /// and 2.
-#[cfg(any(all(rind_backend = "portable", target_pointer_width = "32"), test))]
+#[cfg(any(all(rind_backend = "portable", target_arch = "riscv32"), test))]
 const M0: u32 = 0x4924_9249;
-#[cfg(any(all(rind_backend = "portable", target_pointer_width = "32"), test))]
+#[cfg(any(all(rind_backend = "portable", target_arch = "riscv32"), test))]
 const M1: u32 = M0 << 1;
-#[cfg(any(all(rind_backend = "portable", target_pointer_width = "32"), test))]
+#[cfg(any(all(rind_backend = "portable", target_arch = "riscv32"), test))]
 const M2: u32 = M0 << 2;
 
 /// A 128-bit operand's 27 Karatsuba leaves, 16 bits each, the key's held
 /// masked by [`M0`], [`M1`], and [`M2`].
-#[cfg(any(all(rind_backend = "portable", target_pointer_width = "32"), test))]
+#[cfg(any(all(rind_backend = "portable", target_arch = "riscv32"), test))]
 type Leaves = [[u32; 3]; 27];
 
 /// The 16-bit operands of the 27 carry-less multiplies Karatsuba splits a
 /// 128-bit product into, three levels down, from `x`'s words least
 /// significant first. Leaf `9i + 3j + k` is half `k` of half `j` of half
 /// `i`, where half 0 is the low one, 1 the high one, and 2 their sum.
-#[cfg(any(all(rind_backend = "portable", target_pointer_width = "32"), test))]
+#[cfg(any(all(rind_backend = "portable", target_arch = "riscv32"), test))]
 fn leaves(x: [u32; 4]) -> [u32; 27] {
     let mut out = [0u32; 27];
     let h64 = [[x[0], x[1]], [x[2], x[3]], [x[0] ^ x[2], x[1] ^ x[3]]];
@@ -235,7 +240,7 @@ fn leaves(x: [u32; 4]) -> [u32; 27] {
 }
 
 /// The key `hi x^64 + lo`'s [`Leaves`].
-#[cfg(any(all(rind_backend = "portable", target_pointer_width = "32"), test))]
+#[cfg(any(all(rind_backend = "portable", target_arch = "riscv32"), test))]
 fn key_leaves(hi: u64, lo: u64) -> Leaves {
     leaves([lo as u32, (lo >> 32) as u32, hi as u32, (hi >> 32) as u32])
         .map(|y| [y & M0, y & M1, y & M2])
@@ -252,8 +257,8 @@ fn key_leaves(hi: u64, lo: u64) -> Leaves {
 #[cfg(any(
     all(
         rind_backend = "portable",
-        target_pointer_width = "32",
-        not(all(target_arch = "riscv32", not(target_feature = "m")))
+        target_arch = "riscv32",
+        target_feature = "m"
     ),
     test
 ))]
@@ -297,13 +302,13 @@ fn clmul16_shift(x: u32, y: &[u32; 3]) -> u32 {
 
 #[cfg(all(
     rind_backend = "portable",
-    target_pointer_width = "32",
-    not(all(target_arch = "riscv32", not(target_feature = "m")))
+    target_arch = "riscv32",
+    target_feature = "m"
 ))]
 use clmul16_mul as clmul16;
 // Tests run [`polyval_k16`] on the multiply, and check the two products
 // against each other.
-#[cfg(all(test, not(all(rind_backend = "portable", target_pointer_width = "32"))))]
+#[cfg(all(test, not(all(rind_backend = "portable", target_arch = "riscv32"))))]
 use clmul16_mul as clmul16;
 #[cfg(all(
     rind_backend = "portable",
@@ -314,7 +319,7 @@ use clmul16_shift as clmul16;
 
 /// The carry-less product of `w` and the key's 32-bit operand whose
 /// leaves are `h`, as its low and high words.
-#[cfg(any(all(rind_backend = "portable", target_pointer_width = "32"), test))]
+#[cfg(any(all(rind_backend = "portable", target_arch = "riscv32"), test))]
 #[inline(always)]
 fn kara32(w: u32, h: &[[u32; 3]]) -> (u32, u32) {
     let lo = clmul16(w & 0xffff, &h[0]);
@@ -325,7 +330,7 @@ fn kara32(w: u32, h: &[[u32; 3]]) -> (u32, u32) {
 
 /// Word `i` of a GHASH block, counting from its least significant end as
 /// POLYVAL orders a block's bits.
-#[cfg(any(all(rind_backend = "portable", target_pointer_width = "32"), test))]
+#[cfg(any(all(rind_backend = "portable", target_arch = "riscv32"), test))]
 #[inline(always)]
 fn be_word(b: &[u8; 16], i: usize) -> u32 {
     u32::from_be_bytes([b[12 - 4 * i], b[13 - 4 * i], b[14 - 4 * i], b[15 - 4 * i]])
@@ -337,7 +342,7 @@ fn be_word(b: &[u8; 16], i: usize) -> u32 {
 ///
 /// The nine 32-bit products run in a loop, each from memory to memory:
 /// unrolled, LLVM issues the 243 multiplies first and spills most of them.
-#[cfg(any(all(rind_backend = "portable", target_pointer_width = "32"), test))]
+#[cfg(any(all(rind_backend = "portable", target_arch = "riscv32"), test))]
 #[inline(never)]
 fn polyval_k16(x: &mut [u32; 4], input: &[[u8; 16]], h: &Leaves) {
     let mut p = [(0u32, 0u32); 9];
@@ -386,7 +391,13 @@ fn polyval_k16(x: &mut [u32; 4], input: &[[u8; 16]], h: &Leaves) {
 
 /// The carry-less product of `a` and `b`, as its low and high words, by
 /// Karatsuba over 32-bit halves.
-#[cfg(any(all(target_pointer_width = "32", not(rind_backend = "portable")), test))]
+#[cfg(any(
+    all(
+        target_pointer_width = "32",
+        not(all(rind_backend = "portable", target_arch = "riscv32"))
+    ),
+    test
+))]
 fn gcm_mul64_split(a: u64, b: u64) -> (u64, u64) {
     let (a0, a1) = (a as u32, (a >> 32) as u32);
     let (b0, b1) = (b as u32, (b >> 32) as u32);
@@ -397,7 +408,7 @@ fn gcm_mul64_split(a: u64, b: u64) -> (u64, u64) {
 }
 
 /// Multiplies `xi` by `h` in POLYVAL's field.
-#[cfg(not(all(rind_backend = "portable", target_pointer_width = "32")))]
+#[cfg(not(all(rind_backend = "portable", target_arch = "riscv32")))]
 fn gcm_polyval_nohw(xi: &mut [u64; 2], h: &NohwTable) {
     // Karatsuba multiplication. The product of `xi` and `h` is stored in `r0`
     // through `r3`. Note there is no byte or bit reversal because we are
@@ -478,7 +489,7 @@ mod tests {
         );
     }
 
-    // The 32-bit portable multiply against GHASH by the book, on every
+    // riscv32's portable multiply against GHASH by the book, on every
     // target, so 64-bit hosts test it too: from pseudo-random and all-ones
     // keys, states, and blocks, whose products carry furthest within a
     // residue class, and for each block count up to three.
@@ -569,7 +580,7 @@ mod tests {
     }
 
     // Under ctgrind, with the key, state, and blocks secret, no branch or
-    // memory index of the 32-bit portable multiply or its key setup depends
+    // memory index of riscv32's portable multiply or its key setup depends
     // on them.
     #[test]
     fn k16_constant_time() {
