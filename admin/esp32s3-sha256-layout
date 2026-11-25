@@ -1,0 +1,241 @@
+#!/bin/sh
+#
+# Checks the ESP32-S3 placement of rind's IRAM SHA-256 body.
+#
+# On xtensa-*-espidf the block and the driver must land in .iram1 (literal
+# pools included) and K in .dram1.rind_sha256_k. xtensa-esp32s3-none-elf
+# keeps the ordinary sections. The linked probe, and a firmware image
+# passed with --image, must put the block and the driver in an IRAM output
+# section and K in a DRAM output section fed by .dram1, with no call in
+# the block and no relocation of those sections into flash text.
+#
+# opt-level 3 is the firmware profile. opt-level s and z are checked on
+# the ESP32-S3 object as well: the same rules, because a size-optimized
+# outline into flash is the failure this body is written to avoid.
+# opt-level 0 is not a cache-off promise.
+#
+# Needs the esp rustc the board image uses (1.97.0.0, 8ea53bcd7) and the
+# xtensa-esp-elf binutils. Defaults are under $HOME/.espressif, which is
+# where .github/actions/esp32s3-toolchain installs them (admin/esp32s3-toolchain.sh
+# has the paths, shared with admin/esp32s3-sha512-layout).
+#
+#   admin/esp32s3-sha256-layout
+#   admin/esp32s3-sha256-layout --image path/to/sha2.elf --map path/to/sha2.map
+set -eu
+
+root=$(CDPATH='' cd -- "$(dirname "$0")/.." && pwd)
+image=
+map=
+while [ $# -gt 0 ]; do
+  case $1 in
+    --image)
+      image=$2
+      shift 2
+      ;;
+    --map)
+      map=$2
+      shift 2
+      ;;
+    *)
+      printf 'usage: %s [--image ELF --map MAP]\n' "$0" >&2
+      exit 2
+      ;;
+  esac
+done
+
+# shellcheck source=admin/esp32s3-toolchain.sh
+. "$root/admin/esp32s3-toolchain.sh"
+py=$root/admin/esp32s3-sha256-layout.py
+
+# The symbol matcher is checked on real rustc v0 and legacy names first.
+python3 "$py" selftest
+
+if [ -n "$image" ]; then
+  if [ -z "$map" ] || [ ! -f "$image" ] || [ ! -f "$map" ]; then
+    printf 'esp32s3-sha256-layout: --image needs an ELF and a --map\n' >&2
+    exit 1
+  fi
+  for tool in "$objdump" "$py"; do
+    if [ ! -e "$tool" ]; then
+      printf 'missing %s\n' "$tool" >&2
+      exit 1
+    fi
+  done
+  python3 "$py" image "$objdump" "$image" "$map"
+  printf 'esp32s3-sha256-layout: image ok\n'
+  exit 0
+fi
+
+# The probe below sets `asm_experimental_arch` in its own crate and
+# compiles the two SHA-256 files outside rind. These lines are what keep
+# that feature, and the round-constant table, on the crate the firmware
+# builds. Dropping either would otherwise leave this script green.
+# rustfmt wraps the attribute, so compare it with whitespace removed.
+tr -d ' \n' <"$root/rind/src/lib.rs" |
+  grep -F '#![cfg_attr(any(all(target_arch="xtensa",target_os="espidf"),rind_esp32s3),feature(asm_experimental_arch))]' \
+    >/dev/null || {
+  printf 'esp32s3-sha256-layout: rind/src/lib.rs no longer enables asm_experimental_arch on ESP-IDF Xtensa\n' >&2
+  exit 1
+}
+grep -F 'all(target_arch = "xtensa", target_os = "espidf")' \
+  "$root/rind/src/low/mod.rs" >/dev/null || {
+  printf 'esp32s3-sha256-layout: sha256_k is no longer built for ESP-IDF Xtensa\n' >&2
+  exit 1
+}
+
+for tool in "$rustc" "$cargo" "$objdump" "$readelf" "$nm" "$ar" "$gcc" "$ld" "$py"; do
+  if [ ! -e "$tool" ]; then
+    printf 'missing %s\ninstall the toolchain as .github/actions/esp32s3-toolchain does\n' "$tool" >&2
+    exit 1
+  fi
+done
+
+mkdir -p "$root/.tmp"
+work=$(mktemp -d "$root/.tmp/sha256-layout.XXXXXX")
+cleanup() {
+  status=$?
+  if [ "$status" -ne 0 ]; then
+    printf 'esp32s3-sha256-layout: left %s\n' "$work" >&2
+  else
+    rm -rf "$work"
+  fi
+}
+trap cleanup EXIT
+
+mkdir -p "$work/probe/src"
+cat >"$work/probe/src/lib.rs" <<EOF
+#![no_std]
+#![feature(asm_experimental_arch)]
+#![allow(dead_code, rustdoc::broken_intra_doc_links)]
+
+#[path = "$root/rind/src/low/generic/sha256_k.rs"]
+pub(crate) mod sha256_k;
+
+mod low {
+    pub mod generic {
+        pub(crate) use crate::sha256_k;
+    }
+}
+
+#[path = "$root/rind/src/low/portable/sha256_iram.rs"]
+mod iram;
+
+#[unsafe(no_mangle)]
+pub fn sha256_entry(state: &mut [u32; 8], blocks: &[u8]) {
+    iram::sha256_update_nblocks(state, blocks);
+}
+EOF
+
+cat >"$work/probe/Cargo.toml" <<'EOF'
+[package]
+name = "sha256_layout"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[profile.release]
+opt-level = 3
+lto = false
+codegen-units = 1
+panic = "abort"
+EOF
+
+esp_toolchain_env "$work"
+
+build() {
+  name=$1
+  target=$2
+  opt=$3
+  CARGO_TARGET_DIR="$work/target-$name" \
+    "$cargo" build --manifest-path "$work/probe/Cargo.toml" \
+      --release --target "$target" -Z build-std=core --offline \
+      --config "profile.release.opt-level=$opt" \
+      >"$work/$name.log" 2>&1 \
+    || {
+      printf 'build %s failed\n' "$name" >&2
+      cat "$work/$name.log" >&2
+      exit 1
+    }
+  rlib=$(find "$work/target-$name/$target/release/deps" -name 'libsha256_layout-*.rlib' | head -1)
+  mkdir -p "$work/obj/$name"
+  (cd "$work/obj/$name" && "$ar" x "$rlib")
+  find "$work/obj/$name" -name 'sha256_layout-*.o' -exec mv {} "$work/obj/$name.o" \;
+}
+
+build s3 xtensa-esp32s3-espidf 3
+build s xtensa-esp32s3-espidf '"s"'
+build z xtensa-esp32s3-espidf '"z"'
+build esp32 xtensa-esp32-espidf 3
+build none xtensa-esp32s3-none-elf 3
+
+fail() {
+  printf 'esp32s3-sha256-layout: %s\n' "$1" >&2
+  exit 1
+}
+
+check_object() {
+  python3 "$py" object "$objdump" "$readelf" "$1" "$2" || exit 1
+}
+
+printf 's3 opt-level 3\n'
+check_object "$work/obj/s3.o" placed
+printf 's3 opt-level s\n'
+check_object "$work/obj/s.o" placed
+printf 's3 opt-level z\n'
+check_object "$work/obj/z.o" placed
+printf 'esp32 opt-level 3\n'
+check_object "$work/obj/esp32.o" placed
+printf 'none-elf\n'
+check_object "$work/obj/none.o" ordinary
+
+# opt-level s and z may schedule differently from opt-level 3, so the object
+# bytes are not compared. `check_no_calls` in the python `object` pass above
+# is what rejects a call in each of those streams, and it exits non-zero.
+
+cat >"$work/link.ld" <<'EOF'
+MEMORY {
+  iram0_0_seg (RX) : ORIGIN = 0x40378000, LENGTH = 0x50000
+  default_code_seg (RX) : ORIGIN = 0x42000000, LENGTH = 0x400000
+  dram0_0_seg (RW) : ORIGIN = 0x3FC88000, LENGTH = 0x50000
+}
+SECTIONS {
+  .iram0.text : { *(.iram1 .iram1.*) } > iram0_0_seg
+  .flash.text : { *(.literal .literal.* .text .text.*) } > default_code_seg
+  .dram0.data : { *(.dram1 .dram1.*) *(.data .data.*) } > dram0_0_seg
+  .flash.rodata : { *(.rodata .rodata.*) } > default_code_seg
+  .dram0.bss (NOLOAD) : { *(.bss .bss.*) } > dram0_0_seg
+}
+EOF
+
+{
+  printf '%s\n' 'void *memset(void *s, int c, unsigned long n) {'
+  printf '%s\n' '    unsigned char *p = s;'
+  printf '%s\n' '    for (unsigned long i = 0; i < n; i++) p[i] = (unsigned char)c;'
+  printf '%s\n' '    return s;'
+  printf '%s\n' '}'
+  "$nm" -u "$work/obj/s3.o" | awk '$1 == "U" && $2 != "memset" { print $2 }' | sort -u |
+    while read -r sym; do
+      printf 'void %s(void) {}\n' "$sym"
+    done
+} >"$work/stubs.c"
+"$gcc" -c -O2 -o "$work/stubs.o" "$work/stubs.c"
+
+"$ld" --relax -e sha256_entry -T "$work/link.ld" -Map "$work/s3.map" -o "$work/s3.elf" \
+  "$work/obj/s3.o" "$work/stubs.o" || fail 'link failed'
+
+python3 "$py" image "$objdump" "$work/s3.elf" "$work/s3.map" || exit 1
+
+# objdump prints a target address, not the word "flash". link.ld puts flash
+# at 0x42000000 for 0x400000 bytes, so an operand in 0x42000000..0x423fffff
+# is a call or an l32r out of IRAM. `callxN aR` has no address of its own;
+# the python image pass checks the l32r that feeds it.
+iram_text=$("$objdump" -d -j .iram0.text "$work/s3.elf") || fail 'objdump of IRAM text failed'
+if printf '%s\n' "$iram_text" |
+  grep -E '[[:space:]](call(0|4|8|12)|callx(0|4|8|12)|l32r)[[:space:]].*42[0-3][0-9a-fA-F]{5}'
+then
+  fail 'IRAM text refers to a flash address'
+fi
+
+printf 'esp32s3-sha256-layout: ok\n'

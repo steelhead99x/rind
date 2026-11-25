@@ -21,6 +21,14 @@ Each upstream rind changes, with where its fork is vendored and where the list o
 
 ## Compilers and linkers
 
+### Clippy flags const thread-local initializers
+
+- **Breaks:** Espressif Rust 1.98.1.0's `missing_const_for_thread_local` flags `DIT_GUARDS` in `rind/src/low/cpu.rs` and `HELD` in `rind/src/low/entry.rs` on `xtensa-esp32s3-espidf`, although both initializers are already `const` blocks.
+- **Reproduce:** with that version installed as `esp`, run `cargo +esp clippy -Zbuild-std=std,panic_abort -p rind --lib --locked --target xtensa-esp32s3-espidf -- --deny warnings`.
+- **Workaround:** `sh/bare-metal.sh` compiles the ESP-IDF library with `cargo check` in debug and release. Its bare-metal targets still run Clippy.
+- **Reported:** [rust-lang/rust-clippy#17566](https://github.com/rust-lang/rust-clippy/issues/17566), the same false positive on targets without native thread-local support.
+- **Goes when:** the pinned Espressif toolchain's Clippy accepts those const initializers, so the ESP-IDF row can run Clippy too.
+
 ### rust-lld cannot link ELFv1
 
 - **Breaks:** Rust links `powerpc64-unknown-linux-gnu` with its bundled rust-lld, which supports only ELFv2, so every link fails with `ABI version 1 is not supported` on glibc's `Scrt1.o`.
@@ -60,6 +68,14 @@ Each upstream rind changes, with where its fork is vendored and where the list o
 - **Reported:** no.
 - **Goes when:** rustc supports `-Zsanitizer=address` there.
 
+### Cargo runs $CARGO_HOME/bin's subcommands before PATH's
+
+- **Breaks:** Cargo looks up an external subcommand such as `cargo-fmt` or `cargo-clippy` in `$CARGO_HOME/bin` before `PATH`, unless that directory is itself on `PATH`. On a host with rustup there, `cargo fmt` and `cargo clippy` inside a dev shell run rustup's default toolchain, not the flake's, while `command -v cargo-fmt` names the flake's. A newer rustfmt then reformats files CI accepts, and a toolchain without a cross target's standard library fails clippy with `can't find crate for core`.
+- **Reproduce:** `nix develop --command cargo fmt --version` on a host whose `$CARGO_HOME/bin/cargo-fmt` is a rustup shim and whose `$CARGO_HOME/bin` is not on `PATH` reports rustup's rustfmt. GitHub's ubuntu-24.04 image puts `$HOME/.cargo/bin` on `PATH`, so CI does not hit this.
+- **Workaround:** every dev shell's hook appends `$CARGO_HOME/bin` to `PATH` when it is missing, which turns off Cargo's lookup there first and leaves the flake's tools ahead of it.
+- **Reported:** no.
+- **Goes when:** Cargo prefers `PATH`'s subcommands.
+
 ## Constant-time analysis
 
 ### Valgrind hides ADX from `cpuid`
@@ -81,17 +97,26 @@ Each upstream rind changes, with where its fork is vendored and where the list o
 ### Valgrind cannot run x86_64's newest extensions
 
 - **Breaks:** valgrind (through 3.27) decodes no AVX-512, VAES, VPCLMULQDQ, or SHA instruction and hides them from `cpuid`, so ctgrind never reaches the code that uses them.
+- **Reproduce:** on a Zen 5 (Ryzen 7 255) with valgrind 3.26.0, `cpuid` leaf 7 reports AVX-512F, DQ, IFMA, BW, VL, VBMI, and VBMI2, VAES, VPCLMULQDQ, and SHA natively and none of them under valgrind, and `xgetbv` drops XCR0's AVX-512 state bits (`0x2e7` natively, `0x7` under valgrind). `low::x86_64::cpu::tests::detects_the_expected_cpu` passes with `RIND_TEST_X86_AVX512_AES_GCM`, `RIND_TEST_X86_AVX512_ML_KEM`, `RIND_TEST_X86_AVX512_RSA`, `RIND_TEST_X86_VAES_AES_GCM`, and `RIND_TEST_X86_SHA` set to 1 natively and to 0 under valgrind, so ctgrind on an AVX-512 host checks the AVX2 paths, as on one without AVX-512.
 - **Workaround:** `admin/ct-sde` compares Intel SDE traces of those paths for two secrets, through the `ct_sde` tests (`rind/src/low/x86_64/ct_sde.rs`), in `ctgrind.yml`'s `x86_64-sde` job, all but AVX-512 ML-KEM, which samples only the public matrix. Unlike ctgrind it sees only addresses, not variable-time instructions.
 - **Reported:** no.
 - **Goes when:** valgrind decodes them and reports them in `cpuid`, and ctgrind runs on a host that has them; `admin/ct-sde` then duplicates ctgrind.
 
 ### Valgrind hides the ARM crypto extension and SHA3
 
-- **Breaks:** valgrind passes `AT_HWCAP2` only to ppc64 programs (3.22 through 3.28), so the armv7 build never sees its ARMv8 crypto extension; on aarch64 it hides SHA3 and the SHA-512 instructions. ctgrind never reaches the code that uses them.
+- **Breaks:** valgrind passes `AT_HWCAP2` only to ppc64 programs (3.22 through 3.28), so the armv7 build never sees its ARMv8 crypto extension; on aarch64 it hides SHA3, the SHA-512 instructions, and DIT. ctgrind never reaches the code that uses them, and so checks aarch64 with DIT clear.
 - **Reproduce:** `getauxval(AT_HWCAP2)` is nonzero natively and zero under an armhf valgrind on an arm64 host.
-- **Workaround:** `admin/ct-qemu` and `admin/ct-qemu-plugin.c` compare qemu traces of those paths for two secrets, through the `ct_qemu` tests (`rind/src/low/arm/ct_qemu.rs`), in `ctgrind.yml`'s `armv7-qemu` and `aarch64-qemu` jobs.
+- **Workaround:** `admin/ct-qemu` and `admin/ct-qemu-plugin.c` compare qemu traces of those paths for two secrets, through the `ct_qemu` tests (`rind/src/low/arm/ct_qemu.rs`), in `ctgrind.yml`'s `armv7-qemu` and `aarch64-qemu` jobs; `enables_dit_whenever_the_os_reports_it`, whose child process runs natively and finds the DIT valgrind hides, is ignored under ctgrind.
 - **Reported:** no.
 - **Goes when:** valgrind passes `AT_HWCAP2` on ARM and runs SHA3 on aarch64.
+
+### Valgrind hides HWCAP_CPUID from aarch64 programs
+
+- **Breaks:** valgrind on arm64 Linux limits a program's `AT_HWCAP` to the features it lists (`ARM64_SUPPORTED_HWCAP` in `coregrind/m_initimg/initimg-linux.c`: atomics, AES, PMULL, SHA1, SHA2, SHA512, CRC32, FP, ASIMD, ASIMDDP), which leaves out `HWCAP_CPUID`, though VEX can emulate the `MIDR_EL1` read it gates. rind reads `MIDR_EL1` only behind that bit, so under valgrind it sees no part and picks the wide `_alt` schedules even on a Cortex-A72, Cortex-A76, or Neoverse N1, whose native runs take the narrow ones. A pass that leaves the choice to detection checks only `_alt`, and `detects_the_expected_cpu` fails it if `RIND_TEST_ARM_WIDE_MUL=0` is set, as found on a Raspberry Pi 5 with valgrind 3.24.0.
+- **Reproduce:** `getauxval(AT_HWCAP) & HWCAP_CPUID` is nonzero natively on aarch64 Linux 4.11 or later and zero under valgrind; the mask is in valgrind's source at 3.24.0 and on its master branch (3.29 in development). A C program that prints `AT_HWCAP` and, when bit 11 is set, `mrs x, midr_el1` shows it: on a Raspberry Pi 5 (Cortex-A76, `MIDR_EL1` `0x414fd0b1`) `AT_HWCAP` is `0x119fff` natively and `0x1001fb` under valgrind 3.24.0, and on a Jetson Orin (Cortex-A78AE, `0x410fd421`) `0xce119fff` and `0x1001fb`. Both lose bit 11, so the read is skipped.
+- **Workaround:** `admin/ctgrind` runs aarch64 twice, forcing the wide schedules with `RIND_CPU_FORCE_wide_mul=1` and the narrow ones with `RIND_CPU_DISABLE_wide_mul=1`, each with the matching `RIND_TEST_ARM_WIDE_MUL`, and drops a caller's leftover value otherwise.
+- **Reported:** no.
+- **Goes when:** valgrind passes `HWCAP_CPUID`, since it already emulates the read.
 
 ### Memcheck blames a public flag on a secret carry
 
@@ -126,16 +151,16 @@ Each upstream rind changes, with where its fork is vendored and where the list o
 
 ### BINSEC cannot decode much of what rind runs
 
-- **Breaks:** BINSEC 0.11.3 stops at instructions it cannot decode: on x86_64, AES-NI, VAES, the SHA512 instructions, and every EVEX encoding; on aarch64, the crypto extension's AES, PMULL, and SHA instructions, SHA3's, every SVE encoding, such as SVE2's `xar`, and the `msr` that sets DIT; on armv7, the NEON table lookups and the crypto extension.
+- **Breaks:** BINSEC 0.11.3 stops at instructions it cannot decode: on x86_64, AES-NI, VAES, and every EVEX encoding; on aarch64, the crypto extension's AES, PMULL, and SHA instructions, SHA3's, every SVE encoding, such as SVE2's `xar`, and the `msr` that sets DIT; on armv7, the NEON table lookups and the crypto extension. It also cannot decode x86_64's `VSHA512` instructions, which rind does not run.
 - **Workaround:** `admin/ct-binsec`'s `UNDECODED` denies those features, leaving their paths to `admin/ctgrind`, `admin/ct-sde`, and `admin/ct-qemu`, and armv7 has no `binsec` row in `ctgrind.yml`.
 - **Reported:** no.
 - **Goes when:** a BINSEC release decodes each, feature by feature.
 
 ### BINSEC cannot decode instructions `admin/ct-binsec` stubs
 
-- **Breaks:** BINSEC 0.11.3 stops with `uninterpreted` at these instructions rind's code or glibc runs: on x86_64, `stc` (`f9`), `clc` (`f8`), `movmskps` and VEX `vmovmskps`, `vinsertf128` (VEX.256 0F3A 18), `vpermpd` (VEX.256.W1 0F3A 01), `vmovshdup` (VEX F3 0F 16), `stmxcsr` and `ldmxcsr` (0F AE /3 and /2, which Intel's MXCSR mitigation runs on a CPU that needs it), and the `syscall` in glibc's `mprotect`; on aarch64, `mrs xN, tpidr_el0` (glibc's `malloc`), `tbl` with one to four table registers (8B and 16B), and `cnt` (8B and 16B).
-- **Reproduce:** `admin/ct-binsec` with `STUBS` emptied stops at the first one its harnesses reach, such as `stc` in `ct_binsec_ecdh_p521` on x86_64 or `tbl` in `ct_binsec_aes` on aarch64.
-- **Workaround:** `admin/ct-binsec`'s `STUBS` gives each its effect in BINSEC's script language, generated per encoding from objdump's disassembly of the test binary and glibc, since `replace opcode` matches exact bytes; `tbl`, a constant-time table lookup, becomes a shift of the whole table, which needs no branch; `stmxcsr` stores MXCSR's default, and `ldmxcsr` does nothing, since BINSEC models no floating-point state. Its script makes `mprotect` succeed without its system call.
+- **Breaks:** BINSEC 0.11.3 stops with `uninterpreted` at these instructions rind's code or glibc runs: on x86_64, `stc` (`f9`), `clc` (`f8`), `movmskps` and VEX `vmovmskps`, `vinsertf128` (VEX.256 0F3A 18), `vpermpd` (VEX.256.W1 0F3A 01), from a register or memory, `vmovshdup` (VEX F3 0F 16), and at `opt-level = "z"` `vbroadcastf128` (VEX.256 0F38 1A) and `vextractps` to memory (VEX.128 0F3A 17), `stmxcsr` and `ldmxcsr` (0F AE /3 and /2, which Intel's MXCSR mitigation runs on a CPU that needs it), and the `syscall` in glibc's `mprotect`; on aarch64, `mrs xN, tpidr_el0` (glibc's `malloc`), `tbl` with one to four table registers (8B and 16B), `cnt` (8B and 16B), and `fcsel` (s2n-bignum's narrow X25519).
+- **Reproduce:** `admin/ct-binsec` with `STUBS` emptied stops at the first one its harnesses reach, such as `stc` in `ct_binsec_ecdh_p521` on x86_64 or `tbl` in `ct_binsec_aes` on aarch64; with `CARGO_PROFILE_RELEASE_OPT_LEVEL=z`, `vpermpd` from memory in `ct_binsec_argon2` and `vbroadcastf128` in `ct_binsec_chacha20`.
+- **Workaround:** `admin/ct-binsec`'s `STUBS` gives each its effect in BINSEC's script language, generated per encoding from objdump's disassembly of the test binary and glibc, since `replace opcode` matches exact bytes; `tbl`, a constant-time table lookup, becomes a shift of the whole table, which needs no branch, and `fcsel` becomes a flag mux into the scalar lane with the rest of the Q register zero; `stmxcsr` stores MXCSR's default, and `ldmxcsr` does nothing, since BINSEC models no floating-point state. Its script makes `mprotect` succeed without its system call.
 - **Reported:** no.
 - **Goes when:** a BINSEC release decodes them, or `replace opcode` matches an encoding by mask, so one stub covers every encoding of an instruction.
 
@@ -153,6 +178,14 @@ Each upstream rind changes, with where its fork is vendored and where the list o
 - **Workaround:** `admin/ct-binsec` calls `madvise(MADV_GUARD_REMOVE)` on the stack's mapping before dumping.
 - **Reported:** no.
 - **Goes when:** gdb's core dumps skip or read through guard regions.
+
+### BINSEC stalls on s2n-bignum's P-384 arithmetic of a hashed value
+
+- **Breaks:** BINSEC 0.11.3 visits under 20,000 instructions in 480 s once s2n-bignum's x86_64 `bignum_tomont_p384` takes a field element hashed from a secret, as the VOPRF client's hash to the curve does, and likewise `bignum_modsub` on a scalar hashed from secret points. It sends the solver no query: the hash's term is too large to build on.
+- **Reproduce:** `admin/ct-binsec --timeout 60 ct_binsec_voprf_client` on x86_64 with the harness's `cfg` removed.
+- **Workaround:** the VOPRF server declassifies its proof's challenge, which the proof publishes anyway, before it computes `s`; `ct_binsec_voprf_client` runs only on the portable backend, whose hash to the curve is the same code over fiat-crypto's arithmetic.
+- **Reported:** no.
+- **Goes when:** BINSEC builds those terms without the stall; the client harness may then run on every backend.
 
 ### BINSEC stalls on some ML-KEM ciphertexts
 
@@ -178,14 +211,6 @@ Each upstream rind changes, with where its fork is vendored and where the list o
 - **Workaround:** `admin/prove` renames the second to `markerCopyInst1` with `sed`.
 - **Reported:** no.
 - **Goes when:** Aeneas names the clauses apart.
-
-### Charon panics on HACL*'s unrolled SHA-2
-
-- **Breaks:** libcrux-macros' `unroll_for!` unrolls the 64 or 80 rounds of libcrux-sha2's `sha256_update_nblocks` and `sha512_update_nblocks` into one body whose blocks nest past Charon's fixed `MAX_STACK_DEPTH` of 1024, and Charon panics rebuilding its control flow.
-- **Reproduce:** add `--include 'libcrux_sha2::hacl::sha256_update_nblocks' --extract-opaque-bodies` to `admin/prove`'s portable pass and run `admin/prove lean`: Charon panics with "stack depth limit exceeded" in `transform/control_flow/ullbc_to_llbc.rs` translating `sha256_update`.
-- **Workaround:** the portable pass leaves both functions opaque, as Charon leaves other crates' bodies, and `proofs/Rind/Portable/Hacl.lean` states each as an axiom restating HACL*'s F* theorem about it. Found in [kixel-ai/rind#649](https://github.com/kixel-ai/rind/pull/649).
-- **Reported:** not yet; filing is approved, and [its quest](/quest/m4/verified/hacl-sha2-lean.md) holds the draft issue awaiting the maintainer's approval of its text.
-- **Goes when:** Charon translates both, and that quest proves them in Lean.
 
 ### Lean cannot compile P-384's comb as one literal
 
@@ -221,7 +246,7 @@ Each upstream rind changes, with where its fork is vendored and where the list o
 
 ### cargo-mutants misses compound `cfg(test)`s
 
-- **Breaks:** cargo-mutants skips code under a bare `#[cfg(test)]`, but not under one that also names an architecture, such as `cfg(all(test, rind_backend = "x86_64"))`, so it mutates test helpers.
+- **Breaks:** cargo-mutants skips code under a bare `#[cfg(test)]`, but not under one that also names an architecture or another cfg, such as `cfg(all(test, rind_backend = "x86_64"))` or the SHA-512 layout probe's `cfg(any(test, rind_sha512_load_probe))`, so it mutates test helpers.
 - **Workaround:** `.cargo/mutants.toml` excludes `rind/src/low/tests.rs` by glob and `\btests::` by regex.
 - **Reported:** no.
 - **Goes when:** cargo-mutants treats any `cfg` that requires `test` as test-only.
@@ -319,7 +344,7 @@ Each upstream rind changes, with where its fork is vendored and where the list o
 
 - **Breaks:** actionlint 1.7.12 errors on `queue: max`, which GitHub's concurrency groups accept since May 2026, as `unexpected key "queue" for "concurrency" section`.
 - **Reproduce:** `actionlint .github/workflows/mutants.yml` without the ignore below.
-- **Workaround:** `.github/actionlint.yaml` ignores that error in `mutants.yml`.
+- **Workaround:** `.github/actionlint.yaml` ignores that error in `mutants.yml` and `release.yml`.
 - **Reported:** [rhysd/actionlint#657](https://github.com/rhysd/actionlint/issues/657), with a fix in [rhysd/actionlint#654](https://github.com/rhysd/actionlint/pull/654).
 - **Goes when:** an actionlint release in nixpkgs accepts `queue`.
 

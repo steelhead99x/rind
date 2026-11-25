@@ -1,9 +1,18 @@
+#[cfg(target_arch = "xtensa")]
+fn main() {}
+
+#[cfg(not(target_arch = "xtensa"))]
 mod criterion;
+#[cfg(not(target_arch = "xtensa"))]
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 
 /// aws-lc's XChaCha20-Poly1305, which aws-lc-rs does not expose.
+#[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
+#[cfg(not(target_arch = "xtensa"))]
 struct AwsXChaCha(*mut aws_lc_sys::EVP_AEAD_CTX);
 
+#[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
+#[cfg(not(target_arch = "xtensa"))]
 impl AwsXChaCha {
     fn new(key: &[u8; 32]) -> Self {
         // SAFETY: the key pointer and length describe `key`, and aws-lc copies it.
@@ -47,6 +56,8 @@ impl AwsXChaCha {
     }
 }
 
+#[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
+#[cfg(not(target_arch = "xtensa"))]
 impl Drop for AwsXChaCha {
     fn drop(&mut self) {
         // SAFETY: `self.0` came from `EVP_AEAD_CTX_new` and is freed once.
@@ -54,6 +65,7 @@ impl Drop for AwsXChaCha {
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn test_rc_chacha(key: &chacha20poly1305::XChaCha20Poly1305, aad: &[u8], buf: &mut [u8]) {
     use chacha20poly1305::AeadInOut;
     let mut nonce = [0u8; 24];
@@ -64,6 +76,7 @@ fn test_rc_chacha(key: &chacha20poly1305::XChaCha20Poly1305, aad: &[u8], buf: &m
         .unwrap();
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn test_rind_chacha(
     key: &rind::aead::RandomizedNonceKey,
     aad: &[u8],
@@ -75,6 +88,7 @@ fn test_rind_chacha(
     let _nonce = key.seal_in_place_append_tag(aad, buf).unwrap();
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn bench_chacha20poly1305(c: &mut Criterion) {
     // Each seal draws a fresh random nonce, as a randomized-nonce key must.
     let key = [0u8; 32];
@@ -88,6 +102,7 @@ fn bench_chacha20poly1305(c: &mut Criterion) {
         buf.resize(size, 0u8);
         group.throughput(Throughput::Bytes(size as u64));
 
+        #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
         group.bench_function(BenchmarkId::new("aws-lc-rs", size_name), |b| {
             let key = AwsXChaCha::new(&key);
             b.iter(|| key.seal(aad, &mut buf[..size]));
@@ -98,6 +113,7 @@ fn bench_chacha20poly1305(c: &mut Criterion) {
             b.iter(|| test_rc_chacha(&key, aad, &mut buf[..size]));
         });
         group.bench_function(BenchmarkId::new("rind", size_name), |b| {
+            let _dit = criterion::rind_dit();
             let key = rind::aead::RandomizedNonceKey::new(&key);
             b.iter(|| test_rind_chacha(&key, aad, &mut buf, size));
         });
@@ -124,5 +140,7 @@ fn bench_chacha20poly1305(c: &mut Criterion) {
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 criterion_group!(benches, bench_chacha20poly1305);
+#[cfg(not(target_arch = "xtensa"))]
 criterion_main!(benches);

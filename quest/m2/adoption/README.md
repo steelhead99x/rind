@@ -23,9 +23,9 @@ don't ask again (✅ is the chosen option):
   ([apache/opendal#7582](https://github.com/apache/opendal/pull/7582)), which
   the [migration prompt](/MIGRATE.md) can turn on.
 - Big names on RustCrypto are marketing wins, since rind is several times
-  faster ([BENCHMARKS.md](/BENCHMARKS.md)'s `nixos2`, an i7-8700: RSA-2048
-  verify about 4.7x, P-256 sign and ECDH about 5x, ChaCha20-Poly1305 per
-  packet about 3x, AES-GCM about 2x). Decided 2026-11-09 (maintainer,
+  faster ([BENCHMARKS.md](/BENCHMARKS.md)'s `nixos`, a Zen 3: RSA-2048
+  verify about 4.4x, P-256 sign and ECDH about 7x, ChaCha20-Poly1305 per
+  packet about 3.6x, AES-GCM about 2.7x). Decided 2026-11-09 (maintainer,
   /quest-unblock): Deno and snow are dropped, Deno because it is
   deprecated and rind-snow by closing
   [#470](https://github.com/kixel-ai/rind/pull/470) on purpose.
@@ -92,3 +92,11 @@ don't ask again (✅ is the chosen option):
     and a library crate reaches them through whatever application ships it.
   - A C ABI, and Go, JVM, Swift, and .NET packages: out on 2026-11-04 for
     needing OpenSSL's breadth, and nothing has changed.
+- Decided 2026-11-21 (maintainer, /quest-plan): add `no_std + alloc` to
+  `rind-rustls` and `rind-aws-lc-rs` (beside the `m0` fix for `rind-ring`),
+  close concrete parity gaps in `rind-rcgen`, `rind_cryptography`,
+  `rind-ring`, and `rind-aws-lc-rs`, add optional `rand_core` and `zeroize`
+  trait impls on `rind`, and expose ML-KEM and ML-DSA in `rind-openssl` (`m4`).
+  Considered and left out: standalone `no_std` `rustls-webpki`, `noq`, and
+  `instant-acme 0.9` adapters.
+

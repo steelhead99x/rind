@@ -13,7 +13,8 @@ FE = "&[u64; 4]"
 FE_MUT = "&mut [u64; 4]"
 
 # name: (arguments, whether s2n-bignum has an `_alt` form, which x86_64 runs
-# without BMI2 and ADX and aarch64 runs always, as for Ed25519)
+# without BMI2 and ADX and which aarch64 runs on a wide multiplier, as for
+# Ed25519. `driver.narrow.py` imports the other aarch64 form.)
 ROUTINES = {
     # Returns the Legendre symbol, -1 as `u64::MAX`.
     "bignum_invsqrt_p25519": ([("z", FE_MUT), ("x", FE)], True),

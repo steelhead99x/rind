@@ -62,8 +62,7 @@ moves: passing a hash where a key wants an AEAD algorithm raises `TypeError`.
 
 ```python
 import os
-from pyrind import aead, digest, hkdf, hmac, signature
-from pyrind.signature import sign, verify
+from pyrind import aead, digest, ecdsa, hkdf, hmac, rsa
 
 # Hashes and MACs.
 digest.digest(digest.SHA256, b"hello")
@@ -86,18 +85,28 @@ assert key.open(nonce, sealed, aad=b"") == b"plaintext"
 prk = hkdf.Salt(hkdf.HKDF_SHA256, b"salt").extract(b"input key material")
 aead_key = prk.expand(b"aead", aead.AES_256_GCM)
 
-# Signatures: a key pair signs with a `sign` algorithm, and a peer's public
-# key is parsed for a `verify` algorithm.
-key_pair = signature.EcdsaKeyPair.generate(sign.ECDSA_P256_SHA256_ASN1)
+# Signatures: each algorithm is a module with a `KeyPair` and a `PublicKey`.
+# A key pair signs with a `sign` algorithm, and a peer's public key is parsed
+# for a `verify` algorithm.
+key_pair = ecdsa.KeyPair.generate(ecdsa.sign.P256_SHA256_ASN1)
 signed = key_pair.sign(b"message")
-public_key = signature.PublicKey(verify.ECDSA_P256_SHA256_ASN1, bytes(key_pair.public_key()))
+public_key = ecdsa.PublicKey(ecdsa.verify.P256_SHA256_ASN1, bytes(key_pair.public_key()))
 public_key.verify(b"message", signed)
+
+# An RSA public key is bound to no algorithm: `verify` takes one, and refuses
+# a modulus below its floor.
+rsa_key_pair = rsa.KeyPair.generate(rsa.KeySize.RSA_2048)
+signed = rsa_key_pair.sign(rsa.sign.PSS_SHA256, b"message")
+rsa.PublicKey.from_spki(rsa_key_pair.public_key().to_spki()).verify(rsa.verify.PSS_SHA256, b"message", signed)
 ```
 
 The modules are `aead`, `agreement` (X25519 and ECDH), `cipher`
-(unauthenticated AES-CBC), `cpu`, `digest`, `hkdf`, `hmac`, `kem`
-(ML-KEM-768), `key_wrap` (AES-KW and AES-KWP), `pbkdf2`, `rsa` (RSA-OAEP),
-and `signature` (ECDSA, Ed25519, and RSA). Algorithms only legacy protocols
+(unauthenticated AES-CBC), `cpu`, `digest`, `ecdsa`, `ed25519`, `hkdf`,
+`hmac`, `kem` (ML-KEM-768), `key_wrap` (AES-KW and AES-KWP, each call naming
+its `Mode`), `pbkdf2`, and `rsa` (RSA signatures and RSA-OAEP). They follow
+rind's own modules, so [rind's MIGRATING.md](https://github.com/kixel-ai/rind/blob/main/MIGRATING.md) maps aws-lc-rs
+names to both, and [CHANGELOG.md](https://github.com/kixel-ai/rind/blob/main/rind-python/CHANGELOG.md) maps pyrind 0.1's names to
+0.2's. Algorithms only legacy protocols
 should use, such as SHA-1 and MD5, live in each module's `legacy` submodule.
 Keys load from and encode to PKCS#8, SEC1, PKCS#1, and
 `SubjectPublicKeyInfo` DER. The package ships type stubs, and
@@ -113,7 +122,9 @@ the GIL while they run.
 
 pyrind wipes keys and keyed state when Python frees them, as rind does.
 Nothing wipes the `bytes` a key was loaded from or exported to;
-Python owns those.
+Python owns those. A key, seed, or password passed as another buffer, such
+as a `bytearray` you wipe yourself, is copied for the call, and pyrind wipes
+that copy before the call returns.
 
 ## Platforms
 
@@ -121,8 +132,10 @@ Wheels cover CPython 3.11 and later through the stable ABI, on Linux (glibc
 2.17 and later on x86_64, aarch64, and armv7; musl on x86_64 and aarch64),
 macOS on x86_64 and Apple silicon, and Windows on x86_64 and aarch64. PyPy,
 free-threaded CPython, and other platforms build the sdist, which needs a
-Rust toolchain. rind runs only on x86_64, aarch64, and 32-bit arm, so other
-architectures fail to build; there is no pure-Python fallback.
+Rust toolchain. On an architecture rind has no assembly for, such as
+riscv64 or s390x, that build runs rind's portable Rust backend
+([PLATFORMS.md](https://github.com/kixel-ai/rind/blob/main/PLATFORMS.md));
+there is no pure-Python fallback.
 
 ## License
 

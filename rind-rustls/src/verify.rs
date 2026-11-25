@@ -195,11 +195,15 @@ impl SignatureVerificationAlgorithm for Verify {
 
 #[cfg(test)]
 mod tests {
+    use std::vec::Vec;
+
     use rind::ecdsa::KeyPair as EcdsaKeyPair;
     use rind::ed25519::KeyPair as Ed25519KeyPair;
     use rind::rand;
     use rind::rsa::KeyPair as RsaKeyPair;
     use rustls::SignatureScheme;
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    use wasm_bindgen_test::wasm_bindgen_test as test;
 
     use super::*;
 
@@ -362,6 +366,37 @@ mod tests {
             absent
                 .verify_signature(public_key.as_ref(), &message, signature.as_ref())
                 .unwrap();
+        }
+    }
+
+    // aws-lc-rs does not build for wasm.
+    #[cfg(not(target_family = "wasm"))]
+    #[test]
+    fn ids_match_aws_lc() {
+        use rustls::pki_types::alg_id;
+
+        let aws = rustls::crypto::aws_lc_rs::default_provider();
+        let ours = crate::SUPPORTED_SIG_ALGS.all;
+        // aws-lc-rs also verifies ML-DSA. rind does not, and those three are
+        // the only identifiers that may differ. Equal lengths then mean a
+        // missing rind algorithm cannot hide behind `any`.
+        let ml_dsa = [alg_id::ML_DSA_44, alg_id::ML_DSA_65, alg_id::ML_DSA_87];
+        let theirs = aws
+            .signature_verification_algorithms
+            .all
+            .iter()
+            .copied()
+            .filter(|alg| !ml_dsa.contains(&alg.public_key_alg_id()))
+            .collect::<Vec<_>>();
+        assert_eq!(ours.len(), theirs.len());
+        for alg in ours {
+            assert!(
+                theirs.iter().any(|other| {
+                    other.public_key_alg_id() == alg.public_key_alg_id()
+                        && other.signature_alg_id() == alg.signature_alg_id()
+                }),
+                "{alg:?}"
+            );
         }
     }
 

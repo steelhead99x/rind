@@ -1,6 +1,6 @@
 [package]
 name = "rind-rcgen"
-version = "0.14.5"
+version = "0.14.4"
 edition = "2024"
 repository = "https://github.com/kixel-ai/rind"
 homepage = "https://rind.kixel.ai"
@@ -18,14 +18,10 @@ all-features = true
 [package.metadata.rind.api]
 crate = "rcgen"
 module = ""
-items = ["KeyPair"]
-# rcgen's default backend, whose behavior the README documents.
-features = ["ring"]
+items = ["KeyPair", "RsaKeySize"]
+# rcgen's fuller backend, whose behavior the README documents.
+features = ["aws_lc_rs"]
 skip = { fips = "builds AWS-LC's FIPS module, which rind does not offer" }
-# Items rind cannot back, which the README names.
-omitted = [
-  "KeyPair::generate_rsa_for",
-]
 
 [features]
 # rcgen's default features include `pem`.
@@ -38,11 +34,14 @@ zeroize = []
 [dependencies]
 base64ct = { version = "1.8", optional = true, features = ["alloc"] }
 rcgen = { version = "0.14", default-features = false }
-rind = { version = "0.3.2", path = "../rind" }
+rind = { version = "0.3.2", path = "../rind", default-features = false }
 rustls-pki-types = "1.12"
 zeroize = "1.9"
 
 [dev-dependencies]
+# Tests see `zeroize`, so `zeroing.rs` runs in every test build, cargo-mutants'
+# included, while normal builds keep only the requested features.
+rind-rcgen = { path = ".", features = ["zeroize"] }
 # Requests reach valgrind only once `rind/__ctgrind` turns on crabgrind's default
 # features, as `admin/ctgrind` does; otherwise they build as no-ops.
 crabgrind = { version = "0.4", default-features = false }

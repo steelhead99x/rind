@@ -1,3 +1,5 @@
+use alloc::boxed::Box;
+
 use rind::aead::{self, quic::SAMPLE_LEN};
 use rustls::Error;
 use rustls::crypto::cipher::{AeadKey, Iv, Nonce};
@@ -176,6 +178,8 @@ mod tests {
     use rustls::Side;
     use rustls::SupportedCipherSuite;
     use rustls::quic::{Algorithm as _, DirectionalKeys, Keys, Version};
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    use wasm_bindgen_test::wasm_bindgen_test as test;
 
     use super::*;
     use crate::cipher_suite;
@@ -236,6 +240,18 @@ mod tests {
             .decrypt_in_place(packet_number, head, body)
             .unwrap();
         assert_eq!(plain, &payload[..]);
+    }
+
+    #[test]
+    fn aes128_limits_match_aes256() {
+        // Both AES suites use the same bounds. A mutant of one suite's shift
+        // no longer matches the other, and the public test checks AES-256
+        // against rustls's aws-lc-rs provider.
+        assert_eq!(
+            AES_128_GCM.confidentiality_limit,
+            AES_256_GCM.confidentiality_limit
+        );
+        assert_eq!(AES_128_GCM.integrity_limit, AES_256_GCM.integrity_limit);
     }
 
     #[test]

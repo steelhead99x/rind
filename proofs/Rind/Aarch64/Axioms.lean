@@ -3,10 +3,10 @@ import Rind.Aarch64.P384
 import Rind.Aarch64.P384Keygen
 import Rind.Aarch64.Sha512
 import Rind.Aarch64.Pbkdf2
+import Rind.Aarch64.Pbkdf2Vg
 import Rind.Aarch64.P256
 import Rind.Aarch64.ChaCha20
 import Rind.Aarch64.Ed25519
-import Rind.Aarch64.Ed25519Verify
 import Rind.Aarch64.Sha3
 import Rind.Aarch64.P256Signature
 import Rind.Aarch64.P384Signature
@@ -15,6 +15,9 @@ import Rind.Aarch64.AesKw
 import Rind.Aarch64.AesModesApi
 import Rind.Aarch64.MlKemCoding
 import Rind.Aarch64.GhashPmull
+import Rind.Aarch64.AesGcm
+import Rind.Aarch64.VgChaCha20Poly1305
+import Rind.Aarch64.VgChaCha20
 open rind.aarch64
 
 /-!
@@ -23,15 +26,34 @@ in `Rind.Aarch64.S2nBignum` for X25519, P-256, P-384, Ed25519, and the
 Keccak-f of SHA-3 and ML-KEM's SHAKE; for the SHA-512 family, for HMAC,
 HKDF, and PBKDF2, which cover SHA-384 and SHA-512, and for Ed25519's hashes,
 aws-lc's scalar routine's in `Rind.Aarch64.AwsLc` and rind's HOL Light proof
-there of aws-lc's routine for the SHA-512 instructions; rind's HOL Light proof
-of SHA-256's routine for the crypto extension in `Rind.Aarch64.Sha256Hw`, for
-the theorems over every HMAC algorithm; rind's HOL Light proofs of its
+there of aws-lc's routine for the SHA-512 instructions; the restatement in
+`Rind.Aarch64.Sha256Hw` of rind's Lean proof of SHA-256's routine for the
+crypto extension, a trusted axiom: the kernel checks the proof,
+`sha256_block_data_order_hw_correct`, but not the restatement, since Aeneas
+cannot reach the routine through the opaque wrapper, for the theorems over
+every HMAC algorithm; rind's HOL Light proofs of its
 constant-time compares in `Rind.Aarch64.CtEqual` for HMAC's and PBKDF2's
-`verify` and key wrap's `unwrap` and `unwrap_padded`; and nothing else.
+`verify` and key wrap's `unwrap` and `unwrap_padded`; for P-256's public
+key, ECDH, and ECDSA verification, pyca/verified-garbage's Lean proofs of its
+routines, which `Rind.Aarch64.VgP256` restates; for P-384's `d·G`, which
+key generation and each ECDSA signature's nonce point take, and its ECDSA
+verification, pyca/verified-garbage's Lean proofs of its routines, which
+`Rind.Aarch64.VgP384` restates; for PBKDF2 on
+pyca/verified-garbage's routines, its contracts in `Rind.Aarch64.VgPbkdf2`;
+and nothing else.
 P-384's comb table select rests on no axiom, only on the hand model in
-`Rind.Aarch64.PointSelectModel`. The PMULL GHASH's table and `Ghash::add` rest on
-no axiom, only on the hand model in `Rind.Aarch64.AesGcmModel`.
+`Rind.Aarch64.PointSelectModel`. The PMULL GHASH's table and `Ghash::add`, and
+AES-GCM's counter blocks and its `tagged_from` and `tagged` on short messages
+with the crypto extension's key, rest on no axiom, only on the hand model in
+`Rind.Aarch64.AesGcmModel`.
 ML-KEM's decompression and message coding rest on no axiom.
+ChaCha20-Poly1305's one pass on SVE2 rests on the axioms restating
+pyca/verified-garbage's theorems for its routines in
+`Rind.Aarch64.VgChaCha20Poly1305`.
+ChaCha20's `apply_keystream` rests on the axioms restating
+pyca/verified-garbage's theorems for its routines in `Rind.Aarch64.VgChaCha20`;
+at every length it also takes rind's NEON code's contract as the hypothesis
+`Neon`, which no axiom states.
 A change here is a change to the trust base.
 -/
 
@@ -69,7 +91,8 @@ A change here is a change to the trust base.
  bignum_montmul_p256_spec,
  bignum_montsqr_p256_spec,
  bignum_tomont_p256_spec,
- p256_scalarmulbase_spec] -/
+ p256_scalarmulbase_spec,
+ vg_p256_public_key_spec] -/
 #guard_msgs in
 #print axioms p256_generate
 
@@ -83,7 +106,8 @@ A change here is a change to the trust base.
  bignum_montmul_p256_spec,
  bignum_montsqr_p256_spec,
  bignum_tomont_p256_spec,
- p256_scalarmulbase_spec] -/
+ p256_scalarmulbase_spec,
+ vg_p256_public_key_spec] -/
 #guard_msgs in
 #print axioms p256_from_scalar
 
@@ -100,7 +124,8 @@ A change here is a change to the trust base.
  bignum_montmul_p256_spec,
  bignum_montsqr_p256_spec,
  bignum_tomont_p256_spec,
- p256_scalarmul_spec] -/
+ p256_scalarmul_spec,
+ vg_p256_ecdh_spec] -/
 #guard_msgs in
 #print axioms p256_agree
 
@@ -122,7 +147,8 @@ A change here is a change to the trust base.
  bignum_neg_p384_spec,
  bignum_tomont_p384_spec,
  p384_montjdouble_spec,
- p384_montjmixadd_spec] -/
+ p384_montjmixadd_spec,
+ vg_p384_public_key_spec] -/
 #guard_msgs in
 #print axioms p384_generate
 
@@ -140,7 +166,8 @@ A change here is a change to the trust base.
  bignum_neg_p384_spec,
  bignum_tomont_p384_spec,
  p384_montjdouble_spec,
- p384_montjmixadd_spec] -/
+ p384_montjmixadd_spec,
+ vg_p384_public_key_spec] -/
 #guard_msgs in
 #print axioms p384_from_scalar
 
@@ -298,6 +325,43 @@ A change here is a change to the trust base.
 #guard_msgs in
 #print axioms kdf.verify_spec
 
+/-- info: 'rind.aarch64.kdf.secret_new_spec' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ compress_nohw_spec,
+ sha256_block_data_order_hw_spec,
+ sha512_block_data_order_hw_spec] -/
+#guard_msgs in
+#print axioms kdf.secret_new_spec
+
+/-- info: 'rind.aarch64.kdf.secret_derive_spec' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ compress_nohw_spec,
+ sha256_block_data_order_hw_spec,
+ sha512_block_data_order_hw_spec,
+ vg_pbkdf2_hmac_sha1_sha2_spec,
+ vg_pbkdf2_hmac_sha256_sha2_spec,
+ vg_pbkdf2_hmac_sha384_sha512_spec,
+ vg_pbkdf2_hmac_sha512_sha512_spec] -/
+#guard_msgs in
+#print axioms kdf.secret_derive_spec
+
+/-- info: 'rind.aarch64.kdf.secret_verify_spec' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ compress_nohw_spec,
+ ct_compare_16_spec,
+ ct_compare_bytes_spec,
+ sha256_block_data_order_hw_spec,
+ sha512_block_data_order_hw_spec,
+ vg_pbkdf2_hmac_sha1_sha2_spec,
+ vg_pbkdf2_hmac_sha256_sha2_spec,
+ vg_pbkdf2_hmac_sha384_sha512_spec,
+ vg_pbkdf2_hmac_sha512_sha512_spec] -/
+#guard_msgs in
+#print axioms kdf.secret_verify_spec
+
 /-- info: 'rind.aarch64.chacha20_new' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
 #print axioms chacha20_new
@@ -339,32 +403,6 @@ A change here is a change to the trust base.
 #guard_msgs in
 #print axioms ed25519_key_pair_public_key
 
-/-- info: 'rind.aarch64.ed25519_key_pair_verify' depends on axioms: [propext,
- Classical.choice,
- Quot.sound,
- bignum_cmp_lt_spec,
- bignum_mod_n25519_spec,
- bignum_neg_p25519_spec,
- compress_nohw_spec,
- edwards25519_scalarmuldouble_spec,
- sha512_block_data_order_hw_spec] -/
-#guard_msgs in
-#print axioms ed25519_key_pair_verify
-
-/-- info: 'rind.aarch64.ed25519_public_key_new' depends on axioms: [propext,
- Classical.choice,
- Quot.sound,
- bignum_cmp_lt_spec,
- bignum_eq_spec,
- bignum_mod_n25519_spec,
- bignum_neg_p25519_spec,
- compress_nohw_spec,
- edwards25519_decode_spec,
- edwards25519_scalarmuldouble_spec,
- sha512_block_data_order_hw_spec] -/
-#guard_msgs in
-#print axioms ed25519_public_key_new
-
 /-- info: 'rind.aarch64.p256_ecdsa_generate' depends on axioms: [propext,
  Classical.choice,
  Quot.sound,
@@ -375,7 +413,8 @@ A change here is a change to the trust base.
  bignum_montmul_p256_spec,
  bignum_montsqr_p256_spec,
  bignum_tomont_p256_spec,
- p256_scalarmulbase_spec] -/
+ p256_scalarmulbase_spec,
+ vg_p256_public_key_spec] -/
 #guard_msgs in
 #print axioms p256_ecdsa_generate
 
@@ -389,7 +428,8 @@ A change here is a change to the trust base.
  bignum_montmul_p256_spec,
  bignum_montsqr_p256_spec,
  bignum_tomont_p256_spec,
- p256_scalarmulbase_spec] -/
+ p256_scalarmulbase_spec,
+ vg_p256_public_key_spec] -/
 #guard_msgs in
 #print axioms p256_ecdsa_from_scalar_and_public_key
 
@@ -408,7 +448,8 @@ A change here is a change to the trust base.
  bignum_montsqr_p256_spec,
  bignum_tomont_p256_spec,
  p256_scalarmulbase_spec,
- sha256_block_data_order_hw_spec] -/
+ sha256_block_data_order_hw_spec,
+ vg_p256_public_key_spec] -/
 #guard_msgs in
 #print axioms p256_ecdsa_sign
 
@@ -433,7 +474,8 @@ A change here is a change to the trust base.
  p256_montjadd_spec,
  p256_montjdouble_spec,
  p256_montjmixadd_spec,
- sha256_block_data_order_hw_spec] -/
+ sha256_block_data_order_hw_spec,
+ vg_p256_verify_spec] -/
 #guard_msgs in
 #print axioms p256_ecdsa_key_pair_verify
 
@@ -455,7 +497,8 @@ A change here is a change to the trust base.
  p256_montjadd_spec,
  p256_montjdouble_spec,
  p256_montjmixadd_spec,
- sha256_block_data_order_hw_spec] -/
+ sha256_block_data_order_hw_spec,
+ vg_p256_verify_spec] -/
 #guard_msgs in
 #print axioms p256_ecdsa_public_key_new
 
@@ -473,7 +516,8 @@ A change here is a change to the trust base.
  bignum_neg_p384_spec,
  bignum_tomont_p384_spec,
  p384_montjdouble_spec,
- p384_montjmixadd_spec] -/
+ p384_montjmixadd_spec,
+ vg_p384_public_key_spec] -/
 #guard_msgs in
 #print axioms p384_ecdsa_generate
 
@@ -491,7 +535,8 @@ A change here is a change to the trust base.
  bignum_neg_p384_spec,
  bignum_tomont_p384_spec,
  p384_montjdouble_spec,
- p384_montjmixadd_spec] -/
+ p384_montjmixadd_spec,
+ vg_p384_public_key_spec] -/
 #guard_msgs in
 #print axioms p384_ecdsa_from_scalar_and_public_key
 
@@ -515,7 +560,8 @@ A change here is a change to the trust base.
  compress_nohw_spec,
  p384_montjdouble_spec,
  p384_montjmixadd_spec,
- sha512_block_data_order_hw_spec] -/
+ sha512_block_data_order_hw_spec,
+ vg_p384_public_key_spec] -/
 #guard_msgs in
 #print axioms p384_ecdsa_sign
 
@@ -541,7 +587,8 @@ A change here is a change to the trust base.
  p384_montjadd_spec,
  p384_montjdouble_spec,
  p384_montjmixadd_spec,
- sha512_block_data_order_hw_spec] -/
+ sha512_block_data_order_hw_spec,
+ vg_p384_verify_spec] -/
 #guard_msgs in
 #print axioms p384_ecdsa_key_pair_verify
 
@@ -564,13 +611,15 @@ A change here is a change to the trust base.
  p384_montjadd_spec,
  p384_montjdouble_spec,
  p384_montjmixadd_spec,
- sha512_block_data_order_hw_spec] -/
+ sha512_block_data_order_hw_spec,
+ vg_p384_verify_spec] -/
 #guard_msgs in
 #print axioms p384_ecdsa_public_key_new
 
 /-- info: 'rind.aarch64.sha3_family_digest' depends on axioms: [propext,
  Classical.choice,
  Quot.sound,
+ sha3_keccak_f1600_alt2_spec,
  sha3_keccak_f1600_alt_spec,
  sha3_keccak_f1600_spec] -/
 #guard_msgs in
@@ -579,6 +628,7 @@ A change here is a change to the trust base.
 /-- info: 'rind.aarch64.sha3_family_context' depends on axioms: [propext,
  Classical.choice,
  Quot.sound,
+ sha3_keccak_f1600_alt2_spec,
  sha3_keccak_f1600_alt_spec,
  sha3_keccak_f1600_spec] -/
 #guard_msgs in
@@ -595,6 +645,7 @@ A change here is a change to the trust base.
 /-- info: 'rind.aarch64.sponge_absorb_spec' depends on axioms: [propext,
  Classical.choice,
  Quot.sound,
+ sha3_keccak_f1600_alt2_spec,
  sha3_keccak_f1600_alt_spec,
  sha3_keccak_f1600_spec] -/
 #guard_msgs in
@@ -607,6 +658,7 @@ A change here is a change to the trust base.
 /-- info: 'rind.aarch64.squeezing_squeeze_spec' depends on axioms: [propext,
  Classical.choice,
  Quot.sound,
+ sha3_keccak_f1600_alt2_spec,
  sha3_keccak_f1600_alt_spec,
  sha3_keccak_f1600_spec] -/
 #guard_msgs in
@@ -616,6 +668,9 @@ A change here is a change to the trust base.
  Classical.choice,
  Quot.sound,
  sha3_keccak2_f1600_spec,
+ sha3_keccak4_f1600_alt_spec,
+ sha3_keccak4_f1600_spec,
+ sha3_keccak_f1600_alt2_spec,
  sha3_keccak_f1600_alt_spec,
  sha3_keccak_f1600_spec] -/
 #guard_msgs in
@@ -625,6 +680,9 @@ A change here is a change to the trust base.
  Classical.choice,
  Quot.sound,
  sha3_keccak2_f1600_spec,
+ sha3_keccak4_f1600_alt_spec,
+ sha3_keccak4_f1600_spec,
+ sha3_keccak_f1600_alt2_spec,
  sha3_keccak_f1600_alt_spec,
  sha3_keccak_f1600_spec] -/
 #guard_msgs in
@@ -634,6 +692,9 @@ A change here is a change to the trust base.
  Classical.choice,
  Quot.sound,
  sha3_keccak2_f1600_spec,
+ sha3_keccak4_f1600_alt_spec,
+ sha3_keccak4_f1600_spec,
+ sha3_keccak_f1600_alt2_spec,
  sha3_keccak_f1600_alt_spec,
  sha3_keccak_f1600_spec] -/
 #guard_msgs in
@@ -750,3 +811,55 @@ A change here is a change to the trust base.
 /-- info: 'rind.aarch64.pmull.ghash_add_spec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
 #print axioms pmull.ghash_add_spec
+
+/-- info: 'rind.aarch64.counter_block_eq' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms counter_block_eq
+
+/-- info: 'rind.aarch64.initial_counter_spec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms initial_counter_spec
+
+/-- info: 'rind.aarch64.tagged_from_short_spec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms tagged_from_short_spec
+
+/-- info: 'rind.aarch64.tagged_seal_short_spec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms tagged_seal_short_spec
+
+/-- info: 'rind.aarch64.tagged_open_short_spec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms tagged_open_short_spec
+
+/-- info: 'rind.aarch64.chacha20_poly1305_seal_sve2_spec' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ vg_chacha20_poly1305_seal_sve2_spec] -/
+#guard_msgs in
+#print axioms chacha20_poly1305_seal_sve2_spec
+
+/-- info: 'rind.aarch64.chacha20_poly1305_open_sve2_spec' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ vg_chacha20_poly1305_open_sve2_spec] -/
+#guard_msgs in
+#print axioms chacha20_poly1305_open_sve2_spec
+
+/-- info: 'rind.aarch64.chacha20_apply_keystream_vg' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ vg_chacha20_apply_neon_spec,
+ vg_chacha20_apply_sve2_spec,
+ vg_chacha20_init_spec] -/
+#guard_msgs in
+#print axioms chacha20_apply_keystream_vg
+
+/-- info: 'rind.aarch64.chacha20_apply_keystream' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ vg_chacha20_apply_neon_spec,
+ vg_chacha20_apply_sve2_spec,
+ vg_chacha20_init_spec] -/
+#guard_msgs in
+#print axioms chacha20_apply_keystream

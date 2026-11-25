@@ -1,5 +1,6 @@
 import Rind.X86_64.GhashClmul
 import Rind.X86_64.AesGcm
+import Rind.GcmSpec
 open Aeneas Aeneas.Std Result rind.vale rind.simd
 
 /-!
@@ -26,24 +27,9 @@ theorem getLsbD_ofLanes16 (f : Nat → BitVec 16) (k : Nat) :
     interval_cases k <;> simp
   · rw [BitVec.getLsbD_of_ge _ _ (by omega)]; simp [hk]
 
-theorem getLsbD_ofLanes32 (f : Nat → BitVec 32) (k : Nat) :
-    (ofLanes32 f).getLsbD k = (decide (k < 128) && (f (k / 32)).getLsbD (k % 32)) := by
-  by_cases hk : k < 128
-  · simp only [ofLanes32, BitVec.getLsbD_append]
-    interval_cases k <;> simp
-  · rw [BitVec.getLsbD_of_ge _ _ (by omega)]; simp [hk]
-
 theorem getLsbD_lane16 (a : BitVec 128) (j m : Nat) :
     (lane16 a j).getLsbD m = (decide (m < 16) && a.getLsbD (16 * j + m)) := by
   simp [lane16, BitVec.getLsbD_extractLsb']
-
-theorem getLsbD_lane32 (a : BitVec 128) (j m : Nat) :
-    (lane32 a j).getLsbD m = (decide (m < 32) && a.getLsbD (32 * j + m)) := by
-  simp [lane32, BitVec.getLsbD_extractLsb']
-
-theorem getLsbD_ite {w : Nat} (c : Prop) [Decidable c] (a b : BitVec w) (i : Nat) :
-    (if c then a else b).getLsbD i = if c then a.getLsbD i else b.getLsbD i := by
-  split <;> rfl
 
 /-- `byte_reverse` reverses the bytes. -/
 theorem byte_reverse_eq (x : BitVec 128) :
@@ -63,20 +49,6 @@ theorem byte_reverse_eq (x : BitVec 128) :
     show ¬ (8 % 256 > 15) by decide, ite_false]
   interval_cases k <;> simp
 
-theorem getLsbD_swap (v : BitVec 128) (k : Nat) :
-    (swap v).getLsbD k = (decide (k < 128) && v.getLsbD ((k + 64) % 128)) := by
-  by_cases hk : k < 128
-  · simp only [swap, lo, hi, BitVec.getLsbD_append, BitVec.getLsbD_extractLsb']
-    by_cases h : k < 64
-    · simp [h, hk, show (k + 64) % 128 = 64 + k by omega]
-    · simp [h, hk, show (k + 64) % 128 = k - 64 by omega]; omega
-  · rw [BitVec.getLsbD_of_ge _ _ (by omega)]; simp [hk]
-
-theorem swap_swap (v : BitVec 128) : swap (swap v) = v := by
-  apply BitVec.eq_of_getLsbD_eq; intro k hk
-  rw [getLsbD_swap, getLsbD_swap]
-  simp [hk, show (k + 64) % 128 < 128 by omega, show ((k + 64) % 128 + 64) % 128 = k by omega]
-
 /-- `PSHUFB` by `BYTESWAP_EPI64` reverses each 64-bit half's bytes. -/
 theorem shuffle_byteswap_epi64 (v : BitVec 128) :
     core.core_arch.x86.ssse3._mm_shuffle_epi8 v 0x08090a0b_0c0d0e0f_00010203_04050607#128 =
@@ -88,64 +60,7 @@ theorem shuffle_byteswap_epi64 (v : BitVec 128) :
   simp only [getLsbD_byte _ _ (Nat.mod_lt _ (by omega : 8 > 0)), getLsbD_ite]
   interval_cases k <;> simp +decide [byte]
 
-theorem load_store (v : BitVec 128) : loadBytes (storeBytes v).val = v := by
-  apply eq_of_byte_eq; intro i hi
-  simp only [loadBytes, storeBytes, Std.Array.from_val, List.map_map]
-  rw [byte_leBytesToQuad32 _ hi]
-  have hm : ∀ l : List (BitVec 8), l.map (fun x => U8.bv ⟨x⟩) = l := fun l => by
-    conv_rhs => rw [← List.map_id l]
-    rfl
-  rw [Function.comp_def, hm, leQuad32ToBytes_getElem! _ hi]
-
 /-! ## The counter -/
-
-theorem lane32_inc32_zero (q : Quad32) (n : Nat) : lane32 (inc32 q n) 0 = lane32 q 0 + BitVec.ofNat 32 n := by
-  have hz : ∀ x : Quad32, lane32 x 0 = x.extractLsb' 0 32 := fun _ => rfl
-  apply BitVec.eq_of_getLsbD_eq; intro m hm
-  rw [hz, hz, inc32, BitVec.getLsbD_extractLsb', BitVec.getLsbD_append]
-  simp [hm]
-
-theorem high_inc32 (q : Quad32) (n : Nat) : (inc32 q n).extractLsb' 32 96 = q.extractLsb' 32 96 := by
-  apply BitVec.eq_of_getLsbD_eq; intro m hm
-  simp only [inc32, BitVec.getLsbD_extractLsb', BitVec.getLsbD_append, hm, decide_true, Bool.true_and,
-    show ¬ 32 + m < 32 by omega, ite_false, show 32 + m - 32 = m by omega]
-
-theorem inc32_eq (q : Quad32) (n : Nat) :
-    inc32 q n = q.extractLsb' 32 96 ++ (lane32 q 0 + BitVec.ofNat 32 n) := rfl
-
-theorem inc32_inc32 (q : Quad32) (i j : Nat) : inc32 (inc32 q i) j = inc32 q (i + j) := by
-  rw [inc32_eq (inc32 q i), high_inc32, lane32_inc32_zero, inc32_eq q (i + j), BitVec.add_assoc,
-    BitVec.ofNat_add]
-
-theorem inc32_zero (q : Quad32) : inc32 q 0 = q := by
-  apply BitVec.eq_of_getLsbD_eq; intro k hk
-  simp only [inc32, BitVec.add_zero, BitVec.getLsbD_append, BitVec.getLsbD_extractLsb']
-  by_cases h : k < 32
-  · simp [h]
-  · simp [h, show k - 32 < 96 by omega, show 32 + (k - 32) = k by omega]
-
-theorem lane32_swap (v : BitVec 128) {i : Nat} (hi : i < 4) : lane32 (swap v) i = lane32 v ((i + 2) % 4) := by
-  apply BitVec.eq_of_getLsbD_eq; intro m hm
-  rw [getLsbD_lane32, getLsbD_lane32, getLsbD_swap]
-  simp only [hm, decide_true, Bool.true_and, show 32 * i + m < 128 by omega]
-  congr 1; omega
-
-theorem lane32_inc32 (q : Quad32) (n : Nat) {i : Nat} (hi : 1 ≤ i) (hi' : i < 4) :
-    lane32 (inc32 q n) i = lane32 q i := by
-  apply BitVec.eq_of_getLsbD_eq; intro m hm
-  rw [getLsbD_lane32, getLsbD_lane32]
-  simp only [inc32, BitVec.getLsbD_append, BitVec.getLsbD_extractLsb', hm, decide_true, Bool.true_and,
-    show ¬ 32 * i + m < 32 by omega, ite_false, show 32 * i + m - 32 < 96 by omega]
-  congr 1; omega
-
-theorem ofLanes32_ext (f g : Nat → BitVec 32) (h : ∀ i < 4, f i = g i) : ofLanes32 f = ofLanes32 g := by
-  simp only [ofLanes32, h 0 (by omega), h 1 (by omega), h 2 (by omega), h 3 (by omega)]
-
-theorem ofLanes32_lane32 (x : BitVec 128) : ofLanes32 (lane32 x) = x := by
-  apply BitVec.eq_of_getLsbD_eq; intro k hk
-  rw [getLsbD_ofLanes32, getLsbD_lane32]
-  simp only [hk, decide_true, Bool.true_and, Nat.mod_lt _ (by omega : 32 > 0)]
-  congr 1; omega
 
 /-- `PADDD` of `COUNTER_1` steps the swapped counter as `inc32`. -/
 theorem add_counter (q : Quad32) :
@@ -223,20 +138,6 @@ theorem encrypt_eq (hk : low.x86_64.aes.HwKey) (alg : Algorithm) (kw : List (Bit
 
 /-! ## CTR -/
 
-theorem length_gctr (icb : Quad32) (alg : Algorithm) (kw : List (BitVec 32)) :
-    ∀ (ps : List Quad32) (i : Nat), (gctrEncryptRecursive icb alg kw ps i).length = ps.length
-  | [], _ => rfl
-  | _ :: ps, i => by rw [gctrEncryptRecursive, List.length_cons, length_gctr icb alg kw ps (i + 1),
-      List.length_cons]
-
-theorem gctr_append (icb : Quad32) (alg : Algorithm) (kw : List (BitVec 32)) :
-    ∀ (ps ps' : List Quad32) (i : Nat), gctrEncryptRecursive icb alg kw (ps ++ ps') i =
-      gctrEncryptRecursive icb alg kw ps i ++ gctrEncryptRecursive icb alg kw ps' (i + ps.length)
-  | [], _, _ => rfl
-  | p :: ps, ps', i => by
-    rw [List.cons_append, gctrEncryptRecursive, gctrEncryptRecursive, gctr_append icb alg kw ps ps' (i + 1),
-      List.cons_append, List.length_cons, Nat.add_assoc, Nat.add_comm 1]
-
 section ctr
 variable {f l : BitVec 128} {rks : List (BitVec 128)} {alg : Algorithm} {kw : List (BitVec 32)}
   (henc : ∀ c, low.x86_64.aes_gcm.encrypt c f rks l = ok (aesEncrypt alg kw c))
@@ -286,9 +187,6 @@ theorem mul8_hash (H : P) (t : low.x86_64.ghash.ClmulTable) (ht : TableFor H t) 
   rw [mul8_eq H t ht, hashChunk]
   conv_rhs => rw [eight hs h8]
   rfl
-
-theorem chunksOf_self {α : Type} {k : Nat} (l : List α) (hk : 0 < k) (h : l.length = k) : chunksOf k l = [l] := by
-  rw [chunksOf_cons hk (by omega), List.take_of_length_le (by omega), chunksOf_of_lt (by simp; omega)]
 
 theorem hashChunks_spec (H : P) (hH : Small H) (t : low.x86_64.ghash.ClmulTable) (ht : TableFor H t) :
     ∀ (n : Nat) (hs : List (BitVec 128)) (current : BitVec 128), hs.length = 8 * n →
@@ -422,19 +320,7 @@ theorem padBlocks_head (b : List U8) :
   rw [padBlocks_128 c (chunksOf_length_mem hc), List.map_map]
   rfl
 
-theorem leBytesToSeqQuad32_load (b : List U8) :
-    leBytesToSeqQuad32 (b.map (·.bv)) = (chunksOf 16 b).map loadBytes := by
-  rw [leBytesToSeqQuad32_eq, chunksOf_map, List.map_map]
-  rfl
-
 /-! ## GCTR on the whole input -/
-
-theorem chunksOf_take16 (b : List U8) : chunksOf 16 (b.take (b.length - b.length % 16)) = chunksOf 16 b := by
-  have hk : b.length - b.length % 16 = 16 * (b.length / 16) := by omega
-  have hA : (b.take (b.length - b.length % 16)).length = 16 * (b.length / 16) := by simp; omega
-  conv_rhs => rw [← List.take_append_drop (b.length - b.length % 16) b]
-  rw [chunksOf_append (by omega) _ _ _ hA, chunksOf_of_lt (l := b.drop (b.length - b.length % 16)) (by simp; omega),
-    List.append_nil]
 
 /-- `by8`'s output, the whole blocks then the last partial one, is Vale's GCTR. -/
 theorem by8_out (icb : Quad32) (alg : Algorithm) (kw : List (BitVec 32)) (b : List U8) :

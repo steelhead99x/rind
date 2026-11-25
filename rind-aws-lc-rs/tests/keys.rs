@@ -491,6 +491,453 @@ fn refused() {
             ours::agreement::UnparsedPublicKey::new(agreement_algorithms!(ours)[alg], [4u8; 5]);
         assert!(ours::agreement::agree(&ours_key, peer, (), |_| Ok(())).is_err());
     }
+    // A compressed ECDSA public key whose x is no field element, or that is
+    // too short, which both refuse to decompress.
+    for (ours_alg, theirs_alg, len) in [
+        (
+            &ours::signature::ECDSA_P256_SHA256_ASN1,
+            &theirs::signature::ECDSA_P256_SHA256_ASN1,
+            32,
+        ),
+        (
+            &ours::signature::ECDSA_P384_SHA384_ASN1,
+            &theirs::signature::ECDSA_P384_SHA384_ASN1,
+            48,
+        ),
+        (
+            &ours::signature::ECDSA_P521_SHA512_ASN1,
+            &theirs::signature::ECDSA_P521_SHA512_ASN1,
+            66,
+        ),
+    ] {
+        for prefix in [0x02, 0x03] {
+            for key in [[&[prefix][..], &vec![0xff; len]].concat(), vec![prefix, 1]] {
+                assert!(ours::signature::ParsedPublicKey::new(ours_alg, &key).is_err());
+                assert!(theirs::signature::ParsedPublicKey::new(theirs_alg, &key).is_err());
+            }
+        }
+    }
+}
+
+/// ML-DSA refusal names aws-lc-rs 1.19.0 uses, beyond the `is_err` checks in
+/// `ml_dsa` and `refused`.
+#[cfg(not(any(miri, target_family = "wasm")))]
+#[test]
+fn ml_dsa_refusal_kind() {
+    use theirs::encoding::AsRawBytes;
+
+    fn same<T: core::fmt::Debug, U: core::fmt::Debug>(
+        ours: Result<T, ours::error::KeyRejected>,
+        theirs: Result<U, theirs::error::KeyRejected>,
+    ) {
+        assert_eq!(
+            ours.unwrap_err().description_(),
+            theirs.unwrap_err().description_()
+        );
+    }
+    let ours_sign = &ours::signature::ML_DSA_44_SIGNING;
+    let theirs_sign = &theirs::signature::ML_DSA_44_SIGNING;
+    let other =
+        theirs::signature::PqdsaKeyPair::from_seed(&theirs::signature::ML_DSA_65_SIGNING, &[4; 32])
+            .unwrap();
+    let pkcs8 = other.to_pkcs8v1().unwrap();
+    same(
+        ours::signature::PqdsaKeyPair::from_pkcs8(ours_sign, pkcs8.as_ref()),
+        theirs::signature::PqdsaKeyPair::from_pkcs8(theirs_sign, pkcs8.as_ref()),
+    );
+    let raw = AsRawBytes::as_raw_bytes(&other.private_key()).unwrap();
+    same(
+        ours::signature::PqdsaKeyPair::from_raw_private_key(ours_sign, raw.as_ref()),
+        theirs::signature::PqdsaKeyPair::from_raw_private_key(theirs_sign, raw.as_ref()),
+    );
+    let public = other.public_key().as_ref();
+    let short = &public[..public.len() - 1];
+    same(
+        ours::signature::ParsedPublicKey::new(&ours::signature::ML_DSA_65, short),
+        theirs::signature::ParsedPublicKey::new(&theirs::signature::ML_DSA_65, short),
+    );
+    let ed = theirs::signature::Ed25519KeyPair::from_seed_unchecked(&[3; 32])
+        .unwrap()
+        .to_pkcs8v1()
+        .unwrap();
+    same(
+        ours::signature::PqdsaKeyPair::from_pkcs8(ours_sign, ed.as_ref()),
+        theirs::signature::PqdsaKeyPair::from_pkcs8(theirs_sign, ed.as_ref()),
+    );
+    let oid65 = [0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x03, 0x12];
+    let short_seed = der(
+        0x30,
+        &[
+            der(0x02, &[0]),
+            der(0x30, &der(0x06, &oid65)),
+            der(0x04, &der(0x80, &[0; 31])),
+        ]
+        .concat(),
+    );
+    same(
+        ours::signature::PqdsaKeyPair::from_pkcs8(ours_sign, &short_seed),
+        theirs::signature::PqdsaKeyPair::from_pkcs8(theirs_sign, &short_seed),
+    );
+    let good = theirs::signature::PqdsaKeyPair::from_seed(theirs_sign, &[6; 32]).unwrap();
+    let good_raw = AsRawBytes::as_raw_bytes(&good.private_key()).unwrap();
+    let mut bad = good_raw.as_ref().to_vec();
+    bad[..32].fill(0);
+    same(
+        ours::signature::PqdsaKeyPair::from_raw_private_key(ours_sign, &bad),
+        theirs::signature::PqdsaKeyPair::from_raw_private_key(theirs_sign, &bad),
+    );
+    let mut trailed = pkcs8.as_ref().to_vec();
+    trailed.push(0);
+    // Bytes after the document are unread. The key is another parameter set,
+    // so both then report `Unspecified`.
+    same(
+        ours::signature::PqdsaKeyPair::from_pkcs8(ours_sign, &trailed),
+        theirs::signature::PqdsaKeyPair::from_pkcs8(theirs_sign, &trailed),
+    );
+    assert_eq!(
+        theirs::signature::PqdsaKeyPair::from_pkcs8(theirs_sign, &trailed)
+            .unwrap_err()
+            .description_(),
+        "Unspecified"
+    );
+}
+
+/// Every ML-DSA refusal aws-lc-rs 1.19.0 names for a key that is not the
+/// requested parameter set, including the cases that used to differ.
+#[cfg(not(any(miri, target_family = "wasm")))]
+#[test]
+fn ml_dsa_every_refusal() {
+    let ours44 = &ours::signature::ML_DSA_44_SIGNING;
+    let theirs44 = &theirs::signature::ML_DSA_44_SIGNING;
+    let ours65 = &ours::signature::ML_DSA_65_SIGNING;
+    let theirs65 = &theirs::signature::ML_DSA_65_SIGNING;
+    let seed = [9u8; 32];
+
+    let kind = |doc: &[u8], ours_alg, theirs_alg, expected: &str| {
+        let ours = ours::signature::PqdsaKeyPair::from_pkcs8(ours_alg, doc).unwrap_err();
+        let theirs = theirs::signature::PqdsaKeyPair::from_pkcs8(theirs_alg, doc).unwrap_err();
+        assert_eq!(theirs.description_(), expected, "aws-lc-rs");
+        assert_eq!(ours.description_(), expected, "rind");
+    };
+    // A key of a type rind cannot back is refused from its OID alone, so a
+    // malformed one is `WrongAlgorithm` where aws-lc-rs may name a parse error.
+    let unbacked = |doc: &[u8], theirs_expected: &str| {
+        let ours = ours::signature::PqdsaKeyPair::from_pkcs8(ours44, doc).unwrap_err();
+        let theirs = theirs::signature::PqdsaKeyPair::from_pkcs8(theirs44, doc).unwrap_err();
+        assert_eq!(theirs.description_(), theirs_expected, "aws-lc-rs");
+        assert_eq!(ours.description_(), "WrongAlgorithm", "rind");
+    };
+    let loaded = |doc: &[u8], ours_alg, theirs_alg| {
+        let ours = ours::signature::PqdsaKeyPair::from_pkcs8(ours_alg, doc).unwrap();
+        let theirs = theirs::signature::PqdsaKeyPair::from_pkcs8(theirs_alg, doc).unwrap();
+        assert_eq!(ours.public_key().as_ref(), theirs.public_key().as_ref());
+    };
+
+    // ML-DSA-65 seed plus a trailing byte. As its own set, aws-lc loads it.
+    // As ML-DSA-44, both report `Unspecified`.
+    let oid65 = [0x60u8, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x03, 0x12];
+    let trailed_seed = [der(0x80, &seed), vec![0x00]].concat();
+    let seed_tail = pkcs8_doc(0, &oid65, &[], &trailed_seed, None);
+    loaded(&seed_tail, ours65, theirs65);
+    kind(&seed_tail, ours44, theirs44, "Unspecified");
+    let mut after_doc = seed_tail.clone();
+    after_doc.push(0);
+    loaded(&after_doc, ours65, theirs65);
+    kind(&after_doc, ours44, theirs44, "Unspecified");
+
+    // A v2 public key is ignored, matched or not.
+    let v2 = pkcs8_doc(1, &oid65, &[], &der(0x80, &seed), Some(&[0x00, 0x01]));
+    loaded(&v2, ours65, theirs65);
+
+    // A byte after a SubjectPublicKeyInfo is unread.
+    let public = theirs::signature::PqdsaKeyPair::from_seed(theirs65, &seed)
+        .unwrap()
+        .public_key()
+        .as_ref()
+        .to_vec();
+    let mut spki = der(
+        0x30,
+        &[
+            der(0x30, &der(0x06, &oid65)),
+            der(0x03, &[&[0], public.as_slice()].concat()),
+        ]
+        .concat(),
+    );
+    spki.push(0);
+    ours::signature::ParsedPublicKey::new(&ours::signature::ML_DSA_65, &spki).unwrap();
+    theirs::signature::ParsedPublicKey::new(&theirs::signature::ML_DSA_65, &spki).unwrap();
+
+    // RSA-1024 from Wycheproof, below the 2048 bits rind can back. Consistent
+    // components are `WrongAlgorithm` in both. A corrupted coefficient is
+    // `InvalidEncoding` in aws-lc-rs, and `WrongAlgorithm` here, decided from
+    // the modulus length.
+    let rsa = rsa1024_pkcs8();
+    kind(&rsa, ours44, theirs44, "WrongAlgorithm");
+    let mut bad_rsa = pkcs1_of(&rsa);
+    let last = bad_rsa.len() - 1;
+    bad_rsa[last] ^= 0xff;
+    let bad_rsa = pkcs8_doc(
+        0,
+        &[0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01],
+        &[0x05, 0x00],
+        &bad_rsa,
+        None,
+    );
+    unbacked(&bad_rsa, "InvalidEncoding");
+    let v2_rsa = pkcs8_doc(
+        1,
+        &[0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01],
+        &[0x05, 0x00],
+        &pkcs1_of(&rsa),
+        Some(&[0x00, 0xff]),
+    );
+    kind(&v2_rsa, ours44, theirs44, "InvalidEncoding");
+
+    // RSASSA-PSS. NULL parameters do not parse. An explicit SHA-256 does.
+    // A v2 public key is ignored. An inconsistent key does not parse in
+    // aws-lc-rs; this 1024-bit one is refused from its modulus length here.
+    let pss_oid = [0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x0a];
+    let pkcs1 = pkcs1_of(&rsa);
+    kind(
+        &pkcs8_doc(0, &pss_oid, &[0x05, 0x00], &pkcs1, None),
+        ours44,
+        theirs44,
+        "InvalidEncoding",
+    );
+    let sha256 = der(
+        0x30,
+        &[
+            der(
+                0x06,
+                &[0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01],
+            ),
+            der(0x05, &[]),
+        ]
+        .concat(),
+    );
+    let pss_params = der(0x30, &der(0xa0, &sha256));
+    kind(
+        &pkcs8_doc(0, &pss_oid, &pss_params, &pkcs1, None),
+        ours44,
+        theirs44,
+        "WrongAlgorithm",
+    );
+    kind(
+        &pkcs8_doc(1, &pss_oid, &pss_params, &pkcs1, Some(&[0x00, 0x01])),
+        ours44,
+        theirs44,
+        "WrongAlgorithm",
+    );
+    let mut bad_pss = pkcs1.clone();
+    let last = bad_pss.len() - 1;
+    bad_pss[last] ^= 0xff;
+    unbacked(
+        &pkcs8_doc(0, &pss_oid, &pss_params, &bad_pss, None),
+        "InvalidEncoding",
+    );
+
+    // P-256. A 31-byte scalar is in range. The order is not. A public point
+    // other than scalar * G is not.
+    let p256 = [0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07];
+    kind(
+        &ec_pkcs8(&p256, &[0x01; 31], None),
+        ours44,
+        theirs44,
+        "WrongAlgorithm",
+    );
+    let order = [
+        0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+        0xff, 0xbc, 0xe6, 0xfa, 0xad, 0xa7, 0x17, 0x9e, 0x84, 0xf3, 0xb9, 0xca, 0xc2, 0xfc, 0x63,
+        0x25, 0x51,
+    ];
+    kind(
+        &ec_pkcs8(&p256, &order, None),
+        ours44,
+        theirs44,
+        "InvalidEncoding",
+    );
+    let generated = theirs::signature::EcdsaKeyPair::generate(
+        &theirs::signature::ECDSA_P256_SHA256_FIXED_SIGNING,
+    )
+    .unwrap()
+    .to_pkcs8v1()
+    .unwrap();
+    let mut mismatched = generated.as_ref().to_vec();
+    let last = mismatched.len() - 1;
+    mismatched[last] ^= 0xff;
+    kind(&mismatched, ours44, theirs44, "InvalidEncoding");
+
+    // Curves aws-lc parses and rind cannot back.
+    let k1_g = [
+        0x04, 0x79, 0xbe, 0x66, 0x7e, 0xf9, 0xdc, 0xbb, 0xac, 0x55, 0xa0, 0x62, 0x95, 0xce, 0x87,
+        0x0b, 0x07, 0x02, 0x9b, 0xfc, 0xdb, 0x2d, 0xce, 0x28, 0xd9, 0x59, 0xf2, 0x81, 0x5b, 0x16,
+        0xf8, 0x17, 0x98, 0x48, 0x3a, 0xda, 0x77, 0x26, 0xa3, 0xc4, 0x65, 0x5d, 0xa4, 0xfb, 0xfc,
+        0x0e, 0x11, 0x08, 0xa8, 0xfd, 0x17, 0xb4, 0x48, 0xa6, 0x85, 0x54, 0x19, 0x9c, 0x47, 0xd0,
+        0x8f, 0xfb, 0x10, 0xd4, 0xb8,
+    ];
+    kind(
+        &ec_pkcs8(&[0x2b, 0x81, 0x04, 0x00, 0x0a], &[1], Some(&k1_g)),
+        ours44,
+        theirs44,
+        "WrongAlgorithm",
+    );
+    let mut off = k1_g;
+    off[1] ^= 0xff;
+    unbacked(
+        &ec_pkcs8(&[0x2b, 0x81, 0x04, 0x00, 0x0a], &[1], Some(&off)),
+        "InvalidEncoding",
+    );
+    unbacked(
+        &ec_pkcs8(&[0x2b, 0x81, 0x04, 0x00, 0x0a], &[2], Some(&k1_g)),
+        "InvalidEncoding",
+    );
+    let mut compressed = vec![0x02];
+    compressed.extend_from_slice(&k1_g[1..33]);
+    kind(
+        &ec_pkcs8(&[0x2b, 0x81, 0x04, 0x00, 0x0a], &[1], Some(&compressed)),
+        ours44,
+        theirs44,
+        "WrongAlgorithm",
+    );
+    let p224_g = [
+        0x04, 0xb7, 0x0e, 0x0c, 0xbd, 0x6b, 0xb4, 0xbf, 0x7f, 0x32, 0x13, 0x90, 0xb9, 0x4a, 0x03,
+        0xc1, 0xd3, 0x56, 0xc2, 0x11, 0x22, 0x34, 0x32, 0x80, 0xd6, 0x11, 0x5c, 0x1d, 0x21, 0xbd,
+        0x37, 0x63, 0x88, 0xb5, 0xf7, 0x23, 0xfb, 0x4c, 0x22, 0xdf, 0xe6, 0xcd, 0x43, 0x75, 0xa0,
+        0x5a, 0x07, 0x47, 0x64, 0x44, 0xd5, 0x81, 0x99, 0x85, 0x00, 0x7e, 0x34,
+    ];
+    kind(
+        &ec_pkcs8(&[0x2b, 0x81, 0x04, 0x00, 0x21], &[1], Some(&p224_g)),
+        ours44,
+        theirs44,
+        "WrongAlgorithm",
+    );
+    let bp_g = [
+        0x04, 0x8b, 0xd2, 0xae, 0xb9, 0xcb, 0x7e, 0x57, 0xcb, 0x2c, 0x4b, 0x48, 0x2f, 0xfc, 0x81,
+        0xb7, 0xaf, 0xb9, 0xde, 0x27, 0xe1, 0xe3, 0xbd, 0x23, 0xc2, 0x3a, 0x44, 0x53, 0xbd, 0x9a,
+        0xce, 0x32, 0x62, 0x54, 0x7e, 0xf8, 0x35, 0xc3, 0xda, 0xc4, 0xfd, 0x97, 0xf8, 0x46, 0x1a,
+        0x14, 0x61, 0x1d, 0xc9, 0xc2, 0x77, 0x45, 0x13, 0x2d, 0xed, 0x8e, 0x54, 0x5c, 0x1d, 0x54,
+        0xc7, 0x2f, 0x04, 0x69, 0x97,
+    ];
+    kind(
+        &ec_pkcs8(
+            &[0x2b, 0x24, 0x03, 0x03, 0x02, 0x08, 0x01, 0x01, 0x07],
+            &[1],
+            Some(&bp_g),
+        ),
+        ours44,
+        theirs44,
+        "WrongAlgorithm",
+    );
+
+    // DSA, which rind cannot back. aws-lc checks bounds, not primality:
+    // x = 0 and x = q are out of range there.
+    kind(&dsa_pkcs8(&[1]), ours44, theirs44, "WrongAlgorithm");
+    unbacked(&dsa_pkcs8(&[0]), "InvalidEncoding");
+    let mut q = vec![0x00, 0x80];
+    q.extend_from_slice(&[0; 18]);
+    q.push(0x01);
+    unbacked(&dsa_pkcs8(&q), "InvalidEncoding");
+
+    // An Ed25519 document with a trailing byte still parses.
+    let ed = theirs::signature::Ed25519KeyPair::from_seed_unchecked(&[3; 32])
+        .unwrap()
+        .to_pkcs8v1()
+        .unwrap();
+    let mut ed = ed.as_ref().to_vec();
+    ed.push(0);
+    kind(&ed, ours44, theirs44, "WrongAlgorithm");
+}
+
+fn pkcs8_doc(
+    version: u8,
+    oid: &[u8],
+    parameters: &[u8],
+    private_key: &[u8],
+    public_key: Option<&[u8]>,
+) -> Vec<u8> {
+    let mut body = der(0x02, &[version]);
+    body.extend(der(0x30, &[der(0x06, oid), parameters.to_vec()].concat()));
+    body.extend(der(0x04, private_key));
+    if let Some(public_key) = public_key {
+        body.extend(der(0x81, public_key));
+    }
+    der(0x30, &body)
+}
+
+fn ec_pkcs8(curve: &[u8], scalar: &[u8], point: Option<&[u8]>) -> Vec<u8> {
+    let mut sec1 = der(0x02, &[1]);
+    sec1.extend(der(0x04, scalar));
+    if let Some(point) = point {
+        sec1.extend(der(0xa1, &der(0x03, &[&[0], point].concat())));
+    }
+    pkcs8_doc(
+        0,
+        &[0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01],
+        &der(0x06, curve),
+        &der(0x30, &sec1),
+        None,
+    )
+}
+
+fn dsa_pkcs8(x: &[u8]) -> Vec<u8> {
+    let mut p = vec![0u8; 128];
+    p[0] = 0x80;
+    p[127] = 0x01;
+    let mut q = vec![0u8; 20];
+    q[0] = 0x80;
+    q[19] = 0x01;
+    // A magnitude whose top bit is set needs a leading zero so the INTEGER
+    // is positive.
+    let params = der(
+        0x30,
+        &[
+            der(0x02, &[&[0], p.as_slice()].concat()),
+            der(0x02, &[&[0], q.as_slice()].concat()),
+            der(0x02, &[2]),
+        ]
+        .concat(),
+    );
+    pkcs8_doc(
+        0,
+        &[0x2a, 0x86, 0x48, 0xce, 0x38, 0x04, 0x01],
+        &params,
+        &der(0x02, x),
+        None,
+    )
+}
+
+fn rsa1024_pkcs8() -> Vec<u8> {
+    let path = format!(
+        "{}/../thirdparty/vectors/wycheproof/testvectors_v1/rsa_pkcs1_1024_sig_gen_test.json",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let value: serde_json::Value =
+        serde_json::from_reader(std::fs::File::open(path).unwrap()).unwrap();
+    hex::decode(value["testGroups"][0]["privateKeyPkcs8"].as_str().unwrap()).unwrap()
+}
+
+fn pkcs1_of(pkcs8: &[u8]) -> Vec<u8> {
+    let (_, body, _) = tlv(pkcs8).unwrap();
+    let (_, _, rest) = tlv(body).unwrap();
+    let (_, _, rest) = tlv(rest).unwrap();
+    let (tag, key, _) = tlv(rest).unwrap();
+    assert_eq!(tag, 0x04);
+    key.to_vec()
+}
+
+fn tlv(input: &[u8]) -> Option<(u8, &[u8], &[u8])> {
+    let tag = *input.first()?;
+    let (len, header): (usize, usize) = match *input.get(1)? {
+        len @ 0..=0x7f => (len as usize, 2),
+        0x81 => ((*input.get(2)?) as usize, 3),
+        0x82 => {
+            let bytes = input.get(2..4)?;
+            (u16::from_be_bytes([bytes[0], bytes[1]]) as usize, 4)
+        }
+        _ => return None,
+    };
+    let end = header.checked_add(len)?;
+    Some((tag, input.get(header..end)?, input.get(end..)?))
 }
 
 /// A DER element tagged `tag` holding `contents`.

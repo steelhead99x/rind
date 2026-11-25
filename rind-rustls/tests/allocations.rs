@@ -4,8 +4,10 @@
 //! routines allocate differently by backend and with ADX or AVX-512 IFMA, so
 //! RSA certificates are not pinned. ML-KEM-768's own allocations vary with
 //! the CPU, since pyca/verified-garbage's routines keep no decoded matrix, so
-//! the pinned count leaves them out.
-#![cfg(target_arch = "x86_64")]
+//! the pinned count leaves them out. The count is pinned with `tls12`: a
+//! provider without the TLS 1.2 suites makes fewer, though no TLS 1.2
+//! handshake runs.
+#![cfg(all(target_arch = "x86_64", feature = "tls12"))]
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;

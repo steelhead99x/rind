@@ -4,7 +4,7 @@ import VerifiedGarbage.Spec.Rsa.PrivatePrecompute
 open Aeneas Aeneas.Std Result rind.spec
 
 /-!
-# pyca/verified-garbage's AVX-512 IFMA RSA routines on x86_64
+# pyca/verified-garbage's RSA routines on x86_64
 
 Each axiom restates one of pyca/verified-garbage's (VG's) Lean theorems, at
 the revision `admin/import-vg` pins (0aa40d6c), about the opaque Rust wrapper
@@ -18,8 +18,9 @@ buffers are distinct objects, none overlapping another or the stack below the
 return address, and the wrapper's token proves the CPU features. Those on the
 lengths are the axiom's hypotheses.
 
-The routines are VG's internal functions, which its padding schemes call, so
-their contracts are in VG's proofs rather than its trusted `Spec`. The
+The AVX-512 IFMA routines are VG's internal functions, which its padding
+schemes call, so their contracts are in VG's proofs rather than its trusted
+`Spec`; `R² mod n`'s is its `Spec`'s `publicPrecomputeContract`. The
 restatement, and that the wrapper passes the arguments the contract names,
 are trusted.
 -/
@@ -90,5 +91,23 @@ axiom ifma_crt_spec (self : low.x86_64.rsa_ifma.IfmaCrt) (out x dp dq qinv : Sli
           (VG.Spec.Rsa.i2osp (wordsNat (self.p.val.take self.w.val)) (8 * self.w.val))
           (VG.Spec.Rsa.i2osp (wordsNat (self.q.val.take self.w.val)) (8 * self.w.val))
           (dp.val.map (·.bv)) (dq.val.map (·.bv)) (qinv.val.map (·.bv))) ⦄
+
+/-- `precomputeAdx_verified`, VG's registration's `verified` for
+`vg_rsa_public_precompute_adx`, against `VG.Spec.Rsa.publicPrecomputeContract`:
+https://github.com/pyca/verified-garbage/blob/0aa40d6c21fd02943fe5b38a5b69b6213d07764d/lean/VerifiedGarbage/Proof/Rsa/X86_64/Instances.lean#L294
+
+`Precompute::precompute` passes the routine `pre` and the `k`-byte `n`,
+which the contract's precondition bounds, and scratch of `8w + 48` words for
+`w = ⌈k / 8⌉`, on a CPU with BMI2 and ADX, which its token proves. The
+routine returns 1 and writes `VG.Spec.Rsa.publicPrecompute n`: `n` and then
+`R² mod n`, `w` words each; or returns 0 and writes zeros where that is
+`none`. A mutable slice keeps its length. -/
+@[step]
+axiom rsa_vg_precompute_spec (self : low.x86_64.rsa_vg.Precompute) (pre : Slice U64) (n : Slice U8)
+    (hk : VG.Spec.Rsa.lenValid n.length) (hpre : pre.length = VG.Spec.Rsa.precomputedWords n.length) :
+    low.x86_64.rsa_vg.Precompute.precompute self pre n ⦃ r => r.2.length = pre.length ∧
+      match VG.Spec.Rsa.publicPrecompute (n.val.map (·.bv)) with
+      | some ws => r.1 = true ∧ r.2.val.map (·.bv) = ws
+      | none => r.1 = false ∧ r.2.val.map (·.bv) = List.replicate pre.length 0 ⦄
 
 end rind.x86_64

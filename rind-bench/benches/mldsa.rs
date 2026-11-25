@@ -1,9 +1,20 @@
+#[cfg(target_arch = "xtensa")]
+fn main() {}
+
+#[cfg(not(target_arch = "xtensa"))]
 mod criterion;
+#[cfg(not(target_arch = "xtensa"))]
 use std::hint::black_box;
 
+#[cfg(not(target_arch = "xtensa"))]
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 
-#[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+#[cfg(all(
+    feature = "__bench_openssl",
+    target_family = "unix",
+    not(target_arch = "xtensa")
+))]
+#[cfg(not(target_arch = "xtensa"))]
 mod ossl {
     //! The openssl crate does not yet wrap ML-DSA key generation.
 
@@ -43,13 +54,18 @@ mod ossl {
 
 // The message every library signs. Each signature draws fresh randomness, so
 // the number of rejected attempts, and with it the time, varies alike.
+#[cfg(not(target_arch = "xtensa"))]
 const MESSAGE: &[u8] = b"rind ML-DSA benchmark message";
 
-// The longest signature, ML-DSA-87's.
+// The longest signature, ML-DSA-87's. Only the aws-lc-rs row writes into a
+// buffer of this size; the other rows return their own.
+#[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
+#[cfg(not(target_arch = "xtensa"))]
 const MAX_SIGNATURE_LEN: usize = 4627;
 
 // One parameter set's key generation, signing, and verification, each library
 // by its own name for the set.
+#[cfg(not(target_arch = "xtensa"))]
 macro_rules! ml_dsa {
     (
         $bench:ident, $id:literal,
@@ -65,7 +81,11 @@ macro_rules! ml_dsa {
             let mut group = c.benchmark_group(concat!($id, "-keygen"));
             group.throughput(Throughput::Elements(1));
 
-            #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+            #[cfg(all(
+                feature = "__bench_openssl",
+                target_family = "unix",
+                not(target_arch = "xtensa")
+            ))]
             if ossl::available() {
                 group.bench_function("openssl", |b| {
                     b.iter(|| {
@@ -75,6 +95,7 @@ macro_rules! ml_dsa {
                 });
             }
 
+            #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
             group.bench_function("aws-lc-rs", |b| {
                 use aws_lc_rs::signature::{KeyPair, PqdsaKeyPair, $aws_signing};
 
@@ -102,6 +123,7 @@ macro_rules! ml_dsa {
             });
 
             group.bench_function("rind", |b| {
+                let _dit = criterion::rind_dit();
                 use rind::ml_dsa::{KeyPair, $rind};
 
                 b.iter(|| {
@@ -140,7 +162,11 @@ macro_rules! ml_dsa {
             let mut group = c.benchmark_group(concat!($id, "-sign"));
             group.throughput(Throughput::Elements(1));
 
-            #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+            #[cfg(all(
+                feature = "__bench_openssl",
+                target_family = "unix",
+                not(target_arch = "xtensa")
+            ))]
             if ossl::available() {
                 group.bench_function("openssl", |b| {
                     use openssl::sign::Signer;
@@ -153,6 +179,7 @@ macro_rules! ml_dsa {
                 });
             }
 
+            #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
             group.bench_function("aws-lc-rs", |b| {
                 use aws_lc_rs::signature::{PqdsaKeyPair, $aws_signing};
                 let key = PqdsaKeyPair::generate(&$aws_signing).unwrap();
@@ -194,6 +221,7 @@ macro_rules! ml_dsa {
             });
 
             group.bench_function("rind", |b| {
+                let _dit = criterion::rind_dit();
                 use rind::ml_dsa::{KeyPair, $rind};
                 let key = KeyPair::<$rind>::generate().unwrap();
 
@@ -236,7 +264,11 @@ macro_rules! ml_dsa {
                 )
             };
 
-            #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+            #[cfg(all(
+                feature = "__bench_openssl",
+                target_family = "unix",
+                not(target_arch = "xtensa")
+            ))]
             if ossl::available() {
                 group.bench_function("openssl", |b| {
                     use openssl::pkey::{KeyType, PKey};
@@ -256,6 +288,7 @@ macro_rules! ml_dsa {
                 });
             }
 
+            #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
             group.bench_function("aws-lc-rs", |b| {
                 use aws_lc_rs::signature::{ParsedPublicKey, $aws_verify};
                 let key = ParsedPublicKey::new(&$aws_verify, &public_key).unwrap();
@@ -289,6 +322,7 @@ macro_rules! ml_dsa {
             });
 
             group.bench_function("rind", |b| {
+                let _dit = criterion::rind_dit();
                 use rind::ml_dsa::{PublicKey, $rind};
                 let key = PublicKey::<$rind>::new(&public_key).unwrap();
 
@@ -314,7 +348,11 @@ macro_rules! ml_dsa {
             let mut group = c.benchmark_group(concat!($id, "-load-verify"));
             group.throughput(Throughput::Elements(1));
 
-            #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+            #[cfg(all(
+                feature = "__bench_openssl",
+                target_family = "unix",
+                not(target_arch = "xtensa")
+            ))]
             if ossl::available() {
                 group.bench_function("openssl", |b| {
                     use openssl::pkey::{KeyType, PKey};
@@ -368,6 +406,7 @@ macro_rules! ml_dsa {
             });
 
             group.bench_function("rind", |b| {
+                let _dit = criterion::rind_dit();
                 use rind::ml_dsa::{PublicKey, $rind};
 
                 b.iter(|| {
@@ -380,6 +419,7 @@ macro_rules! ml_dsa {
     };
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 ml_dsa!(
     mldsa44, "mldsa44",
     rind: MlDsa44,
@@ -390,6 +430,7 @@ ml_dsa!(
     openssl: c"ML-DSA-44", ML_DSA_44,
 );
 
+#[cfg(not(target_arch = "xtensa"))]
 ml_dsa!(
     mldsa65, "mldsa65",
     rind: MlDsa65,
@@ -400,6 +441,7 @@ ml_dsa!(
     openssl: c"ML-DSA-65", ML_DSA_65,
 );
 
+#[cfg(not(target_arch = "xtensa"))]
 ml_dsa!(
     mldsa87, "mldsa87",
     rind: MlDsa87,
@@ -410,5 +452,7 @@ ml_dsa!(
     openssl: c"ML-DSA-87", ML_DSA_87,
 );
 
+#[cfg(not(target_arch = "xtensa"))]
 criterion_group!(benches, mldsa44, mldsa65, mldsa87);
+#[cfg(not(target_arch = "xtensa"))]
 criterion_main!(benches);

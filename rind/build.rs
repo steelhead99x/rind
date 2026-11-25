@@ -12,7 +12,9 @@
 //! `x86_64-unknown-none` and `x86_64-unknown-uefi`, gets the portable backend.
 //! The 32-bit ARM assembly is cut for ARMv7, so a target
 //! for an earlier core, such as ARMv6's `arm-unknown-linux-gnueabihf` or
-//! ARMv5TE's `arm-linux-androideabi`, gets the portable backend too.
+//! ARMv5TE's `arm-linux-androideabi`, gets the portable backend too, and so
+//! does a microcontroller (M-profile) target such as `thumbv7em-none-eabihf`,
+//! which has no ARM state or NEON for that assembly to run in.
 //! `--cfg rind_portable` forces it anywhere, so CI tests it on x86_64 without
 //! emulation; it is for testing, not for shipping.
 //!
@@ -30,6 +32,10 @@
 //! `std`, the only places rind may use `std`: every target but those for
 //! bare metal (`target_os = "none"`), UEFI, and Linux without a libc, such
 //! as `x86_64-unknown-linux-none`, all of which run `no_std` code.
+//!
+//! And it sets `rind_reg_asm` on the architectures whose `asm!` with a `reg`
+//! operand is stable Rust, which the portable MD5 uses as an optimisation
+//! barrier. Elsewhere, such as Xtensa or MIPS, it uses `black_box`.
 
 use std::env;
 
@@ -40,11 +46,16 @@ fn main() {
     );
 
     println!(r#"cargo::rustc-check-cfg=cfg(rind_limb, values("32", "64"))"#);
+    println!("cargo::rustc-check-cfg=cfg(rind_esp32s3)");
+    // The SHA-512 layout probe sets this so it can link `sha512_load_probe`.
+    println!("cargo::rustc-check-cfg=cfg(rind_sha512_load_probe)");
     println!("cargo::rustc-check-cfg=cfg(rind_std)");
+    println!("cargo::rustc-check-cfg=cfg(rind_reg_asm)");
 
     let os = env::var("CARGO_CFG_TARGET_OS").expect("cargo sets the target os");
     let libc = env::var("CARGO_CFG_TARGET_ENV").is_ok_and(|e| !e.is_empty());
-    if !(os == "none" || os == "uefi" || (os == "linux" && !libc)) {
+    let has_std = !(os == "none" || os == "uefi" || (os == "linux" && !libc));
+    if has_std {
         println!("cargo::rustc-cfg=rind_std");
     }
 
@@ -57,10 +68,43 @@ fn main() {
     let backend = match arch.as_str() {
         "x86_64" if little && !forced && enabled("sse2") => "x86_64",
         "aarch64" if little && !forced && enabled("neon") => "aarch64",
-        "arm" if little && !forced && armv7_or_later() => "arm",
+        // M-profile is Thumb-only and has no NEON, so the arm assembly
+        // cannot run there.
+        "arm" if little && !forced && armv7_or_later() && !m_profile() => "arm",
         _ => "portable",
     };
     println!(r#"cargo::rustc-cfg=rind_backend="{backend}""#);
+
+    // `rind_dit`: an aarch64 target with an OS, where `rind::cpu::Dit`
+    // counts guards per thread and a debug build checks PSTATE.DIT under
+    // every secret computation (`src/low/entry.rs`). Every aarch64 call that
+    // handles a secret sets DIT where the CPU has it, without an OS too.
+    println!("cargo::rustc-check-cfg=cfg(rind_dit)");
+    if backend == "aarch64" && has_std {
+        println!("cargo::rustc-cfg=rind_dit");
+    }
+
+    // Stable Rust's `asm!` with a `reg` operand, allow-listed so an
+    // architecture whose inline assembly is unstable, such as Xtensa or MIPS,
+    // falls back to `black_box` in the portable MD5 instead of failing to
+    // build. Arm64EC's `reg` class has been stable since Rust 1.84.
+    let reg_asm = matches!(
+        arch.as_str(),
+        "x86"
+            | "x86_64"
+            | "arm"
+            | "aarch64"
+            | "arm64ec"
+            | "riscv32"
+            | "riscv64"
+            | "loongarch64"
+            | "s390x"
+            | "powerpc"
+            | "powerpc64"
+    );
+    if reg_asm {
+        println!("cargo::rustc-cfg=rind_reg_asm");
+    }
 
     let wide = env::var("CARGO_CFG_TARGET_POINTER_WIDTH").is_ok_and(|w| w == "64")
         || (arch == "wasm32"
@@ -69,6 +113,13 @@ fn main() {
     if env::var_os("CARGO_CFG_RIND_LIMB").is_none() {
         let limb = if wide { 64 } else { 32 };
         println!(r#"cargo::rustc-cfg=rind_limb="{limb}""#);
+    }
+
+    // The ESP32-S3, from its triple: esp rustc 1.97.0.0 reports an
+    // `esp32s3ops` target feature and 1.98.1.0 does not, so the feature
+    // cannot pick the S3's SHA-512 placement.
+    if env::var("TARGET").is_ok_and(|t| t.starts_with("xtensa-esp32s3-")) {
+        println!("cargo::rustc-cfg=rind_esp32s3");
     }
 }
 
@@ -88,4 +139,23 @@ fn armv7_or_later() -> bool {
         .unwrap_or_default();
     let digits = version.bytes().take_while(u8::is_ascii_digit).count();
     version[..digits].parse::<u32>().is_ok_and(|v| v >= 7)
+}
+
+/// Whether the 32-bit ARM target is for a microcontroller (M-profile) core,
+/// as in `thumbv7m-none-eabi`, `thumbv7em-none-eabihf`,
+/// `thumbv8m.main-none-eabihf` or `thumbv8.1m.main-none-eabihf`: Thumb only,
+/// without NEON.
+fn m_profile() -> bool {
+    let target = env::var("TARGET").expect("cargo sets the target");
+    let arch = target.split('-').next().unwrap_or_default();
+    let Some(version) = arch.strip_prefix("thumbv") else {
+        return false;
+    };
+    fn skip_digits(s: &str) -> &str {
+        s.trim_start_matches(|c: char| c.is_ascii_digit())
+    }
+    // The major version, then an optional minor one, as in v8.1m.
+    let rest = skip_digits(version);
+    let rest = rest.strip_prefix('.').map_or(rest, skip_digits);
+    rest.starts_with('m') || rest.starts_with("em")
 }

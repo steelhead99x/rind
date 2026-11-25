@@ -15,9 +15,10 @@ use crate::high::hmac_drbg::HmacDrbg;
 use crate::high::signature::ml_dsa::ParameterSet;
 use crate::kem::Algorithm;
 use crate::low::Entry;
-use crate::mid::mldsa::{self, Array as _, KeyPair};
+use crate::mid::mldsa::{self, KeyPair};
 use crate::mid::mlkem::{Array, Ciphertext, DecapKey, EncapKey, Message};
 use crate::mid::sha3::Sha3_256Context;
+use crate::mid::util::Array as _;
 
 /// One prediction-resistant generate's inputs: the entropy it reseeds with,
 /// and the additional input it reseeds with.
@@ -108,7 +109,8 @@ pub fn ml_kem_check_encapsulation_key<P: Algorithm>(ek: &[u8]) -> Result<(), Err
 /// The check is the hash's alone: an embedded encapsulation key that fails
 /// its own modulus check still passes, as section 7.3 has it.
 pub fn ml_kem_check_decapsulation_key<P: Algorithm>(dk: &[u8]) -> Result<(), Error> {
-    let _entry = Entry::new_public();
+    // The key is copied whole, secret part included, so under DIT.
+    let _entry = Entry::new_secret();
     let dk =
         P::DecapKeyBytes::from_slice(dk).ok_or_else(|| Error::from(KeyFormatError::WrongLength))?;
     let (ek, h) = dk.as_ref()[P::K * 384..P::K * 768 + 64].split_at(P::K * 384 + 32);

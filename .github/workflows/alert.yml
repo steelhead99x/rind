@@ -16,10 +16,11 @@ on:
     # Matched by workflow `name:`, not filename. Only workflows that run outside
     # a pull request and a manual dispatch. `sh/alert.sh check` enforces the list.
     workflows:
-      - asan
       - bench
       - build
       - dart-libraries
+      - ESP32-S3 SHA-256 layout
+      - ESP32-S3 SHA-512 layout
       - Dart release
       - Check
       - coverage
@@ -31,10 +32,12 @@ on:
       - python
       - quality lints
       - regenerate
+      - sanitizers
       - Site deploy
       - Release
       - timing
       - x86-cpu
+      - xtensa
     types:
       - completed
 
@@ -44,17 +47,19 @@ on:
 jobs:
   discord:
     name: Discord
-    # Scheduled runs alert only when scheduled, since whoever dispatched one
-    # is already watching it. Release alerts however it ran: it follows the
-    # queue's pushes to main, which nobody watches. So do Site deploy, which a
-    # merge to main starts, and Dart release, which a tag push starts with
-    # nobody watching. A cancellation posts only when a job hit its time limit
-    # (`sh/alert.sh timed-out`), since a newer run or a hand cancel stops a run
-    # as a matter of course. Queue failures stay on the PR and go to the queue
-    # watcher and fixer.
+    # A workflow alerts when a schedule or a push started it, whichever
+    # workflow it is, not a dispatch, since whoever dispatched one is already
+    # watching it: prove's runs on a push to main, which gate no merge, name
+    # the commit that broke a proof here. Release alerts however it ran: it
+    # follows the queue's pushes to main, which nobody watches. So do Site
+    # deploy, which a merge to main starts, and Dart release, which a tag push
+    # starts with nobody watching. A cancellation posts only when a job hit
+    # its time limit (`sh/alert.sh timed-out`), since a newer run or a hand
+    # cancel stops a run as a matter of course. Queue failures stay on the PR
+    # and go to the queue watcher and fixer.
     if: >-
       contains(fromJSON('["failure", "timed_out", "cancelled"]'), github.event.workflow_run.conclusion) &&
-      (github.event.workflow_run.event == 'schedule' ||
+      (github.event.workflow_run.event == 'schedule' || github.event.workflow_run.event == 'push' ||
       contains(fromJSON('["Release", "Dart release", "Site deploy"]'), github.event.workflow_run.name))
     runs-on: ubuntu-latest
     timeout-minutes: 5

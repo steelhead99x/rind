@@ -1,18 +1,33 @@
 //! rustls over each provider, with the client and server in one process, so
 //! each row is what both peers pay together.
 
+#[cfg(target_arch = "xtensa")]
+fn main() {}
+
+#[cfg(not(target_arch = "xtensa"))]
 mod criterion;
+#[cfg(not(target_arch = "xtensa"))]
 use std::io::{Read, Write};
+#[cfg(not(target_arch = "xtensa"))]
 use std::panic::{self, AssertUnwindSafe};
+#[cfg(not(target_arch = "xtensa"))]
 use std::sync::{Arc, mpsc};
+#[cfg(not(target_arch = "xtensa"))]
 use std::thread;
+#[cfg(not(target_arch = "xtensa"))]
 use std::time::Instant;
 
+#[cfg(not(target_arch = "xtensa"))]
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
+#[cfg(not(target_arch = "xtensa"))]
 use rustls::client::Resumption;
+#[cfg(not(target_arch = "xtensa"))]
 use rustls::crypto::CryptoProvider;
+#[cfg(not(target_arch = "xtensa"))]
 use rustls::pki_types::pem::PemObject;
+#[cfg(not(target_arch = "xtensa"))]
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+#[cfg(not(target_arch = "xtensa"))]
 use rustls::{
     CipherSuite, ClientConfig, ClientConnection, Connection, HandshakeKind, NamedGroup,
     RootCertStore, ServerConfig, ServerConnection,
@@ -20,53 +35,78 @@ use rustls::{
 
 /// The providers this build and CPU have. The setup below runs every
 /// provider, whatever criterion's filter, so it can't leave Graviola to it.
+#[cfg(not(target_arch = "xtensa"))]
 fn providers() -> impl Iterator<Item = &'static str> {
-    ["ring", "aws-lc-rs", "rind"]
+    ["ring"]
         .into_iter()
+        .chain(cfg!(not(any(target_arch = "xtensa", target_os = "none"))).then_some("aws-lc-rs"))
+        .chain(["rind"])
         .chain(graviola_runs().then_some("graviola"))
-        .chain(cfg!(all(feature = "__bench_openssl", target_family = "unix")).then_some("openssl"))
+        .chain(
+            cfg!(all(
+                feature = "__bench_openssl",
+                target_family = "unix",
+                not(target_arch = "xtensa")
+            ))
+            .then_some("openssl"),
+        )
 }
 
 /// Whether Graviola runs here: it panics on a CPU without the features it
 /// asserts in its `verify_cpu_features`.
 #[cfg(target_arch = "x86_64")]
+#[cfg(not(target_arch = "xtensa"))]
 fn graviola_runs() -> bool {
     use std::arch::is_x86_feature_detected as has;
     has!("aes") && has!("pclmulqdq") && has!("bmi1") && has!("adx") && has!("avx") && has!("avx2")
 }
 
 #[cfg(target_arch = "aarch64")]
+#[cfg(not(target_arch = "xtensa"))]
 fn graviola_runs() -> bool {
     use std::arch::is_aarch64_feature_detected as has;
     has!("neon") && has!("aes") && has!("pmull") && has!("sha2")
 }
 
 #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+#[cfg(not(target_arch = "xtensa"))]
 fn graviola_runs() -> bool {
     false
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn provider(name: &str) -> CryptoProvider {
     match name {
         "ring" => rustls::crypto::ring::default_provider(),
+        #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
         "aws-lc-rs" => rustls::crypto::aws_lc_rs::default_provider(),
         #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
         "graviola" => rustls_graviola::default_provider(),
-        #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+        #[cfg(all(
+            feature = "__bench_openssl",
+            target_family = "unix",
+            not(target_arch = "xtensa")
+        ))]
         "openssl" => rustls_openssl::default_provider(),
         _ => rind_rustls::default_provider(),
     }
 }
 
 /// `name`'s provider, offering only `group`, or `None` where it lacks it.
+#[cfg(not(target_arch = "xtensa"))]
 fn with_group(name: &str, group: NamedGroup) -> Option<CryptoProvider> {
     let all = match name {
         "ring" => rustls::crypto::ring::ALL_KX_GROUPS.to_vec(),
+        #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
         "aws-lc-rs" => rustls::crypto::aws_lc_rs::ALL_KX_GROUPS.to_vec(),
         #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
         "graviola" => rustls_graviola::kx::ALL_KX_GROUPS.to_vec(),
         // What the linked OpenSSL offers: ML-KEM needs 3.5.
-        #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+        #[cfg(all(
+            feature = "__bench_openssl",
+            target_family = "unix",
+            not(target_arch = "xtensa")
+        ))]
         "openssl" => rustls_openssl::kx_group::available_groups(),
         _ => rind_rustls::ALL_KX_GROUPS.to_vec(),
     };
@@ -78,6 +118,7 @@ fn with_group(name: &str, group: NamedGroup) -> Option<CryptoProvider> {
 }
 
 /// `name`'s provider, offering only the TLS 1.3 `suite`.
+#[cfg(not(target_arch = "xtensa"))]
 fn with_suite(name: &str, suite: CipherSuite) -> CryptoProvider {
     let provider = provider(name);
     let suite = *provider
@@ -93,15 +134,18 @@ fn with_suite(name: &str, suite: CipherSuite) -> CryptoProvider {
 
 /// A key in `rind-rustls/tests/keys`, and the client and server configs for
 /// it, or `None` where the provider cannot sign with it.
+#[cfg(not(target_arch = "xtensa"))]
 fn configs(
     provider: CryptoProvider,
     key: &str,
     resumption: bool,
 ) -> Option<(Arc<ClientConfig>, Arc<ServerConfig>)> {
-    let dir = format!(
-        "{}/../rind-rustls/tests/keys/{key}",
-        env!("CARGO_MANIFEST_DIR")
-    );
+    // `RIND_BENCH_KEYS_DIR`, read at run time, names a copy of
+    // `rind-rustls/tests/keys`, for a binary run on a device where the
+    // build-time checkout path does not exist.
+    let keys = std::env::var("RIND_BENCH_KEYS_DIR")
+        .unwrap_or_else(|_| format!("{}/../rind-rustls/tests/keys", env!("CARGO_MANIFEST_DIR")));
+    let dir = format!("{keys}/{key}");
     let chain = CertificateDer::pem_file_iter(format!("{dir}/end.fullchain"))
         .unwrap()
         .collect::<Result<Vec<_>, _>>()
@@ -131,6 +175,7 @@ fn configs(
 }
 
 /// Moves every record `from` has queued into `to`.
+#[cfg(not(target_arch = "xtensa"))]
 fn transfer(from: &mut Connection, to: &mut Connection, buf: &mut Vec<u8>) {
     while from.wants_write() {
         buf.clear();
@@ -144,6 +189,7 @@ fn transfer(from: &mut Connection, to: &mut Connection, buf: &mut Vec<u8>) {
 }
 
 /// Runs a handshake to completion, including the server's session tickets.
+#[cfg(not(target_arch = "xtensa"))]
 fn handshake(client: &Arc<ClientConfig>, server: &Arc<ServerConfig>) -> (Connection, Connection) {
     let mut client = Connection::Client(
         ClientConnection::new(client.clone(), "localhost".try_into().unwrap()).unwrap(),
@@ -157,6 +203,7 @@ fn handshake(client: &Arc<ClientConfig>, server: &Arc<ServerConfig>) -> (Connect
     (client, server)
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn handshake_kind(server: &Connection) -> HandshakeKind {
     match server {
         Connection::Server(server) => server.handshake_kind().unwrap(),
@@ -164,6 +211,7 @@ fn handshake_kind(server: &Connection) -> HandshakeKind {
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 const GROUPS: [(&str, NamedGroup); 5] = [
     ("x25519mlkem768", NamedGroup::X25519MLKEM768),
     ("x25519", NamedGroup::X25519),
@@ -172,6 +220,7 @@ const GROUPS: [(&str, NamedGroup); 5] = [
     ("secp521r1", NamedGroup::secp521r1),
 ];
 
+#[cfg(not(target_arch = "xtensa"))]
 const KEYS: [&str; 7] = [
     "ecdsa-p256",
     "ecdsa-p384",
@@ -184,6 +233,7 @@ const KEYS: [&str; 7] = [
 
 /// A full TLS 1.3 handshake per key exchange group, with an ECDSA P-256
 /// certificate.
+#[cfg(not(target_arch = "xtensa"))]
 fn full_handshake_by_group(c: &mut Criterion) {
     let mut group = c.benchmark_group("rustls-full-handshake-group");
     group.throughput(Throughput::Elements(1));
@@ -198,6 +248,7 @@ fn full_handshake_by_group(c: &mut Criterion) {
                 HandshakeKind::Full
             );
             group.bench_function(format!("{group_name}/{name}"), |b| {
+                let _dit = (name == "rind").then(criterion::rind_dit);
                 b.iter(|| handshake(&client, &server))
             });
         }
@@ -205,6 +256,7 @@ fn full_handshake_by_group(c: &mut Criterion) {
 }
 
 /// A full TLS 1.3 handshake per certificate key, over X25519.
+#[cfg(not(target_arch = "xtensa"))]
 fn full_handshake_by_key(c: &mut Criterion) {
     let mut group = c.benchmark_group("rustls-full-handshake-key");
     group.throughput(Throughput::Elements(1));
@@ -215,6 +267,7 @@ fn full_handshake_by_key(c: &mut Criterion) {
                 continue;
             };
             group.bench_function(format!("{key}/{name}"), |b| {
+                let _dit = (name == "rind").then(criterion::rind_dit);
                 b.iter(|| handshake(&client, &server))
             });
         }
@@ -223,6 +276,7 @@ fn full_handshake_by_key(c: &mut Criterion) {
 
 /// A TLS 1.3 handshake resumed from a ticket, per key exchange group: each
 /// resumption takes one ticket and the server sends more.
+#[cfg(not(target_arch = "xtensa"))]
 fn resumed_handshake(c: &mut Criterion) {
     let mut group = c.benchmark_group("rustls-resumed-handshake");
     group.throughput(Throughput::Elements(1));
@@ -238,6 +292,7 @@ fn resumed_handshake(c: &mut Criterion) {
                 HandshakeKind::Resumed
             );
             group.bench_function(format!("{group_name}/{name}"), |b| {
+                let _dit = (name == "rind").then(criterion::rind_dit);
                 b.iter(|| handshake(&client, &server))
             });
         }
@@ -254,7 +309,12 @@ fn resumed_handshake(c: &mut Criterion) {
 /// the oldest, so a thread that falls behind finds its ticket gone and runs a
 /// full handshake. The threads live for the whole row, so per-thread state a
 /// provider sets up on first use, such as aws-lc's, is not timed.
+#[cfg(not(target_arch = "xtensa"))]
 fn threaded_handshake(c: &mut Criterion) {
+    // One client and server per logical CPU, held for the whole row.
+    if criterion::low_memory() {
+        return;
+    }
     let threads = thread::available_parallelism().unwrap().get();
     // bench-report reports these rows as running on every logical CPU, so a
     // run held to fewer, by affinity or a cgroup quota, must not pass for one.
@@ -283,6 +343,8 @@ fn threaded_handshake(c: &mut Criterion) {
                         let (work, jobs) = mpsc::channel::<u64>();
                         let done_tx = done_tx.clone();
                         s.spawn(move || {
+                            // Held for the thread's life, so the timed handshakes run under it.
+                            let _dit = (name == "rind").then(criterion::rind_dit);
                             // Each step reports whether it ran and every handshake
                             // was of `kind`, rather than panic and leave the main
                             // thread waiting on this one.
@@ -340,8 +402,32 @@ fn threaded_handshake(c: &mut Criterion) {
     }
 }
 
+/// Sends `data` from `server` to `client` in one record, which `client` reads
+/// into `out`, of the same length.
+#[cfg(not(target_arch = "xtensa"))]
+fn record(
+    server: &mut Connection,
+    client: &mut Connection,
+    data: &[u8],
+    out: &mut [u8],
+    buf: &mut Vec<u8>,
+) {
+    server.writer().write_all(data).unwrap();
+    transfer(server, client, buf);
+    client.reader().read_exact(out).unwrap();
+}
+
+/// A connection pair over `name`'s provider, offering only the TLS 1.3 `suite`,
+/// past its handshake.
+#[cfg(not(target_arch = "xtensa"))]
+fn connected(name: &str, suite: CipherSuite) -> (Connection, Connection) {
+    let (client, server) = configs(with_suite(name, suite), "ecdsa-p256", false).unwrap();
+    handshake(&client, &server)
+}
+
 /// 1 MB from server to client in full records, per TLS 1.3 cipher suite:
 /// each byte is sealed once and opened once.
+#[cfg(not(target_arch = "xtensa"))]
 fn bulk(c: &mut Criterion) {
     const LEN: usize = 1 << 20;
     const RECORD: usize = 16384;
@@ -358,15 +444,13 @@ fn bulk(c: &mut Criterion) {
         ),
     ] {
         for name in providers() {
-            let (client, server) = configs(with_suite(name, suite), "ecdsa-p256", false).unwrap();
-            let (mut client, mut server) = handshake(&client, &server);
+            let (mut client, mut server) = connected(name, suite);
             let mut buf = Vec::new();
             group.bench_function(format!("{suite_name}/{name}"), |b| {
+                let _dit = (name == "rind").then(criterion::rind_dit);
                 b.iter(|| {
                     for _ in 0..LEN / RECORD {
-                        server.writer().write_all(&data).unwrap();
-                        transfer(&mut server, &mut client, &mut buf);
-                        client.reader().read_exact(&mut out).unwrap();
+                        record(&mut server, &mut client, &data, &mut out, &mut buf);
                     }
                 })
             });
@@ -374,12 +458,73 @@ fn bulk(c: &mut Criterion) {
     }
 }
 
+/// One small record from server to client, per TLS 1.3 cipher suite and
+/// size, as chat messages, game state, and MoQ's control messages send them:
+/// what rustls and each provider add per record, which bulk's full records
+/// spread over 16 KB.
+#[cfg(not(target_arch = "xtensa"))]
+fn records(c: &mut Criterion) {
+    const SIZES: [(usize, &str); 3] = [(64, "64B"), (256, "256B"), (1024, "1KB")];
+    const AES128: CipherSuite = CipherSuite::TLS13_AES_128_GCM_SHA256;
+    let mut group = c.benchmark_group("rustls-records");
+    let data = [0x5a; 1024];
+    let mut out = [0; 1024];
+    let mut buf = Vec::new();
+    for (suite_name, suite) in [
+        ("aes128-gcm", AES128),
+        (
+            "chacha20poly1305",
+            CipherSuite::TLS13_CHACHA20_POLY1305_SHA256,
+        ),
+    ] {
+        for name in providers() {
+            let (mut client, mut server) = connected(name, suite);
+            for (size, size_name) in SIZES {
+                group.throughput(Throughput::Bytes(size as u64));
+                group.bench_function(format!("{suite_name}/{name}/{size_name}"), |b| {
+                    let _dit = (name == "rind").then(criterion::rind_dit);
+                    b.iter(|| {
+                        record(
+                            &mut server,
+                            &mut client,
+                            &data[..size],
+                            &mut out[..size],
+                            &mut buf,
+                        )
+                    })
+                });
+            }
+        }
+    }
+    group.finish();
+
+    // The smallest, where the toggle is the largest share of a record.
+    if let Some(mut group) = criterion::dit_per_call(c, "rustls-records") {
+        let (mut client, mut server) = connected("rind", AES128);
+        group.throughput(Throughput::Bytes(64));
+        group.bench_function("aes128-gcm/rind/64B", |b| {
+            b.iter(|| {
+                record(
+                    &mut server,
+                    &mut client,
+                    &data[..64],
+                    &mut out[..64],
+                    &mut buf,
+                )
+            })
+        });
+    }
+}
+
+#[cfg(not(target_arch = "xtensa"))]
 criterion_group!(
     benches,
     full_handshake_by_group,
     full_handshake_by_key,
     resumed_handshake,
     threaded_handshake,
-    bulk
+    bulk,
+    records
 );
+#[cfg(not(target_arch = "xtensa"))]
 criterion_main!(benches);

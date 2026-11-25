@@ -22,7 +22,7 @@ features = ["aws-lc-rs"]
 # Without it a custom provider cannot enforce that, and it adds only the DER
 # parsers this crate already needs to read certificates.
 dimpl = { version = "0.9", default-features = false, features = ["_crypto-common"] }
-rind = { version = "0.3.2", path = "../rind" }
+rind = { version = "0.3.2", path = "../rind", default-features = false }
 rustls-pki-types = { version = "1.9", default-features = false, features = ["std"] }
 x509-cert = { version = "0.3", default-features = false }
 

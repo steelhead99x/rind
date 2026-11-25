@@ -19,11 +19,25 @@ qemu. iOS devices' code is only built.
   rind-rustls and rind-dimpl prefer ChaCha20-Poly1305. Where the CPU has
   SVE2, as Armv9 cores from Neoverse N2 and Cortex-A710 on do,
   ChaCha20-Poly1305 runs [verified-garbage]'s SVE2 assembly, and aws-lc's
-  NEON assembly otherwise. On Apple's platforms,
-  secret-dependent code runs with data-independent timing (DIT), set and
-  cleared in each call unless `rind::cpu::Dit::hold()` holds it across a batch
-  of calls. rind sets no DIT on other aarch64 platforms, where Arm says it
-  changes nothing on current cores.
+  NEON assembly otherwise. Where the CPU has DIT, as Armv8.4 cores and
+  Apple's do, secret-dependent code runs with data-independent timing, set
+  and cleared in each call unless `rind::cpu::Dit::hold()` holds it across a
+  batch of calls, as Arm
+  [recommends](https://developer.arm.com/documentation/ka005181/1-0/). It
+  runs without DIT wherever the OS doesn't report it: Rust's detection finds
+  it only on Linux, Android, and Apple's platforms, not on Windows or the
+  BSDs, and a hypervisor may hide it, as that of GitHub's Neoverse N2
+  runners does. On Linux, the public-key arithmetic
+  runs s2n-bignum's narrow-multiplier schedules when `MIDR_EL1` names
+  Cortex-A72, Cortex-A76, or Neoverse N1, and its `_alt` schedules
+  everywhere else, and Keccak-f runs a lone state on s2n-bignum's
+  `sha3_keccak_f1600_alt2` when it names Cortex-A72 (see
+  [ALGORITHMS.md](ALGORITHMS.md)). The register is read
+  on whichever core makes the first such call, and the choice is cached for
+  the process, as aws-lc does. On a chip that mixes core types, such as
+  Cortex-A76 with Cortex-A55, every core then runs the schedule that first
+  core picked: correct and constant time on each, only slower on the cores
+  it was not picked for.
 - `x86_64` runs on every x86_64 CPU. It needs a target that enables SSE2,
   as every one with an OS does; `x86_64-unknown-none` and
   `x86_64-unknown-uefi` disable it and run the portable backend. Without `aes` and `pclmulqdq`, as on
@@ -46,6 +60,8 @@ qemu. iOS devices' code is only built.
   its integer assembly, and ChaCha20 [HACL\*]'s verified rounds.
   Without `adx`, as on Haswell, AMD's cores before Zen, and virtual CPUs
   that hide it, [s2n-bignum]'s `_alt` routines replace those that use it,
+  P-384's `d·G`, for key generation and ECDSA signing, runs
+  [verified-garbage]'s baseline routine and its ECDSA verification rind's own,
   and [aws-lc]'s Montgomery multiplication replaces its Karatsuba routines
   for RSA; with `avx2` there, as on Haswell, RSA-2048 signing runs aws-lc's
   RSAZ exponentiation, and Ed25519 verification's multiplication a port of
@@ -53,7 +69,8 @@ qemu. iOS devices' code is only built.
   Intel's cores before Ice Lake and AMD's before Zen, SLH-DSA's SHA-2
   parameter sets hash eight SHA-256 inputs at once with a port of the
   SPHINCS+ team's AVX2 code. With `avx512ifma`, as on Ice Lake,
-  Sapphire Rapids, and AMD's Zen 4 and 5, RSA-2048 and 4096 signing and
+  Sapphire Rapids, and AMD's Zen 4 and 5, ChaCha20-Poly1305 runs
+  [verified-garbage]'s assembly, RSA-2048 and 4096 signing and
   the public operation of 2048-, 3072-, and 4096-bit moduli with
   e = 65537 run [verified-garbage]'s routines, and RSA-3072 signing too with `avx512fp16`, as on Intel's
   since Sapphire Rapids, and aws-lc's dual AVX-512 RSAZ without it, as
@@ -64,19 +81,64 @@ qemu. iOS devices' code is only built.
   Montgomery multiplication runs [aws-lc]'s assembly, with NEON where the CPU
   has it. Where
   the CPU has the ARMv8 crypto extension, as most 32-bit Android devices do,
-  AES, GHASH, SHA1, and SHA256 run [aws-lc]'s assembly for it instead.
+  AES, GHASH, SHA1, and SHA256 run [aws-lc]'s assembly for it instead, and
+  without it AES and GHASH run aws-lc's NEON assembly where the CPU has NEON.
   Without it, `rind::cpu::has_aes_hardware()` is false, and rind-rustls and
   rind-dimpl prefer ChaCha20-Poly1305, which is faster there: ChaCha20 runs
   aws-lc's assembly, and so does Poly1305 where the CPU has NEON. SHA-384,
   SHA-512, and SHA-512/256 always run aws-lc's assembly, with NEON where the
   CPU has it, as do SHA-1 and SHA-256 without the crypto extension, and with
   NEON, X25519's shared secret runs [BoringSSL]'s assembly. SHA-3's, ML-KEM's,
-  and ML-DSA's Keccak-f runs [OpenSSL]'s assembly, on NEON where the CPU has it.
+  and ML-DSA's Keccak-f runs [OpenSSL]'s assembly, on NEON where the CPU has it,
+  and so do P-256's field multiplication, squaring, addition, and subtraction.
   That assembly is A32 on every target, but `armv7-linux-androideabi` and
   the `thumbv7` targets build Rust as Thumb-2, the inline assembly of the
   constant-time compares included, so the compares' proofs (see
   [proofs/README.md](proofs/README.md)) cover only targets that build A32,
   such as `armv7-unknown-linux-gnueabihf`.
+
+  On a Raspberry Pi 2 B's Cortex-A7 (900 MHz, NEON, no crypto extension),
+  `armv7-unknown-linux-gnueabihf`, rind runs the key-derivation and public-key
+  operations below in less time than aws-lc-rs, ring, RustCrypto, and libcrux
+  do, except Argon2id's smallest cost, 4 MiB in one pass, where RustCrypto's
+  crate, which never wipes its memory, is 6% faster; the wipe is 4 of that
+  6 points. Median of three runs on one pinned core with the governor on
+  `performance` and the other cores near idle, each library's native build,
+  release profile; time in microseconds, and the last column is rind's time over the
+  fastest other library's.
+
+  | Operation | rind | aws-lc-rs | ring | RustCrypto or libcrux | rind over fastest |
+  |---|---|---|---|---|---|
+  | HMAC-SHA256, 64 bytes | 7.1 | 11.3 | 8.8 | | 0.81 |
+  | HMAC-SHA256, 1 KiB | 37.7 | 41.5 | 39.3 | | 0.96 |
+  | PBKDF2-HMAC-SHA256, 1000 iterations | 5381 | 6052 | 7057 | | 0.89 |
+  | HKDF-SHA256, extract and 32-byte expand | 23.0 | 28.5 | 25.7 | | 0.90 |
+  | X25519, shared secret | 1039 | 2823 | | 1869 (dalek) | 0.56 |
+  | X25519, public key | 643 | 767 | | | 0.84 |
+  | Ed25519, key from seed | 656 | 774 | | | 0.85 |
+  | Ed25519, sign 64 bytes | 672 | 815 | | 753 (dalek) | 0.89 |
+  | Ed25519, verify | 1732 | 2476 | 1779 | 1788 (dalek) | 0.97 |
+  | ML-KEM-768, key generation | 573 | 1130 | | 1308 (libcrux) | 0.51 |
+  | ML-KEM-768, encapsulate | 315 | 1247 | | 1486 (libcrux) | 0.25 |
+  | ML-KEM-768, decapsulate | 501 | 1516 | | 1745 (libcrux) | 0.33 |
+  | Argon2id, 4 MiB, 1 pass, 1 lane | 94 ms | | | 89 ms (RustCrypto) | 1.06 |
+  | Argon2id, 8 MiB, 3 passes, 1 lane | 498 ms | | | 501 ms (RustCrypto) | 0.99 |
+
+  Argon2id's fill runs portable Rust here, as stable Rust has no 32-bit Arm NEON
+  intrinsics, and it matches RustCrypto's. The first row's
+  gap is the wipe of its 4 MiB, which `AGENTS.md` requires of memory derived
+  from a password; without it rind takes 90.6 ms, 1.02 times RustCrypto's. aws-lc-rs and ring have no
+  Argon2id, and neither library has BLAKE2 or BLAKE3, which rind does not
+  offer outside Argon2id. Built from `main` at 529ff5c0 with the Nix dev
+  shell's `armv7` target and measured by a harness outside the workspace,
+  since `rind-bench` does not build `openssl-sys` for it.
+
+- Thumb-only M-profile targets (`thumbv6m-none-eabi`, `thumbv7em-none-eabihf`)
+  and `riscv32imc-unknown-none-elf` build the portable backend; M-profile has
+  no A32 and no NEON for the arm assembly. Where the target has no
+  compare-and-swap (`thumbv6m`, `riscv32imc`), the reuse cache keeps nothing, so
+  each use builds its value again; that is correct on any number of cores and
+  interrupt handlers and needs no critical section.
 
 - Builds with `-Z cf-protection=branch` or `-Z branch-protection=bti`, both
   unstable, are unsupported: rind calls aws-lc's x86_64 and aarch64 routines
@@ -104,7 +166,7 @@ qemu. iOS devices' code is only built.
   for `wasm32-wasip2` and `wasm32-unknown-unknown`
   when a change touches rind, the workspace manifest or lockfile, or the
   flake, and `just gate` always does. It compiles every published adapter
-  for both, and rind-rustls's and rind-ring's tests for `wasm32-wasip2`, when
+  for both, and rind-rustls's and rind-ring's tests for each, when
   a change touches an adapter, rind's manifest, the workspace manifest or
   lockfile, or the flake. `wasm32-unknown-unknown` enables `getrandom/wasm_js`
   for JavaScript randomness, as rind-ring's `wasm32_unknown_unknown_js` does
@@ -116,10 +178,55 @@ qemu. iOS devices' code is only built.
   rind-ring's tests on `wasm32-wasip2` under wasmtime (`just wasm`), without
   the differential tests, since aws-lc does not build for wasm; Ed25519's CCTV
   vectors and the expanded ML-DSA wipe check run against data recorded from
-  aws-lc instead, and the adapters' handshakes run rind against itself. `wasm32-unknown-unknown` stays
-  compile-only: its tests need a JavaScript host. Constant time is unchecked on
+  aws-lc instead, and the adapters' handshakes run rind against itself. It
+  runs rind-rustls's and rind-ring's tests again on `wasm32-unknown-unknown`
+  in Node, under wasm-bindgen's test runner, where rind takes its random
+  source and rustls its clock from JavaScript; rind's own tests read their
+  vectors from files, which that target cannot open. Constant time is unchecked on
   wasm: ctgrind and the trace checks inspect native code, and a wasm engine
   compiles rind again, so its JIT may turn a select into a branch.
+  Bare-metal targets (`target_os = "none"`) build the library without std, on
+  `alloc`: the program supplies a global allocator and a getrandom backend.
+  `just check` lints them in debug and release (`just bare-metal`) whenever a
+  change reaches the portable or x86_64 backend: `thumbv6m-none-eabi` and
+  `riscv32imc-unknown-none-elf`, which lack compare-and-swap and so keep no
+  reuse cache, `thumbv7em-none-eabihf`, `armv7a-none-eabi`,
+  `armv7r-none-eabihf`, `aarch64-unknown-none`,
+  `aarch64-unknown-none-softfloat`, and `x86_64-unknown-none`. Every one but
+  `x86_64-unknown-none` runs the portable backend: the aarch64 and 32-bit ARM
+  assembly loads and stores unaligned words, which these strict-align targets
+  fault on when the MMU is off or alignment checking is on.
+  `x86_64-unknown-none` is soft-float and does not enable SSE2, so it stays on
+  the portable backend, which leaves out `stmxcsr` (that raises `#UD` when
+  `CR4.OSFXSR` is clear), and needs `--cfg curve25519_dalek_backend="serial"`
+  or `"fiat"`, since dalek's default `simd` backend does not compile there.
+  Built with `-C target-feature=+sse,+sse2,-soft-float`, it runs the x86_64
+  backend, which reads CPUID; the lint builds that too, so its `global_asm`
+  is assembled. SSE2 alone leaves soft-float set, and LLVM then aborts while
+  splitting vector results; rustc warns that clearing soft-float this way
+  will become an error
+  ([rust-lang/rust#116344](https://github.com/rust-lang/rust/issues/116344)).
+  AVX, AVX2, SHA512, VAES, VPCLMULQDQ, and AVX-512 run only when the build
+  enables those target features, since XCR0 does not show that an interrupt
+  saves YMM or ZMM. curve25519-dalek follows the same opt-in: its default on
+  x86_64 is the simd backend, or avx512 when `avx512ifma` and `avx512vl` are
+  enabled, and cpufeatures reports AVX2 and AVX-512 on this os only when they
+  are target features. An explicit `simd` or `avx512` cfg selects the same
+  code. `Dit::hold` does nothing on these targets: there is no thread-local
+  count, and these backends set no CPU state there.
+  The ESP32's Xtensa targets are tier 3, on Espressif's toolchain, so they
+  are not part of that Nix lint. They use Espressif's 1.98.1.0, the release of
+  the dev shell's rustc, since 1.97's Clippy does not know every lint rind
+  names. `just xtensa` and `.github/workflows/xtensa.yml`
+  clippy `xtensa-esp32-none-elf`, `xtensa-esp32s2-none-elf` (no compare-and-swap),
+  and `xtensa-esp32s3-none-elf` the same four ways, check the ESP-IDF library
+  (`xtensa-esp32s3-espidf`, which has std and getrandom's own backend) the
+  same four ways, and check `rind-bench`'s bench targets there. Those
+  benches are empty programs on Xtensa: criterion does not build against
+  ESP-IDF's libc, and ring and OpenSSL have no Xtensa port, so those paths
+  are `cfg`'d out. The check compiles the empty programs. A name inside that
+  `cfg` is not typechecked. None of these targets runs a test or a
+  constant-time check.
   RSA and the NIST curves run on 64-bit limbs on 64-bit targets and on
   `wasm32` built with `-C target-feature=+wide-arithmetic` (stable from Rust
   1.101), whose 128-bit products take one or two multiply instructions, and
@@ -127,10 +234,17 @@ qemu. iOS devices' code is only built.
 
 A backend requires only what its target enables at compile time, so rind runs
 on every CPU its target does; every other feature only picks a faster path.
+On x86_64 and aarch64, a release build for a CPU with a feature, such as one
+with `-C target-cpu=icelake-server`, links no code for the CPUs without it,
+so it is smaller: a rustls client over rind-rustls drops from 5.4 MB to
+4.5 MB there.
 
 rind is `no_std` with `alloc`, so a target without `std` builds it, given a
 global allocator. CI builds it for `x86_64-unknown-none`,
-`aarch64-unknown-none`, and `armv7a-none-eabi`. Without an OS:
+`aarch64-unknown-none`, and `armv7a-none-eabi`. rind-ring builds there as
+ring does, rind-rustls with its `std` feature off as rustls does, and
+rind-aws-lc-rs as it is, though aws-lc-rs needs `std`; CI builds all three
+for `x86_64-unknown-none`. Without an OS:
 
 - rind draws random bytes from [getrandom], which has no source there until
   the caller supplies one: pass `--cfg getrandom_backend="custom"` to every
@@ -150,8 +264,9 @@ global allocator. CI builds it for `x86_64-unknown-none`,
   bit can stay clear throughout).
 - aarch64 cannot ask without an OS, so it runs what the target enables at
   compile time: `-C target-feature=+aes,+sha2` turns on its crypto extension
-  paths, `+sha3` those that use the SHA3 extension, such as SHA-512's
-  (Keccak-f1600 runs on it only on Apple's cores, so not here), and `+sve2`
+  paths, `+sha3` those that use the SHA3 extension, such as SHA-512's and
+  four-way Keccak-f1600's (fewer states run on it only on Apple's cores, so
+  not here), and `+sve2`
   the SVE2 ChaCha20-Poly1305. 32-bit `arm` asks only Linux and Android, so
   elsewhere it runs the code for a core with neither NEON nor the crypto
   extension, whatever the target enables.
@@ -168,7 +283,8 @@ global allocator. CI builds it for `x86_64-unknown-none`,
   level that runs rind. The `*-none` targets
   build Rust with `strict-align` for code that runs before that.
 - `RIND_CPU_DISABLE_*` does nothing, and `rind::cpu::Dit::hold()` holds
-  nothing, since rind sets DIT only on Apple's platforms.
+  nothing, since there are no threads to count guards per: on aarch64 each
+  call sets DIT itself where the target enables `+dit`.
 
 [rind-fips](rind-fips/README.md)'s FIPS 140-3 module builds only for glibc
 Linux on `x86_64` and `aarch64`, and runs only the fastest paths there: on
@@ -229,8 +345,11 @@ Intel guarantees the timing of the instructions it lists as data-independent
   enclave on one that does runs with it set whatever the OS does
   ([Intel DOITM]). Linux does not set it, as of 7.4, nor does KVM pass it to
   guests, and rind knows of no other kernel that does. Intel's list leaves out
-  the `VSHA512` instructions, which SHA-384 and SHA-512 run where the CPU has
-  them, as from Arrow Lake and Lunar Lake on.
+  the `VSHA512` instructions (`VSHA512RNDS2`, `VSHA512MSG1`, and
+  `VSHA512MSG2`). SHA-384 and SHA-512 do not run them, including on Arrow Lake
+  and Lunar Lake: they take OpenSSL's AVX2 routine on every CPU with AVX2, BMI1, BMI2, POPCNT, and SSSE3,
+  and `admin/ct-vartime` refuses `vsha512*`. Should Intel add them to its
+  list, the SHA512-extension routine is worth importing again.
 - On Intel processors that do not report `MCDT_NO`, such as its Core processors
   from Skylake to Alder Lake, only while MXCSR holds `0x1FBF`: otherwise some
   vector integer multiplies, such as `vpmuludq` and `vpmullw`, may take a cycle
@@ -240,9 +359,10 @@ Intel guarantees the timing of the instructions it lists as data-independent
   and around every call on 32-bit `x86`, whose compiled arithmetic may use
   them anywhere, then
   restores the caller's MXCSR. On the x86_64 backend, `admin/ct-vartime`
-  checks that nothing rind exports reaches one except through a function that
-  enters the mitigation. It counts all of such a function as covered, so each
-  enters first, holds it to its end, and never inlines into its caller. On
+  checks that nothing rind exports reaches one unless the mitigation is held
+  on every path to it: in a function that enters it, it follows the control
+  flow from the function's start, so a multiply before the mitigation is
+  entered or after it ends still fails. On
   32-bit `x86` and the portable backend, coverage rests on every call's
   `Entry`, which the scan does not check. aws-lc and BoringSSL do not
   mitigate this.

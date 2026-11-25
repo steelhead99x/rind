@@ -1,6 +1,8 @@
+use alloc::boxed::Box;
+use alloc::sync::Arc;
+use alloc::vec::Vec;
+use core::fmt;
 use core::sync::atomic::{AtomicUsize, Ordering};
-use std::fmt;
-use std::sync::Arc;
 
 use rind::aead::{RandomNonce, RandomizedNonceKey};
 use rind::rand;
@@ -136,6 +138,11 @@ const TAG_LEN: usize = 16;
 
 #[cfg(test)]
 mod tests {
+    use std::format;
+
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    use wasm_bindgen_test::wasm_bindgen_test as test;
+
     use super::*;
 
     #[test]
@@ -146,15 +153,47 @@ mod tests {
 
         assert!(t.enabled());
         assert_eq!(t.lifetime(), ONE_TICKET_LIFETIME_SECS * 2);
-        println!("{t:?}");
+        // aws-lc-rs does not build for wasm.
+        #[cfg(not(target_family = "wasm"))]
+        {
+            let theirs = rustls::crypto::aws_lc_rs::Ticketer::new().unwrap();
+            assert_eq!(t.lifetime(), theirs.lifetime());
+        }
     }
 
     #[test]
     fn make_generator() {
         let g = make_ticket_generator().unwrap();
+        // rustls requires `Debug`, which shows the lifetime but no key.
+        assert_eq!(
+            format!("{g:?}"),
+            format!("XChaCha20Ticketer {{ lifetime: {ONE_TICKET_LIFETIME_SECS}, .. }}")
+        );
         assert!(g.enabled());
-        assert_eq!(g.lifetime(), ONE_TICKET_LIFETIME_SECS);
-        println!("{g:?}");
+        // aws-lc-rs's `Ticketer` is a rotator of two of these generators, so
+        // one generator's lifetime is half of that rotator's. A change to
+        // `ONE_TICKET_LIFETIME_SECS` no longer matches aws-lc-rs.
+        #[cfg(not(target_family = "wasm"))]
+        let one_ticket = rustls::crypto::aws_lc_rs::Ticketer::new()
+            .unwrap()
+            .lifetime()
+            / 2;
+        // aws-lc-rs does not build for wasm, so there the constant stands in.
+        #[cfg(target_family = "wasm")]
+        let one_ticket = ONE_TICKET_LIFETIME_SECS;
+        assert_eq!(g.lifetime(), one_ticket);
+    }
+
+    #[test]
+    fn shorter_ticket_decrypts_after_a_longer_one() {
+        // `decrypt` refuses a ciphertext longer than any ticket this key has
+        // sealed. Replacing that `>` with `<` refuses the shorter one instead.
+        let t = XChaCha20Ticketer::new().unwrap();
+        let long = t.encrypt(&[0xab; 48]).unwrap();
+        let short = t.encrypt(b"hello").unwrap();
+        assert!(long.len() > short.len());
+        assert_eq!(t.decrypt(&short).as_deref(), Some(&b"hello"[..]));
+        assert_eq!(t.decrypt(&long).unwrap().len(), 48);
     }
 
     #[test]

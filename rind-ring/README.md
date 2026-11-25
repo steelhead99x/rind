@@ -16,7 +16,8 @@ ring = { package = "rind-ring", version = "0.17" }
 Every ring feature is accepted. As in ring, `alloc` gates RSA, `std` the
 errors' `std::error::Error` impls, and `wasm32_unknown_unknown_js` the
 browser's random source (see [WebAssembly](#webassembly)); the rest change
-nothing.
+nothing. Like ring, it builds without `std`, but always needs a global
+allocator, as rind does, even without `alloc`.
 
 The rename reaches only the crate that makes it. A binary moves every crate
 in its tree on ring 0.17 to rind, including dependencies that name ring such
@@ -50,17 +51,13 @@ These items are not offered, so code using them, in a patched dependency
 too, fails to build:
 
 - `aead::chacha20_poly1305_openssh`: rind refuses it, having no SSH consumer.
-- `rsa::KeyPairComponents` and `rsa::KeyPair::from_components`: building a
-  key from components means encoding its secret parts as DER, which
-  branches on their leading bytes. Load the key as PKCS#1 or PKCS#8.
-- `io`, `test`, `deprecated_test`, and `test_file!`: ring's DER reader and
-  test harness, which are no cryptography. `test::rand`'s fixed random
-  sources could not work, since rind draws its own randomness.
+- `test`, `deprecated_test`, and `test_file!`: ring's test harness, which
+  is no cryptography. `test::rand`'s fixed random sources could not work,
+  since rind draws its own randomness.
 - `signature::RsaEncoding::encode`: ring's hidden, deprecated internal
   method, which takes a type callers cannot name.
 
 ## Behaves differently
-
 
 - Where ring takes a `rand::SecureRandom` to generate a key or sign,
   rind draws from the system random source itself, as
@@ -71,13 +68,19 @@ too, fails to build:
   does; a public key on its own is not wiped.
 - A `error::KeyRejected`'s `Display` gives rind's reason, not ring's
   name for it, which ring documents as changing between releases.
+- An RSA key whose integers disagree is refused when it loads, as
+  aws-lc-rs refuses it, where ring takes a wrong `d`, which it never uses,
+  and finds a wrong `e` or CRT integer only when it signs.
+- `rsa::KeyPair::from_components` takes private integers with leading
+  zero bytes, as aws-lc-rs does, where ring refuses those wider than it
+  expects: refusing them would branch on their secret first bytes.
 
 ## WebAssembly
 
 rind-ring builds for `wasm32-wasip2`, where CI runs its tests under wasmtime,
 and for `wasm32-unknown-unknown`, the browser, where its
 `wasm32_unknown_unknown_js` feature takes the JavaScript random source, as
-ring's does. Neither needs the C compiler targeting wasm that ring needs.
+ring's does, and CI runs ring's own tests in Node. Neither needs the C compiler targeting wasm that ring needs.
 rind's constant-time checks do not cover wasm; [PLATFORMS.md](https://github.com/kixel-ai/rind/blob/main/PLATFORMS.md) says why.
 
 License: Apache-2.0 OR ISC OR MIT-0

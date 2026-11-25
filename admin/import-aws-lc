@@ -10,9 +10,13 @@ with its file, since the blocks can share an assembler scope. Undoing those
 edits gives aws-lc's text line for line.
 
 32-bit ARM: one file per source, for `global_asm!`, from the `linux-arm`
-flavor cut down to the routines rind calls and the tables they load, or kept
-whole for the handwritten NEON Poly1305. Each routine's name is a `{name}`
-operand that rind binds to a crate-version qualified symbol.
+flavor cut down to the routines rind calls, the tables they load, and the
+`helpers`, local routines and tables, they reach, or kept whole for the
+handwritten NEON Poly1305. Each routine's name is a `{name}` operand that
+rind binds to a crate-version qualified symbol; a helper keeps its local name.
+An import's `drops` delete runs of consecutive lines, each spelled as given
+and found exactly once, optionally after lines that stay: deliberate changes
+to aws-lc's code, each saying why.
 
 x86_64 and aarch64: one file per routine and flavor, holding the routine's
 body from after its label through its return, for `naked_asm!` in a naked
@@ -96,6 +100,89 @@ ARM_IMPORTS = [
         "copyright": "Copyright 2014-2020 The OpenSSL Project Authors. All Rights Reserved.",
         "constants": [],
         "routines": ["gcm_init_v8", "gcm_ghash_v8"],
+    },
+    # For NEON without the crypto extension, as aws-lc picks them: vpaes for
+    # key setup, single blocks, and short CTR runs, bsaes for longer CTR runs
+    # and CBC decryption, from a vpaes key converted to the plain schedule
+    # bsaes reads, and NEON GHASH.
+    {
+        "source": "vpaes-armv7.S",
+        "tag": "vpaes",
+        "perlasm": "crypto/fipsmodule/aes/asm/vpaes-armv7.pl",
+        "copyright": "Copyright 2015-2016 The OpenSSL Project Authors. All Rights Reserved.",
+        "constants": [],
+        "helpers": [
+            "_vpaes_consts",
+            "_vpaes_preheat",
+            "_vpaes_encrypt_core",
+            "_vpaes_decrypt_consts",
+            "_vpaes_decrypt_core",
+            "_vpaes_key_consts",
+            "_vpaes_key_preheat",
+            "_vpaes_schedule_core",
+            "_vpaes_schedule_192_smear",
+            "_vpaes_schedule_round",
+            "_vpaes_schedule_transform",
+            "_vpaes_schedule_mangle",
+            "_vpaes_convert_consts",
+        ],
+        "routines": [
+            "vpaes_encrypt",
+            "vpaes_decrypt",
+            "vpaes_set_encrypt_key",
+            "vpaes_set_decrypt_key",
+            "vpaes_encrypt_key_to_bsaes",
+            "vpaes_decrypt_key_to_bsaes",
+            "vpaes_ctr32_encrypt_blocks",
+        ],
+        # The key schedule's and the bsaes conversions' zeroing of the
+        # registers they used: rind wipes no temporaries (AGENTS.md), and the
+        # routines are unproven. Each conversion's ends after its last store.
+        "drops": [
+            ["@ cleanup"]
+            + [f"veor q{i}, q{i}, q{i} @ vpxor %xmm{i}, %xmm{i}, %xmm{i}" for i in range(8)],
+        ]
+        + [
+            (
+                [f"vst1.64 {{q0}}, [r0]{suffix}", ""],
+                ["@ Wipe registers which contained key material."]
+                + [f"veor q{i}, q{i}, q{i}" for i in range(3)]
+                + [""],
+            )
+            for suffix in ("", "!")
+        ],
+    },
+    {
+        "source": "bsaes-armv7.S",
+        "tag": "bsaes",
+        "perlasm": "crypto/fipsmodule/aes/asm/bsaes-armv7.pl",
+        "copyright": "Copyright 2012-2016 The OpenSSL Project Authors. All Rights Reserved.",
+        "constants": [],
+        "helpers": ["_bsaes_decrypt8", "_bsaes_const", "_bsaes_encrypt8", "_bsaes_key_convert"],
+        "routines": ["bsaes_cbc_encrypt", "bsaes_ctr32_encrypt_blocks"],
+        # Each routine's wipe of the bitsliced schedule it builds on the
+        # stack, 1,184 to 1,696 bytes stored on every call: rind wipes no
+        # stack temporaries (AGENTS.md), and the routines are unproven. The
+        # `mov sp, r9` after each frees the schedule as before.
+        "drops": [
+            [
+                "vmov.i32 q0, #0",
+                "vmov.i32 q1, #0",
+                f".L{mode}_bzero:@ wipe key schedule [if any]",
+                "vstmia sp!, {q0,q1}",
+                "cmp sp, r9",
+                f"bne .L{mode}_bzero",
+            ]
+            for mode in ("cbc_dec", "ctr_enc")
+        ],
+    },
+    {
+        "source": "ghash-armv4.S",
+        "tag": "ghash_neon",
+        "perlasm": "crypto/fipsmodule/modes/asm/ghash-armv4.pl",
+        "copyright": "Copyright 2010-2018 The OpenSSL Project Authors. All Rights Reserved.",
+        "constants": [],
+        "routines": ["gcm_init_neon", "gcm_ghash_neon"],
     },
     {
         "source": "sha1-armv4-large.S",
@@ -604,6 +691,13 @@ IMPORTS_64 = [
         ],
         "inner": ["_vpaes_schedule_low_round"],
         "carries": {"vpaes_cbc_encrypt": ["vpaes_cbc_decrypt"]},
+        # The key schedule's zeroing of v0 through v7 after its last store, as
+        # for armv7's: rind wipes no temporaries (AGENTS.md), and the routine
+        # is unproven. Each line is unique to it, comment included.
+        "drops": {
+            "vpaes_schedule_core": ["// cleanup"]
+            + [f"eor v{i}.16b, v{i}.16b, v{i}.16b // vpxor %xmm{i}, %xmm{i}, %xmm{i}" for i in range(8)],
+        },
     },
     # ChaCha20-Poly1305 in one pass, with NEON.
     {
@@ -664,6 +758,29 @@ def routine(lines, name):
     start = find(lines, [".globl", name])
     end = find(lines, [".size", f"{name},.-{name}"], start)
     return lines[start : end + 1]
+
+
+def helper(lines, name):
+    """`name`, a local routine or table, from its `.type` through its `.size`,
+    or without one, as `_vpaes_preheat` is, through its last line before the
+    next routine or table."""
+    for kind in ("%function", "%object"):
+        if [".type", f"{name},{kind}"] in map(str.split, lines):
+            start = find(lines, [".type", f"{name},{kind}"])
+            break
+    else:
+        sys.exit(f"missing helper: {name}")
+    for end in range(start + 1, len(lines)):
+        words = lines[end].split()
+        if words == [".size", f"{name},.-{name}"]:
+            return lines[start : end + 1]
+        if words[:1] in ([".type"], [".globl"]):
+            break
+    else:
+        sys.exit(f"helper runs to the end: {name}")
+    while lines[end - 1].split()[:1] in ([], [".align"]) or lines[end - 1].lstrip().startswith("@"):
+        end -= 1
+    return lines[start:end]
 
 
 def source_index(lines, piece):
@@ -813,6 +930,19 @@ def write(path, lines):
     os.replace(tmp, path)
 
 
+def drop_run(text, run):
+    """`text` without `run`, consecutive lines spelled as given, which must
+    occur exactly once. A run given as `(after, lines)` drops `lines` where
+    `after`, which stays, comes right before them."""
+    after, lines = run if isinstance(run, tuple) else ([], run)
+    words = [line.split() for line in after + lines]
+    split = [line.split() for line in text]
+    at = [i + len(after) for i in range(len(text)) if split[i : i + len(words)] == words]
+    if len(at) != 1:
+        sys.exit(f"expected one run of {(after + lines)[0]!r} ...: found {len(at)}")
+    return text[: at[0]] + text[at[0] + len(lines) :]
+
+
 def import_arm(aws_lc):
     out_dir = os.path.join(ROOT, "arm", "aws_lc")
     for spec in ARM_IMPORTS:
@@ -826,8 +956,11 @@ def import_arm(aws_lc):
             # In aws-lc's order, which keeps each routine's `adr` and literal
             # `ldr` within reach of the constants it loads.
             pieces = [constant(lines, label, following) for label, following in spec["constants"]]
+            pieces += [helper(lines, name) for name in spec.get("helpers", [])]
             pieces += [routine(lines, name) for name in spec["routines"]]
             text = [line for piece in sorted(pieces, key=lambda p: source_index(lines, p)) for line in piece]
+        for run in spec.get("drops", []):
+            text = drop_run(text, run)
 
         out = os.path.join(out_dir, spec["source"].removesuffix(".S") + ".s")
         operands = {name: (name, 0) for name in spec["routines"]}

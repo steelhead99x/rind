@@ -11,6 +11,8 @@ use rustls::{
     ClientConfig, ClientConnection, HandshakeKind, NamedGroup, RootCertStore, ServerConfig,
     ServerConnection,
 };
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+use wasm_bindgen_test::wasm_bindgen_test as test;
 
 #[test]
 fn all_suites() {
@@ -182,36 +184,86 @@ fn client_config(provider: Arc<CryptoProvider>, key_type: KeyType) -> Arc<Client
         .into()
 }
 
+/// Moves one `write_tls` to the peer. A short `read_tls` is not a complete
+/// delivery: rustls reads once into its deframer, and the unread tail would
+/// otherwise be overwritten on the next write.
+macro_rules! transfer {
+    ($from:expr, $to:expr, $buf:expr) => {{
+        let wr = $from.write_tls(&mut &mut $buf[..]).unwrap();
+        let mut off = 0;
+        while off < wr {
+            let n = $to.read_tls(&mut &$buf[off..wr]).unwrap();
+            assert!(
+                n > 0,
+                "TLS peer read none of the {} bytes still queued",
+                wr - off
+            );
+            off += n;
+            // An incomplete record stays buffered. Process after each read so a
+            // full deframer cannot refuse the rest of this write.
+            $to.process_new_packets().unwrap();
+        }
+    }};
+}
+
+/// Drains both directions. A confidentiality limit of zero keeps `wants_write`
+/// set, and this fails at the cap instead of spinning.
+fn drain(client: &mut ClientConnection, server: &mut ServerConnection, what: &str) {
+    let mut rounds = 0;
+    while client.wants_write() || server.wants_write() {
+        rounds += 1;
+        assert!(rounds <= 64, "{what} did not finish");
+        let mut buf = [0u8; 1024];
+        transfer!(client, server, buf);
+        transfer!(server, client, buf);
+    }
+}
+
 fn exercise(client_config: Arc<ClientConfig>, server_config: Arc<ServerConfig>) -> HandshakeKind {
     let mut client = ClientConnection::new(client_config, "localhost".try_into().unwrap()).unwrap();
     let mut server = ServerConnection::new(server_config).unwrap();
 
-    while client.is_handshaking() && server.is_handshaking() {
+    // A confidentiality limit of zero never leaves the handshake: each record
+    // asks for a key update. Shuttle until both sides have finished and neither
+    // still wants to write, so a one-sided stall stays inside the cap. One
+    // 1024-byte write cannot carry an RSA-4096 chain plus an ML-KEM share; 64
+    // rounds is past that flight and still rejects a handshake that never goes idle.
+    let mut rounds = 0;
+    while client.is_handshaking()
+        || server.is_handshaking()
+        || client.wants_write()
+        || server.wants_write()
+    {
+        rounds += 1;
+        assert!(rounds <= 64, "handshake did not finish");
         let mut buf = [0u8; 1024];
-        let wr = client.write_tls(&mut &mut buf[..]).unwrap();
-        server.read_tls(&mut &buf[..wr]).unwrap();
-        server.process_new_packets().unwrap();
-
-        let wr = server.write_tls(&mut &mut buf[..]).unwrap();
-        client.read_tls(&mut &buf[..wr]).unwrap();
-        client.process_new_packets().unwrap();
+        transfer!(client, server, buf);
+        transfer!(server, client, buf);
     }
 
-    let _ = client.writer().write(b"hello world").unwrap();
+    client.writer().write_all(b"hello world").unwrap();
     client.send_close_notify();
-    let mut buf = [0u8; 1024];
-    let wr = client.write_tls(&mut &mut buf[..]).unwrap();
-    server.read_tls(&mut &buf[..wr]).unwrap();
-    server.process_new_packets().unwrap();
+    drain(&mut client, &mut server, "application exchange");
 
     let mut out = vec![];
     server.reader().read_to_end(&mut out).unwrap();
     assert_eq!(out, b"hello world");
 
-    let _ = server.writer().write(b"goodbye").unwrap();
-    let wr = server.write_tls(&mut &mut buf[..]).unwrap();
-    client.read_tls(&mut &buf[..wr]).unwrap();
-    client.process_new_packets().unwrap();
+    server.writer().write_all(b"goodbye").unwrap();
+    drain(&mut client, &mut server, "server reply");
+    let mut got = Vec::new();
+    while got.len() < b"goodbye".len() {
+        let mut buf = [0u8; 16];
+        // `WouldBlock` is what a reply that never arrives looks like. `unwrap`
+        // would panic with that error and hide the assertion below.
+        let n = client
+            .reader()
+            .read(&mut buf)
+            .expect("client read none of the server reply");
+        assert!(n > 0, "client read none of the server reply");
+        got.extend_from_slice(&buf[..n]);
+    }
+    assert_eq!(got, b"goodbye");
 
     server.handshake_kind().unwrap()
 }
@@ -263,40 +315,43 @@ impl KeyType {
         }
     }
 
-    fn slug(self) -> &'static str {
+    /// This key's `ca.cert`, `end.fullchain`, and `end.key`, compiled in,
+    /// since the browser's target has no file system.
+    fn files(self) -> [&'static [u8]; 3] {
+        macro_rules! files {
+            ($slug:literal) => {
+                [
+                    include_bytes!(concat!("keys/", $slug, "/ca.cert")),
+                    include_bytes!(concat!("keys/", $slug, "/end.fullchain")),
+                    include_bytes!(concat!("keys/", $slug, "/end.key")),
+                ]
+            };
+        }
         match self {
-            Self::Rsa2048 => "rsa-2048",
-            Self::Rsa3072 => "rsa-3072",
-            Self::Rsa4096 => "rsa-4096",
-            Self::EcdsaP256 => "ecdsa-p256",
-            Self::EcdsaP384 => "ecdsa-p384",
-            Self::EcdsaP521 => "ecdsa-p521",
-            Self::Ed25519 => "ed25519",
+            Self::Rsa2048 => files!("rsa-2048"),
+            Self::Rsa3072 => files!("rsa-3072"),
+            Self::Rsa4096 => files!("rsa-4096"),
+            Self::EcdsaP256 => files!("ecdsa-p256"),
+            Self::EcdsaP384 => files!("ecdsa-p384"),
+            Self::EcdsaP521 => files!("ecdsa-p521"),
+            Self::Ed25519 => files!("ed25519"),
         }
     }
 
-    /// This key's file `name`, from any directory, as the iOS simulator runs
-    /// the tests.
-    fn file(self, name: &str) -> String {
-        let dir = env!("CARGO_MANIFEST_DIR");
-        format!("{dir}/tests/keys/{}/{name}", self.slug())
-    }
-
     fn cert_chain(self) -> Vec<CertificateDer<'static>> {
-        CertificateDer::pem_file_iter(self.file("end.fullchain"))
-            .unwrap()
+        CertificateDer::pem_slice_iter(self.files()[1])
             .collect::<Result<Vec<_>, _>>()
             .unwrap()
     }
 
     fn key(self) -> PrivateKeyDer<'static> {
-        PrivateKeyDer::from_pem_file(self.file("end.key")).unwrap()
+        PrivateKeyDer::from_pem_slice(self.files()[2]).unwrap()
     }
 
     fn ca_certs(self) -> Arc<RootCertStore> {
         let mut roots = RootCertStore::empty();
         roots
-            .add(CertificateDer::from_pem_file(self.file("ca.cert")).unwrap())
+            .add(CertificateDer::from_pem_slice(self.files()[0]).unwrap())
             .unwrap();
         roots.into()
     }

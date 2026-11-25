@@ -71,12 +71,19 @@ rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-and
 rustup target add aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios
 ```
 
+Each build hook output folder keeps its own cargo target directory. To share
+one between builds, such as several apps', name it with the
+`cargo_target_dir` user-define beside `build_from_source`, as a path relative
+to that `pubspec.yaml`.
+
 ## Platforms
 
 Android on arm64, armv7, and x86_64; iOS on devices and the simulator;
 macOS, Linux, and Windows on arm64 and x86_64; and Linux on armv7. The build
 fails for any other target, such as Android's 32-bit x86, rather than falling
-back to slower code. There is no web build: rind has no WebAssembly backend.
+back to slower code. There is no web build: the package calls rind through
+`dart:ffi`, which Dart's web compilers lack, though rind itself builds for
+WebAssembly.
 
 rind's arm64 build enables NEON, which every Android and Apple device has; a source build for a target without NEON uses rind's portable backend.
 
@@ -86,7 +93,10 @@ rind's arm64 build enables NEON, which every Android and Apple device has; a sou
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:rind/ecdsa.dart' as ecdsa;
+import 'package:rind/ed25519.dart' as ed25519;
 import 'package:rind/rind.dart';
+import 'package:rind/rsa.dart' as rsa;
 
 void main() {
   final key = Uint8List(32);
@@ -98,21 +108,54 @@ void main() {
   final sealed = aead.seal(nonce, utf8.encode('hello'));
   print(utf8.decode(aead.open(nonce, sealed)));
 
-  final pair = EcdsaKeyPair.generate(EcdsaSigningAlgorithm.p256Sha256Asn1);
-  final signature = pair.sign(utf8.encode('hello'));
-  final verifier = PublicKey(
-    VerificationAlgorithm.ecdsaP256Sha256Asn1,
-    pair.publicKey.bytes,
+  // Each signature algorithm has a key pair and a public key; the peer
+  // parses the public key from its encoding or its SubjectPublicKeyInfo.
+  final ecdsaPair = ecdsa.KeyPair.generate(
+    ecdsa.SigningAlgorithm.p256Sha256Asn1,
   );
-  verifier.verify(utf8.encode('hello'), signature);
+  ecdsa.PublicKey(
+    ecdsa.VerificationAlgorithm.p256Sha256Asn1,
+    ecdsaPair.publicKey.bytes,
+  ).verify(utf8.encode('hello'), ecdsaPair.sign(utf8.encode('hello')));
+
+  final ed25519Pair = ed25519.KeyPair.generate();
+  ed25519.PublicKey.fromSpki(
+    ed25519Pair.publicKey.toSpki(),
+  ).verify(utf8.encode('hello'), ed25519Pair.sign(utf8.encode('hello')));
+
+  // An RSA public key verifies with any algorithm whose modulus floor it
+  // meets.
+  final rsaPair = rsa.KeyPair.generate(rsa.KeySize.rsa2048);
+  rsa.PublicKey(rsaPair.publicKey.bytes).verify(
+    rsa.VerificationAlgorithm.pssSha256,
+    utf8.encode('hello'),
+    rsaPair.sign(rsa.SigningAlgorithm.pssSha256, utf8.encode('hello')),
+  );
+
+  final oaep = rsa.DecryptingKey.generate(
+    rsa.OaepAlgorithm.sha256,
+    rsa.KeySize.rsa2048,
+  );
+  final ciphertext = rsa.EncryptingKey.fromSpki(
+    rsa.OaepAlgorithm.sha256,
+    oaep.publicKey.toSpki(),
+  ).encrypt(utf8.encode('hello'));
+  print(utf8.decode(oaep.decrypt(ciphertext)));
 }
 ```
 
 The API is rind's own: each algorithm is a constant, and each key type has one
-role. [rind_cryptography](cryptography) offers the `cryptography` package's
-API on it instead. Failures throw a `RindException` whose `error` says what
-failed, as rind's `Error` does, and a refused key says why in its `reason`.
-SHA-1, MD5, and RSA keys below 2048 bits are in `package:rind/legacy.dart`.
+role. ECDSA, Ed25519, and RSA each have a library, imported under its name,
+with a `KeyPair` and a `PublicKey`, as rind's `ecdsa`, `ed25519`, and `rsa`
+modules do: a public key's constructor takes the algorithm's own encoding (an
+X9.62 point, 32 bytes, or PKCS#1), and `fromSpki` a `SubjectPublicKeyInfo`.
+RSA-OAEP is in `package:rind/rsa.dart` too.
+[rind_cryptography](cryptography) offers the `cryptography` package's API on
+it instead. Failures throw a `RindException` whose `error` says what failed,
+as rind's `Error` does, and a refused key says why in its `reason`.
+SHA-1 and MD5 are in `package:rind/legacy.dart`, and RSA's SHA-1 algorithms
+and other modulus floors in `package:rind/rsa_legacy.dart`, imported `as rsa`
+beside `package:rind/rsa.dart`.
 
 Keys live in native memory, and rind wipes that native copy when Dart frees
 the key. It does not wipe a `Uint8List` you passed in; clear that yourself.

@@ -17,22 +17,6 @@ namespace rind.x86_64
 
 /-! ## Vale's words and blocks -/
 
-theorem word_bytes (w : BitVec 32) :
-    (BitVec.fromLEBytes ((List.range 4).map fun i => w.extractLsb' (8 * i) 8)).setWidth 32 = w := by
-  apply eq_of_wbyte_eq; intro i hi
-  rw [wbyte, byte_word _ hi, getElem!_range_map _ hi, wbyte]
-
-/-- Vale's key bytes read back to the key's words. -/
-theorem seqNat8ToSeqNat32LE_seqNat32ToSeqNat8LE :
-    ∀ (w : List (BitVec 32)), seqNat8ToSeqNat32LE (seqNat32ToSeqNat8LE w) = w
-  | [] => rfl
-  | w :: ws => by
-    have e : (List.range 4).map (fun i => w.extractLsb' (8 * i) 8) =
-        [w.extractLsb' 0 8, w.extractLsb' 8 8, w.extractLsb' 16 8, w.extractLsb' 24 8] := rfl
-    rw [seqNat32ToSeqNat8LE, List.flatMap_cons, ← seqNat32ToSeqNat8LE, e, List.cons_append, List.cons_append,
-      List.cons_append, List.cons_append, List.nil_append, seqNat8ToSeqNat32LE_cons4, ← e, word_bytes,
-      seqNat8ToSeqNat32LE_seqNat32ToSeqNat8LE ws]
-
 /-! ## The length block -/
 
 @[step]
@@ -40,17 +24,6 @@ theorem mul_h_spec (H : P) (hH : Small H) (t : low.x86_64.ghash.ClmulTable) (ht 
     low.x86_64.ghash.ClmulTable.mul_h t x ⦃ y => toPoly y = gf128MulRev (toPoly x) H ⦄ := by
   obtain ⟨y, hy, hp⟩ := mul_h_eq H hH t ht x
   rw [hy, WP.spec_ok]; exact hp
-
-theorem lengths_eq (A M : Nat) (hM : M < 2 ^ 64) :
-    (BitVec.ofNat 128 A <<< 64) ||| BitVec.ofNat 128 M =
-      insertNat64 (insertNat64 (mkfour 0 0 0 0) A 1) M 0 := by
-  apply BitVec.eq_of_getLsbD_eq; intro k hk
-  simp only [insertNat64, Nat.one_ne_zero, ite_false, ite_true, BitVec.getLsbD_or, BitVec.getLsbD_shiftLeft,
-    BitVec.getLsbD_ofNat, BitVec.getLsbD_append, BitVec.getLsbD_extractLsb', hk, decide_true, Bool.true_and]
-  by_cases h : k < 64
-  · simp [h]
-  · have : M.testBit k = false := Nat.testBit_lt_two_pow (lt_of_lt_of_le hM (Nat.pow_le_pow_right (by omega) (by omega)))
-    simp [h, this, show k - 64 < 64 by omega, show k - 64 < 128 by omega, show 64 + (k - 64) = k by omega]
 
 theorem add_lengths_spec (g : low.x86_64.ghash.Ghash) (t : low.x86_64.ghash.ClmulTable) (H : P) (hH : Small H)
     (ht : TableFor H t) (hg : ClmulOf g.table t ∨ ∃ a, g.table = .Avx512 a ∧ a.clmul = t) (a m : Usize)
@@ -97,27 +70,6 @@ theorem add_lengths_spec (g : low.x86_64.ghash.Ghash) (t : low.x86_64.ghash.Clmu
     rw [hy, toPoly_xor, hb]
 
 /-! ## The counter block and the tag -/
-
-theorem leBytesToQuad32_leQuad32ToBytes (q : Quad32) : leBytesToQuad32 (leQuad32ToBytes q) = q := by
-  apply BitVec.eq_of_getLsbD_eq; intro k hk
-  rw [getLsbD_leBytesToQuad32 _ hk, leQuad32ToBytes_getElem! _ (by omega), getLsbD_byte _ _ (by omega)]
-  congr 1; omega
-
-/-- GCTR on one whole block XORs in the keystream of the counter block itself. -/
-theorem gctr_block (icb q : Quad32) (alg : Algorithm) (kw : List (BitVec 32)) :
-    gctrEncrypt icb (leQuad32ToBytes q) alg kw =
-      leQuad32ToBytes (q ^^^ aesEncrypt alg kw (reverseBytesQuad32 icb)) := by
-  have hl : (leQuad32ToBytes q).length = 16 := by simp [leQuad32ToBytes]
-  have hs : leBytesToSeqQuad32 (leQuad32ToBytes q) = [q] := by
-    rw [leBytesToSeqQuad32_eq, chunksOf_self _ (by omega) hl, List.map_singleton,
-      leBytesToQuad32_leQuad32ToBytes]
-  simp only [gctrEncrypt, hl, Nat.mod_self, ite_true, hs, gctrEncryptRecursive, gctrEncryptBlock, inc32_zero,
-    leSeqQuad32ToBytes, List.flatMap_cons, List.flatMap_nil, List.append_nil]
-
-theorem computeIvBE_96 (hLE : Quad32) (iv : List (BitVec 8)) (h : iv.length = 12) :
-    computeIvBE hLE iv =
-      (reverseBytesQuad32 (leBytesToQuad32 (iv ++ List.replicate 4 0))).extractLsb' 32 96 ++ (1 : BitVec 32) := by
-  rw [computeIvBE, ite_eq_left (by omega), padTo128Bits, ite_eq_right (by omega), h]
 
 theorem counter_bits (hLE : Quad32) (l : List (BitVec 8)) (hl : l.length = 12) :
     (BitVec.setWidth 64 (BitVec.setWidth 32 (BitVec.fromLEBytes (l.drop 8))) ||| 1#64 <<< 56) ++
@@ -183,40 +135,6 @@ theorem cipher_by8 (ENC : Bool) (hk : low.x86_64.aes.HwKey) (g : low.x86_64.ghas
   obtain ⟨tb, cur⟩ := g
   simp only at hg
   rcases hg with rfl | ⟨a, rfl⟩ <;> rfl
-
-/-- GHASH from zero over the padded AAD and ciphertext, then the length
-block, is `gcm_hash`'s, its bytes reversed. -/
-theorem gcmHash_eq (hLE : Quad32) (a c : List U8) (x : BitVec 128)
-    (hx : toPoly x = gf128MulRev (ghashPoly (polyLE hLE) 0 ((padBlocks a ++ padBlocks c).map toPoly) +
-      toPoly (insertNat64 (insertNat64 (mkfour 0 0 0 0) (8 * a.length) 1) (8 * c.length) 0)) (polyLE hLE)) :
-    reverseBytesQuad32 x = gcmHash hLE (bvs a) (bvs c) := by
-  have hrev : ∀ q, polyLE (reverseBytesQuad32 q) = toPoly q := fun q => by
-    rw [polyLE, reverseBytesQuad32_involutive]
-  have h : polyLE (gcmHash hLE (bvs a) (bvs c)) = toPoly x := by
-    rw [hx, gcmHash]
-    rw [polyLE_ghashLE, List.map_append, List.map_append, padBlocks_vale, padBlocks_vale, List.map_singleton,
-      hrev, List.length_map, List.length_map, ← List.append_assoc, ghashPoly_append, ← List.map_append,
-      ghashPoly_cons, ghashPoly_nil]
-  rw [polyLE] at h
-  rw [← toPoly_inj h, reverseBytesQuad32_involutive]
-
-theorem length_leSeqQuad32ToBytes : ∀ (qs : List Quad32), (leSeqQuad32ToBytes qs).length = 16 * qs.length
-  | [] => rfl
-  | q :: qs => by
-    rw [leSeqQuad32ToBytes, List.flatMap_cons, List.length_append, ← leSeqQuad32ToBytes,
-      length_leSeqQuad32ToBytes qs]
-    simp [leQuad32ToBytes]; ring
-
-theorem length_gctrEncrypt (icb : Quad32) (p : List (BitVec 8)) (alg : Algorithm) (kw : List (BitVec 32)) :
-    (gctrEncrypt icb p alg kw).length = p.length := by
-  unfold gctrEncrypt
-  dsimp only
-  split
-  · rw [length_leSeqQuad32ToBytes, length_gctr, leBytesToSeqQuad32_eq, List.length_map, chunksOf_length]; omega
-  · rw [List.length_append, length_leSeqQuad32ToBytes, length_gctr, leBytesToSeqQuad32_eq, List.length_map,
-      chunksOf_length, List.length_take, List.length_take]
-    simp only [leQuad32ToBytes, List.length_map, List.length_range]
-    omega
 
 /-- `tagged_from` with the counter block `j0`, on a table `by8` takes: GCTR
 from the block after `j0`, and the tag GCTR from `j0` on `gcm_hash` of the AAD

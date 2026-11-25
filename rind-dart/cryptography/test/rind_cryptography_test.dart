@@ -8,7 +8,9 @@ import 'dart:typed_data';
 
 import 'package:cryptography/cryptography.dart';
 import 'package:cryptography/dart.dart';
+import 'package:rind/ecdsa.dart' as ecdsa;
 import 'package:rind/rind.dart' as rind;
+import 'package:rind/rsa.dart' as rsa;
 import 'package:rind_cryptography/rind_cryptography.dart';
 import 'package:test/test.dart';
 
@@ -49,7 +51,6 @@ void main() {
   test('what rind lacks throws where it is constructed', () {
     final hmac = _rind.hmac(_rind.sha256());
     final constructors = <Object Function()>[
-      () => _rind.aesGcm(nonceLength: 16),
       () => _rind.argon2id(
         memory: 1,
         parallelism: 1,
@@ -237,6 +238,9 @@ void main() {
       _rind.aesGcm(secretKeyLength: 16): DartAesGcm.with128bits(),
       _rind.aesGcm(secretKeyLength: 24): DartAesGcm.with192bits(),
       _rind.aesGcm(): DartAesGcm.with256bits(),
+      _rind.aesGcm(nonceLength: 8): DartAesGcm.with256bits(nonceLength: 8),
+      _rind.aesGcm(secretKeyLength: 16, nonceLength: 16):
+          DartAesGcm.with128bits(nonceLength: 16),
       _rind.chacha20Poly1305Aead(): const DartChacha20.poly1305Aead(),
     };
 
@@ -306,9 +310,37 @@ void main() {
         throwsArgumentError,
       );
       await expectLater(
-        cipher.encrypt([1], secretKey: SecretKey(_bytes(32)), nonce: [1]),
+        cipher.encrypt([1], secretKey: SecretKey(_bytes(32)), nonce: []),
         throwsArgumentError,
       );
+      expect(() => _rind.aesGcm(nonceLength: 0), throwsRangeError);
+      final chacha = _rind.chacha20Poly1305Aead();
+      await expectLater(
+        chacha.encrypt([1], secretKey: SecretKey(_bytes(32)), nonce: [1]),
+        throwsArgumentError,
+      );
+    });
+
+    test('AES-GCM takes a nonce of any length, as Dart does', () async {
+      final cipher = _rind.aesGcm();
+      final secretKey = await cipher.newSecretKey();
+      for (final length in [1, 8, 11, 13, 16, 64]) {
+        final nonce = _bytes(length, 3);
+        final box = await cipher.encrypt(
+          [1, 2, 3],
+          secretKey: secretKey,
+          nonce: nonce,
+        );
+        expect(
+          box,
+          await DartAesGcm.with256bits().encrypt(
+            [1, 2, 3],
+            secretKey: secretKey,
+            nonce: nonce,
+          ),
+        );
+        expect(await cipher.decrypt(box, secretKey: secretKey), [1, 2, 3]);
+      }
     });
 
     test('ChaCha20-Poly1305 refuses a key stream index', () async {
@@ -835,16 +867,16 @@ void main() {
   group('ECDSA', () {
     final curves = {
       _rind.ecdsaP256(_rind.sha256()): (
-        rind.EcdsaSigningAlgorithm.p256Sha256Fixed,
-        rind.VerificationAlgorithm.ecdsaP256Sha256Fixed,
+        ecdsa.SigningAlgorithm.p256Sha256Fixed,
+        ecdsa.VerificationAlgorithm.p256Sha256Fixed,
       ),
       _rind.ecdsaP384(_rind.sha384()): (
-        rind.EcdsaSigningAlgorithm.p384Sha384Fixed,
-        rind.VerificationAlgorithm.ecdsaP384Sha384Fixed,
+        ecdsa.SigningAlgorithm.p384Sha384Fixed,
+        ecdsa.VerificationAlgorithm.p384Sha384Fixed,
       ),
       _rind.ecdsaP521(_rind.sha512()): (
-        rind.EcdsaSigningAlgorithm.p521Sha512Fixed,
-        rind.VerificationAlgorithm.ecdsaP521Sha512Fixed,
+        ecdsa.SigningAlgorithm.p521Sha512Fixed,
+        ecdsa.VerificationAlgorithm.p521Sha512Fixed,
       ),
     };
 
@@ -857,7 +889,7 @@ void main() {
         final message = _bytes(100);
 
         final signature = await algorithm.sign(message, keyPair: pair);
-        rind.PublicKey(
+        ecdsa.PublicKey(
           verification,
           point,
         ).verify(message, Uint8List.fromList(signature.bytes));
@@ -868,10 +900,10 @@ void main() {
         );
 
         // The package's own PKCS#8 and SPKI encodings, which rind reads.
-        final rindPair = rind.EcdsaKeyPair.fromPkcs8(signing, data.toDer());
+        final rindPair = ecdsa.KeyPair.fromPkcs8(signing, data.toDer());
         expect(rindPair.publicKey.bytes, point);
         expect(
-          rind.PublicKey.fromSpki(verification, data.publicKey.toDer()).bytes,
+          ecdsa.PublicKey.fromSpki(verification, data.publicKey.toDer()).bytes,
           point,
         );
         final rindSignature = Signature(
@@ -922,18 +954,17 @@ void main() {
       // signature at all means they round-tripped.
       final message = _bytes(100);
       for (final (hash, verification) in [
-        (_rind.sha256(), rind.VerificationAlgorithm.rsaPkcs1Sha256),
-        (_rind.sha384(), rind.VerificationAlgorithm.rsaPkcs1Sha384),
-        (_rind.sha512(), rind.VerificationAlgorithm.rsaPkcs1Sha512),
+        (_rind.sha256(), rsa.VerificationAlgorithm.pkcs1Sha256),
+        (_rind.sha384(), rsa.VerificationAlgorithm.pkcs1Sha384),
+        (_rind.sha512(), rsa.VerificationAlgorithm.pkcs1Sha512),
       ]) {
         final pkcs1 = _rind.rsaSsaPkcs1v15(hash);
         final signature = await pkcs1.sign(message, keyPair: data);
         expect(signature.publicKey, data.publicKey);
-        rind.PublicKey.fromComponents(
-          verification,
+        rsa.PublicKey.fromComponents(
           n: Uint8List.fromList(data.n),
           e: Uint8List.fromList(data.e),
-        ).verify(message, Uint8List.fromList(signature.bytes));
+        ).verify(verification, message, Uint8List.fromList(signature.bytes));
         expect(await pkcs1.verify(message, signature: signature), isTrue);
         expect(
           await pkcs1.verify([...message, 0], signature: signature),
@@ -942,24 +973,47 @@ void main() {
       }
     });
 
-    test('PSS signs with a salt as long as the hash', () async {
+    test('PSS signs and verifies with its salt length', () async {
       final message = _bytes(100);
-      final pss = _rind.rsaPss(_rind.sha256(), nonceLengthInBytes: 32);
-      final signature = await pss.sign(message, keyPair: data);
-      expect(await pss.verify(message, signature: signature), isTrue);
-      rind.PublicKey.fromComponents(
-        rind.VerificationAlgorithm.rsaPssSha256,
-        n: Uint8List.fromList(data.n),
-        e: Uint8List.fromList(data.e),
-      ).verify(message, Uint8List.fromList(signature.bytes));
+      for (final (hash, verification) in [
+        (_rind.sha256(), rsa.PssVerificationAlgorithm.sha256),
+        (_rind.sha384(), rsa.PssVerificationAlgorithm.sha384),
+        (_rind.sha512(), rsa.PssVerificationAlgorithm.sha512),
+      ]) {
+        for (final salt in [0, 16, hash.hashLengthInBytes]) {
+          final pss = _rind.rsaPss(hash, nonceLengthInBytes: salt);
+          final signature = await pss.sign(message, keyPair: data);
+          expect(await pss.verify(message, signature: signature), isTrue);
+          expect(
+            await pss.verify([...message, 0], signature: signature),
+            isFalse,
+          );
+          rsa.PublicKey.fromComponents(
+            n: Uint8List.fromList(data.n),
+            e: Uint8List.fromList(data.e),
+          ).verify(
+            verification(salt),
+            message,
+            Uint8List.fromList(signature.bytes),
+          );
 
-      // Another salt length verifies any salt, and signs nothing.
-      final salted = _rind.rsaPss(_rind.sha256(), nonceLengthInBytes: 16);
-      expect(await salted.verify(message, signature: signature), isTrue);
-      await expectLater(
-        salted.sign(message, keyPair: data),
-        _throwsUnsupported,
-      );
+          // Another salt length refuses it, as WebCrypto's does.
+          final other = _rind.rsaPss(hash, nonceLengthInBytes: salt + 1);
+          expect(await other.verify(message, signature: signature), isFalse);
+        }
+      }
+      for (final salt in [-1, 65536]) {
+        expect(
+          () => _rind.rsaPss(_rind.sha256(), nonceLengthInBytes: salt),
+          throwsA(
+            isA<RangeError>().having(
+              (e) => e.name,
+              'name',
+              'nonceLengthInBytes',
+            ),
+          ),
+        );
+      }
     });
 
     test('SHA-1 PKCS#1 v1.5 verifies and signs nothing', () async {

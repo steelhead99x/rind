@@ -10,12 +10,13 @@ publish = false
 rind = { path = "../rind" }
 codspeed-criterion-compat = { optional = true, version = "6" }
 
-[dev-dependencies]
+# Xtensa builds none of these. criterion's wait-timeout crate does not compile
+# against ESP-IDF's libc, ring and OpenSSL have no Xtensa port, and the bench
+# targets there are empty programs. A bench that names one of them fails the
+# Xtensa check, and a host `cargo bench` still builds every row.
+[target.'cfg(not(target_arch = "xtensa"))'.dev-dependencies]
 aes-gcm = "0.11"
 argon2 = { version = "0.6", default-features = false, features = ["alloc"] }
-aws-lc-rs = { version = "1.19", features = ["non-fips"], default-features = false }
-# For XChaCha20-Poly1305, which aws-lc-rs does not expose.
-aws-lc-sys = { version = "0.47", default-features = false }
 blind-rsa-signatures = "0.18"
 chacha20poly1305 = "0.11"
 criterion = "0.8"
@@ -27,7 +28,7 @@ hex = { version = "0.4", features = ["serde"] }
 hmac = "0.13"
 hpke = { version = "0.15", features = ["aes", "hkdfsha2"] }
 hpke-rs = { version = "0.8", features = ["libcrux"] }
-jsonwebtoken = { version = "11.1", default-features = false, features = ["aws_lc_rs"] }
+jsonwebtoken = { version = "12", default-features = false }
 libcrux-aes = "0.0.10"
 libcrux-chacha20poly1305 = "0.0.10"
 libcrux-ecdh = "0.0.9"
@@ -47,11 +48,9 @@ p256 = { version = "0.14", features = ["ecdh", "getrandom"] }
 p384 = { version = "0.14", features = ["ecdh", "getrandom", "oprf"] }
 p521 = { version = "0.14", features = ["ecdh", "getrandom"] }
 proptest = "1.5.0"
-ring = "0.17"
 rind-jsonwebtoken = { path = "../rind-jsonwebtoken" }
 rind-rustls = { path = "../rind-rustls" }
 rsa = { version = "0.10", features = ["pkcs1v15"] }
-rustls = { version = "0.23.36", default-features = false, features = ["aws-lc-rs", "ring", "std"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha1 = "0.11"
@@ -67,13 +66,27 @@ vrf-rfc9381 = { version = "0.0.7", features = ["edwards25519", "p256"] }
 # tiers deny it what they deny rind, through `VG_CPU_FEATURES`.
 verified-garbage = { git = "https://github.com/pyca/verified-garbage", rev = "0aa40d6c21fd02943fe5b38a5b69b6213d07764d", features = ["cpu-features-env"] }
 x25519-dalek = { version = "3", features = ["getrandom"] }
+ring = "0.17"
+rustls = { version = "0.23.36", default-features = false, features = ["ring", "std"] }
+
+# aws-lc builds for neither Xtensa nor bare metal (`target_os = "none"`), so
+# the benches leave its rows out there, on the same cfg, and these with them:
+# aws-lc-rs, and the aws-lc-rs backends of jsonwebtoken and rustls.
+[target.'cfg(not(any(target_arch = "xtensa", target_os = "none")))'.dev-dependencies]
+aws-lc-rs = { version = "1.19", features = ["non-fips"], default-features = false }
+# For XChaCha20-Poly1305, which aws-lc-rs does not expose.
+aws-lc-sys = { version = "0.47", default-features = false }
+jsonwebtoken = { version = "12", default-features = false, features = ["aws_lc_rs"] }
+rustls = { version = "0.23.36", default-features = false, features = ["aws-lc-rs"] }
 
 # Graviola supports only these.
 [target.'cfg(any(target_arch = "x86_64", target_arch = "aarch64"))'.dev-dependencies]
 graviola = "0.4"
 rustls-graviola = "0.4"
 
-[target.'cfg(target_family = "unix")'.dev-dependencies]
+# ESP-IDF counts as unix, but openssl-sys needs a target OpenSSL this lint
+# does not install.
+[target.'cfg(all(target_family = "unix", not(target_arch = "xtensa")))'.dev-dependencies]
 foreign-types = "0.3"
 openssl = "0.10"
 openssl-sys = "0.9"
@@ -117,6 +130,10 @@ harness = false
 
 [[bench]]
 name = "sha3"
+harness = false
+
+[[bench]]
+name = "dit_toggle"
 harness = false
 
 [[bench]]

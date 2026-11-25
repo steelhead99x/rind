@@ -493,11 +493,14 @@ impl<'a> Integer<'a> {
         }
     }
 
+    /// Whether the sign bit is set, computed without branching on it, since
+    /// `rsa::SigningKey::from_pkcs1_der` asks of secret integers and only
+    /// then declassifies the answer.
     pub(crate) fn is_negative(&self) -> bool {
-        self.twos_complement
-            .first()
-            .map(|b| b & 0x80 == 0x80)
-            .unwrap_or_default()
+        // Not through an `Option<bool>`, whose `None` a debug build tests
+        // with a compare on the secret bit: here the `Option` holds the byte
+        // and only the public length decides it.
+        self.twos_complement.first().copied().unwrap_or(0) & 0x80 == 0x80
     }
 
     /// The two's complement bytes, borrowed for as long as what was parsed,
@@ -907,6 +910,7 @@ impl Tag {
         self.0 == offered
     }
 
+    #[cfg_attr(coverage_nightly, coverage(off))] // const-evaluated only
     const fn constructed(&self) -> bool {
         matches!(self.0, Self::SEQUENCE) || self.0 & Self::CONSTRUCTED == Self::CONSTRUCTED
     }

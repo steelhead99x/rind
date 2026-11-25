@@ -11,7 +11,8 @@ topics:
   - ffi
   - encryption
 
-# No web: rind has no wasm build.
+# No web: rind's package calls rind through `dart:ffi`, which Dart's web
+# compilers lack.
 platforms:
   android:
   ios:
@@ -24,7 +25,7 @@ environment:
 
 dependencies:
   cryptography: ^2.9.0
-  rind: ^0.1.0
+  rind: ^0.2.0
 
 dev_dependencies:
   lints: ^6.0.0

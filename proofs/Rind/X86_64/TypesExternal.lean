@@ -25,6 +25,13 @@ opaque low.x86_64.p256_vg.P256 : Type
 /-- The token proving the CPU runs pyca/verified-garbage's AVX-512 IFMA X25519
 and Ed25519, which no proof here covers. -/
 opaque low.x86_64.curve25519_ifma.Curve25519Ifma : Type
+/-- The token proving the CPU runs pyca/verified-garbage's P-384 `d·G`, which
+no proof here covers. -/
+opaque low.x86_64.p384_vg.MulBase : Type
+
+/-- The token proving the CPU runs pyca/verified-garbage's P-384 ECDSA
+verification, which no proof here covers. -/
+opaque low.x86_64.p384_vg.Verify : Type
 
 /-- The token proving the CPU has BMI2 and ADX. -/
 opaque low.x86_64.cpu.HaveBmi2Adx : Type
@@ -35,14 +42,17 @@ opaque low.x86_64.cpu.HaveAvx512ForRsa : Type
 
 /-- The tokens proving the CPU has what each SHA-1, SHA-256, SHA-512, and
 ChaCha20-Poly1305 routine needs: the SHA extensions, AVX and SSSE3, AVX2,
-SSSE3, the SHA512 instructions, and SSE4.1. -/
+SSSE3, and SSE4.1. -/
 opaque low.x86_64.cpu.HaveSha1 : Type
 opaque low.x86_64.cpu.HaveSha256 : Type
 opaque low.x86_64.cpu.HaveAvx : Type
 opaque low.x86_64.cpu.HaveAvx2 : Type
 opaque low.x86_64.cpu.HaveSsse3 : Type
-opaque low.x86_64.cpu.HaveSha512 : Type
 opaque low.x86_64.cpu.HaveSse41 : Type
+
+/-- The token proving pyca/verified-garbage's AVX-512 IFMA ChaCha20-Poly1305
+runs here. -/
+opaque low.x86_64.cpu.HaveIfmaForVgChaCha20Poly1305 : Type
 
 /-- The tokens proving pyca/verified-garbage's ML-KEM-768 encapsulation, and
 its key generation and decapsulation, run here. -/

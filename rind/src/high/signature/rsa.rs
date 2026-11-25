@@ -189,6 +189,7 @@ const fn verification(scheme: RsaScheme, min_bits: usize) -> VerificationAlgorit
     algorithm(RsaVerification::Scheme(scheme), scheme.min_bits(min_bits))
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))] // const-evaluated only
 const fn sha1_verification(min_bits: usize) -> VerificationAlgorithm {
     algorithm(RsaVerification::Pkcs1Sha1, min_bits)
 }
@@ -270,6 +271,37 @@ pub struct PublicKeyComponents<B> {
     pub e: B,
 }
 
+/// An RSA private key as its big-endian integers, as a JWK carries them,
+/// rather than DER.
+#[derive(Clone, Copy)]
+pub struct KeyPairComponents<B> {
+    /// The modulus and public exponent, without leading zero bytes.
+    pub public_key: PublicKeyComponents<B>,
+    /// The private exponent.
+    pub d: B,
+    /// The first prime factor of the modulus.
+    pub p: B,
+    /// The second prime factor of the modulus.
+    pub q: B,
+    /// `d` mod `p - 1`.
+    pub dp: B,
+    /// `d` mod `q - 1`.
+    pub dq: B,
+    /// The inverse of `q` mod `p`.
+    pub qi: B,
+}
+
+impl<B> fmt::Debug for KeyPairComponents<B>
+where
+    PublicKeyComponents<B>: fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("KeyPairComponents")
+            .field("public_key", &self.public_key)
+            .finish_non_exhaustive()
+    }
+}
+
 /// An RSA public key, with a modulus of 1024 to 8192 bits, which verifies
 /// with any [`VerificationAlgorithm`] whose floor it meets.
 ///
@@ -349,7 +381,8 @@ impl PublicKey {
     }
 }
 
-#[cfg(any(test, rind_fips))]
+// Compiled as `crate::fips` is.
+#[cfg(all(any(test, rind_fips), feature = "ml-dsa", feature = "slh-dsa"))]
 impl PublicKey {
     /// The modulus length in bits: what the FIPS module checks against
     /// FIPS 186-5's sizes.
@@ -412,6 +445,23 @@ impl KeyPair {
     /// Loads a PKCS#1 `RSAPrivateKey`.
     pub fn from_pkcs1(der: &[u8]) -> Result<Self, Error> {
         Self::new(rsa::SigningKey::from_pkcs1_der(der)?)
+    }
+
+    /// Loads a private key from its big-endian integers, as a JWK carries
+    /// them, refusing one whose integers disagree.
+    pub fn from_components(
+        components: &KeyPairComponents<impl AsRef<[u8]>>,
+    ) -> Result<Self, Error> {
+        Self::new(rsa::SigningKey::from_components(&rsa::Components {
+            n: components.public_key.n.as_ref(),
+            e: components.public_key.e.as_ref(),
+            d: components.d.as_ref(),
+            p: components.p.as_ref(),
+            q: components.q.as_ref(),
+            dp: components.dp.as_ref(),
+            dq: components.dq.as_ref(),
+            qi: components.qi.as_ref(),
+        })?)
     }
 
     fn new(key: rsa::SigningKey) -> Result<Self, Error> {

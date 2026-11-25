@@ -109,6 +109,7 @@ pub(crate) fn has_small_order(bytes: &[u8]) -> bool {
     ];
 
     /// `p = 2^255 - 19`, as limbs, with its lowest limb `low`.
+    #[cfg_attr(coverage_nightly, coverage(off))] // const-evaluated only
     const fn near_p(low: u64) -> [u64; 4] {
         [low, u64::MAX, u64::MAX, u64::MAX >> 1]
     }

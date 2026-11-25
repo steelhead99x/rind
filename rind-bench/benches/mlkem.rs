@@ -1,9 +1,20 @@
+#[cfg(target_arch = "xtensa")]
+fn main() {}
+
+#[cfg(not(target_arch = "xtensa"))]
 mod criterion;
+#[cfg(not(target_arch = "xtensa"))]
 use std::hint::black_box;
 
+#[cfg(not(target_arch = "xtensa"))]
 use criterion::{BatchSize, Criterion, Throughput, criterion_group, criterion_main};
 
-#[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+#[cfg(all(
+    feature = "__bench_openssl",
+    target_family = "unix",
+    not(target_arch = "xtensa")
+))]
+#[cfg(not(target_arch = "xtensa"))]
 mod ossl {
     //! The openssl crate does not yet wrap ML-KEM keygen/encaps/decaps.
 
@@ -96,6 +107,7 @@ mod ossl {
 
 /// A verified-garbage ML-KEM-768 key, which it generates only from a seed:
 /// drawn here, as the other libraries draw theirs.
+#[cfg(not(target_arch = "xtensa"))]
 fn vg_generate() -> verified_garbage::mlkem768::DecapsulationKey768 {
     let mut seed = [0u8; 64];
     getrandom::fill(&mut seed).unwrap();
@@ -104,6 +116,7 @@ fn vg_generate() -> verified_garbage::mlkem768::DecapsulationKey768 {
 
 /// Checks that verified-garbage and rind each decapsulate the other's
 /// ciphertexts to the secret it encapsulated.
+#[cfg(not(target_arch = "xtensa"))]
 fn vg_agrees_with_rind() {
     use rind::kem::*;
     use verified_garbage::mlkem768::EncapsulationKey768;
@@ -127,11 +140,16 @@ fn vg_agrees_with_rind() {
 }
 
 // client first operation
+#[cfg(not(target_arch = "xtensa"))]
 fn mlkem768_keygen(c: &mut Criterion) {
     let mut group = c.benchmark_group("mlkem768-keygen");
     group.throughput(Throughput::Elements(1));
 
-    #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+    #[cfg(all(
+        feature = "__bench_openssl",
+        target_family = "unix",
+        not(target_arch = "xtensa")
+    ))]
     if ossl::available() {
         group.bench_function("openssl", |b| {
             b.iter(|| {
@@ -141,6 +159,7 @@ fn mlkem768_keygen(c: &mut Criterion) {
         });
     }
 
+    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
     group.bench_function("aws-lc-rs", |b| {
         use aws_lc_rs::kem;
 
@@ -169,6 +188,7 @@ fn mlkem768_keygen(c: &mut Criterion) {
     });
 
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         use rind::kem::*;
 
         b.iter(|| {
@@ -192,11 +212,16 @@ fn mlkem768_keygen(c: &mut Criterion) {
 }
 
 // server operation
+#[cfg(not(target_arch = "xtensa"))]
 fn mlkem768_encaps(c: &mut Criterion) {
     let mut group = c.benchmark_group("mlkem768-encaps");
     group.throughput(Throughput::Elements(1));
 
-    #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+    #[cfg(all(
+        feature = "__bench_openssl",
+        target_family = "unix",
+        not(target_arch = "xtensa")
+    ))]
     if ossl::available() {
         group.bench_function("openssl", |b| {
             use openssl::pkey::{KeyType, PKey};
@@ -216,6 +241,7 @@ fn mlkem768_encaps(c: &mut Criterion) {
         });
     }
 
+    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
     group.bench_function("aws-lc-rs", |b| {
         use aws_lc_rs::kem;
 
@@ -263,6 +289,7 @@ fn mlkem768_encaps(c: &mut Criterion) {
     });
 
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         use rind::kem::*;
 
         let encaps = DecapsulationKey::<MlKem768>::generate()
@@ -302,11 +329,16 @@ fn mlkem768_encaps(c: &mut Criterion) {
 }
 
 // client second operation
+#[cfg(not(target_arch = "xtensa"))]
 fn mlkem768_decaps(c: &mut Criterion) {
     let mut group = c.benchmark_group("mlkem768-decaps");
     group.throughput(Throughput::Elements(1));
 
-    #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+    #[cfg(all(
+        feature = "__bench_openssl",
+        target_family = "unix",
+        not(target_arch = "xtensa")
+    ))]
     if ossl::available() {
         group.bench_function("openssl", |b| {
             let decaps = ossl::keygen();
@@ -316,6 +348,7 @@ fn mlkem768_decaps(c: &mut Criterion) {
         });
     }
 
+    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
     group.bench_function("aws-lc-rs", |b| {
         use aws_lc_rs::kem;
 
@@ -360,6 +393,7 @@ fn mlkem768_decaps(c: &mut Criterion) {
     });
 
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         use rind::kem::*;
 
         let decaps = DecapsulationKey::<MlKem768>::generate().unwrap();
@@ -397,11 +431,16 @@ fn mlkem768_decaps(c: &mut Criterion) {
 }
 
 // combined operation: keygen, encaps-encode, encaps-decode, encaps, decaps
+#[cfg(not(target_arch = "xtensa"))]
 fn mlkem768_combined(c: &mut Criterion) {
     let mut group = c.benchmark_group("mlkem768-combined");
     group.throughput(Throughput::Elements(1));
 
-    #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+    #[cfg(all(
+        feature = "__bench_openssl",
+        target_family = "unix",
+        not(target_arch = "xtensa")
+    ))]
     if ossl::available() {
         group.bench_function("openssl", |b| {
             use openssl::pkey::{KeyType, PKey};
@@ -422,6 +461,7 @@ fn mlkem768_combined(c: &mut Criterion) {
         });
     }
 
+    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
     group.bench_function("aws-lc-rs", |b| {
         use aws_lc_rs::kem;
 
@@ -467,6 +507,7 @@ fn mlkem768_combined(c: &mut Criterion) {
     });
 
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         use rind::kem::*;
 
         b.iter(|| {
@@ -507,15 +548,18 @@ fn mlkem768_combined(c: &mut Criterion) {
 
 /// ML-KEM-512 and ML-KEM-1024 against aws-lc-rs and libcrux, each operation
 /// measured as its ML-KEM-768 group measures it.
+#[cfg(not(target_arch = "xtensa"))]
 macro_rules! mlkem_set {
     (
         $keygen:ident, $encaps:ident, $decaps:ident, $name:literal, $set:ident, $aws:ident,
         $libcrux:ident, $public:ident, $ciphertext:ident
     ) => {
+        #[cfg(not(target_arch = "xtensa"))]
         fn $keygen(c: &mut Criterion) {
             let mut group = c.benchmark_group(concat!($name, "-keygen"));
             group.throughput(Throughput::Elements(1));
 
+            #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
             group.bench_function("aws-lc-rs", |b| {
                 use aws_lc_rs::kem;
 
@@ -536,6 +580,7 @@ macro_rules! mlkem_set {
             });
 
             group.bench_function("rind", |b| {
+                let _dit = criterion::rind_dit();
                 use rind::kem::*;
 
                 b.iter(|| {
@@ -544,10 +589,12 @@ macro_rules! mlkem_set {
             });
         }
 
+        #[cfg(not(target_arch = "xtensa"))]
         fn $encaps(c: &mut Criterion) {
             let mut group = c.benchmark_group(concat!($name, "-encaps"));
             group.throughput(Throughput::Elements(1));
 
+            #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
             group.bench_function("aws-lc-rs", |b| {
                 use aws_lc_rs::kem;
 
@@ -583,6 +630,7 @@ macro_rules! mlkem_set {
             });
 
             group.bench_function("rind", |b| {
+                let _dit = criterion::rind_dit();
                 use rind::kem::*;
 
                 let encaps = DecapsulationKey::<$set>::generate()
@@ -597,10 +645,12 @@ macro_rules! mlkem_set {
             });
         }
 
+        #[cfg(not(target_arch = "xtensa"))]
         fn $decaps(c: &mut Criterion) {
             let mut group = c.benchmark_group(concat!($name, "-decaps"));
             group.throughput(Throughput::Elements(1));
 
+            #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
             group.bench_function("aws-lc-rs", |b| {
                 use aws_lc_rs::kem;
 
@@ -635,6 +685,7 @@ macro_rules! mlkem_set {
             });
 
             group.bench_function("rind", |b| {
+                let _dit = criterion::rind_dit();
                 use rind::kem::*;
 
                 let decaps = DecapsulationKey::<$set>::generate().unwrap();
@@ -649,6 +700,7 @@ macro_rules! mlkem_set {
     };
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 mlkem_set!(
     mlkem512_keygen,
     mlkem512_encaps,
@@ -660,6 +712,7 @@ mlkem_set!(
     MlKem512PublicKey,
     MlKem512Ciphertext
 );
+#[cfg(not(target_arch = "xtensa"))]
 mlkem_set!(
     mlkem1024_keygen,
     mlkem1024_encaps,
@@ -672,6 +725,7 @@ mlkem_set!(
     MlKem1024Ciphertext
 );
 
+#[cfg(not(target_arch = "xtensa"))]
 criterion_group!(
     benches,
     mlkem512_keygen,
@@ -685,4 +739,5 @@ criterion_group!(
     mlkem1024_encaps,
     mlkem1024_decaps,
 );
+#[cfg(not(target_arch = "xtensa"))]
 criterion_main!(benches);

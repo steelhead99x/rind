@@ -1,0 +1,32 @@
+name: ESP32-S3 SHA-256 layout
+
+# Links rind's SHA-256 the way ESP-IDF places `.iram1` and `.dram1`, and
+# checks the ESP32-S3 image: block and driver in IRAM, K in `.dram1`, no
+# call in the block, no relocation into flash text. The toolchain is the
+# one the board image uses (esp rustc 1.97.0.0).
+# Weekly, at its own hour: see TESTING.md, "Scheduled workflows".
+on:
+  schedule:
+    - cron: "23 12 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: esp32s3-sha256-layout-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  layout:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/esp32s3-toolchain
+
+      - name: Check placement
+        run: admin/esp32s3-sha256-layout

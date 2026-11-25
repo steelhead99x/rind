@@ -16,7 +16,8 @@ dev_dependencies:
     sdk: flutter
   integration_test:
     sdk: flutter
-  # The package's tests, which this app runs, import it.
+  # The package's tests, which this app runs, import these.
+  pointycastle: any
   test: any
 
 # Test the checkout's Rust, not a released prebuilt library.

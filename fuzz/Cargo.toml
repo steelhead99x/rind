@@ -3,10 +3,20 @@ name = "rind-fuzz"
 version = "0.0.0"
 publish = false
 edition = "2021"
-rust-version.workspace = true
+# hpke-rs, the HPKE oracle, needs 1.94 through libcrux-platform, which calls
+# `__cpuid` as the safe function it became then. cargo fuzz builds on nightly.
+rust-version = "1.94"
+
+# rind's own build script, so the targets see the `rind_backend` it picks
+# and take the oracle that shares no code with that backend.
+build = "build.rs"
 
 [package.metadata]
 cargo-fuzz = true
+
+[lints.rust]
+# Set by cargo fuzz.
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(fuzzing)"] }
 
 [dependencies]
 libfuzzer-sys = { version = "0.4", features = ["arbitrary-derive"] }
@@ -33,9 +43,69 @@ str0m-aws-lc-rs = "0.7"
 # SLH-DSA, which aws-lc-rs lacks, and the traits that encode its keys.
 pkcs8 = { version = "0.11", default-features = false, features = ["alloc"] }
 slh-dsa = "=0.2.0-rc.5"
+# Each primitive's independent oracle beside aws-lc, which shares no code
+# with the path rind runs, as TESTING.md's primitives table names it.
+aes = "0.9"
+aes-gcm = { version = "0.11", default-features = false, features = ["aes"] }
+aes-kw = "0.3"
+cbc = { version = "0.2", features = ["alloc"] }
+chacha20 = "0.10"
+chacha20poly1305 = { version = "0.11", default-features = false }
+ctr = "0.10"
+ghash = "0.6"
+hkdf = "0.13"
+hmac = "0.13"
+md-5 = { version = "0.11", default-features = false }
+pbkdf2 = { version = "0.13", default-features = false, features = ["hmac"] }
+sha1 = { version = "0.11", default-features = false, features = ["oid"] }
+sha2 = { version = "0.11", default-features = false }
+sha3 = { version = "0.12", default-features = false }
+ml-dsa = { version = "0.1", default-features = false }
+ml-kem = { version = "0.3", default-features = false, features = ["hazmat"] }
+rsa = { version = "0.10", features = ["pkcs1v15"] }
+libcrux-curve25519 = "0.0.10"
+libcrux-ed25519 = "0.0.11"
+libcrux-p256 = { version = "0.0.10", features = ["expose-hacl"] }
+p256 = { version = "0.14", default-features = false, features = ["ecdh", "ecdsa", "pkcs8"] }
+p384 = { version = "0.14", default-features = false, features = ["ecdh", "ecdsa", "pkcs8"] }
+p521 = { version = "0.14", default-features = false, features = ["ecdh", "ecdsa", "pkcs8"] }
+# The textbook curves in `rind/src/test/reference.rs`, the oracle on armv7
+# and the portable backend where every crate covering a curve runs rind's.
+num-bigint = "0.5"
+hpke-rs = { version = "0.8", default-features = false, features = ["hazmat", "rustcrypto", "std"] }
+blind-rsa-signatures = { version = "0.18", default-features = false }
+akd_core = { version = "0.13", default-features = false, features = ["vrf"] }
+vrf-rfc9381 = { version = "0.0.7", default-features = false, features = ["p256"] }
+voprf = { version = "0.5", default-features = false, features = ["alloc", "ristretto255-ciphersuite"] }
+p256-voprf = { package = "p256", version = "0.13", default-features = false, features = ["hash2curve", "voprf"] }
+p384-voprf = { package = "p384", version = "0.13", default-features = false, features = ["hash2curve", "voprf"] }
+p521-voprf = { package = "p521", version = "0.13.3", default-features = false, features = ["hash2curve", "voprf"] }
+rand_core-voprf = { package = "rand_core", version = "0.6", features = ["getrandom"] }
+# SPAKE2+, which aws-lc-rs does not offer; `test-utils` takes the ephemeral
+# scalars the fuzzer writes.
+pakery-crypto = { version = "0.6.2", default-features = false, features = ["std", "p256"] }
+pakery-spake2plus = { version = "0.6.2", default-features = false, features = ["std", "test-utils"] }
+# RFC 9591's FROST, which aws-lc-rs does not offer.
+frost-ed25519 = { version = "3", default-features = false }
+frost-ristretto255 = { version = "3", default-features = false }
+frost-p256 = { version = "3", default-features = false }
 
 [dependencies.rind]
 path = "../rind"
+
+# The bindings whose C ABIs the `dart`, `python`, and `fips` targets drive.
+[dependencies.rind-dart]
+path = "../rind-dart"
+
+# CPython, linked only under cargo fuzz, so a workspace build needs no
+# libpython.
+[target.'cfg(all(fuzzing, target_os = "linux", target_env = "gnu", target_pointer_width = "64"))'.dependencies]
+rind-python = { path = "../rind-python" }
+pyo3 = { version = "0.30", features = ["auto-initialize"] }
+
+# The FIPS module builds only here, as rind-fips's build script decides.
+[target.'cfg(all(target_os = "linux", target_env = "gnu", target_endian = "little", target_pointer_width = "64", any(target_arch = "x86_64", target_arch = "aarch64")))'.dependencies]
+rind-fips = { path = "../rind-fips" }
 
 [[bin]]
 name = "legacy"
@@ -208,6 +278,41 @@ bench = false
 [[bin]]
 name = "openssl"
 path = "fuzzer/openssl.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "dart"
+path = "fuzzer/dart.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fips"
+path = "fuzzer/fips.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "python"
+path = "fuzzer/python.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "spake2plus"
+path = "fuzzer/spake2plus.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "frost"
+path = "fuzzer/frost.rs"
 test = false
 doc = false
 bench = false

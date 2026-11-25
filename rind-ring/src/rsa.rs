@@ -1,10 +1,6 @@
 //! RSA key pairs and public keys.
-//!
-//! ring's `KeyPair::from_components` and `KeyPairComponents` are not
-//! offered: building a key from big-endian private components means
-//! encoding them as DER here, which branches on their secret leading bytes.
-//! Load the key as PKCS#1 or PKCS#8 instead.
 
+use alloc::boxed::Box;
 use core::fmt;
 use core::marker::PhantomData;
 
@@ -33,11 +29,42 @@ impl KeyPair {
             .and_then(Self::new)
     }
 
+    /// Loads a private key from its big-endian integers.
+    ///
+    /// Unlike ring, this takes private integers with leading zero bytes, as
+    /// aws-lc-rs does: refusing them would branch on their secret first
+    /// bytes. It refuses integers that disagree, which ring may take.
+    pub fn from_components<Public, Private>(
+        components: &KeyPairComponents<Public, Private>,
+    ) -> Result<Self, error::KeyRejected>
+    where
+        Public: AsRef<[u8]>,
+        Private: AsRef<[u8]>,
+    {
+        let public_key = &components.public_key;
+        let components = rind::rsa::KeyPairComponents {
+            public_key: rind::rsa::PublicKeyComponents {
+                n: public_key.n.as_ref(),
+                e: public_key.e.as_ref(),
+            },
+            d: components.d.as_ref(),
+            p: components.p.as_ref(),
+            q: components.q.as_ref(),
+            dp: components.dP.as_ref(),
+            dq: components.dQ.as_ref(),
+            qi: components.qInv.as_ref(),
+        };
+        rind::rsa::KeyPair::from_components(&components)
+            .map_err(error::KeyRejected::rind)
+            .and_then(Self::new)
+    }
+
     // rind takes moduli up to 8192 bits of any length; ring refuses the
     // rest, and an exponent below 65537.
     fn new(key: rind::rsa::KeyPair) -> Result<Self, error::KeyRejected> {
+        // rind's encoding of a key it loaded always parses.
         let public = PublicKey::new(key.public_key().as_ref())
-            .map_err(|_| error::KeyRejected::invalid_encoding())?;
+            .or(Err(error::KeyRejected::invalid_encoding()))?;
         let bits = public.modulus_bits();
         if bits < 2048 {
             return Err(error::KeyRejected::too_small());
@@ -100,6 +127,38 @@ impl fmt::Debug for KeyPair {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RsaKeyPair")
             .field("public", &self.public)
+            .finish()
+    }
+}
+
+/// An RSA private key as its big-endian integers.
+#[derive(Clone, Copy)]
+#[allow(non_snake_case)]
+pub struct KeyPairComponents<Public, Private = Public> {
+    /// The modulus and public exponent.
+    pub public_key: PublicKeyComponents<Public>,
+    /// The private exponent.
+    pub d: Private,
+    /// The first prime factor of the modulus.
+    pub p: Private,
+    /// The second prime factor of the modulus.
+    pub q: Private,
+    /// `d` mod `p - 1`.
+    pub dP: Private,
+    /// `d` mod `q - 1`.
+    pub dQ: Private,
+    /// The inverse of `q` mod `p`.
+    pub qInv: Private,
+}
+
+impl<Public, Private> fmt::Debug for KeyPairComponents<Public, Private>
+where
+    PublicKeyComponents<Public>: fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // As ring, leaving out the private integers.
+        f.debug_struct("KeyPairComponents")
+            .field("public_key", &self.public_key)
             .finish()
     }
 }
@@ -407,4 +466,22 @@ pub(crate) mod padding {
         SHA512,
         "PSS signatures with SHA-512, MGF1, and a 64-byte random salt."
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::PublicKey;
+    use crate::der::tests::tlv;
+
+    #[test]
+    fn modulus_bits_counts_a_top_byte_below_0x80() {
+        // 0x01ff is 9 bits. `8 * len - leading_zeros` becomes `8 * len +
+        // leading_zeros` only for this shape: a modulus whose top bit is set
+        // has no leading zeros, and the two agree.
+        let modulus = tlv(0x02, &[0x01, 0xff]);
+        let exponent = tlv(0x02, &[0x01, 0x00, 0x01]);
+        let der = tlv(0x30, &[modulus, exponent].concat());
+        let key = PublicKey::new(&der).unwrap();
+        assert_eq!(key.modulus_bits(), 9);
+    }
 }

@@ -5,18 +5,25 @@ Usage: admin/bench-report-test
 """
 
 import contextlib
+import copy
 import fcntl
+import glob
+import hashlib
+import hmac
 import importlib.machinery
 import importlib.util
 import io
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tarfile
+import stat
 import tempfile
 import unittest
+from unittest import mock
 
 # The script has no .py name to cache bytecode under.
 sys.dont_write_bytecode = True
@@ -61,8 +68,8 @@ def hosts():
                 ("aes256-gcm/{lib}/16KB", "aws-lc-rs", 1500.0),
             ],
         ),
-        "nixos2": host(
-            "nixos2",
+        "desktop": host(
+            "desktop",
             "x86_64",
             "NixOS (Linux 6.18)",
             COFFEE_LAKE,
@@ -75,7 +82,7 @@ def hosts():
             "kixtop",
             "arm64",
             "macOS 15.1 (24.1.0)",
-            {"aes": 1, "pmull": 1, "sha2": 1, "sha3": 1},
+            {"aes": 1, "dit": 1, "pmull": 1, "sha2": 1, "sha3": 1},
             [("x25519-ecdh/{lib}", "rind", 20000.0), ("x25519-ecdh/{lib}", "ring", 40000.0)],
         ),
     }
@@ -156,10 +163,10 @@ class Render(unittest.TestCase):
     def test_overview_marks_each_measured_square(self):
         svg = br.overview_svg(hosts(), VERIFIED, "light")
         titles = squares(svg)
-        # nixos: x25519 3 + aes 2; nixos2: aes 2; kixtop: x25519 2; desktop
+        # nixos: x25519 3 + aes 2; desktop: aes 2; kixtop: x25519 2; ovh-iad
         # is unmeasured, so it has no squares.
         self.assertEqual(len(titles), 9)
-        self.assertIn("left to right: nixos, nixos2, kixtop.", svg)
+        self.assertIn("left to right: nixos, desktop, kixtop.", svg)
         # Only the libraries some host timed get a column.
         self.assertIn(">OpenSSL<", svg)
         self.assertNotIn(">graviola<", svg)
@@ -173,41 +180,66 @@ class Render(unittest.TestCase):
         self.assertEqual(
             sorted(titles),
             [
-                "AES-256-GCM seal, 16 KB, rind on nixos2: 2.00 µs, 1.00× the fastest; verified: aes proof",
+                "AES-256-GCM seal, 16 KB, rind on desktop: 2.00 µs, 1.00× the fastest; verified: aes proof",
                 "X25519, rind on nixos: 30.00 µs, 1.00× the fastest; verified: x86 proof",
                 "X25519, ring on kixtop: 40.00 µs, 2.00× the fastest; verified: any-arch proof",
                 "X25519, ring on nixos: 33.00 µs, 1.10× the fastest; verified: any-arch proof",
             ],
         )
 
-    def test_dit_held_shows_beside_rind_but_never_sets_the_fastest(self):
+    def test_vg_dit_held_shows_beside_vg_but_never_sets_the_fastest(self):
         everyone = hosts()
-        everyone["kixtop"]["results"].append({"operation": "x25519-ecdh/{lib}", "library": "rind-dit-held", "ns": 10000.0})
-        everyone["kixtop"]["results"][1]["ns"] = 15000.0
-        svg = br.overview_svg(everyone, VERIFIED, "light")
-        titles = squares(svg)
-        # kixtop's rind trails ring by 33%; its held row counts for neither.
-        self.assertIn(">rind is the fastest, or within 10% of it, in 3 of its 4 times<", svg)
-        self.assertIn("X25519, rind (DIT held) on kixtop: 10.00 µs, 0.67× the fastest", titles)
-        self.assertIn("X25519, rind on kixtop: 20.00 µs, 1.33× the fastest", titles)
-        # rind is a gap against ring, never against its own held row.
-        self.assertEqual(br.gaps_of(everyone, None), {("x25519-ecdh", "kixtop"): (20000.0 / 15000.0, "ring")})
-        on_macos = [{"library": "rind", "operations": ["x25519-ecdh"], "proof": "p", "link": "https://example.com"}]
-        table = br.host_table(everyone["kixtop"], on_macos)
-        self.assertIn("| Operation | rind | rind (DIT held) | ring |", table)
-        self.assertIn("| X25519 | 20.00 µs ✓ | 10.00 µs ✓ | 15.00 µs |", table)
-        self.assertEqual(br.header_lines("rind (DIT held)"), ["rind", "(DIT held)"])
-        held = "rind (DIT held) times rind with `rind::cpu::Dit::hold()`"
-        self.assertIn(held, br.report(everyone, None, VERIFIED, [])[br.REPORT])
-        self.assertNotIn(held, br.report(hosts(), None, VERIFIED, [])[br.REPORT])
+        held_rows = [
+            ("hmac-sha256/{lib}/64B", "rind", 120.0),
+            ("hmac-sha256/{lib}/64B", "verified-garbage", 110.0),
+            ("hmac-sha256/{lib}/64B", "verified-garbage-dit-held", 60.0),
+            ("hmac-sha256/{lib}/64B", "ring", 90.0),
+        ]
+        everyone["kixtop"]["results"] += [{"operation": op, "library": lib, "ns": ns} for op, lib, ns in held_rows]
+        kixtop = everyone["kixtop"]
+        self.assertEqual(br.dit_pairs(kixtop), [("hmac-sha256/64B", "verified-garbage", 110.0, 60.0)])
+        # The held row is no rival: ring is the fastest, and rind's gap is
+        # against ring.
+        self.assertEqual(br.fastest(br.times(kixtop)["hmac-sha256/64B"]), "ring")
+        self.assertEqual(br.gaps_of(everyone, None)[("hmac-sha256/64B", "kixtop")], (120.0 / 90.0, "ring"))
+        table = br.dit_pair_table(kixtop)
+        self.assertEqual(table[0], "| Operation | Library | Default (DIT set per call) | DIT held | Held over default |")
+        self.assertIn("| HMAC-SHA256, 64 B | verified-garbage | 110 ns | 60 ns | 0.55× |", table)
+        text = br.report(everyone, None, VERIFIED, [])[br.REPORT]
+        self.assertIn("DIT pairs on `kixtop`: each library's default time beside its DIT-held one.", text)
+        self.assertNotIn("DIT pairs on `nixos`", text)
+        self.assertIn("verified-garbage (DIT held) times verified-garbage with `verified_garbage::dit::scope`", text)
+        self.assertIn("How each library sets DIT on aarch64", text)
+        self.assertIn("rind's column is timed holding it", text)
+        self.assertIn("ring, never", text)
+        self.assertIn("| Operation | rind | ring | verified-garbage | verified-garbage (DIT held) |", br.host_table(kixtop, VERIFIED))
+        # Without a held row, the report says nothing of DIT's modes.
+        plain = br.report(hosts(), None, VERIFIED, [])[br.REPORT]
+        self.assertNotIn("How each library sets DIT", plain)
+        self.assertNotIn("DIT pairs on", plain)
 
     def test_site_data_never_counts_a_variant_as_the_fastest(self):
         everyone = hosts()
-        everyone["kixtop"]["results"].append({"operation": "x25519-ecdh/{lib}", "library": "rind-dit-held", "ns": 10000.0})
-        kixtop = next(h for h in br.site_data(everyone, None, VERIFIED, [])["hosts"] if h["name"] == "kixtop")
-        self.assertEqual(kixtop["libraries"], ["rind", "rind-dit-held", "ring"])
-        self.assertEqual(kixtop["fastest"], {"x25519-ecdh": "rind"})
-        self.assertEqual(kixtop["times"]["x25519-ecdh"][1], ["10.00 µs", 0, 0.5])
+        everyone["kixtop"]["results"] += [
+            {"operation": "hmac-sha256/{lib}/64B", "library": "verified-garbage", "ns": 110.0},
+            {"operation": "hmac-sha256/{lib}/64B", "library": "verified-garbage-dit-held", "ns": 60.0},
+        ]
+        data = br.site_data(everyone, None, VERIFIED, [])
+        kixtop = next(h for h in data["hosts"] if h["name"] == "kixtop")
+        # verified-garbage alone, beside its own held row, has no rival.
+        self.assertNotIn("hmac-sha256/64B", kixtop["fastest"])
+        self.assertEqual(kixtop["fastest"]["x25519-ecdh"], "rind")
+        variants = {lib["id"]: lib["variant_of"] for lib in data["libraries"]}
+        self.assertEqual(variants["verified-garbage-dit-held"], "verified-garbage")
+        self.assertIsNone(variants["rind"])
+        self.assertNotIn("verified-garbage-dit-held", kixtop["grid"]["hmac-sha256/64B"])
+
+    def test_every_library_documents_how_it_sets_dit(self):
+        # A library added to the report must say whether it sets DIT, so its
+        # rows are never silently compared with a held or unheld one.
+        self.assertEqual(set(br.DIT_MODES), set(br.COLUMNS) - set(br.VARIANTS))
+        self.assertTrue(all(br.LIBRARIES[held] == held for held in br.VARIANTS))
+        self.assertTrue(all(base in br.COLUMNS for base in br.VARIANTS.values()))
 
     def test_fastest_bin_holds_within_ten_percent(self):
         self.assertEqual(br.bin_of(1.0, br.SPEED_BINS), 0)
@@ -233,12 +265,49 @@ class Render(unittest.TestCase):
     def test_site_data_draws_a_tiers_fastest_from_the_heatmaps_rivals(self):
         columns = {c["name"]: c for c in br.site_data({}, TIERS, VERIFIED, [])["tiers"]["columns"]}
         x86, portable = columns["x86_64"], columns["portable"]
-        self.assertEqual(x86["rivals"], ["rind", "aws-lc-rs", "ring", "verified-garbage"])
+        self.assertEqual(x86["rivals"], ["rind", "aws-lc-rs", "ring", "rustcrypto", "verified-garbage"])
         self.assertEqual(x86["fastest"]["chacha20/*/32B"], "verified-garbage")
-        self.assertEqual(portable["rivals"], ["rind", "aws-lc-rs", "ring"])
+        self.assertEqual(portable["rivals"], ["rind", "aws-lc-rs", "ring", "rustcrypto"])
         self.assertEqual(portable["fastest"]["sha256/*/64B"], "rind")
         # The portable column still shows verified-garbage's time, with its ratio.
         self.assertIn("verified-garbage", portable["libraries"])
+
+    def test_dit_per_call_row_ranks_against_the_held_rows_rivals(self):
+        h = hosts()
+        lead, timed = br.standing(h)
+        h["kixtop"]["results"].append({"operation": "dit-per-call/x25519-ecdh/{lib}", "library": "rind", "ns": 50000.0})
+        # The tally counts it as one more rind time, trailing ring's held one.
+        self.assertEqual(br.standing(h), (lead, timed + 1))
+        # It repeats the held row's code, so the held row's proof covers it.
+        linux = dict(h["kixtop"], os="Linux 6.18")
+        self.assertIsNotNone(br.proof_for(VERIFIED, "rind", "dit-per-call/x25519-ecdh", linux))
+        titles = squares(br.host_svg("kixtop", h["kixtop"], VERIFIED, "light"))
+        self.assertIn("X25519, DIT set per call, rind: 50.00 µs, 1.25× the fastest", titles)
+        kixtop = next(x for x in br.site_data(h, None, VERIFIED, [])["hosts"] if x["name"] == "kixtop")
+        self.assertEqual(kixtop["fastest"]["dit-per-call/x25519-ecdh"], "ring")
+        # nixos's x25519 proof doesn't reach a DIT row it never runs.
+        nixos = next(x for x in br.site_data(h, None, VERIFIED, [])["hosts"] if x["name"] == "nixos")
+        self.assertEqual(nixos["grid"]["dit-per-call/x25519-ecdh"]["rind"], "untimed")
+        self.assertEqual(nixos["grid"]["x25519-ecdh"]["rind"], 0)
+        md = br.report(h, None, VERIFIED, [])[br.REPORT]
+        # A signature's noise outweighs the toggle, so only short rows count.
+        self.assertNotIn("more a call than holding it", md)
+        for op, ns in [("aes128-gcm/{lib}/32B", 40.0), ("dit-per-call/aes128-gcm/{lib}/32B", 100.0)]:
+            h["kixtop"]["results"].append({"operation": op, "library": "rind", "ns": ns})
+        md = br.report(h, None, VERIFIED, [])[br.REPORT]
+        self.assertIn("takes rind 60 ns more a call than holding it, in the row timed both ways", md)
+        # Where the OS hides DIT, rind sets none, and the difference is noise.
+        hidden = copy.deepcopy(h)
+        hidden["kixtop"]["rind_cpu"]["cpuid"]["dit"] = 0
+        self.assertNotIn("more a call than holding it", br.report(hidden, None, VERIFIED, [])[br.REPORT])
+        # Only aarch64 has DIT, so an x86_64 host never lists the rows as untimed.
+        nixos = md.split("### `nixos`")[1].split("### `desktop`")[0]
+        self.assertNotIn("DIT set per call", nixos)
+        self.assertNotIn("setting DIT", br.host_svg("nixos", h["nixos"], VERIFIED, "light"))
+        self.assertIn("DIT set per call", re.search(r"Not timed on `kixtop`: (.*)", md).group(1))
+        self.assertIsNone(br.tier_row("dit-per-call/x25519-ecdh/*"))
+        # Trailing the held row's fastest rival is a gap that needs a decision.
+        self.assertEqual(br.gaps_of(h, None)[("dit-per-call/x25519-ecdh", "kixtop")], (1.25, "ring"))
 
     def test_ranks_every_aead_open_benchmark(self):
         for key in ["aes256-gcm-open/*/16KB", "chacha20poly1305-open/*/16KB"]:
@@ -253,12 +322,12 @@ class Render(unittest.TestCase):
         md = files[br.REPORT]
         self.assertIn("on three machines", md)
         self.assertIn("Not timed on `kixtop`: full handshake, X25519MLKEM768, ", md)
-        self.assertIn("Not measured yet: `desktop`, `ovh-iad`, `ovh-sea`.", md)
-        self.assertNotIn("`desktop` |", md)
+        self.assertNotIn("Not measured yet", md)
+        self.assertNotIn("`ovh-iad` |", md)
         self.assertIn("No weekly results yet.", md)
         self.assertEqual(
             sorted(os.path.basename(p) for p in files if p.endswith(".svg")),
-            sorted(f"{n}{s}.svg" for n in ["overview", "nixos", "nixos2", "kixtop"] for s in ["", "-dark"]),
+            sorted(f"{n}{s}.svg" for n in ["overview", "nixos", "desktop", "kixtop"] for s in ["", "-dark"]),
         )
         self.assertIn("| Operation | rind | aws-lc-rs | ring | OpenSSL |", md)
         self.assertIn("| X25519 | 30.00 µs ✓ | - | 33.00 µs ✓ | 300.00 µs |", md)
@@ -267,24 +336,51 @@ class Render(unittest.TestCase):
         regex = re.compile(br.operation_regex({"graviola": ["adx"]}))
         for row in ["x25519-ecdh/rind", "p256-ecdh/p256-rustcrypto", "aes128-gcm/openssl/32B"]:
             self.assertTrue(regex.match(row), row)
-        for row in ["x25519-ecdh/graviola", "aes128-gcm/graviola/32B", "x25519-ecdh/rind/extra"]:
+        for row in ["x25519-ecdh/graviola", "aes128-gcm/graviola/32B", "x25519-ecdh/rind/extra", "slhdsa-sha2-128s-sign/fips205"]:
             self.assertFalse(regex.match(row), row)
+        self.assertTrue(re.match(br.operation_regex(), "slhdsa-sha2-128s-sign/rustcrypto"))
+        self.assertFalse(re.match(br.operation_regex(), "slhdsa-sha2-128s-sign/fips205"))
+        self.assertIsNone(br.operation_of("slhdsa-sha2-128s-sign/fips205"))
         everyone = hosts()
-        everyone["nixos2"]["refused"] = {"graviola": ["bmi1", "adx"]}
+        everyone["desktop"]["refused"] = {"graviola": ["bmi1", "adx"]}
         md = br.report(everyone, None, VERIFIED, [])[br.REPORT]
-        self.assertIn("graviola isn't timed on `nixos2`: it requires BMI1 and ADX, which this CPU lacks.", md)
+        self.assertIn("graviola isn't timed on `desktop`: it requires BMI1 and ADX, which this CPU lacks.", md)
+
+    def test_reports_md5_and_sha1(self):
+        # rind-bench times these on every device; a report that drops them
+        # hides rows that ran (the Fire TV run lost them this way).
+        regex = re.compile(br.operation_regex())
+        for hash_name, label in [("sha1", "SHA-1"), ("md5", "MD5")]:
+            for size, size_label in [("64B", "64 B"), ("1350B", "1350 B"), ("16KB", "16 KB")]:
+                row = f"{hash_name}/rind/{size}"
+                self.assertTrue(regex.match(row), row)
+                self.assertTrue(regex.match(f"{hash_name}/rustcrypto/{size}"), row)
+                self.assertEqual(br.operation_of(row), (f"{hash_name}/{{lib}}/{size}", "rind"))
+                self.assertEqual(br.label(f"{hash_name}/{size}"), f"{label}, {size_label}")
+        # Only the sizes the report names.
+        self.assertFalse(regex.match("sha1/rind/32B"))
+        self.assertFalse(regex.match("md5/rind"))
+        algorithms = {}
+        for op in br.OPERATIONS:
+            name = br.row_name(op)
+            if name.startswith(("sha1/", "md5/")):
+                matches = [a for a, pattern in br.ALGORITHMS if re.match(pattern, name + "/")]
+                self.assertEqual(len(matches), 1, name)
+                algorithms[name] = matches[0]
+        self.assertEqual(algorithms["sha1/64B"], "SHA-1")
+        self.assertEqual(algorithms["md5/16KB"], "MD5")
 
     def test_site_data_grid_marks_each_cell(self):
         h = hosts()
-        h["nixos2"]["refused"] = {"openssl": ["adx"]}
+        h["desktop"]["refused"] = {"openssl": ["adx"]}
         data = br.site_data(h, None, VERIFIED, [])
-        self.assertEqual([x["name"] for x in data["hosts"]], ["nixos", "nixos2", "kixtop"])
+        self.assertEqual([x["name"] for x in data["hosts"]], ["nixos", "desktop", "kixtop"])
         self.assertEqual([x["os_kind"] for x in data["hosts"]], ["linux", "linux", "macos"])
         grid = {x["name"]: x["grid"] for x in data["hosts"]}
         self.assertEqual(set(grid["nixos"]), {br.row_name(op) for op in br.OPERATIONS})
         self.assertEqual(set(grid["nixos"]["x25519-ecdh"]), {"rind", "aws-lc-rs", "ring", "openssl"})
-        cells = lambda row, lib: [grid[n][row][lib] for n in ["nixos", "nixos2", "kixtop"]]
-        # Both x86_64 hosts have ADX, nixos2 without timing it; kixtop's
+        cells = lambda row, lib: [grid[n][row][lib] for n in ["nixos", "desktop", "kixtop"]]
+        # Both x86_64 hosts have ADX, desktop without timing it; kixtop's
         # proof holds only on Linux.
         self.assertEqual(cells("x25519-ecdh", "rind"), [0, 0, {"other_os": 3}])
         # A proof shows where the host timed nothing, since it covers the code.
@@ -298,13 +394,122 @@ class Render(unittest.TestCase):
         import xml.etree.ElementTree as ET
 
         everyone = hosts()
-        for names in [list(everyone), ["nixos2"], []]:
+        for names in [list(everyone), ["desktop"], []]:
             files = br.report({n: everyone[n] for n in names}, TIERS, VERIFIED, [])
             with self.subTest(hosts=names):
                 self.assertEqual("## Speed" in files[br.REPORT], bool(names))
                 for path, content in files.items():
                     if path.endswith(".svg"):
                         ET.fromstring(content)
+
+
+class PinnedCpus(unittest.TestCase):
+    def sample_ids(self):
+        libs = list(br.LIBRARIES)
+        ids = [op.replace("{lib}", lib) for op in br.OPERATIONS for lib in libs]
+        ids.extend(
+            [
+                "rustls-full-handshake-group/x25519/rind/extra",
+                "rustls-full-handshake-threads/x25519",
+                "not-a-bench/rind",
+            ]
+        )
+        return ids
+
+    def test_threaded_groups_are_exactly_the_two_rustls_thread_rows(self):
+        self.assertEqual(
+            br.threaded_pass_operations(),
+            [
+                "rustls-full-handshake-threads/x25519/{lib}",
+                "rustls-resumed-handshake-threads/x25519/{lib}",
+            ],
+        )
+        self.assertEqual(
+            len(br.pinned_pass_operations()) + len(br.threaded_pass_operations()),
+            len(br.OPERATIONS),
+        )
+        self.assertEqual(
+            sorted(br.pinned_pass_operations() + br.threaded_pass_operations()),
+            sorted(br.OPERATIONS),
+        )
+
+    def test_exclusion_skips_only_the_threaded_rustls_groups(self):
+        pinned = re.compile(br.operation_regex(operations=br.pinned_pass_operations()))
+        threaded = re.compile(br.operation_regex(operations=br.threaded_pass_operations()))
+        full = re.compile(br.operation_regex())
+        # Near names stay in the pinned pass, not the threaded one.
+        for row in [
+            "rustls-full-handshake-group/x25519/rind",
+            "rustls-full-handshake-group/x25519mlkem768/aws-lc-rs",
+            "rustls-full-handshake-key/ed25519/openssl",
+            "rustls-resumed-handshake/x25519/rind",
+            "rustls-bulk/aes128-gcm/rind",
+        ]:
+            self.assertTrue(pinned.match(row), row)
+            self.assertFalse(threaded.match(row), row)
+            self.assertTrue(full.match(row), row)
+        for row in [
+            "rustls-full-handshake-threads/x25519/rind",
+            "rustls-resumed-handshake-threads/x25519/aws-lc-rs",
+        ]:
+            self.assertFalse(pinned.match(row), row)
+            self.assertTrue(threaded.match(row), row)
+            self.assertTrue(full.match(row), row)
+        self.assertFalse(pinned.match("rustls-full-handshake-threads/x25519/rind/extra"))
+        self.assertFalse(threaded.match("rustls-full-handshake-group/x25519/rind"))
+
+    def test_two_pass_filters_cover_the_same_rows_as_a_single_pass(self):
+        ids = self.sample_ids()
+        full = re.compile(br.operation_regex())
+        pinned = re.compile(br.operation_regex(operations=br.pinned_pass_operations()))
+        threaded = re.compile(br.operation_regex(operations=br.threaded_pass_operations()))
+        matched_full = [i for i in ids if full.match(i)]
+        matched_pinned = [i for i in ids if pinned.match(i)]
+        matched_threaded = [i for i in ids if threaded.match(i)]
+        self.assertEqual(set(matched_pinned) & set(matched_threaded), set())
+        self.assertEqual(sorted(matched_pinned + matched_threaded), sorted(matched_full))
+        # One ID per operation per library.
+        self.assertEqual(len(matched_full), len(br.OPERATIONS) * len(br.LIBRARIES))
+        self.assertEqual(len(matched_threaded), 2 * len(br.LIBRARIES))
+
+    def test_refused_libraries_apply_to_both_passes(self):
+        refused = {"graviola": ["adx"]}
+        pinned = re.compile(br.operation_regex(refused, br.pinned_pass_operations()))
+        threaded = re.compile(br.operation_regex(refused, br.threaded_pass_operations()))
+        self.assertTrue(pinned.match("rustls-resumed-handshake/x25519/rind"))
+        self.assertFalse(pinned.match("rustls-resumed-handshake/x25519/graviola"))
+        self.assertTrue(threaded.match("rustls-full-handshake-threads/x25519/rind"))
+        self.assertFalse(threaded.match("rustls-full-handshake-threads/x25519/graviola"))
+
+    def test_pinned_cpus_only_on_linux_when_the_env_is_set(self):
+        self.assertEqual(br.pinned_cpus_on("linux", "0"), "0")
+        self.assertEqual(br.pinned_cpus_on("linux", "2,3"), "2,3")
+        self.assertIsNone(br.pinned_cpus_on("linux", None))
+        self.assertIsNone(br.pinned_cpus_on("linux", ""))
+        self.assertIsNone(br.pinned_cpus_on("linux", "  "))
+        self.assertIsNone(br.pinned_cpus_on("darwin", "0"))
+        self.assertIsNone(br.pinned_cpus_on("darwin", "2,3"))
+
+    def test_a_pin_splits_into_taskset_then_unpinned_thread_pass(self):
+        one = br.bench_passes({}, None)
+        self.assertEqual(len(one), 1)
+        self.assertIsNone(one[0][0])
+        self.assertEqual(one[0][1], br.CRITERION_ARGS + [br.operation_regex()])
+
+        two = br.bench_passes({}, "0")
+        self.assertEqual(len(two), 2)
+        self.assertEqual(two[0][0], "0")
+        self.assertEqual(
+            two[0][1],
+            br.CRITERION_ARGS + [br.operation_regex(operations=br.pinned_pass_operations())],
+        )
+        self.assertIsNone(two[1][0])
+        self.assertEqual(
+            two[1][1],
+            br.CRITERION_ARGS + [br.operation_regex(operations=br.threaded_pass_operations())],
+        )
+        # A no-pin run is still a single cargo bench, including on Linux.
+        self.assertEqual(br.bench_passes({"graviola": ["adx"]}, None)[0][0], None)
 
 
 class Verified(unittest.TestCase):
@@ -331,6 +536,8 @@ class Verified(unittest.TestCase):
         self.assertEqual(len(self.load(self.entry(cpu='["adx", "!vaes"]'))), 1)
         self.assertEqual(len(self.load(self.entry(arch=None))), 1)
         self.assertEqual(len(self.load(self.entry(arch='"armv7"', cpu=None))), 1)
+        # rind-cpuid reads armv7's NEON and crypto extension bits.
+        self.assertEqual(len(self.load(self.entry(arch='"armv7"', cpu='["neon", "aes", "!crc32"]'))), 1)
 
     def test_refuses_what_names_nothing(self):
         for fields in [
@@ -338,7 +545,7 @@ class Verified(unittest.TestCase):
             {"operations": '["x25519"]'},
             {"operations": '["aes256-gcm/8B"]'},
             {"arch": '"riscv64"'},
-            {"arch": '"armv7"', "cpu": '["neon"]'},
+            {"arch": '"armv7"', "cpu": '["avx2"]'},
             {"arch": None, "cpu": '["adx"]'},
             {"cpu": '["sha2"]'},
             {"os": '"windows"'},
@@ -498,16 +705,18 @@ class HostScript(unittest.TestCase):
         self.addCleanup(d.cleanup)
         self.work = os.path.join(d.name, "work")
         self.lock = os.path.join(d.name, "lock")
-        self.addCleanup(setattr, br, "HOSTS", br.HOSTS)
+        self.addCleanup(setattr, br, "COLLECT_HOSTS", br.COLLECT_HOSTS)
 
     def test_removes_its_copy_and_keeps_the_rest(self):
-        br.HOSTS = {"vps": {"jobs": 1}}
+        br.COLLECT_HOSTS = {"vps": {"jobs": 1}}
         os.makedirs(os.path.join(self.work, "target"))
         self.assertEqual(self.run_script("echo $(ls) > result.json"), (0, b"file\n"))
         self.assertEqual(os.listdir(self.work), ["target"])
 
+    # The lease is flock(1), which macOS does not ship.
+    @unittest.skipUnless(shutil.which("flock"), "needs flock(1)")
     def test_holds_the_lease_through_the_run_and_its_cleanup(self):
-        br.HOSTS = {"vps": {"jobs": 1, "lease": self.lock}}
+        br.COLLECT_HOSTS = {"vps": {"jobs": 1, "lease": self.lock}}
         # Another run's lease: its work stays.
         os.makedirs(os.path.join(self.work, "target"))
         with open(self.lock, "w") as held:
@@ -521,6 +730,2192 @@ class HostScript(unittest.TestCase):
         self.assertFalse(os.path.exists(self.work))
         with open(self.lock) as other:
             fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+
+ALIEN = "intel-core-ultra-9-275hx"
+RYZEN = "amd-ryzen-9-7950x"
+
+
+def laptop(name):
+    return host(
+        name,
+        "x86_64",
+        "Ubuntu 24.04 (Linux 6.8)",
+        ZEN3,
+        [("x25519-ecdh/{lib}", "rind", 30000.0), ("x25519-ecdh/{lib}", "ring", 20000.0)],
+    )
+
+
+class CpuSlug(unittest.TestCase):
+    def test_slug_normalizes_brand_strings(self):
+        cases = {
+            "Intel(R) Core(TM) Ultra 9 275HX": "intel-core-ultra-9-275hx",
+            "AMD Ryzen 9 7950X 16-Core Processor": "amd-ryzen-9-7950x",
+            "Apple M3 Max": "apple-m3-max",
+            "Intel(R) Core(TM) i7-8700 CPU @ 3.20GHz": "intel-core-i7-8700",
+            "AMD Ryzen 9 5900XT 16-Core Processor": "amd-ryzen-9-5900xt",
+            "Apple M4": "apple-m4",
+            "Intel Core Processor (Haswell, no TSX)": "intel-core-haswell-no-tsx",
+            "Intel(R) Core(TM) Ultra 7 270K Plus": "intel-core-ultra-7-270k-plus",
+            "Intel® Core™ i9-13900K": "intel-core-i9-13900k",
+            "CPU": "unknown",
+        }
+        for raw, slug in cases.items():
+            with self.subTest(raw=raw):
+                self.assertEqual(br.cpu_slug(raw), slug)
+                br.check_host_name(slug)
+
+    def test_slug_stays_a_short_filename(self):
+        slug = br.cpu_slug("word " * 40)
+        self.assertLessEqual(len(slug), 80)
+        self.assertFalse(slug.endswith("-"))
+        br.check_host_name(slug)
+
+    def test_reads_linux_cpuinfo_and_lscpu(self):
+        cpuinfo = "processor\t: 0\nmodel\t\t: 143\nmodel name\t: AMD Ryzen 9 7950X 16-Core Processor\n"
+        self.assertEqual(br.cpu_model_from_cpuinfo(cpuinfo), "AMD Ryzen 9 7950X 16-Core Processor")
+        self.assertEqual(br.cpu_model_from_cpuinfo("Model\t\t: Raspberry Pi 4 Model B\n"), "Raspberry Pi 4 Model B")
+        self.assertEqual(br.cpu_model_from_cpuinfo("processor : 0\n"), "")
+        lscpu = "CPU(s): 16\nModel name:                         Intel(R) Core(TM) Ultra 9 275HX\n"
+        self.assertEqual(br.cpu_model_from_lscpu(lscpu), "Intel(R) Core(TM) Ultra 9 275HX")
+        self.assertEqual(br.cpu_model_from_lscpu("BIOS Model name: ignored\n"), "")
+
+    def test_counts_physical_cores(self):
+        blocks = []
+        for phys in (0, 1):
+            for core in (0, 1):
+                blocks.append(f"physical id\t: {phys}\ncore id\t\t: {core}\nprocessor\t: x\n")
+        self.assertEqual(br.physical_from_cpuinfo("\n".join(blocks)), 4)
+        self.assertIsNone(br.physical_from_cpuinfo("processor : 0\n"))
+        lscpu = "Thread(s) per core: 2\nCore(s) per socket: 8\nSocket(s): 2\n"
+        self.assertEqual(br.physical_from_lscpu(lscpu), 16)
+        self.assertIsNone(br.physical_from_lscpu("CPU(s): 4\n"))
+
+    def test_this_machine_describes_itself(self):
+        meta = br.cpu_metadata()
+        self.assertTrue(meta["model"])
+        self.assertEqual(meta["slug"], br.cpu_slug(meta["model"]))
+        br.check_host_name(meta["slug"])
+        self.assertGreaterEqual(meta["logical_cpus"], 1)
+        self.assertIn("arch", meta)
+        if "physical_cpus" in meta:
+            self.assertGreaterEqual(meta["physical_cpus"], 1)
+
+    def test_host_override_accepts_any_sane_name(self):
+        model = "Intel(R) Core(TM) Ultra 9 275HX"
+        self.assertEqual(br.resolve_host(None, model), ALIEN)
+        self.assertEqual(br.resolve_host("x86-host-a", model), "x86-host-a")
+        self.assertNotIn("x86-host-a", br.COLLECT_HOSTS)
+        for bad in ["../x", "a/b", "tiers", "portable", "x86_64", "has space", ".", ".."]:
+            with self.subTest(bad=bad), self.assertRaises(SystemExit):
+                br.resolve_host(bad, model)
+
+    def test_architecture_fallback_is_not_a_reserved_host_name(self):
+        # Minimal aarch64 Linux: no model name in cpuinfo or lscpu, so the
+        # brand string is platform.machine(), and that slug is the reserved
+        # tier name. An underscore in x86_64 becomes a hyphen, which is not
+        # reserved; it still has to be a legal host name.
+        for processor, machine, expect in (
+            ("", "aarch64", "aarch64-host"),
+            ("aarch64", "aarch64", "aarch64-host"),
+            ("", "x86_64", "x86-64"),
+        ):
+            model = br.cpu_model_fallback(processor, machine)
+            slug = br.cpu_slug(model)
+            with self.subTest(processor=processor, machine=machine):
+                self.assertEqual(slug, expect)
+                self.assertNotIn(slug, br.reserved_host_names())
+                self.assertEqual(br.resolve_host(None, model), slug)
+                br.check_host_name(slug)
+        self.assertEqual(br.cpu_model_fallback("", ""), "unknown")
+        br.check_host_name(br.cpu_slug(br.cpu_model_fallback("", "")))
+        for _, tier in br.TIERS:
+            slug = br.cpu_slug(tier)
+            with self.subTest(tier=tier):
+                self.assertNotIn(slug, br.reserved_host_names())
+                br.check_host_name(slug)
+        with self.assertRaises(SystemExit):
+            br.resolve_host("aarch64", "aarch64")
+
+    def test_machine_tag_comes_from_the_os_id(self):
+        # machine-id(5): a published id is HMAC-SHA256 under this report's key,
+        # not an unkeyed hash of the OS id. Empty input is not a tag.
+        self.assertEqual(br._MACHINE_TAG_KEY, b"rind-bench-report-host")
+        self.assertEqual(br.usable_machine_id("uninitialized\n"), "")
+        self.assertEqual(br.usable_machine_id(""), "")
+        self.assertEqual(br.usable_machine_id("abc"), "abc")
+        self.assertEqual(br.machine_tag_for(""), "")
+        keyed = hmac.new(br._MACHINE_TAG_KEY, b"abc", hashlib.sha256).hexdigest()[:8]
+        self.assertEqual(br.machine_tag_for("abc"), keyed)
+        self.assertNotEqual(keyed, hashlib.sha256(b"abc").hexdigest()[:8])
+        self.assertEqual(br.machine_tag_for("abc"), br.machine_tag_for("abc"))
+        self.assertRegex(br.machine_tag_for("abc"), r"^[0-9a-f]{8}$")
+        self.assertNotEqual(br.machine_tag_for("abc"), br.machine_tag_for("abd"))
+        self.assertEqual(br.machine_tag(), br.machine_tag_for(br.machine_identity()))
+        self.assertEqual(br.machine_tag_of({"machine": "abcdef12"}), "abcdef12")
+        self.assertEqual(br.machine_tag_of({"machine": "ABCDEF12"}), "")
+        self.assertEqual(br.machine_tag_of({"machine": "not-a-tag"}), "")
+        self.assertEqual(br.machine_tag_of({}), "")
+        text = br.report(hosts(), None, VERIFIED, [])[br.REPORT]
+        self.assertIn("of HMAC-SHA256 over the OS machine id, under a fixed application key", text)
+
+    def test_uninitialized_machine_id_is_not_a_tag(self):
+        # machine-id(5): empty, all zeros, and `uninitialized` are not ids.
+        # Hashing the sentinel gives every such image the same tag.
+        sentinel = hmac.new(br._MACHINE_TAG_KEY, b"uninitialized", hashlib.sha256).hexdigest()[:8]
+        self.assertEqual(sentinel, "31957766")
+        absent = (
+            "uninitialized",
+            "UNINITIALIZED",
+            " uninitialized\n",
+            "",
+            "   ",
+            "0" * 32,
+            "00000000-0000-0000-0000-000000000000",
+        )
+        for ident in absent:
+            with self.subTest(ident=ident):
+                self.assertEqual(br.machine_tag_for(ident), "")
+                self.assertEqual(br.machine_id_text(ident), "")
+        self.assertNotEqual(br.machine_tag_for("uninitialized"), sentinel)
+        keyed = hmac.new(br._MACHINE_TAG_KEY, b"abc", hashlib.sha256).hexdigest()[:8]
+        self.assertEqual(br.machine_tag_for("abc"), keyed)
+        self.assertEqual(br.machine_id_text("abc"), "")
+        self.assertEqual(br.machine_id_text("not-a-machine-id"), "")
+        valid = "a" * 32
+        uuid = "01234567-89ab-cdef-0123-456789abcdef"
+        self.assertEqual(br.machine_id_text(valid), valid)
+        self.assertEqual(br.machine_id_text(uuid), uuid)
+        zeros = "0" * 32
+        with tempfile.TemporaryDirectory() as directory:
+            first = os.path.join(directory, "machine-id")
+            second = os.path.join(directory, "dbus")
+            with open(first, "w") as f:
+                f.write("uninitialized\n")
+            with open(second, "w") as f:
+                f.write(valid + "\n")
+            self.assertEqual(br.read_machine_id((first, second)), valid)
+            with open(second, "w") as f:
+                f.write("uninitialized\n")
+            self.assertEqual(br.read_machine_id((first, second)), "")
+            with open(first, "w") as f:
+                f.write(zeros + "\n")
+            with open(second, "w") as f:
+                f.write("not-a-machine-id\n")
+            self.assertEqual(br.read_machine_id((first, second)), "")
+            with open(first, "w") as f:
+                f.write(valid + "\n")
+            self.assertEqual(br.read_machine_id((first, second)), valid)
+        text = br.report(hosts(), None, VERIFIED, [])[br.REPORT]
+        self.assertIn("or uninitialized id is not a tag.", text)
+
+
+class AnyHost(unittest.TestCase):
+    def test_summary_render_and_import_take_a_host_outside_collect_hosts(self):
+        self.assertNotIn(ALIEN, br.COLLECT_HOSTS)
+        self.assertNotIn(RYZEN, br.COLLECT_HOSTS)
+        everyone = hosts()
+        # Caller order of hosts outside COLLECT_HOSTS is kept, which is not
+        # alphabetical: intel-... before amd-...
+        everyone[ALIEN] = laptop(ALIEN)
+        everyone[RYZEN] = laptop(RYZEN)
+        svg = br.overview_svg(everyone, VERIFIED, "light")
+        self.assertIn(f"left to right: nixos, desktop, kixtop, {ALIEN}, {RYZEN}.", svg)
+        md = br.report(everyone, None, VERIFIED, [])[br.REPORT]
+        self.assertIn("on five machines", md)
+        self.assertIn(f"### `{ALIEN}`: {ALIEN} CPU", md)
+        self.assertIn(f"### `{RYZEN}`:", md)
+        self.assertNotIn("Not measured yet", md)
+
+        with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as dst:
+            for name, body in ((ALIEN, laptop(ALIEN)), (RYZEN, laptop(RYZEN))):
+                with open(os.path.join(src, f"{name}.json"), "w") as f:
+                    json.dump(body, f)
+            with open(os.path.join(src, "nixos.json"), "w") as f:
+                json.dump({"schema": 1, "host": "nixos", "status": "busy", "reason": "busy"}, f)
+            with open(os.path.join(src, "tiers.json"), "w") as f:
+                json.dump({"tiers": []}, f)
+            loaded = br.load_hosts(src)
+            self.assertEqual(list(loaded), ["nixos", RYZEN, ALIEN])
+            with io.StringIO() as out, contextlib.redirect_stdout(out):
+                br.summary(type("Args", (), {"dir": src})())
+                text = out.getvalue()
+            self.assertIn(f"`{ALIEN}`: {ALIEN} CPU", text)
+            self.assertIn(f"`{RYZEN}`", text)
+            self.assertIn("nixos`: not measured, busy: busy", text)
+            self.assertNotIn("tiers", text)
+            self.assertIn(f"{ALIEN} |", text)
+            saved = br.DATA_DIR
+            br.DATA_DIR = dst
+            try:
+                with contextlib.redirect_stderr(io.StringIO()):
+                    br.import_hosts(src)
+            finally:
+                br.DATA_DIR = saved
+            self.assertEqual(sorted(os.listdir(dst)), [f"{RYZEN}.json", f"{ALIEN}.json"])
+
+    def test_published_data_still_loads_in_report_order(self):
+        self.assertEqual(
+            list(br.load_hosts(br.DATA_DIR)),
+            ["nixos", "desktop", "fedora", "kixtop", "ovh-iad", "ovh-sea"],
+        )
+
+    def test_run_accepts_any_host_and_collect_keeps_its_list(self):
+        script = os.path.join(HERE, "bench-report")
+        for args in (["run"], ["run", "--host", ALIEN]):
+            proc = subprocess.run([sys.executable, script, *args], capture_output=True, text=True)
+            with self.subTest(args=args):
+                self.assertNotEqual(proc.returncode, 0)
+                self.assertNotIn("unknown host", proc.stderr)
+                self.assertNotIn("unknown collect host", proc.stderr)
+                self.assertIn("--commit", proc.stderr)
+        collect = subprocess.run(
+            [sys.executable, script, "collect", "--host", ALIEN], capture_output=True, text=True
+        )
+        self.assertNotEqual(collect.returncode, 0)
+        self.assertIn(f"unknown collect host {ALIEN}", collect.stderr)
+        self.assertIn("nixos", collect.stderr)
+        self.assertIn("`admin/bench-report run`", collect.stderr)
+
+    def test_load_hosts_rejects_illegal_names(self):
+        with tempfile.TemporaryDirectory() as src:
+            cases = {
+                "x86_64.json": "x86_64",
+                "aarch64.json": "aarch64",
+                "armv7.json": "armv7",
+                "portable.json": "portable",
+                "bad name.json": "bad name",
+                f"{'a' * 82}.json": "a" * 82,
+            }
+            for filename, host_name in cases.items():
+                path = os.path.join(src, filename)
+                with open(path, "w") as f:
+                    json.dump({"schema": 1, "host": host_name, "status": "ok"}, f)
+                with self.subTest(filename=filename), self.assertRaises(SystemExit):
+                    br.load_hosts(src)
+                os.remove(path)
+            with open(os.path.join(src, "laptop.json"), "w") as f:
+                json.dump({"schema": 1, "host": "portable", "status": "ok"}, f)
+            with self.assertRaises(SystemExit):
+                br.load_hosts(src)
+            os.remove(os.path.join(src, "laptop.json"))
+            with open(os.path.join(src, "laptop.json"), "w") as f:
+                json.dump({"schema": 1, "host": 1, "status": "ok"}, f)
+            with self.assertRaises(SystemExit):
+                br.load_hosts(src)
+            os.remove(os.path.join(src, "laptop.json"))
+            legal = "b" * 81
+            with open(os.path.join(src, f"{legal}.json"), "w") as f:
+                json.dump({"schema": 1, "host": legal, "status": "ok"}, f)
+            with open(os.path.join(src, "tiers.json"), "w") as f:
+                json.dump({"tiers": []}, f)
+            self.assertEqual(list(br.load_hosts(src)), [legal])
+
+    def test_same_cpu_slug_imports_keep_both_machines(self):
+        slug = RYZEN
+        machines = []
+        for tag, started in (
+            ("aaaaaaaa", "2026-11-03T02:00:00+00:00"),
+            ("bbbbbbbb", "2026-11-04T02:00:00+00:00"),
+        ):
+            body = laptop(slug)
+            body["machine"] = tag
+            body["started"] = started
+            machines.append(body)
+        saved = br.DATA_DIR
+        try:
+            for first, second in (machines, list(reversed(machines))):
+                with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                    br.DATA_DIR = data
+                    for body in (first, second):
+                        with open(os.path.join(src, f"{slug}.json"), "w") as f:
+                            json.dump(body, f)
+                        br.import_hosts(src)
+                    newcomer = f"{slug}-{second['machine']}"
+                    self.assertEqual(set(os.listdir(data)), {f"{slug}.json", f"{newcomer}.json"})
+                    with open(os.path.join(data, f"{slug}.json")) as f:
+                        self.assertEqual(json.load(f)["machine"], first["machine"])
+                    with open(os.path.join(data, f"{newcomer}.json")) as f:
+                        got = json.load(f)
+                    self.assertEqual((got["host"], got["machine"]), (newcomer, second["machine"]))
+                    again = dict(second)
+                    again["started"] = "2026-11-05T02:00:00+00:00"
+                    with open(os.path.join(src, f"{slug}.json"), "w") as f:
+                        json.dump(again, f)
+                    br.import_hosts(src)
+                    self.assertEqual(set(os.listdir(data)), {f"{slug}.json", f"{newcomer}.json"})
+                    with open(os.path.join(data, f"{newcomer}.json")) as f:
+                        self.assertEqual(json.load(f)["started"], "2026-11-05T02:00:00+00:00")
+                    loaded = br.load_hosts(data)
+                    self.assertEqual(set(loaded), {slug, newcomer})
+        finally:
+            br.DATA_DIR = saved
+
+    def test_tagged_result_does_not_replace_an_untagged_host(self):
+        """An untagged file may be any machine, so a tagged result goes beside it as `<slug>-<tag>`."""
+        saved = br.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                br.DATA_DIR = data
+                first = laptop("mybox")
+                with open(os.path.join(data, "mybox.json"), "w") as f:
+                    json.dump(first, f)
+                second = laptop("mybox")
+                second["machine"] = "cccccccc"
+                second["started"] = "2026-11-05T00:00:00+00:00"
+                with open(os.path.join(src, "mybox.json"), "w") as f:
+                    json.dump(second, f)
+                with contextlib.redirect_stderr(io.StringIO()) as err:
+                    br.import_hosts(src)
+                self.assertIn("mybox: same slug as another machine, imported as mybox-cccccccc", err.getvalue())
+                self.assertEqual(set(os.listdir(data)), {"mybox.json", "mybox-cccccccc.json"})
+                with open(os.path.join(data, "mybox.json")) as f:
+                    self.assertEqual(json.load(f), first)
+                with open(os.path.join(data, "mybox-cccccccc.json")) as f:
+                    body = json.load(f)
+                self.assertEqual(
+                    (body["host"], body["machine"], body["alias_of"], body["started"]),
+                    ("mybox-cccccccc", "cccccccc", "mybox", "2026-11-05T00:00:00+00:00"),
+                )
+        finally:
+            br.DATA_DIR = saved
+
+    def test_untagged_result_does_not_replace_an_untagged_host(self):
+        """Two untagged results cannot be told apart, so the newcomer is refused and named on stderr."""
+        saved = br.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                br.DATA_DIR = data
+                first = laptop("mybox")
+                with open(os.path.join(data, "mybox.json"), "w") as f:
+                    json.dump(first, f)
+                second = laptop("mybox")
+                second["cpu"]["model"] = "another CPU"
+                second["started"] = "2026-11-05T00:00:00+00:00"
+                with open(os.path.join(src, "mybox.json"), "w") as f:
+                    json.dump(second, f)
+                with contextlib.redirect_stderr(io.StringIO()) as err:
+                    br.import_hosts(src)
+                self.assertIn(
+                    "mybox: not imported, a result that may be another machine's holds mybox", err.getvalue()
+                )
+                self.assertEqual(os.listdir(data), ["mybox.json"])
+                with open(os.path.join(data, "mybox.json")) as f:
+                    self.assertEqual(json.load(f), first)
+        finally:
+            br.DATA_DIR = saved
+
+    def test_reimport_reuses_a_numeric_suffix_when_the_tag_alias_is_taken(self):
+        slug = RYZEN
+        tag = "bbbbbbbb"
+        alias = f"{slug}-{tag}"
+        saved = br.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                br.DATA_DIR = data
+                resident = laptop(slug)
+                resident["machine"] = "aaaaaaaa"
+                with open(os.path.join(src, f"{slug}.json"), "w") as f:
+                    json.dump(resident, f)
+                br.import_hosts(src)
+                occupant = laptop(alias)
+                occupant["machine"] = "cccccccc"
+                os.remove(os.path.join(src, f"{slug}.json"))
+                with open(os.path.join(src, f"{alias}.json"), "w") as f:
+                    json.dump(occupant, f)
+                br.import_hosts(src)
+                newcomer = laptop(slug)
+                newcomer["machine"] = tag
+                newcomer["started"] = "2026-11-04T02:00:00+00:00"
+                os.remove(os.path.join(src, f"{alias}.json"))
+                with open(os.path.join(src, f"{slug}.json"), "w") as f:
+                    json.dump(newcomer, f)
+                br.import_hosts(src)
+                numeric = f"{slug}-2"
+                self.assertEqual(
+                    set(os.listdir(data)),
+                    {f"{slug}.json", f"{alias}.json", f"{numeric}.json"},
+                )
+                newcomer["started"] = "2026-11-05T02:00:00+00:00"
+                with open(os.path.join(src, f"{slug}.json"), "w") as f:
+                    json.dump(newcomer, f)
+                br.import_hosts(src)
+                self.assertEqual(
+                    set(os.listdir(data)),
+                    {f"{slug}.json", f"{alias}.json", f"{numeric}.json"},
+                )
+                with open(os.path.join(data, f"{numeric}.json")) as f:
+                    body = json.load(f)
+                self.assertEqual(body["machine"], tag)
+                self.assertEqual(body["host"], numeric)
+                self.assertEqual(body["started"], "2026-11-05T02:00:00+00:00")
+                self.assertFalse(os.path.exists(os.path.join(data, f"{slug}-3.json")))
+        finally:
+            br.DATA_DIR = saved
+
+    def test_a_free_name_is_not_rerouted_to_the_same_tag(self):
+        tag = "aaaaaaaa"
+        saved = br.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                br.DATA_DIR = data
+                slug_body = laptop(RYZEN)
+                slug_body["machine"] = tag
+                slug_body["started"] = "2026-11-03T02:00:00+00:00"
+                with open(os.path.join(src, f"{RYZEN}.json"), "w") as f:
+                    json.dump(slug_body, f)
+                br.import_hosts(src)
+                named = laptop("nixos")
+                named["machine"] = tag
+                named["started"] = "2026-11-04T02:00:00+00:00"
+                os.remove(os.path.join(src, f"{RYZEN}.json"))
+                with open(os.path.join(src, "nixos.json"), "w") as f:
+                    json.dump(named, f)
+                br.import_hosts(src)
+                self.assertEqual(set(os.listdir(data)), {f"{RYZEN}.json", "nixos.json"})
+                with open(os.path.join(data, f"{RYZEN}.json")) as f:
+                    self.assertEqual(json.load(f)["started"], "2026-11-03T02:00:00+00:00")
+                with open(os.path.join(data, "nixos.json")) as f:
+                    body = json.load(f)
+                self.assertEqual(body["host"], "nixos")
+                self.assertEqual(body["started"], "2026-11-04T02:00:00+00:00")
+        finally:
+            br.DATA_DIR = saved
+
+    def test_two_explicit_names_with_one_tag_both_import(self):
+        tag = "aaaaaaaa"
+        saved = br.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                br.DATA_DIR = data
+                for name, started in (("box-perf", "2026-11-03T02:00:00+00:00"), ("box-powersave", "2026-11-04T02:00:00+00:00")):
+                    body = laptop(name)
+                    body["machine"] = tag
+                    body["started"] = started
+                    with open(os.path.join(src, f"{name}.json"), "w") as f:
+                        json.dump(body, f)
+                    br.import_hosts(src)
+                    os.remove(os.path.join(src, f"{name}.json"))
+                self.assertEqual(set(os.listdir(data)), {"box-perf.json", "box-powersave.json"})
+                for name, started in (("box-perf", "2026-11-03T02:00:00+00:00"), ("box-powersave", "2026-11-04T02:00:00+00:00")):
+                    with open(os.path.join(data, f"{name}.json")) as f:
+                        body = json.load(f)
+                    self.assertEqual((body["host"], body["started"]), (name, started))
+        finally:
+            br.DATA_DIR = saved
+
+    def test_untagged_import_does_not_replace_a_tagged_host(self):
+        """An untagged result has no tag to name a second file with, so it is not imported."""
+        saved = br.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                br.DATA_DIR = data
+                tagged = laptop(RYZEN)
+                tagged["machine"] = "aaaaaaaa"
+                tagged["started"] = "2026-11-03T02:00:00+00:00"
+                with open(os.path.join(src, f"{RYZEN}.json"), "w") as f:
+                    json.dump(tagged, f)
+                br.import_hosts(src)
+                untagged = laptop(RYZEN)
+                untagged["started"] = "2026-11-04T02:00:00+00:00"
+                with open(os.path.join(src, f"{RYZEN}.json"), "w") as f:
+                    json.dump(untagged, f)
+                for _ in range(2):
+                    with contextlib.redirect_stderr(io.StringIO()) as err:
+                        br.import_hosts(src)
+                    self.assertIn(f"{RYZEN}: not imported, a result that may be another machine's holds {RYZEN}", err.getvalue())
+                    self.assertEqual(os.listdir(data), [f"{RYZEN}.json"])
+                    with open(os.path.join(data, f"{RYZEN}.json")) as f:
+                        body = json.load(f)
+                    self.assertEqual((body["machine"], body["started"]), ("aaaaaaaa", "2026-11-03T02:00:00+00:00"))
+        finally:
+            br.DATA_DIR = saved
+
+    def test_explicit_numeric_name_is_not_replaced_by_a_collision(self):
+        tag = "aaaaaaaa"
+        saved = br.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                br.DATA_DIR = data
+
+                def put(name, body):
+                    for old in os.listdir(src):
+                        os.remove(os.path.join(src, old))
+                    with open(os.path.join(src, f"{name}.json"), "w") as f:
+                        json.dump(body, f)
+                    br.import_hosts(src)
+
+                explicit = laptop("box-2")
+                explicit["machine"] = tag
+                explicit["started"] = "2026-11-03T02:00:00+00:00"
+                put("box-2", explicit)
+                other = laptop("box")
+                other["machine"] = "bbbbbbbb"
+                other["started"] = "2026-11-04T02:00:00+00:00"
+                put("box", other)
+                same = laptop("box")
+                same["machine"] = tag
+                same["started"] = "2026-11-05T02:00:00+00:00"
+                put("box", same)
+                alias = "box-aaaaaaaa"
+                self.assertEqual(set(os.listdir(data)), {"box-2.json", "box.json", f"{alias}.json"})
+                with open(os.path.join(data, "box-2.json")) as f:
+                    kept = json.load(f)
+                self.assertEqual(kept["started"], "2026-11-03T02:00:00+00:00")
+                self.assertNotIn("alias_of", kept)
+                with open(os.path.join(data, f"{alias}.json")) as f:
+                    generated = json.load(f)
+                self.assertEqual(generated["alias_of"], "box")
+                self.assertEqual(generated["host"], alias)
+                same["started"] = "2026-11-06T02:00:00+00:00"
+                put("box", same)
+                self.assertEqual(set(os.listdir(data)), {"box-2.json", "box.json", f"{alias}.json"})
+                with open(os.path.join(data, "box-2.json")) as f:
+                    self.assertEqual(json.load(f)["started"], "2026-11-03T02:00:00+00:00")
+                with open(os.path.join(data, f"{alias}.json")) as f:
+                    self.assertEqual(json.load(f)["started"], "2026-11-06T02:00:00+00:00")
+        finally:
+            br.DATA_DIR = saved
+
+    def test_untagged_collision_leaves_an_explicit_numeric_name(self):
+        saved = br.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                br.DATA_DIR = data
+
+                def put(name, body):
+                    for old in os.listdir(src):
+                        os.remove(os.path.join(src, old))
+                    with open(os.path.join(src, f"{name}.json"), "w") as f:
+                        json.dump(body, f)
+                    with contextlib.redirect_stderr(io.StringIO()) as err:
+                        br.import_hosts(src)
+                    return err.getvalue()
+
+                resident = laptop("box")
+                resident["machine"] = "bbbbbbbb"
+                resident["started"] = "2026-11-03T02:00:00+00:00"
+                put("box", resident)
+                explicit = laptop("box-2")
+                explicit["started"] = "2026-11-04T02:00:00+00:00"
+                put("box-2", explicit)
+                untagged = laptop("box")
+                untagged["started"] = "2026-11-05T02:00:00+00:00"
+                for _ in range(2):
+                    self.assertIn("box: not imported, a result that may be another machine's holds box", put("box", untagged))
+                    self.assertEqual(set(os.listdir(data)), {"box.json", "box-2.json"})
+                with open(os.path.join(data, "box-2.json")) as f:
+                    kept = json.load(f)
+                self.assertEqual(kept["started"], "2026-11-04T02:00:00+00:00")
+                self.assertNotIn("alias_of", kept)
+                with open(os.path.join(data, "box.json")) as f:
+                    self.assertEqual(json.load(f)["machine"], "bbbbbbbb")
+        finally:
+            br.DATA_DIR = saved
+
+    def test_one_directory_keeps_a_chosen_numeric_name_beside_a_collision(self):
+        """One import of a directory that holds both the colliding slug and a chosen `<slug>-N`.
+
+        The chosen name is imported as it is. The untagged newcomer has no
+        tag to name a second file with, so it is not imported at all.
+        """
+        saved = br.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                br.DATA_DIR = data
+                resident = laptop("box")
+                resident["machine"] = "aaaaaaaa"
+                resident["started"] = "2026-11-03T02:00:00+00:00"
+                with open(os.path.join(data, "box.json"), "w") as f:
+                    json.dump(resident, f)
+                chosen = laptop("box-2")
+                chosen["started"] = "2026-11-04T02:00:00+00:00"
+                newcomer = laptop("box")
+                newcomer["started"] = "2026-11-05T02:00:00+00:00"
+                with open(os.path.join(src, "box-2.json"), "w") as f:
+                    json.dump(chosen, f)
+                with open(os.path.join(src, "box.json"), "w") as f:
+                    json.dump(newcomer, f)
+                with contextlib.redirect_stderr(io.StringIO()) as err:
+                    br.import_hosts(src)
+                log = err.getvalue()
+                self.assertIn("box: not imported, a result that may be another machine's holds box", log)
+                self.assertNotIn("imported as", log)
+                self.assertEqual(set(os.listdir(data)), {"box.json", "box-2.json"})
+                with open(os.path.join(data, "box.json")) as f:
+                    self.assertEqual(json.load(f)["machine"], "aaaaaaaa")
+                with open(os.path.join(data, "box-2.json")) as f:
+                    kept = json.load(f)
+                self.assertEqual(kept["started"], "2026-11-04T02:00:00+00:00")
+                self.assertEqual(kept["host"], "box-2")
+                self.assertNotIn("alias_of", kept)
+        finally:
+            br.DATA_DIR = saved
+
+    def test_one_directory_keeps_a_differently_tagged_chosen_numeric_name(self):
+        saved = br.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                br.DATA_DIR = data
+                resident = laptop("box")
+                resident["machine"] = "aaaaaaaa"
+                resident["started"] = "2026-11-03T02:00:00+00:00"
+                with open(os.path.join(data, "box.json"), "w") as f:
+                    json.dump(resident, f)
+                chosen = laptop("box-2")
+                chosen["machine"] = "dddddddd"
+                chosen["started"] = "2026-11-04T02:00:00+00:00"
+                newcomer = laptop("box")
+                newcomer["machine"] = "bbbbbbbb"
+                newcomer["started"] = "2026-11-05T02:00:00+00:00"
+                with open(os.path.join(src, "box.json"), "w") as f:
+                    json.dump(newcomer, f)
+                with open(os.path.join(src, "box-2.json"), "w") as f:
+                    json.dump(chosen, f)
+                with contextlib.redirect_stderr(io.StringIO()) as err:
+                    br.import_hosts(src)
+                log = err.getvalue()
+                alias = "box-bbbbbbbb"
+                self.assertIn(f"imported as {alias}", log)
+                self.assertNotIn("imported as box-2", log)
+                self.assertEqual(set(os.listdir(data)), {"box.json", "box-2.json", f"{alias}.json"})
+                with open(os.path.join(data, "box-2.json")) as f:
+                    kept = json.load(f)
+                self.assertEqual((kept["host"], kept["machine"], kept["started"]), ("box-2", "dddddddd", "2026-11-04T02:00:00+00:00"))
+                self.assertNotIn("alias_of", kept)
+                with open(os.path.join(data, f"{alias}.json")) as f:
+                    body = json.load(f)
+                self.assertEqual((body["host"], body["machine"], body["alias_of"]), (alias, "bbbbbbbb", "box"))
+        finally:
+            br.DATA_DIR = saved
+
+    def test_incoming_generated_alias_is_the_one_destination(self):
+        """A collection that already holds this machine's marked alias updates that file and no other."""
+        tag = "bbbbbbbb"
+        alias = f"box-{tag}"
+        saved = br.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                br.DATA_DIR = data
+                resident = laptop("box")
+                resident["machine"] = "aaaaaaaa"
+                resident["started"] = "2026-11-03T02:00:00+00:00"
+                with open(os.path.join(data, "box.json"), "w") as f:
+                    json.dump(resident, f)
+                chosen = laptop("box-2")
+                chosen["started"] = "2026-11-04T02:00:00+00:00"
+                previous = laptop(alias)
+                previous["machine"] = tag
+                previous["alias_of"] = "box"
+                previous["started"] = "2026-11-05T02:00:00+00:00"
+                newcomer = laptop("box")
+                newcomer["machine"] = tag
+                newcomer["started"] = "2026-11-06T02:00:00+00:00"
+                for name, body in (("box-2", chosen), (alias, previous), ("box", newcomer)):
+                    with open(os.path.join(src, f"{name}.json"), "w") as f:
+                        json.dump(body, f)
+                with contextlib.redirect_stderr(io.StringIO()) as err:
+                    br.import_hosts(src)
+                log = err.getvalue()
+                self.assertIn(f"imported as {alias}", log)
+                self.assertNotIn("imported as box-2", log)
+                self.assertEqual(set(os.listdir(data)), {"box.json", "box-2.json", f"{alias}.json"})
+                with open(os.path.join(data, "box.json")) as f:
+                    self.assertEqual(json.load(f)["machine"], "aaaaaaaa")
+                with open(os.path.join(data, "box-2.json")) as f:
+                    kept = json.load(f)
+                self.assertEqual(kept["started"], "2026-11-04T02:00:00+00:00")
+                self.assertNotIn("alias_of", kept)
+                with open(os.path.join(data, f"{alias}.json")) as f:
+                    body = json.load(f)
+                self.assertEqual(body["host"], alias)
+                self.assertEqual(body["machine"], tag)
+                self.assertEqual(body["alias_of"], "box")
+                self.assertEqual(body["started"], "2026-11-06T02:00:00+00:00")
+        finally:
+            br.DATA_DIR = saved
+
+    def test_marked_alias_does_not_overwrite_another_machine(self):
+        """An incoming `<slug>-N` alias is not a license to replace whoever already uses that name."""
+        tag = "bbbbbbbb"
+        saved = br.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                br.DATA_DIR = data
+                resident = laptop("box")
+                resident["machine"] = "aaaaaaaa"
+                resident["started"] = "2026-11-03T02:00:00+00:00"
+                other = laptop("box-2")
+                other["machine"] = "cccccccc"
+                other["started"] = "2026-11-04T02:00:00+00:00"
+                for name, body in (("box", resident), ("box-2", other)):
+                    with open(os.path.join(data, f"{name}.json"), "w") as f:
+                        json.dump(body, f)
+                newcomer = laptop("box")
+                newcomer["machine"] = tag
+                newcomer["started"] = "2026-11-06T02:00:00+00:00"
+                marked = laptop("box-2")
+                marked["machine"] = tag
+                marked["alias_of"] = "box"
+                marked["started"] = "2026-11-06T02:00:00+00:00"
+                for name, body in (("box", newcomer), ("box-2", marked)):
+                    with open(os.path.join(src, f"{name}.json"), "w") as f:
+                        json.dump(body, f)
+                with contextlib.redirect_stderr(io.StringIO()) as err:
+                    br.import_hosts(src)
+                alias = f"box-{tag}"
+                self.assertIn(f"imported as {alias}", err.getvalue())
+                self.assertEqual(set(os.listdir(data)), {"box.json", "box-2.json", f"{alias}.json"})
+                with open(os.path.join(data, "box.json")) as f:
+                    self.assertEqual(json.load(f)["machine"], "aaaaaaaa")
+                with open(os.path.join(data, "box-2.json")) as f:
+                    kept = json.load(f)
+                self.assertEqual((kept["machine"], kept["started"]), ("cccccccc", "2026-11-04T02:00:00+00:00"))
+                self.assertNotIn("alias_of", kept)
+                with open(os.path.join(data, f"{alias}.json")) as f:
+                    body = json.load(f)
+                self.assertEqual(
+                    (body["host"], body["machine"], body["alias_of"], body["started"]),
+                    (alias, tag, "box", "2026-11-06T02:00:00+00:00"),
+                )
+        finally:
+            br.DATA_DIR = saved
+
+    def test_disambiguation_rank_does_not_overwrite_another_machine(self):
+        """The preferred alias spelling is left alone when another machine already owns that file."""
+        tag = "bbbbbbbb"
+        alias = f"box-{tag}"
+        saved = br.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                br.DATA_DIR = data
+                resident = laptop("box")
+                resident["machine"] = "aaaaaaaa"
+                resident["started"] = "2026-11-03T02:00:00+00:00"
+                real = laptop("box-3")
+                real["machine"] = tag
+                real["alias_of"] = "box"
+                real["started"] = "2026-11-04T02:00:00+00:00"
+                occupied = laptop(alias)
+                occupied["machine"] = "cccccccc"
+                occupied["started"] = "2026-11-04T02:00:00+00:00"
+                for name, body in (("box", resident), ("box-3", real), (alias, occupied)):
+                    with open(os.path.join(data, f"{name}.json"), "w") as f:
+                        json.dump(body, f)
+                newcomer = laptop("box")
+                newcomer["machine"] = tag
+                newcomer["started"] = "2026-11-06T02:00:00+00:00"
+                marked = laptop(alias)
+                marked["machine"] = tag
+                marked["alias_of"] = "box"
+                for name, body in (("box", newcomer), (alias, marked)):
+                    with open(os.path.join(src, f"{name}.json"), "w") as f:
+                        json.dump(body, f)
+                with contextlib.redirect_stderr(io.StringIO()) as err:
+                    br.import_hosts(src)
+                self.assertNotIn(f"imported as {alias}", err.getvalue())
+                self.assertEqual(set(os.listdir(data)), {"box.json", "box-3.json", f"{alias}.json"})
+                with open(os.path.join(data, f"{alias}.json")) as f:
+                    kept = json.load(f)
+                self.assertEqual((kept["machine"], kept["started"]), ("cccccccc", "2026-11-04T02:00:00+00:00"))
+                self.assertNotIn("alias_of", kept)
+                with open(os.path.join(data, "box-3.json")) as f:
+                    body = json.load(f)
+                self.assertEqual(
+                    (body["host"], body["machine"], body["alias_of"], body["started"]),
+                    ("box-3", tag, "box", "2026-11-06T02:00:00+00:00"),
+                )
+                with open(os.path.join(data, "box.json")) as f:
+                    self.assertEqual(json.load(f)["machine"], "aaaaaaaa")
+        finally:
+            br.DATA_DIR = saved
+
+    def test_disambiguation_rank_does_not_overwrite_another_machines_box_3(self):
+        """A lower numeric suffix loses to the real alias when another machine owns that suffix."""
+        tag = "bbbbbbbb"
+        saved = br.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                br.DATA_DIR = data
+                resident = laptop("box")
+                resident["machine"] = "aaaaaaaa"
+                resident["started"] = "2026-11-03T02:00:00+00:00"
+                other = laptop("box-3")
+                other["machine"] = "cccccccc"
+                other["started"] = "2026-11-04T02:00:00+00:00"
+                real = laptop("box-4")
+                real["machine"] = tag
+                real["alias_of"] = "box"
+                real["started"] = "2026-11-05T02:00:00+00:00"
+                for name, body in (("box", resident), ("box-3", other), ("box-4", real)):
+                    with open(os.path.join(data, f"{name}.json"), "w") as f:
+                        json.dump(body, f)
+                newcomer = laptop("box")
+                newcomer["machine"] = tag
+                newcomer["started"] = "2026-11-06T02:00:00+00:00"
+                marked = laptop("box-3")
+                marked["machine"] = tag
+                marked["alias_of"] = "box"
+                for name, body in (("box", newcomer), ("box-3", marked)):
+                    with open(os.path.join(src, f"{name}.json"), "w") as f:
+                        json.dump(body, f)
+                with contextlib.redirect_stderr(io.StringIO()) as err:
+                    br.import_hosts(src)
+                self.assertNotIn("imported as box-3", err.getvalue())
+                self.assertEqual(set(os.listdir(data)), {"box.json", "box-3.json", "box-4.json"})
+                with open(os.path.join(data, "box-3.json")) as f:
+                    kept = json.load(f)
+                self.assertEqual((kept["machine"], kept["started"]), ("cccccccc", "2026-11-04T02:00:00+00:00"))
+                self.assertNotIn("alias_of", kept)
+                with open(os.path.join(data, "box-4.json")) as f:
+                    body = json.load(f)
+                self.assertEqual(
+                    (body["host"], body["machine"], body["alias_of"], body["started"]),
+                    ("box-4", tag, "box", "2026-11-06T02:00:00+00:00"),
+                )
+        finally:
+            br.DATA_DIR = saved
+
+    def test_free_slug_updates_a_marked_alias(self):
+        """Removing the other machine's file does not turn this machine into two hosts."""
+        tag = "bbbbbbbb"
+        alias = f"box-{tag}"
+        saved = br.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                br.DATA_DIR = data
+
+                def put(files):
+                    for old in os.listdir(src):
+                        os.remove(os.path.join(src, old))
+                    for name, body in files:
+                        with open(os.path.join(src, f"{name}.json"), "w") as f:
+                            json.dump(body, f)
+                    with contextlib.redirect_stderr(io.StringIO()):
+                        br.import_hosts(src)
+
+                other = laptop("box")
+                other["machine"] = "aaaaaaaa"
+                other["started"] = "2026-11-03T02:00:00+00:00"
+                put([("box", other)])
+                first = laptop("box")
+                first["machine"] = tag
+                first["started"] = "2026-11-04T02:00:00+00:00"
+                put([("box", first)])
+                self.assertEqual(set(os.listdir(data)), {"box.json", f"{alias}.json"})
+                os.remove(os.path.join(data, "box.json"))
+                again = laptop("box")
+                again["machine"] = tag
+                again["started"] = "2026-11-06T02:00:00+00:00"
+                put([("box", again)])
+                self.assertEqual(os.listdir(data), [f"{alias}.json"])
+                with open(os.path.join(data, f"{alias}.json")) as f:
+                    body = json.load(f)
+                self.assertEqual((body["host"], body["machine"], body["alias_of"], body["started"]), (alias, tag, "box", "2026-11-06T02:00:00+00:00"))
+                stale = laptop(alias)
+                stale["machine"] = tag
+                stale["alias_of"] = "box"
+                stale["started"] = "2026-11-04T02:00:00+00:00"
+                newer = laptop("box")
+                newer["machine"] = tag
+                newer["started"] = "2026-11-07T02:00:00+00:00"
+                put([(alias, stale), ("box", newer)])
+                self.assertEqual(os.listdir(data), [f"{alias}.json"])
+                with open(os.path.join(data, f"{alias}.json")) as f:
+                    body = json.load(f)
+                self.assertEqual(body["started"], "2026-11-07T02:00:00+00:00")
+                self.assertEqual(body["alias_of"], "box")
+                # A chosen host that only shares the tag keeps its own name.
+                named = laptop("nixos")
+                named["machine"] = tag
+                named["started"] = "2026-11-08T02:00:00+00:00"
+                put([("nixos", named)])
+                self.assertEqual(set(os.listdir(data)), {f"{alias}.json", "nixos.json"})
+                with open(os.path.join(data, "nixos.json")) as f:
+                    kept = json.load(f)
+                self.assertEqual((kept["host"], kept["started"]), ("nixos", "2026-11-08T02:00:00+00:00"))
+                self.assertNotIn("alias_of", kept)
+                with open(os.path.join(data, f"{alias}.json")) as f:
+                    self.assertEqual(json.load(f)["started"], "2026-11-07T02:00:00+00:00")
+        finally:
+            br.DATA_DIR = saved
+
+    def test_a_result_that_will_not_be_imported_does_not_reserve_its_name(self):
+        tag = "bbbbbbbb"
+        alias = f"box-{tag}"
+        saved = br.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                br.DATA_DIR = data
+                resident = laptop("box")
+                resident["machine"] = "aaaaaaaa"
+                resident["started"] = "2026-11-03T02:00:00+00:00"
+                with open(os.path.join(data, "box.json"), "w") as f:
+                    json.dump(resident, f)
+                newcomer = laptop("box")
+                newcomer["machine"] = tag
+                newcomer["started"] = "2026-11-06T02:00:00+00:00"
+                busy = laptop(alias)
+                busy["machine"] = tag
+                busy["status"] = "busy"
+                busy["reason"] = "busy"
+                for name, body in (("box", newcomer), (alias, busy)):
+                    with open(os.path.join(src, f"{name}.json"), "w") as f:
+                        json.dump(body, f)
+                with contextlib.redirect_stderr(io.StringIO()) as err:
+                    br.import_hosts(src)
+                log = err.getvalue()
+                self.assertIn(f"imported as {alias}", log)
+                self.assertNotIn("imported as box-2", log)
+                self.assertIn(f"{alias}: not imported", log)
+                self.assertEqual(set(os.listdir(data)), {"box.json", f"{alias}.json"})
+                with open(os.path.join(data, f"{alias}.json")) as f:
+                    body = json.load(f)
+                self.assertEqual((body["host"], body["machine"], body["alias_of"], body["status"]), (alias, tag, "box", "ok"))
+                again = laptop("box")
+                again["machine"] = tag
+                again["started"] = "2026-11-07T02:00:00+00:00"
+                os.remove(os.path.join(src, f"{alias}.json"))
+                with open(os.path.join(src, "box.json"), "w") as f:
+                    json.dump(again, f)
+                with contextlib.redirect_stderr(io.StringIO()) as err:
+                    br.import_hosts(src)
+                self.assertNotIn("box-2", err.getvalue())
+                self.assertFalse(os.path.exists(os.path.join(data, "box-2.json")))
+                with open(os.path.join(data, f"{alias}.json")) as f:
+                    self.assertEqual(json.load(f)["started"], "2026-11-07T02:00:00+00:00")
+                with open(os.path.join(data, "box.json")) as f:
+                    self.assertEqual(json.load(f)["machine"], "aaaaaaaa")
+        finally:
+            br.DATA_DIR = saved
+
+    def test_a_file_without_a_status_does_not_reserve_its_name(self):
+        """A result the import will skip, including one with no status, does not hold a filename."""
+        tag = "bbbbbbbb"
+        alias = f"box-{tag}"
+        saved = br.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                br.DATA_DIR = data
+                resident = laptop("box")
+                resident["machine"] = "aaaaaaaa"
+                with open(os.path.join(data, "box.json"), "w") as f:
+                    json.dump(resident, f)
+                newcomer = laptop("box")
+                newcomer["machine"] = tag
+                newcomer["started"] = "2026-11-06T02:00:00+00:00"
+                unmeasured = {"schema": 1, "host": alias}
+                with open(os.path.join(src, "box.json"), "w") as f:
+                    json.dump(newcomer, f)
+                with open(os.path.join(src, f"{alias}.json"), "w") as f:
+                    json.dump(unmeasured, f)
+                with contextlib.redirect_stderr(io.StringIO()) as err:
+                    br.import_hosts(src)
+                self.assertIn(f"{alias}: not imported", err.getvalue())
+                self.assertNotIn("imported as box-2", err.getvalue())
+                self.assertEqual(set(os.listdir(data)), {"box.json", f"{alias}.json"})
+                with open(os.path.join(data, f"{alias}.json")) as f:
+                    body = json.load(f)
+                self.assertEqual((body["machine"], body["alias_of"], body["status"]), (tag, "box", "ok"))
+                self.assertFalse(os.path.exists(os.path.join(data, "box-2.json")))
+        finally:
+            br.DATA_DIR = saved
+
+    def test_incoming_alias_does_not_replace_a_different_host_at_that_name(self):
+        tag = "bbbbbbbb"
+        alias = f"box-{tag}"
+        saved = br.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                br.DATA_DIR = data
+                resident = laptop("box")
+                resident["machine"] = "aaaaaaaa"
+                resident["started"] = "2026-11-03T02:00:00+00:00"
+                occupied = laptop(alias)
+                occupied["machine"] = "dddddddd"
+                occupied["started"] = "2026-11-04T02:00:00+00:00"
+                for name, body in (("box", resident), (alias, occupied)):
+                    with open(os.path.join(data, f"{name}.json"), "w") as f:
+                        json.dump(body, f)
+                previous = laptop(alias)
+                previous["machine"] = tag
+                previous["alias_of"] = "box"
+                previous["started"] = "2026-11-05T02:00:00+00:00"
+                newcomer = laptop("box")
+                newcomer["machine"] = tag
+                newcomer["started"] = "2026-11-06T02:00:00+00:00"
+                for name, body in ((alias, previous), ("box", newcomer)):
+                    with open(os.path.join(src, f"{name}.json"), "w") as f:
+                        json.dump(body, f)
+                with contextlib.redirect_stderr(io.StringIO()) as err:
+                    br.import_hosts(src)
+                log = err.getvalue()
+                self.assertIn("imported as box-2", log)
+                self.assertNotIn(f"imported as {alias}", log)
+                self.assertEqual(set(os.listdir(data)), {"box.json", f"{alias}.json", "box-2.json"})
+                with open(os.path.join(data, f"{alias}.json")) as f:
+                    kept = json.load(f)
+                self.assertEqual((kept["machine"], kept["started"]), ("dddddddd", "2026-11-04T02:00:00+00:00"))
+                self.assertNotIn("alias_of", kept)
+                with open(os.path.join(data, "box-2.json")) as f:
+                    body = json.load(f)
+                self.assertEqual((body["host"], body["machine"], body["alias_of"], body["started"]), ("box-2", tag, "box", "2026-11-06T02:00:00+00:00"))
+                with open(os.path.join(data, "box.json")) as f:
+                    self.assertEqual(json.load(f)["machine"], "aaaaaaaa")
+        finally:
+            br.DATA_DIR = saved
+
+    def test_marked_alias_does_not_overwrite_a_chosen_host_of_that_name(self):
+        tag = "bbbbbbbb"
+        saved = br.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                br.DATA_DIR = data
+                resident = laptop("box")
+                resident["machine"] = "aaaaaaaa"
+                resident["started"] = "2026-11-03T02:00:00+00:00"
+                chosen = laptop("box-2")
+                chosen["machine"] = "cccccccc"
+                chosen["started"] = "2026-11-04T02:00:00+00:00"
+                for name, body in (("box", resident), ("box-2", chosen)):
+                    with open(os.path.join(data, f"{name}.json"), "w") as f:
+                        json.dump(body, f)
+                alias = laptop("box-2")
+                alias["machine"] = tag
+                alias["alias_of"] = "box"
+                alias["started"] = "2026-11-05T02:00:00+00:00"
+                newcomer = laptop("box")
+                newcomer["machine"] = tag
+                newcomer["started"] = "2026-11-06T02:00:00+00:00"
+                for name, body in (("box", newcomer), ("box-2", alias)):
+                    with open(os.path.join(src, f"{name}.json"), "w") as f:
+                        json.dump(body, f)
+                with contextlib.redirect_stderr(io.StringIO()) as err:
+                    br.import_hosts(src)
+                self.assertNotIn("imported as box-2", err.getvalue())
+                with open(os.path.join(data, "box-2.json")) as f:
+                    kept = json.load(f)
+                self.assertEqual((kept["machine"], kept["started"]), ("cccccccc", "2026-11-04T02:00:00+00:00"))
+                self.assertNotIn("alias_of", kept)
+                stored = [
+                    name
+                    for name in os.listdir(data)
+                    if name not in ("box.json", "box-2.json")
+                ]
+                self.assertEqual(len(stored), 1)
+                with open(os.path.join(data, stored[0])) as f:
+                    body = json.load(f)
+                self.assertEqual((body["machine"], body["alias_of"], body["started"]), (tag, "box", "2026-11-06T02:00:00+00:00"))
+        finally:
+            br.DATA_DIR = saved
+
+    def test_occupied_tag_name_does_not_hide_the_real_alias(self):
+        tag = "bbbbbbbb"
+        saved = br.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                br.DATA_DIR = data
+                resident = laptop("box")
+                resident["machine"] = "aaaaaaaa"
+                real = laptop("box-3")
+                real["machine"] = tag
+                real["alias_of"] = "box"
+                real["started"] = "2026-11-04T02:00:00+00:00"
+                owned = laptop(f"box-{tag}")
+                owned["machine"] = "cccccccc"
+                owned["started"] = "2026-11-03T02:00:00+00:00"
+                for name, body in (("box", resident), ("box-3", real), (f"box-{tag}", owned)):
+                    with open(os.path.join(data, f"{name}.json"), "w") as f:
+                        json.dump(body, f)
+                newcomer = laptop("box")
+                newcomer["machine"] = tag
+                newcomer["started"] = "2026-11-06T02:00:00+00:00"
+                marked = laptop(f"box-{tag}")
+                marked["machine"] = tag
+                marked["alias_of"] = "box"
+                marked["started"] = "2026-11-05T02:00:00+00:00"
+                for name, body in (("box", newcomer), (f"box-{tag}", marked)):
+                    with open(os.path.join(src, f"{name}.json"), "w") as f:
+                        json.dump(body, f)
+                br.import_hosts(src)
+                with open(os.path.join(data, f"box-{tag}.json")) as f:
+                    kept = json.load(f)
+                self.assertEqual(kept["machine"], "cccccccc")
+                self.assertEqual(kept["started"], "2026-11-03T02:00:00+00:00")
+                with open(os.path.join(data, "box-3.json")) as f:
+                    body = json.load(f)
+                self.assertEqual((body["machine"], body["alias_of"], body["started"]), (tag, "box", "2026-11-06T02:00:00+00:00"))
+                self.assertEqual(set(os.listdir(data)), {"box.json", "box-3.json", f"box-{tag}.json"})
+        finally:
+            br.DATA_DIR = saved
+
+    def test_free_slug_refreshes_the_marked_alias(self):
+        tag = "bbbbbbbb"
+        alias = f"box-{tag}"
+        saved = br.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                br.DATA_DIR = data
+                previous = laptop(alias)
+                previous["machine"] = tag
+                previous["alias_of"] = "box"
+                previous["started"] = "2026-11-04T02:00:00+00:00"
+                with open(os.path.join(data, f"{alias}.json"), "w") as f:
+                    json.dump(previous, f)
+                newcomer = laptop("box")
+                newcomer["machine"] = tag
+                newcomer["started"] = "2026-11-06T02:00:00+00:00"
+                with open(os.path.join(src, "box.json"), "w") as f:
+                    json.dump(newcomer, f)
+                br.import_hosts(src)
+                self.assertEqual(os.listdir(data), [f"{alias}.json"])
+                with open(os.path.join(data, f"{alias}.json")) as f:
+                    body = json.load(f)
+                self.assertEqual((body["machine"], body["alias_of"], body["started"]), (tag, "box", "2026-11-06T02:00:00+00:00"))
+        finally:
+            br.DATA_DIR = saved
+
+    def test_same_machine_slug_and_alias_stay_one_file(self):
+        """The slug file this machine already has is refreshed, and the alias is not a second host."""
+        tag = "bbbbbbbb"
+        alias = f"box-{tag}"
+        saved = br.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                br.DATA_DIR = data
+
+                def put(files):
+                    for old in os.listdir(src):
+                        os.remove(os.path.join(src, old))
+                    for name, body in files:
+                        with open(os.path.join(src, f"{name}.json"), "w") as f:
+                            json.dump(body, f)
+                    with contextlib.redirect_stderr(io.StringIO()) as err:
+                        br.import_hosts(src)
+                    return err.getvalue()
+
+                resident = laptop("box")
+                resident["machine"] = tag
+                resident["started"] = "2026-11-03T02:00:00+00:00"
+                with open(os.path.join(data, "box.json"), "w") as f:
+                    json.dump(resident, f)
+                marked = laptop(alias)
+                marked["machine"] = tag
+                marked["alias_of"] = "box"
+                marked["started"] = "2026-11-04T02:00:00+00:00"
+                log = put([(alias, marked)])
+                self.assertNotIn("another machine", log)
+                self.assertIn("same machine as box, refreshed box", log)
+                self.assertEqual(log.count("refreshed box"), 1, log)
+                self.assertEqual(os.listdir(data), ["box.json"])
+                with open(os.path.join(data, "box.json")) as f:
+                    body = json.load(f)
+                self.assertEqual((body["machine"], body["started"]), (tag, "2026-11-04T02:00:00+00:00"))
+                self.assertNotIn("alias_of", body)
+
+                stale = dict(resident)
+                old_alias = dict(marked)
+                with open(os.path.join(data, "box.json"), "w") as f:
+                    json.dump(stale, f)
+                with open(os.path.join(data, f"{alias}.json"), "w") as f:
+                    json.dump(old_alias, f)
+                later = laptop("box")
+                later["machine"] = tag
+                later["started"] = "2026-11-05T02:00:00+00:00"
+                log = put([("box", later)])
+                self.assertNotIn("another machine", log)
+                self.assertIn(f"{alias}: same machine as box, dropped", log)
+                self.assertEqual(os.listdir(data), ["box.json"])
+                with open(os.path.join(data, "box.json")) as f:
+                    self.assertEqual(json.load(f)["started"], "2026-11-05T02:00:00+00:00")
+
+                with open(os.path.join(data, "box.json"), "w") as f:
+                    json.dump(stale, f)
+                both = laptop("box")
+                both["machine"] = tag
+                both["started"] = "2026-11-06T02:00:00+00:00"
+                twin = dict(marked)
+                twin["started"] = "2026-11-06T02:00:00+00:00"
+                log = put([("box", both), (alias, twin)])
+                self.assertNotIn("another machine", log)
+                self.assertNotIn(f"imported as {alias}", log)
+                self.assertEqual(os.listdir(data), ["box.json"])
+                with open(os.path.join(data, "box.json")) as f:
+                    got = json.load(f)
+                self.assertEqual((got["machine"], got["started"]), (tag, "2026-11-06T02:00:00+00:00"))
+                self.assertFalse(os.path.exists(os.path.join(data, f"{alias}.json")))
+        finally:
+            br.DATA_DIR = saved
+
+    def test_tagged_result_does_not_take_over_an_untagged_alias(self):
+        """An untagged alias may be another machine, so a tagged result is stored beside it."""
+        tag = "bbbbbbbb"
+        alias = f"box-{tag}"
+        saved = br.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                br.DATA_DIR = data
+                resident = laptop("box")
+                resident["machine"] = "aaaaaaaa"
+                resident["started"] = "2026-11-03T02:00:00+00:00"
+                untagged = laptop("box-2")
+                untagged["alias_of"] = "box"
+                untagged["started"] = "2026-11-04T02:00:00+00:00"
+                for name, body in (("box", resident), ("box-2", untagged)):
+                    with open(os.path.join(data, f"{name}.json"), "w") as f:
+                        json.dump(body, f)
+                newcomer = laptop("box")
+                newcomer["machine"] = tag
+                newcomer["started"] = "2026-11-05T02:00:00+00:00"
+                with open(os.path.join(src, "box.json"), "w") as f:
+                    json.dump(newcomer, f)
+                with contextlib.redirect_stderr(io.StringIO()) as err:
+                    br.import_hosts(src)
+                self.assertIn(f"imported as {alias}", err.getvalue())
+                self.assertEqual(set(os.listdir(data)), {"box.json", "box-2.json", f"{alias}.json"})
+                newcomer["started"] = "2026-11-06T02:00:00+00:00"
+                with open(os.path.join(src, "box.json"), "w") as f:
+                    json.dump(newcomer, f)
+                br.import_hosts(src)
+                self.assertEqual(set(os.listdir(data)), {"box.json", "box-2.json", f"{alias}.json"})
+                with open(os.path.join(data, "box.json")) as f:
+                    self.assertEqual(json.load(f)["machine"], "aaaaaaaa")
+                with open(os.path.join(data, "box-2.json")) as f:
+                    body = json.load(f)
+                self.assertEqual(
+                    (body["host"], body.get("machine"), body["alias_of"], body["started"]),
+                    ("box-2", None, "box", "2026-11-04T02:00:00+00:00"),
+                )
+                with open(os.path.join(data, f"{alias}.json")) as f:
+                    body = json.load(f)
+                self.assertEqual(
+                    (body["machine"], body["alias_of"], body["started"]),
+                    (tag, "box", "2026-11-06T02:00:00+00:00"),
+                )
+        finally:
+            br.DATA_DIR = saved
+
+    def test_untagged_alias_is_not_replaced_by_another_untagged_result(self):
+        """Two untagged results cannot be told apart, so one never replaces a generated alias."""
+        saved = br.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                br.DATA_DIR = data
+                resident = laptop("box")
+                resident["machine"] = "aaaaaaaa"
+                alias = laptop("box-2")
+                alias["alias_of"] = "box"
+                alias["started"] = "2026-11-04T02:00:00+00:00"
+                for name, body in (("box", resident), ("box-2", alias)):
+                    with open(os.path.join(data, f"{name}.json"), "w") as f:
+                        json.dump(body, f)
+                other = laptop("box-2")
+                other["started"] = "2026-11-05T02:00:00+00:00"
+                with open(os.path.join(src, "box-2.json"), "w") as f:
+                    json.dump(other, f)
+                with contextlib.redirect_stderr(io.StringIO()) as err:
+                    br.import_hosts(src)
+                self.assertIn("box-2: not imported, a result that may be another machine's holds box-2", err.getvalue())
+                self.assertEqual(set(os.listdir(data)), {"box.json", "box-2.json"})
+                with open(os.path.join(data, "box-2.json")) as f:
+                    body = json.load(f)
+                self.assertEqual((body["started"], body["alias_of"]), ("2026-11-04T02:00:00+00:00", "box"))
+        finally:
+            br.DATA_DIR = saved
+
+    def test_refreshing_the_slug_file_keeps_an_untagged_alias(self):
+        """Refreshing this machine's own slug file drops its same-tag alias, never an untagged one."""
+        tag = "bbbbbbbb"
+        saved = br.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                br.DATA_DIR = data
+                mine = laptop("box")
+                mine["machine"] = tag
+                mine["started"] = "2026-11-03T02:00:00+00:00"
+                untagged = laptop("box-2")
+                untagged["alias_of"] = "box"
+                untagged["started"] = "2026-11-01T02:00:00+00:00"
+                extra = laptop("box-3")
+                extra["machine"] = tag
+                extra["alias_of"] = "box"
+                extra["started"] = "2026-11-02T02:00:00+00:00"
+                for name, body in (("box", mine), ("box-2", untagged), ("box-3", extra)):
+                    with open(os.path.join(data, f"{name}.json"), "w") as f:
+                        json.dump(body, f)
+                newer = laptop("box")
+                newer["machine"] = tag
+                newer["started"] = "2026-11-06T02:00:00+00:00"
+                with open(os.path.join(src, "box.json"), "w") as f:
+                    json.dump(newer, f)
+                with contextlib.redirect_stderr(io.StringIO()) as err:
+                    br.import_hosts(src)
+                log = err.getvalue()
+                self.assertIn("box-3: same machine as box, dropped", log)
+                self.assertNotIn("box-2: same machine as box, dropped", log)
+                self.assertEqual(set(os.listdir(data)), {"box.json", "box-2.json"})
+                with open(os.path.join(data, "box.json")) as f:
+                    self.assertEqual(json.load(f)["started"], "2026-11-06T02:00:00+00:00")
+                with open(os.path.join(data, "box-2.json")) as f:
+                    self.assertEqual(json.load(f)["started"], "2026-11-01T02:00:00+00:00")
+        finally:
+            br.DATA_DIR = saved
+
+    def test_one_bad_json_file_does_not_stop_load_hosts(self):
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, "box.json"), "w") as f:
+                json.dump(laptop("box"), f)
+            with open(os.path.join(d, "broken.json"), "w") as f:
+                f.write("{not json")
+            with open(os.path.join(d, "list.json"), "w") as f:
+                json.dump([1, 2], f)
+            with contextlib.redirect_stderr(io.StringIO()) as err:
+                hosts = br.load_hosts(d)
+            self.assertEqual(list(hosts), ["box"])
+            log = err.getvalue()
+            self.assertIn("broken.json: not readable as JSON", log)
+            self.assertIn("list.json: not a host result", log)
+
+    def test_import_leaves_an_unreadable_file_in_the_data_directory(self):
+        """An unreadable file holds its name like another machine's result, and import never replaces it."""
+        tag = "bbbbbbbb"
+        saved = br.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                br.DATA_DIR = data
+                with open(os.path.join(data, "box.json"), "w") as f:
+                    f.write("{not json")
+                tagged = laptop("box")
+                tagged["machine"] = tag
+                with open(os.path.join(src, "box.json"), "w") as f:
+                    json.dump(tagged, f)
+                with contextlib.redirect_stderr(io.StringIO()) as err:
+                    br.import_hosts(src)
+                log = err.getvalue()
+                self.assertIn("box.json: not readable as JSON", log)
+                self.assertIn(f"imported as box-{tag}", log)
+                self.assertEqual(set(os.listdir(data)), {"box.json", f"box-{tag}.json"})
+                with open(os.path.join(data, "box.json")) as f:
+                    self.assertEqual(f.read(), "{not json")
+                with open(os.path.join(src, "box.json"), "w") as f:
+                    json.dump(laptop("box"), f)
+                with contextlib.redirect_stderr(io.StringIO()) as err:
+                    br.import_hosts(src)
+                self.assertIn("box: not imported, a result that may be another machine's holds box", err.getvalue())
+                self.assertEqual(set(os.listdir(data)), {"box.json", f"box-{tag}.json"})
+                with open(os.path.join(data, "box.json")) as f:
+                    self.assertEqual(f.read(), "{not json")
+        finally:
+            br.DATA_DIR = saved
+
+    def test_run_without_a_machine_id_requires_a_host_name(self):
+        """A name made from the CPU is the same on every machine with that CPU, so `run` wants --host."""
+        saved = br.machine_identity
+        br.machine_identity = lambda: ""
+        try:
+            with self.assertRaises(SystemExit) as raised:
+                br.run(type("Args", (), {"host": None})())
+            self.assertIn("pass --host NAME", str(raised.exception))
+        finally:
+            br.machine_identity = saved
+
+    def test_moving_a_marked_alias_keeps_alias_of(self):
+        """Moving a marked alias keeps the slug it was generated for, so a later import finds it."""
+        tag = "bbbbbbbb"
+        occupied = f"box-{tag}"
+        saved = br.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                br.DATA_DIR = data
+                other = laptop(occupied)
+                other["machine"] = "cccccccc"
+                other["started"] = "2026-11-03T02:00:00+00:00"
+                with open(os.path.join(data, f"{occupied}.json"), "w") as f:
+                    json.dump(other, f)
+                marked = laptop(occupied)
+                marked["machine"] = tag
+                marked["alias_of"] = "box"
+                marked["started"] = "2026-11-04T02:00:00+00:00"
+                with open(os.path.join(src, f"{occupied}.json"), "w") as f:
+                    json.dump(marked, f)
+                with contextlib.redirect_stderr(io.StringIO()):
+                    br.import_hosts(src)
+                moved = f"{occupied}-{tag}"
+                self.assertEqual(set(os.listdir(data)), {f"{occupied}.json", f"{moved}.json"})
+                with open(os.path.join(data, f"{occupied}.json")) as f:
+                    self.assertEqual(json.load(f)["machine"], "cccccccc")
+                with open(os.path.join(data, f"{moved}.json")) as f:
+                    body = json.load(f)
+                self.assertEqual((body["host"], body["machine"], body["alias_of"]), (moved, tag, "box"))
+                os.remove(os.path.join(src, f"{occupied}.json"))
+                later = laptop("box")
+                later["machine"] = tag
+                later["started"] = "2026-11-06T02:00:00+00:00"
+                with open(os.path.join(src, "box.json"), "w") as f:
+                    json.dump(later, f)
+                br.import_hosts(src)
+                self.assertFalse(os.path.exists(os.path.join(data, "box.json")))
+                self.assertEqual(set(os.listdir(data)), {f"{occupied}.json", f"{moved}.json"})
+                with open(os.path.join(data, f"{moved}.json")) as f:
+                    body = json.load(f)
+                self.assertEqual((body["started"], body["machine"], body["alias_of"]), ("2026-11-06T02:00:00+00:00", tag, "box"))
+                with open(os.path.join(data, f"{occupied}.json")) as f:
+                    self.assertEqual(json.load(f)["machine"], "cccccccc")
+        finally:
+            br.DATA_DIR = saved
+
+    def test_tagged_reimport_keeps_another_machines_untagged_alias(self):
+        """Refreshing a tagged alias leaves an untagged alias of that slug in place.
+
+        An untagged alias can be another machine, so it matches no result. A
+        second alias that already carries this result's tag is still one
+        host, so that copy is removed.
+        """
+        tag = "bbbbbbbb"
+        alias = f"box-{tag}"
+        saved = br.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                br.DATA_DIR = data
+                occupant = laptop("box")
+                occupant["machine"] = "aaaaaaaa"
+                occupant["started"] = "2026-11-03T02:00:00+00:00"
+                historical = laptop("box-2")
+                historical["alias_of"] = "box"
+                historical["started"] = "2026-11-01T02:00:00+00:00"
+                mine = laptop(alias)
+                mine["machine"] = tag
+                mine["alias_of"] = "box"
+                mine["started"] = "2026-11-04T02:00:00+00:00"
+                extra = laptop("box-3")
+                extra["machine"] = tag
+                extra["alias_of"] = "box"
+                extra["started"] = "2026-11-02T02:00:00+00:00"
+                for name, body in (("box", occupant), ("box-2", historical), (alias, mine), ("box-3", extra)):
+                    with open(os.path.join(data, f"{name}.json"), "w") as f:
+                        json.dump(body, f)
+                newer = laptop("box")
+                newer["machine"] = tag
+                newer["started"] = "2026-11-06T02:00:00+00:00"
+                with open(os.path.join(src, "box.json"), "w") as f:
+                    json.dump(newer, f)
+                with contextlib.redirect_stderr(io.StringIO()) as err:
+                    br.import_hosts(src)
+                log = err.getvalue()
+                self.assertIn("box-3: same machine as box, dropped", log)
+                self.assertNotIn("box-2: same machine as box, dropped", log)
+                self.assertEqual(set(os.listdir(data)), {"box.json", "box-2.json", f"{alias}.json"})
+                with open(os.path.join(data, "box.json")) as f:
+                    self.assertEqual(json.load(f)["machine"], "aaaaaaaa")
+                with open(os.path.join(data, "box-2.json")) as f:
+                    body = json.load(f)
+                self.assertEqual(
+                    (body["started"], body.get("machine"), body["alias_of"]),
+                    ("2026-11-01T02:00:00+00:00", None, "box"),
+                )
+                with open(os.path.join(data, f"{alias}.json")) as f:
+                    body = json.load(f)
+                self.assertEqual(
+                    (body["started"], body["machine"], body["alias_of"]),
+                    ("2026-11-06T02:00:00+00:00", tag, "box"),
+                )
+        finally:
+            br.DATA_DIR = saved
+
+    def test_busy_incoming_file_does_not_reserve_its_name(self):
+        tag = "bbbbbbbb"
+        alias = f"box-{tag}"
+        saved = br.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                br.DATA_DIR = data
+                resident = laptop("box")
+                resident["machine"] = "aaaaaaaa"
+                with open(os.path.join(data, "box.json"), "w") as f:
+                    json.dump(resident, f)
+                newcomer = laptop("box")
+                newcomer["machine"] = tag
+                newcomer["started"] = "2026-11-06T02:00:00+00:00"
+                busy = {"schema": 1, "host": alias, "status": "busy", "reason": "busy"}
+                with open(os.path.join(src, "box.json"), "w") as f:
+                    json.dump(newcomer, f)
+                with open(os.path.join(src, f"{alias}.json"), "w") as f:
+                    json.dump(busy, f)
+                br.import_hosts(src)
+                self.assertEqual(set(os.listdir(data)), {"box.json", f"{alias}.json"})
+                with open(os.path.join(data, f"{alias}.json")) as f:
+                    body = json.load(f)
+                self.assertEqual((body["machine"], body["alias_of"], body["started"]), (tag, "box", "2026-11-06T02:00:00+00:00"))
+                self.assertFalse(os.path.exists(os.path.join(data, "box-2.json")))
+        finally:
+            br.DATA_DIR = saved
+
+    def test_slug_file_and_marked_alias_stay_one_host(self):
+        tag = "bbbbbbbb"
+        alias = f"box-{tag}"
+        saved = br.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                br.DATA_DIR = data
+
+                def put(files):
+                    for old in os.listdir(src):
+                        os.remove(os.path.join(src, old))
+                    for name, body in files:
+                        with open(os.path.join(src, f"{name}.json"), "w") as f:
+                            json.dump(body, f)
+                    with contextlib.redirect_stderr(io.StringIO()) as err:
+                        br.import_hosts(src)
+                    return err.getvalue()
+
+                slug = laptop("box")
+                slug["machine"] = tag
+                slug["started"] = "2026-11-03T02:00:00+00:00"
+                put([("box", slug)])
+                marked = laptop(alias)
+                marked["machine"] = tag
+                marked["alias_of"] = "box"
+                marked["started"] = "2026-11-04T02:00:00+00:00"
+                log = put([(alias, marked)])
+                self.assertIn(f"{alias}: same machine as box, refreshed box", log)
+                self.assertEqual(os.listdir(data), ["box.json"])
+                with open(os.path.join(data, "box.json")) as f:
+                    body = json.load(f)
+                self.assertEqual(body["started"], "2026-11-04T02:00:00+00:00")
+                self.assertNotIn("alias_of", body)
+                # A later slug import must not leave the old file beside a refreshed alias.
+                marked["started"] = "2026-11-04T02:00:00+00:00"
+                with open(os.path.join(data, f"{alias}.json"), "w") as f:
+                    json.dump(marked, f)
+                later = laptop("box")
+                later["machine"] = tag
+                later["started"] = "2026-11-06T02:00:00+00:00"
+                log = put([("box", later)])
+                self.assertNotIn("another machine", log)
+                self.assertIn(f"{alias}: same machine as box, dropped", log)
+                self.assertEqual(os.listdir(data), ["box.json"])
+                with open(os.path.join(data, "box.json")) as f:
+                    self.assertEqual(json.load(f)["started"], "2026-11-06T02:00:00+00:00")
+                both = laptop(alias)
+                both["machine"] = tag
+                both["alias_of"] = "box"
+                both["started"] = "2026-11-05T02:00:00+00:00"
+                newest = laptop("box")
+                newest["machine"] = tag
+                newest["started"] = "2026-11-07T02:00:00+00:00"
+                log = put([("box", newest), (alias, both)])
+                self.assertNotIn("another machine", log)
+                self.assertIn(f"{alias}: same machine as box, not a second host", log)
+                self.assertEqual(os.listdir(data), ["box.json"])
+                with open(os.path.join(data, "box.json")) as f:
+                    self.assertEqual(json.load(f)["started"], "2026-11-07T02:00:00+00:00")
+        finally:
+            br.DATA_DIR = saved
+
+    def test_moved_alias_keeps_the_slug_marker(self):
+        tag = "bbbbbbbb"
+        alias = f"box-{tag}"
+        saved = br.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                br.DATA_DIR = data
+                occupied = laptop(alias)
+                occupied["machine"] = "cccccccc"
+                occupied["started"] = "2026-11-03T02:00:00+00:00"
+                with open(os.path.join(data, f"{alias}.json"), "w") as f:
+                    json.dump(occupied, f)
+                marked = laptop(alias)
+                marked["machine"] = tag
+                marked["alias_of"] = "box"
+                marked["started"] = "2026-11-05T02:00:00+00:00"
+                with open(os.path.join(src, f"{alias}.json"), "w") as f:
+                    json.dump(marked, f)
+                br.import_hosts(src)
+                moved = f"{alias}-{tag}"
+                self.assertEqual(set(os.listdir(data)), {f"{alias}.json", f"{moved}.json"})
+                with open(os.path.join(data, f"{alias}.json")) as f:
+                    self.assertEqual(json.load(f)["machine"], "cccccccc")
+                with open(os.path.join(data, f"{moved}.json")) as f:
+                    body = json.load(f)
+                self.assertEqual(body["alias_of"], "box")
+                self.assertEqual(body["machine"], tag)
+                # A later slug import finds that marker.
+                for old in os.listdir(src):
+                    os.remove(os.path.join(src, old))
+                later = laptop("box")
+                later["machine"] = tag
+                later["started"] = "2026-11-06T02:00:00+00:00"
+                with open(os.path.join(src, "box.json"), "w") as f:
+                    json.dump(later, f)
+                br.import_hosts(src)
+                with open(os.path.join(data, f"{moved}.json")) as f:
+                    self.assertEqual(json.load(f)["started"], "2026-11-06T02:00:00+00:00")
+                self.assertFalse(os.path.exists(os.path.join(data, "box.json")))
+        finally:
+            br.DATA_DIR = saved
+
+    def test_an_unreadable_file_is_never_an_alias_destination(self):
+        tag = "bbbbbbbb"
+        alias = f"box-{tag}"
+        resident = laptop("box")
+        resident["machine"] = "aaaaaaaa"
+        newcomer = laptop("box")
+        newcomer["machine"] = tag
+        marked = laptop(alias)
+        marked["machine"] = tag
+        marked["alias_of"] = "box"
+        got = br.assign_import_name(
+            "box", newcomer, {"box": resident}, {"box": newcomer, alias: marked}, blocked={alias}
+        )
+        self.assertEqual(got, "box-2")
+        saved = br.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                br.DATA_DIR = data
+                with open(os.path.join(data, "box.json"), "w") as f:
+                    json.dump(resident, f)
+                with open(os.path.join(data, f"{alias}.json"), "w") as f:
+                    f.write("{not json")
+                marked["started"] = "2026-11-02T02:00:00+00:00"
+                for name, body in (("box", newcomer), (alias, marked)):
+                    with open(os.path.join(src, f"{name}.json"), "w") as f:
+                        json.dump(body, f)
+                with contextlib.redirect_stderr(io.StringIO()):
+                    br.import_hosts(src)
+                self.assertEqual(set(os.listdir(data)), {"box.json", f"{alias}.json", "box-2.json"})
+                with open(os.path.join(data, f"{alias}.json")) as f:
+                    self.assertEqual(f.read(), "{not json")
+        finally:
+            br.DATA_DIR = saved
+
+    def test_a_result_that_will_not_be_imported_is_never_an_alias_destination(self):
+        tag = "bbbbbbbb"
+        resident = laptop("box")
+        resident["machine"] = "aaaaaaaa"
+        kept = laptop("box-4")
+        kept["machine"] = tag
+        kept["alias_of"] = "box"
+        kept["started"] = "2026-11-02T02:00:00+00:00"
+        newcomer = laptop("box")
+        newcomer["machine"] = tag
+        newcomer["started"] = "2026-11-06T02:00:00+00:00"
+        busy = {"schema": 1, "host": "box-3", "machine": tag, "alias_of": "box", "status": "busy", "reason": "busy"}
+        got = br.assign_import_name(
+            "box", newcomer, {"box": resident, "box-4": kept}, {"box": newcomer, "box-3": busy}
+        )
+        self.assertEqual(got, "box-4")
+        saved = br.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                br.DATA_DIR = data
+                for name, body in (("box", resident), ("box-4", kept)):
+                    with open(os.path.join(data, f"{name}.json"), "w") as f:
+                        json.dump(body, f)
+                for name, body in (("box", newcomer), ("box-3", busy)):
+                    with open(os.path.join(src, f"{name}.json"), "w") as f:
+                        json.dump(body, f)
+                with contextlib.redirect_stderr(io.StringIO()):
+                    br.import_hosts(src)
+                self.assertEqual(set(os.listdir(data)), {"box.json", "box-4.json"})
+                with open(os.path.join(data, "box-4.json")) as f:
+                    self.assertEqual(json.load(f)["started"], "2026-11-06T02:00:00+00:00")
+        finally:
+            br.DATA_DIR = saved
+
+    def test_the_newest_result_of_one_machine_in_a_collection_wins(self):
+        tag = "bbbbbbbb"
+        alias = f"box-{tag}"
+        resident = laptop("box")
+        resident["machine"] = "aaaaaaaa"
+        for slug_started, alias_started, winner, loser in (
+            ("2026-11-03T02:00:00+00:00", "2026-11-05T02:00:00+00:00", alias, "box"),
+            ("2026-11-05T02:00:00+00:00", "2026-11-03T02:00:00+00:00", "box", alias),
+            # Same instant, different offsets: the alias is an hour later.
+            ("2026-11-05T02:00:00+00:00", "2026-11-05T04:00:00+01:00", alias, "box"),
+        ):
+            with self.subTest(winner=winner, slug_started=slug_started):
+                newcomer = laptop("box")
+                newcomer["machine"] = tag
+                newcomer["started"] = slug_started
+                marked = laptop(alias)
+                marked["machine"] = tag
+                marked["alias_of"] = "box"
+                marked["started"] = alias_started
+                newest = slug_started if winner == "box" else alias_started
+                saved = br.DATA_DIR
+                try:
+                    with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                        br.DATA_DIR = data
+                        with open(os.path.join(data, "box.json"), "w") as f:
+                            json.dump(resident, f)
+                        for name, body in (("box", newcomer), (alias, marked)):
+                            with open(os.path.join(src, f"{name}.json"), "w") as f:
+                                json.dump(body, f)
+                        with contextlib.redirect_stderr(io.StringIO()) as err:
+                            br.import_hosts(src)
+                        self.assertIn(f"{loser}: same machine as {winner}, not a second host", err.getvalue())
+                        self.assertEqual(set(os.listdir(data)), {"box.json", f"{alias}.json"})
+                        with open(os.path.join(data, "box.json")) as f:
+                            self.assertEqual(json.load(f), resident)
+                        with open(os.path.join(data, f"{alias}.json")) as f:
+                            body = json.load(f)
+                        self.assertEqual((body["machine"], body["alias_of"], body["started"]), (tag, "box", newest))
+                finally:
+                    br.DATA_DIR = saved
+
+    def test_summary_render_and_import_skip_a_result_without_times(self):
+        saved = br.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                br.DATA_DIR = data
+                broken = laptop("nolist")
+                broken["results"] = {"x": 1}
+                bad_entry = laptop("badentry")
+                bad_entry["results"].append({"operation": "x25519-ecdh/{lib}", "library": "rind"})
+                missing = laptop("missing")
+                del missing["results"]
+                busy = {"schema": 1, "host": "busybox", "status": "busy", "reason": "busy"}
+                for d in (src, data):
+                    for body in (laptop("box"), broken, bad_entry, missing, busy):
+                        with open(os.path.join(d, f"{body['host']}.json"), "w") as f:
+                            json.dump(body, f)
+                with contextlib.redirect_stderr(io.StringIO()) as err:
+                    self.assertEqual(list(br.load_measured(data)), ["box"])
+                for name in ("nolist", "badentry", "missing"):
+                    self.assertIn(f"{name}: no well-formed results list, skipped", err.getvalue())
+                self.assertIn("busybox: not measured, busy: busy, skipped", err.getvalue())
+                with contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(io.StringIO()) as err:
+                    br.summary(type("Args", (), {"dir": src})())
+                text = out.getvalue()
+                self.assertIn("`box`: box CPU", text)
+                self.assertIn("busybox`: not measured, busy: busy", text)
+                self.assertIn("missing: no well-formed results list, skipped", err.getvalue())
+                self.assertNotIn("missing", text)
+                with tempfile.TemporaryDirectory() as empty:
+                    br.DATA_DIR = empty
+                    with contextlib.redirect_stderr(io.StringIO()) as err:
+                        br.import_hosts(src)
+                    self.assertEqual(os.listdir(empty), ["box.json"])
+                    self.assertIn("missing: not imported, no well-formed results list", err.getvalue())
+        finally:
+            br.DATA_DIR = saved
+
+    def test_a_data_file_write_keeps_the_umask_mode(self):
+        """An atomic data-file write gets the mode `open` would, not mkstemp's 0600, and leaves no temp file."""
+        saved, umask = br.DATA_DIR, os.umask(0o022)
+        try:
+            with tempfile.TemporaryDirectory() as data:
+                br.DATA_DIR = data
+                br._dump_data_file("box", {"schema": 1, "host": "box"})
+                self.assertEqual(stat.S_IMODE(os.stat(os.path.join(data, "box.json")).st_mode), 0o644)
+                self.assertEqual(os.listdir(data), ["box.json"])
+        finally:
+            br.DATA_DIR = saved
+            os.umask(umask)
+
+    def test_a_host_file_missing_what_the_report_reads_is_skipped(self):
+        """The published results pass; each field the report reads, removed or broken, skips the file."""
+        real = {}
+        for path in sorted(glob.glob(os.path.join(br.DATA_DIR, "*.json"))):
+            name = os.path.splitext(os.path.basename(path))[0]
+            if name != "tiers":
+                with open(path) as f:
+                    real[name] = json.load(f)
+        self.assertTrue(real)
+        for name, body in real.items():
+            self.assertEqual(br.unmeasured(body), "", name)
+        base = dict(next(iter(real.values())))
+        for key in ("machine", "alias_of"):
+            base.pop(key, None)
+        bad = {}
+        for field in ("commit", "started", "os", "cpu", "cpu.model", "cpu.arch", "cpu.logical_cpus", "toolchain", "toolchain.rustc"):
+            for how, value in (("missing", None), ("wrong", 7 if field != "cpu.logical_cpus" else "8")):
+                body = json.loads(json.dumps(base))
+                parent, _, key = field.rpartition(".")
+                holder = body[parent] if parent else body
+                if value is None:
+                    del holder[key]
+                else:
+                    holder[key] = value
+                bad[f"{how}-{field.replace('.', '-')}"] = body
+        for label, ns in (("0", 0), ("neg", -1), ("true", True), ("nan", float("nan")), ("inf", float("inf")), ("str", "1"), ("huge", 10**400)):
+            body = json.loads(json.dumps(base))
+            body["results"][0]["ns"] = ns
+            bad[f"ns-{label}"] = body
+        for key in br.OPTIONAL_HOST_OBJECTS:
+            body = json.loads(json.dumps(base))
+            body[key] = "x"
+            bad[f"wrong-{key.replace('_', '-')}"] = body
+        body = json.loads(json.dumps(base))
+        body["refused"] = {"no-such-library": ["adx"]}
+        bad["refused-unknown-library"] = body
+        body = json.loads(json.dumps(base))
+        body["refused"] = {"rind": "adx"}
+        bad["refused-not-a-list"] = body
+        if isinstance(base.get("build_cost"), dict) and base["build_cost"].get("status") == "ok":
+            for label, edit in (
+                ("no-builds", lambda c: c.pop("builds")),
+                ("no-host", lambda c: c.pop("host")),
+                ("build-no-seconds", lambda c: c["builds"][0].pop("seconds")),
+                ("build-bad-tools", lambda c: c["builds"][0].__setitem__("tools", "none")),
+                ("build-bool-bytes", lambda c: c["builds"][0].__setitem__("stripped_bytes", True)),
+            ):
+                body = json.loads(json.dumps(base))
+                edit(body["build_cost"])
+                bad[f"build-cost-{label}"] = body
+        body = json.loads(json.dumps(base))
+        body["build_cost"] = {"status": "skipped"}
+        bad["build-cost-no-reason"] = body
+        saved = br.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                br.DATA_DIR = data
+                for d in (src, data):
+                    for name, body in {"good": base, **bad}.items():
+                        with open(os.path.join(d, f"{name}.json"), "w") as f:
+                            json.dump(dict(body, host=name), f)
+                with contextlib.redirect_stderr(io.StringIO()) as err:
+                    self.assertEqual(list(br.load_measured(data)), ["good"])
+                for name in bad:
+                    self.assertRegex(err.getvalue(), rf"bench-report: {name}: .*, skipped\n")
+                with contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(io.StringIO()) as err:
+                    br.summary(type("Args", (), {"dir": src})())
+                for name in bad:
+                    self.assertRegex(err.getvalue(), rf"bench-report: {name}: .*, skipped\n")
+                    self.assertNotIn(f"`{name}`", out.getvalue())
+                self.assertIn("`good`", out.getvalue())
+                with tempfile.TemporaryDirectory() as empty:
+                    br.DATA_DIR = empty
+                    with contextlib.redirect_stderr(io.StringIO()) as err:
+                        br.import_hosts(src)
+                    self.assertEqual(os.listdir(empty), ["good.json"])
+                    for name in bad:
+                        self.assertIn(f"bench-report: {name}: not imported, ", err.getvalue())
+        finally:
+            br.DATA_DIR = saved
+
+    def test_render_check_with_from_writes_nothing(self):
+        """`render --from DIR --check`, with or without --adopt, leaves the data directory byte for byte."""
+
+        def snapshot(d):
+            out = {}
+            for name in sorted(os.listdir(d)):
+                with open(os.path.join(d, name), "rb") as f:
+                    out[name] = f.read()
+            return out
+
+        saved = br.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as scratch:
+                data = os.path.join(scratch, "data")
+                shutil.copytree(saved, data)
+                br.DATA_DIR = data
+                resident = laptop("nixos")
+                with open(os.path.join(data, "laptop.json"), "w") as f:
+                    json.dump(resident, f)
+                newcomer = laptop("laptop")
+                newcomer["machine"] = "cccccccc"
+                for name in ("laptop", "fresh"):
+                    with open(os.path.join(src, f"{name}.json"), "w") as f:
+                        json.dump(dict(newcomer, host=name), f)
+                before = snapshot(data)
+                for extra in ([], ["--adopt", "laptop"]):
+                    with self.subTest(extra=extra):
+                        argv = ["bench-report", "render", "--from", src, "--check", *extra]
+                        with mock.patch.object(sys, "argv", argv), contextlib.redirect_stderr(io.StringIO()):
+                            with self.assertRaises(SystemExit) as raised:
+                                br.main()
+                        self.assertEqual(snapshot(data), before)
+                        self.assertIn("--check", str(raised.exception))
+        finally:
+            br.DATA_DIR = saved
+
+    def adopt_case(self, resident, newcomer, adopt):
+        """The data directory's files and stderr after importing `newcomer` over `resident` as nixos."""
+        saved = br.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                br.DATA_DIR = data
+                if resident is not None:
+                    with open(os.path.join(data, "nixos.json"), "w") as f:
+                        json.dump(resident, f)
+                with open(os.path.join(src, "nixos.json"), "w") as f:
+                    json.dump(newcomer, f)
+                with contextlib.redirect_stderr(io.StringIO()) as err:
+                    br.import_hosts(src, adopt)
+                files = {}
+                for name in os.listdir(data):
+                    with open(os.path.join(data, name)) as f:
+                        files[name] = json.load(f)
+                return files, err.getvalue()
+        finally:
+            br.DATA_DIR = saved
+
+    def test_adopt_lets_a_tagged_result_take_over_an_untagged_file(self):
+        resident = laptop("nixos")
+        newcomer = laptop("nixos")
+        newcomer["machine"] = "cccccccc"
+        newcomer["started"] = "2026-11-05T00:00:00+00:00"
+        files, log = self.adopt_case(resident, newcomer, ["nixos"])
+        self.assertIn("nixos: adopted by machine cccccccc", log)
+        self.assertEqual(files, {"nixos.json": newcomer})
+        # Without --adopt the untagged file stays and the result gets a twin.
+        files, _ = self.adopt_case(resident, newcomer, ())
+        self.assertEqual(set(files), {"nixos.json", "nixos-cccccccc.json"})
+        self.assertEqual(files["nixos.json"], resident)
+
+    def test_adopt_refuses_anything_but_a_tagged_result_over_an_untagged_file(self):
+        tagged = laptop("nixos")
+        tagged["machine"] = "cccccccc"
+        other = laptop("nixos")
+        other["machine"] = "aaaaaaaa"
+        for resident, newcomer, adopt, message in (
+            (other, tagged, ["nixos"], "--adopt nixos: nixos.json already carries a machine tag"),
+            (laptop("nixos"), laptop("nixos"), ["nixos"], "--adopt nixos: the collection has no measured, tagged"),
+            (None, tagged, ["nixos"], "--adopt nixos: the data directory has no readable nixos.json"),
+            (laptop("nixos"), tagged, ["nixos", "kixtop"], "--adopt kixtop: the data directory has no readable"),
+        ):
+            with self.subTest(message=message):
+                saved = br.DATA_DIR
+                try:
+                    with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                        br.DATA_DIR = data
+                        if resident is not None:
+                            with open(os.path.join(data, "nixos.json"), "w") as f:
+                                json.dump(resident, f)
+                        with open(os.path.join(src, "nixos.json"), "w") as f:
+                            json.dump(newcomer, f)
+                        with self.assertRaises(SystemExit) as raised:
+                            br.import_hosts(src, adopt)
+                        self.assertIn(message, str(raised.exception))
+                        # A refused adopt writes nothing, even for a name that was fine.
+                        self.assertEqual(os.listdir(data), [] if resident is None else ["nixos.json"])
+                        if resident is not None:
+                            with open(os.path.join(data, "nixos.json")) as f:
+                                self.assertEqual(json.load(f), resident)
+                finally:
+                    br.DATA_DIR = saved
+        with self.assertRaises(SystemExit) as raised:
+            br.render(type("Args", (), {"collection": None, "adopt": ["nixos"], "check": False})())
+        self.assertIn("--adopt needs --from DIR", str(raised.exception))
+
+    def test_an_older_result_never_replaces_a_newer_file_from_its_machine(self):
+        tag = "cccccccc"
+        newer = laptop("nixos")
+        newer["machine"] = tag
+        newer["started"] = "2026-11-06T00:00:00+00:00"
+        older = dict(newer, started="2026-11-04T00:00:00+00:00")
+        files, log = self.adopt_case(newer, older, ())
+        self.assertIn("nixos: not imported, nixos from the same machine started later", log)
+        self.assertEqual(files, {"nixos.json": newer})
+        # A newer or equal run still refreshes the file, and says so.
+        files, log = self.adopt_case(older, newer, ())
+        self.assertIn("nixos: same machine as nixos, not older, refreshed nixos", log)
+        self.assertEqual(files, {"nixos.json": newer})
+
+    def test_an_older_result_never_deletes_a_newer_alias_from_its_machine(self):
+        tag = "cccccccc"
+        alias = f"nixos-{tag}"
+        saved = br.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                br.DATA_DIR = data
+                resident = laptop("nixos")
+                resident["machine"] = tag
+                resident["started"] = "2026-11-01T00:00:00+00:00"
+                marked = laptop(alias)
+                marked["machine"] = tag
+                marked["alias_of"] = "nixos"
+                marked["started"] = "2026-11-06T00:00:00+00:00"
+                for name, body in (("nixos", resident), (alias, marked)):
+                    with open(os.path.join(data, f"{name}.json"), "w") as f:
+                        json.dump(body, f)
+                older = laptop("nixos")
+                older["machine"] = tag
+                older["started"] = "2026-11-04T00:00:00+00:00"
+                with open(os.path.join(src, "nixos.json"), "w") as f:
+                    json.dump(older, f)
+                with contextlib.redirect_stderr(io.StringIO()) as err:
+                    br.import_hosts(src)
+                self.assertIn(f"nixos: not imported, {alias} from the same machine started later", err.getvalue())
+                self.assertEqual(set(os.listdir(data)), {"nixos.json", f"{alias}.json"})
+                with open(os.path.join(data, f"{alias}.json")) as f:
+                    self.assertEqual(json.load(f), marked)
+                with open(os.path.join(data, "nixos.json")) as f:
+                    self.assertEqual(json.load(f), resident)
+        finally:
+            br.DATA_DIR = saved
+
+    def test_adopt_refuses_an_older_result_and_replaces_an_unmeasured_file(self):
+        tag = "cccccccc"
+        alias = f"nixos-{tag}"
+        resident = laptop("nixos")
+        resident["started"] = "2026-11-06T00:00:00+00:00"
+        older = laptop("nixos")
+        older["machine"] = tag
+        older["started"] = "2026-11-04T00:00:00+00:00"
+        marked = laptop(alias)
+        marked["machine"] = tag
+        marked["alias_of"] = "nixos"
+        marked["started"] = "2026-11-06T00:00:00+00:00"
+        early = dict(resident, started="2026-11-01T00:00:00+00:00")
+        for files, message in (
+            ({"nixos": resident}, "--adopt nixos: nixos.json started later than the collection's nixos.json"),
+            ({"nixos": early, alias: marked}, f"--adopt nixos: {alias}.json started later than the collection's"),
+        ):
+            with self.subTest(message=message):
+                saved = br.DATA_DIR
+                try:
+                    with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                        br.DATA_DIR = data
+                        for name, body in files.items():
+                            with open(os.path.join(data, f"{name}.json"), "w") as f:
+                                json.dump(body, f)
+                        with open(os.path.join(src, "nixos.json"), "w") as f:
+                            json.dump(older, f)
+                        with self.assertRaises(SystemExit) as raised:
+                            br.import_hosts(src, ["nixos"])
+                        self.assertIn(message, str(raised.exception))
+                        for name, body in files.items():
+                            with open(os.path.join(data, f"{name}.json")) as f:
+                                self.assertEqual(json.load(f), body)
+                finally:
+                    br.DATA_DIR = saved
+        busy = {"schema": 1, "host": "nixos", "status": "busy", "reason": "busy"}
+        files, log = self.adopt_case(busy, older, ["nixos"])
+        self.assertIn("--adopt nixos: nixos.json holds no times (not measured, busy: busy), replacing it", log)
+        self.assertEqual(files, {"nixos.json": older})
+
+    def cli(self, data, *argv):
+        """Runs `admin/bench-report render` through argparse on `data`, writing no report files."""
+        saved = {k: getattr(br, k) for k in ("DATA_DIR", "REPORT_DIR", "REPORT", "report", "load_gaps")}
+        argv_saved = sys.argv
+        try:
+            with tempfile.TemporaryDirectory() as out:
+                br.DATA_DIR = data
+                br.REPORT_DIR = out
+                br.REPORT = os.path.join(out, "BENCHMARKS.md")
+                br.report = lambda *a: {}
+                br.load_gaps = lambda *a, **k: []
+                sys.argv = ["bench-report", "render", *argv]
+                with contextlib.redirect_stderr(io.StringIO()) as err, contextlib.redirect_stdout(io.StringIO()):
+                    try:
+                        br.main()
+                    except SystemExit as e:
+                        return 1, err.getvalue() + str(e.code)
+                return 0, err.getvalue()
+        finally:
+            for k, v in saved.items():
+                setattr(br, k, v)
+            sys.argv = argv_saved
+
+    def test_adopt_through_the_command_line(self):
+        tag = "cccccccc"
+        with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+
+            def put(directory, name, body):
+                with open(os.path.join(directory, f"{name}.json"), "w") as f:
+                    f.write(body if isinstance(body, str) else json.dumps(body))
+
+            def tagged(name, **extra):
+                body = laptop(name)
+                body["machine"] = tag
+                body["started"] = "2026-11-06T00:00:00+00:00"
+                body.update(extra)
+                return body
+
+            for name in ("nixos", "kixtop"):
+                put(data, name, laptop(name))
+                put(src, name, tagged(name))
+            code, log = self.cli(data, "--from", src, "--adopt", "nixos", "--adopt", "kixtop")
+            self.assertEqual(code, 0, log)
+            self.assertIn("nixos: adopted by machine cccccccc", log)
+            self.assertIn("kixtop: adopted by machine cccccccc", log)
+            self.assertEqual(sorted(os.listdir(data)), ["kixtop.json", "nixos.json"])
+            for name in ("nixos", "kixtop"):
+                with open(os.path.join(data, f"{name}.json")) as f:
+                    self.assertEqual(json.load(f), tagged(name))
+            for target, incoming, message in (
+                ("{not json", tagged("box"), "--adopt box: the data directory has no readable box.json"),
+                (laptop("box"), {"schema": 1, "host": "box", "machine": tag, "status": "busy", "reason": "busy"},
+                 "--adopt box: the collection has no measured, tagged box.json"),
+                (laptop("box"), tagged("box", alias_of="nixos"),
+                 "--adopt box: the collection's box.json is a generated alias of nixos"),
+            ):
+                with self.subTest(message=message):
+                    put(data, "box", target)
+                    put(src, "box", incoming)
+                    code, log = self.cli(data, "--from", src, "--adopt", "box")
+                    self.assertEqual(code, 1)
+                    self.assertIn(message, log)
+                    with open(os.path.join(data, "box.json")) as f:
+                        self.assertEqual(f.read(), target if isinstance(target, str) else json.dumps(target))
+            code, log = self.cli(data, "--adopt", "nixos")
+            self.assertEqual(code, 1)
+            self.assertIn("--adopt needs --from DIR", log)
+            self.assertFalse([n for n in os.listdir(data) if n.endswith(".tmp")])
+
+    def test_import_rejects_a_reserved_name_already_on_disk(self):
+        saved = br.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                br.DATA_DIR = data
+                with open(os.path.join(data, "x86_64.json"), "w") as f:
+                    json.dump({"host": "x86_64"}, f)
+                body = laptop("nixos")
+                with open(os.path.join(src, "nixos.json"), "w") as f:
+                    json.dump(body, f)
+                with self.assertRaises(SystemExit):
+                    br.import_hosts(src)
+                self.assertEqual(os.listdir(data), ["x86_64.json"])
+        finally:
+            br.DATA_DIR = saved
+
+    def test_colliding_slug_suffix_stays_a_legal_name(self):
+        slug = "n" * 80
+        name = br.tagged_host_name(slug, "abcdef12")
+        self.assertLessEqual(len(name), 81)
+        self.assertTrue(name.endswith("-abcdef12"))
+        br.check_host_name(name)
+        other = br.collided_host_name(slug, "abcdef12", {slug, name})
+        br.check_host_name(other)
+        self.assertNotIn(other, {slug, name})
+        self.assertEqual(other, br.collided_host_name(slug, "abcdef12", {slug, name}))
+
+
+class AnyHostGaps(unittest.TestCase):
+    def setUp(self):
+        self.hosts = hosts()
+        self.hosts["nixos"]["results"][1]["ns"] = 20000.0
+        self.hosts[ALIEN] = laptop(ALIEN)
+        self.tiers = {**TIERS, "tiers": [dict(t) for t in TIERS["tiers"]]}
+        self.tiers["tiers"][0]["benchmarks"] = {"sha256/*/64B": {"rind": 100.0, "ring": 80.0}}
+
+    def load(self, *entries):
+        with tempfile.NamedTemporaryFile("w", suffix=".toml", delete=False) as f:
+            f.write("".join("[[gap]]\n" + "".join(f"{k} = {v}\n" for k, v in e.items()) for e in entries))
+        try:
+            return br.load_gaps(self.hosts, self.tiers, f.name)
+        finally:
+            os.unlink(f.name)
+
+    def test_a_measured_host_outside_collect_hosts_can_decide_a_gap(self):
+        gaps = self.load(
+            {"operations": '["x25519-ecdh"]', "on": '["nixos"]', "quest": '"/quest/m3/README.md"'},
+            {"operations": '["sha256/*/64B"]', "on": '["x86_64"]', "reason": '"r"'},
+            {"operations": '["x25519-ecdh"]', "on": f'["{ALIEN}"]', "reason": '"laptop"'},
+        )
+        table = "\n".join(br.gap_table(gaps))
+        self.assertIn(f"| X25519 | `{ALIEN}` | 1.50× (ring) | laptop |", table)
+        self.assertIn("| `sha256/*/64B` | x86_64 tier | 1.25× (ring) | r |", table)
+
+    def test_refuses_a_host_that_has_no_result(self):
+        with self.assertRaises(SystemExit):
+            self.load(
+                {"operations": '["x25519-ecdh"]', "on": '["nixos"]', "quest": '"/quest/m3/README.md"'},
+                {"operations": '["sha256/*/64B"]', "on": '["x86_64"]', "reason": '"r"'},
+                {"operations": '["x25519-ecdh"]', "on": f'["{RYZEN}"]', "reason": '"r"'},
+            )
 
 
 class Comparison(unittest.TestCase):
@@ -558,7 +2953,7 @@ class Comparison(unittest.TestCase):
     def test_counts_times_within_ten_percent_of_the_fastest(self):
         _, rows = self.cells(hosts())
         # rind leads all four of its contested times. aws-lc-rs is within 10%
-        # on nixos2 only, and ring at exactly 1.1x on nixos, but twice
+        # on desktop only, and ring at exactly 1.1x on nixos, but twice
         # rind's time on kixtop.
         self.assertIn("[4 of its 4 times]", rows["rind"][3])
         self.assertIn("[1 of its 2 times]", rows["aws-lc-rs"][3])

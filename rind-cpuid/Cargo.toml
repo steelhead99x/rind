@@ -4,3 +4,14 @@ version = "0.1.0"
 edition = "2024"
 rust-version.workspace = true
 publish = false
+
+# The aarch64 Linux probe reads `AT_HWCAP` for `HWCAP_CPUID` before reading
+# `MIDR_EL1`, as rind does to pick its multiplier schedule. Like the x86_64
+# probe, which reads `cpuid` itself, it does not link the library.
+[target.'cfg(all(target_arch = "aarch64", target_os = "linux"))'.dependencies]
+libc = { version = "0.2", default-features = false }
+
+# The 32-bit ARM probe reads `AT_HWCAP` and `AT_HWCAP2`, as rind's arm backend
+# does, and does not link the library either.
+[target.'cfg(all(target_arch = "arm", any(target_os = "linux", target_os = "android")))'.dependencies]
+libc = { version = "0.2", default-features = false }

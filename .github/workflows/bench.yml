@@ -64,7 +64,7 @@ jobs:
 
       - name: Install cargo-binstall
         if: steps.select.outputs.benches != ''
-        uses: cargo-bins/cargo-binstall@851112458b5f28a29e5bc14a690c3f283d9dcc6f # v1.26.2
+        uses: cargo-bins/cargo-binstall@5885714d0a40a14b2535c6ffc051fd8e49aa9665 # v1.27.0
 
       - name: Install cargo-codspeed
         if: steps.select.outputs.benches != ''
@@ -94,7 +94,7 @@ jobs:
   # aarch64, the crypto extension, the SHA-512 and SHA-3 instructions, and
   # SVE2, as a Raspberry Pi 4 lacks them, and one row only the SHA-512 and
   # SHA-3 instructions and SVE2, as a Cortex-A76 and a Neoverse N1 lack them,
-  # so rind runs its 4-way AES-GCM kernels, scalar SHA-512, scalar Keccak, and
+  # so rind runs its 4-way AES-GCM kernels, scalar SHA-512, the hybrid NEON Keccak, and
   # NEON ChaCha20-Poly1305; on armv7,
   # the crypto extension, which no ARMv7 core has, and which aws-lc's 32-bit
   # ARM detection has no variable to deny, so its build fixes its
@@ -211,13 +211,19 @@ jobs:
           targets: ${{ matrix.target }}
 
       # A dispatch that names bench targets runs those of the row's; a row
-      # timing none of them skips the rest.
+      # timing none of them skips the rest. A portable row leaves out the
+      # protocols whose only baseline is RustCrypto: its CPU detection can't
+      # be denied a feature, so only the native rows time it.
       - name: Select benchmarks
         id: select
         run: |
-          args=$ROW
+          read -ra names <<<"${ROW//--bench /}"
+          if [ ${#names[@]} -eq 0 ] && [ "$PORTABLE" = true ]; then
+            read -ra names <<<"$(BENCHES='' sh/bench-select.sh '' | tr ' ' '\n' | grep -vxE "$RUSTCRYPTO_ONLY" | tr '\n' ' ')"
+          fi
+          args=
+          for name in "${names[@]}"; do args+=" --bench $name"; done
           if [ -n "$BENCHES" ]; then
-            read -ra names <<<"${ROW//--bench /}"
             selected=$(sh/bench-select.sh "${names[*]}")
             args=
             for name in $selected; do args+=" --bench $name"; done
@@ -227,6 +233,10 @@ jobs:
         env:
           ROW: ${{ matrix.benches }}
           BENCHES: ${{ inputs.benches }}
+          PORTABLE: ${{ matrix.portable && 'true' || 'false' }}
+          # The bench targets whose rustcrypto rows the native rows time, as
+          # the filter in "Run benchmarks" names their groups: change both.
+          RUSTCRYPTO_ONLY: argon2|slhdsa|blind_rsa|oprf|vrf|spake2plus
 
       # Hosted hardware can change under the same label. The personality
       # makes the kernel list the features the target's code sees, such as
@@ -364,7 +374,14 @@ jobs:
                 ;;
             esac
           fi
-          cargo bench "${config[@]}" -p rind-bench ${{ steps.select.outputs.args }} --target ${{ matrix.target }} -- --noplot "(^|/)($libs)(/|\$)"
+          filter="(^|/)($libs)(/|\$)"
+          # RustCrypto, where aws-lc-rs and ring offer nothing to time rind
+          # against: Argon2id, SLH-DSA, and the protocols. These are the
+          # groups of the bench targets in RUSTCRYPTO_ONLY: change both.
+          if [ "${{ matrix.portable }}" != true ]; then
+            filter+='|^(argon2id|slhdsa|blind-rsa\d+|v?oprf|vrf|spake2plus)-[^/]+/rustcrypto$'
+          fi
+          cargo bench "${config[@]}" -p rind-bench ${{ steps.select.outputs.args }} --target ${{ matrix.target }} -- --noplot "$filter"
         env:
           # Times RSA key generation too, which varies from run to run.
           NOISY_BENCHMARKS: 1
@@ -409,7 +426,8 @@ jobs:
           path: bench-results.json
 
       # One row per benchmark, in run order, with rind's time over the fastest
-      # baseline's, and over verified-garbage's.
+      # baseline's, and over verified-garbage's. RustCrypto is a baseline only
+      # where aws-lc-rs and ring offer nothing, the one place it is timed.
       - name: Summarize
         if: steps.select.outputs.skip != 'true'
         shell: bash
@@ -417,16 +435,16 @@ jobs:
           find target/criterion -path '*/new/benchmark.json' -printf '%T@ %p\n' | sort -n | cut -d' ' -f2- |
             while read -r f; do
               jq -c --slurpfile e "${f%benchmark.json}estimates.json" '.full_id | split("/")
-                | {lib: map(select(. == "rind" or . == "aws-lc-rs" or . == "ring" or . == "verified-garbage"))[0],
-                   key: map(if . == "rind" or . == "aws-lc-rs" or . == "ring" or . == "verified-garbage" then "*" else . end) | join("/"),
+                | {lib: map(select(. == "rind" or . == "aws-lc-rs" or . == "ring" or . == "rustcrypto" or . == "verified-garbage"))[0],
+                   key: map(if . == "rind" or . == "aws-lc-rs" or . == "ring" or . == "rustcrypto" or . == "verified-garbage" then "*" else . end) | join("/"),
                    ns: ($e[0].slope // $e[0].mean).point_estimate}' "$f"
             done |
             jq -rs 'def time: if . == null then "-" elif . < 1e3 then "\(round) ns"
                       elif . < 1e6 then "\(. / 10 | round / 100) µs" else "\(. / 1e4 | round / 100) ms" end;
               reduce (.[] | select(.lib)) as $b ({}; .[$b.key][$b.lib] = $b.ns)
-              | "| benchmark | rind | aws-lc-rs | ring | rind / fastest | verified-garbage | rind / verified-garbage |", "|---|---|---|---|---|---|---|",
-                (to_entries[] | .value as $v | ([$v["aws-lc-rs"], $v.ring] | map(select(.)) | min) as $best
-                  | "| \(.key) | \($v.rind | time) | \($v["aws-lc-rs"] | time) | \($v.ring | time) | \(if $v.rind and $best then $v.rind / $best * 100 | round / 100 else "-" end) | \($v["verified-garbage"] | time) | \(if $v.rind and $v["verified-garbage"] then $v.rind / $v["verified-garbage"] * 100 | round / 100 else "-" end) |")' |
+              | "| benchmark | rind | aws-lc-rs | ring | RustCrypto | rind / fastest | verified-garbage | rind / verified-garbage |", "|---|---|---|---|---|---|---|---|",
+                (to_entries[] | .value as $v | ([$v["aws-lc-rs"], $v.ring, $v.rustcrypto] | map(select(.)) | min) as $best
+                  | "| \(.key) | \($v.rind | time) | \($v["aws-lc-rs"] | time) | \($v.ring | time) | \($v.rustcrypto | time) | \(if $v.rind and $best then $v.rind / $best * 100 | round / 100 else "-" end) | \($v["verified-garbage"] | time) | \(if $v.rind and $v["verified-garbage"] then $v.rind / $v["verified-garbage"] * 100 | round / 100 else "-" end) |")' |
             tee -a "$GITHUB_STEP_SUMMARY"
 
   # Fails the scheduled run, and so alerts, on a gap over 10% that

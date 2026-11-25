@@ -1,17 +1,29 @@
+#[cfg(target_arch = "xtensa")]
+fn main() {}
+
+#[cfg(not(target_arch = "xtensa"))]
+#[macro_use]
 mod criterion;
+#[cfg(not(target_arch = "xtensa"))]
 use std::hint::black_box;
 
+#[cfg(not(target_arch = "xtensa"))]
 use criterion::measurement::WallTime;
+#[cfg(not(target_arch = "xtensa"))]
 use criterion::{BenchmarkGroup, Criterion, criterion_group, criterion_main};
 
+#[cfg(not(target_arch = "xtensa"))]
 struct Len(usize);
 
+#[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
+#[cfg(not(target_arch = "xtensa"))]
 impl aws_lc_rs::hkdf::KeyType for Len {
     fn len(&self) -> usize {
         self.0
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 impl ring::hkdf::KeyType for Len {
     fn len(&self) -> usize {
         self.0
@@ -20,14 +32,17 @@ impl ring::hkdf::KeyType for Len {
 
 // A 32-byte key for one label, from a PRK extracted once: what a QUIC token
 // or an e2ee track key derives from a long-lived secret.
+#[cfg(not(target_arch = "xtensa"))]
 fn bench<V: verified_garbage::hmac::HmacHash>(
     c: &mut Criterion,
     name: &str,
     ring: ring::hkdf::Algorithm,
-    aws: aws_lc_rs::hkdf::Algorithm,
+    aws: aws!(hkdf::Algorithm),
     ours: &'static rind::hkdf::Algorithm,
     hash: Hash,
 ) {
+    #[cfg(any(target_arch = "xtensa", target_os = "none"))]
+    let _ = &aws;
     let mut group = c.benchmark_group(name);
     let secret = [0x5a; 32];
     let info: [&[u8]; 1] = [b"label"];
@@ -46,6 +61,7 @@ fn bench<V: verified_garbage::hmac::HmacHash>(
             black_box(out)
         })
     });
+    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
     group.bench_function("extract-expand/aws-lc-rs", |b| {
         b.iter(|| {
             let mut out = [0u8; 32];
@@ -58,19 +74,18 @@ fn bench<V: verified_garbage::hmac::HmacHash>(
             black_box(out)
         })
     });
-    for (lib, _dit) in criterion::rind_rows() {
-        group.bench_function(format!("extract-expand/{lib}"), |b| {
-            b.iter(|| {
-                let mut out = [0u8; 32];
-                rind::hkdf::Salt::new(ours, b"salt")
-                    .extract(&secret)
-                    .unwrap()
-                    .fill(&info, &mut out)
-                    .unwrap();
-                black_box(out)
-            })
-        });
-    }
+    group.bench_function("extract-expand/rind", |b| {
+        let _dit = criterion::rind_dit();
+        b.iter(|| {
+            let mut out = [0u8; 32];
+            rind::hkdf::Salt::new(ours, b"salt")
+                .extract(&secret)
+                .unwrap()
+                .fill(&info, &mut out)
+                .unwrap();
+            black_box(out)
+        })
+    });
 
     let prk = ring::hkdf::Salt::new(ring, b"salt").extract(&secret);
     group.bench_function("expand/ring", |b| {
@@ -91,11 +106,14 @@ fn bench<V: verified_garbage::hmac::HmacHash>(
 
     // aws-lc-rs's `extract` defers extraction to each expansion, so its PRK
     // is computed here instead.
+    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
     let prk_bytes = aws_lc_rs::hmac::sign(
         &aws_lc_rs::hmac::Key::new(aws.hmac_algorithm(), b"salt"),
         &secret,
     );
+    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
     let prk = aws_lc_rs::hkdf::Prk::new_less_safe(aws, prk_bytes.as_ref());
+    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
     group.bench_function("expand/aws-lc-rs", |b| {
         b.iter(|| {
             let mut out = [0u8; 32];
@@ -103,6 +121,7 @@ fn bench<V: verified_garbage::hmac::HmacHash>(
             black_box(out)
         })
     });
+    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
     group.bench_function("expand-aes-256-gcm-key/aws-lc-rs", |b| {
         b.iter(|| {
             black_box(aws_lc_rs::aead::UnboundKey::from(
@@ -114,16 +133,16 @@ fn bench<V: verified_garbage::hmac::HmacHash>(
     let prk = rind::hkdf::Salt::new(ours, b"salt")
         .extract(&secret)
         .unwrap();
-    for (lib, _dit) in criterion::rind_rows() {
-        group.bench_function(format!("expand/{lib}"), |b| {
-            b.iter(|| {
-                let mut out = [0u8; 32];
-                prk.fill(&info, &mut out).unwrap();
-                black_box(out)
-            })
-        });
-    }
+    group.bench_function("expand/rind", |b| {
+        let _dit = criterion::rind_dit();
+        b.iter(|| {
+            let mut out = [0u8; 32];
+            prk.fill(&info, &mut out).unwrap();
+            black_box(out)
+        })
+    });
     group.bench_function("expand-aes-256-gcm-key/rind", |b| {
+        let _dit = criterion::rind_dit();
         b.iter(|| {
             black_box(rind::aead::Key::from(
                 prk.expand(&info, &rind::aead::AES_256_GCM).unwrap(),
@@ -139,11 +158,16 @@ fn bench<V: verified_garbage::hmac::HmacHash>(
     }
     libcrux(&mut group, hash, &secret, info[0]);
     vg::<V>(&mut group, ours, &secret, info[0]);
-    #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+    #[cfg(all(
+        feature = "__bench_openssl",
+        target_family = "unix",
+        not(target_arch = "xtensa")
+    ))]
     openssl(&mut group, hash, &secret, info[0]);
 }
 
 #[derive(Clone, Copy)]
+#[cfg(not(target_arch = "xtensa"))]
 enum Hash {
     Sha1,
     Sha256,
@@ -151,6 +175,7 @@ enum Hash {
     Sha512,
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn rustcrypto<H: hkdf::HmacImpl>(
     group: &mut BenchmarkGroup<'_, WallTime>,
     secret: &[u8],
@@ -177,6 +202,7 @@ fn rustcrypto<H: hkdf::HmacImpl>(
 
 // verified-garbage has no HKDF, so this is RFC 5869 over its HMAC, as rind's
 // glue would run it.
+#[cfg(not(target_arch = "xtensa"))]
 fn vg_expand<V: verified_garbage::hmac::HmacHash>(prk: &[u8], info: &[u8], out: &mut [u8]) {
     let mut previous: Option<V::Output> = None;
     for (counter, chunk) in (1u8..).zip(out.chunks_mut(V::OUTPUT_SIZE)) {
@@ -192,6 +218,7 @@ fn vg_expand<V: verified_garbage::hmac::HmacHash>(prk: &[u8], info: &[u8], out: 
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn vg<V: verified_garbage::hmac::HmacHash>(
     group: &mut BenchmarkGroup<'_, WallTime>,
     ours: &'static rind::hkdf::Algorithm,
@@ -212,23 +239,36 @@ fn vg<V: verified_garbage::hmac::HmacHash>(
     extract_expand(&mut out);
     assert_eq!(out, expected);
 
-    group.bench_function("extract-expand/verified-garbage", |b| {
-        b.iter(|| {
-            let mut out = [0u8; 32];
-            extract_expand(&mut out);
-            black_box(out)
-        })
-    });
+    // Each HMAC this glue runs sets DIT on its own, so the held row saves
+    // a toggle per HMAC, not per HKDF call.
+    for (lib, held) in criterion::vg_rows() {
+        group.bench_function(format!("extract-expand/{lib}"), |b| {
+            vg_scope!(
+                held,
+                b.iter(|| {
+                    let mut out = [0u8; 32];
+                    extract_expand(&mut out);
+                    black_box(out)
+                })
+            )
+        });
+    }
     let prk = verified_garbage::hmac::Hmac::<V>::mac(b"salt", secret);
-    group.bench_function("expand/verified-garbage", |b| {
-        b.iter(|| {
-            let mut out = [0u8; 32];
-            vg_expand::<V>(prk.as_ref(), info, &mut out);
-            black_box(out)
-        })
-    });
+    for (lib, held) in criterion::vg_rows() {
+        group.bench_function(format!("expand/{lib}"), |b| {
+            vg_scope!(
+                held,
+                b.iter(|| {
+                    let mut out = [0u8; 32];
+                    vg_expand::<V>(prk.as_ref(), info, &mut out);
+                    black_box(out)
+                })
+            )
+        });
+    }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn libcrux(group: &mut BenchmarkGroup<'_, WallTime>, hash: Hash, secret: &[u8], info: &[u8]) {
     use libcrux_hkdf::{Algorithm, expand, extract, hkdf};
     let (algorithm, prk_len) = match hash {
@@ -256,7 +296,12 @@ fn libcrux(group: &mut BenchmarkGroup<'_, WallTime>, hash: Hash, secret: &[u8], 
     });
 }
 
-#[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+#[cfg(all(
+    feature = "__bench_openssl",
+    target_family = "unix",
+    not(target_arch = "xtensa")
+))]
+#[cfg(not(target_arch = "xtensa"))]
 fn openssl(group: &mut BenchmarkGroup<'_, WallTime>, hash: Hash, secret: &[u8], info: &[u8]) {
     use openssl::md::Md;
     use openssl::pkey::Id;
@@ -303,12 +348,13 @@ fn openssl(group: &mut BenchmarkGroup<'_, WallTime>, hash: Hash, secret: &[u8], 
     });
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn hkdf(c: &mut Criterion) {
     bench::<verified_garbage::hashes::sha1::Sha1>(
         c,
         "hkdf-sha1",
         ring::hkdf::HKDF_SHA1_FOR_LEGACY_USE_ONLY,
-        aws_lc_rs::hkdf::HKDF_SHA1_FOR_LEGACY_USE_ONLY,
+        aws!(hkdf::HKDF_SHA1_FOR_LEGACY_USE_ONLY),
         &rind::hkdf::legacy::HKDF_SHA1,
         Hash::Sha1,
     );
@@ -316,7 +362,7 @@ fn hkdf(c: &mut Criterion) {
         c,
         "hkdf-sha256",
         ring::hkdf::HKDF_SHA256,
-        aws_lc_rs::hkdf::HKDF_SHA256,
+        aws!(hkdf::HKDF_SHA256),
         &rind::hkdf::HKDF_SHA256,
         Hash::Sha256,
     );
@@ -324,7 +370,7 @@ fn hkdf(c: &mut Criterion) {
         c,
         "hkdf-sha384",
         ring::hkdf::HKDF_SHA384,
-        aws_lc_rs::hkdf::HKDF_SHA384,
+        aws!(hkdf::HKDF_SHA384),
         &rind::hkdf::HKDF_SHA384,
         Hash::Sha384,
     );
@@ -332,11 +378,13 @@ fn hkdf(c: &mut Criterion) {
         c,
         "hkdf-sha512",
         ring::hkdf::HKDF_SHA512,
-        aws_lc_rs::hkdf::HKDF_SHA512,
+        aws!(hkdf::HKDF_SHA512),
         &rind::hkdf::HKDF_SHA512,
         Hash::Sha512,
     );
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 criterion_group!(benches, hkdf);
+#[cfg(not(target_arch = "xtensa"))]
 criterion_main!(benches);

@@ -1,12 +1,24 @@
+#[cfg(target_arch = "xtensa")]
+fn main() {}
+
+#[cfg(not(target_arch = "xtensa"))]
 mod criterion;
-#[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+#[cfg(all(
+    feature = "__bench_openssl",
+    target_family = "unix",
+    not(target_arch = "xtensa")
+))]
+#[cfg(not(target_arch = "xtensa"))]
 mod ossl_ec;
+#[cfg(not(target_arch = "xtensa"))]
 use std::hint::black_box;
 
+#[cfg(not(target_arch = "xtensa"))]
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 
 // verified-garbage has no key generation: a random scalar, drawn again until
 // it is in range, and its public key.
+#[cfg(not(target_arch = "xtensa"))]
 fn vg_generate() -> (
     verified_garbage::ec::PrivateKey<verified_garbage::ec::P384>,
     verified_garbage::ec::PublicKey<verified_garbage::ec::P384>,
@@ -21,6 +33,7 @@ fn vg_generate() -> (
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 const PUBLIC_KEY: &[u8; 97] = &[
     0x04, 0x7a, 0x6e, 0xc8, 0xd3, 0x11, 0xd5, 0xca, 0x58, 0x8b, 0xae, 0xd4, 0x1b, 0xe3, 0xe9, 0x8f,
     0x30, 0xc9, 0x29, 0x48, 0x44, 0xec, 0xbb, 0x62, 0x99, 0x95, 0x65, 0x36, 0x35, 0xdb, 0xc2, 0x2d,
@@ -31,6 +44,7 @@ const PUBLIC_KEY: &[u8; 97] = &[
     0xc8,
 ];
 
+#[cfg(not(target_arch = "xtensa"))]
 fn ecdh(c: &mut Criterion) {
     let mut group = c.benchmark_group("p384-ecdh");
     group.throughput(Throughput::Elements(1));
@@ -54,6 +68,7 @@ fn ecdh(c: &mut Criterion) {
         })
     });
 
+    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
     group.bench_function("aws-lc-rs", |b| {
         use aws_lc_rs::{agreement, error, rand};
         let rng = rand::SystemRandom::new();
@@ -95,6 +110,7 @@ fn ecdh(c: &mut Criterion) {
     });
 
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         b.iter(|| {
             use rind::agreement::*;
             let our_private_key = PrivateKey::generate(&ECDH_P384).unwrap();
@@ -133,7 +149,11 @@ fn ecdh(c: &mut Criterion) {
         })
     });
 
-    #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+    #[cfg(all(
+        feature = "__bench_openssl",
+        target_family = "unix",
+        not(target_arch = "xtensa")
+    ))]
     group.bench_function("openssl", |b| {
         let mut curve = ossl_ec::Curve::new(
             openssl::nid::Nid::SECP384R1,
@@ -143,6 +163,7 @@ fn ecdh(c: &mut Criterion) {
     });
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn keygen(c: &mut Criterion) {
     let mut group = c.benchmark_group("p384-keygen");
     group.throughput(Throughput::Elements(1));
@@ -158,6 +179,7 @@ fn keygen(c: &mut Criterion) {
         })
     });
 
+    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
     group.bench_function("aws-lc-rs", |b| {
         use aws_lc_rs::{agreement, rand};
         let rng = rand::SystemRandom::new();
@@ -180,6 +202,7 @@ fn keygen(c: &mut Criterion) {
     });
 
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         b.iter(|| {
             use rind::agreement::*;
             let our_private_key = PrivateKey::generate(&ECDH_P384).unwrap();
@@ -193,6 +216,7 @@ fn keygen(c: &mut Criterion) {
     });
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn ecdsa_verify(c: &mut Criterion) {
     let mut group = c.benchmark_group("p384-ecdsa-verify");
     group.throughput(Throughput::Elements(1));
@@ -228,6 +252,7 @@ fn ecdsa_verify(c: &mut Criterion) {
         })
     });
 
+    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
     group.bench_function("aws-lc-rs", |b| {
         let public_key = aws_lc_rs::signature::UnparsedPublicKey::new(
             &aws_lc_rs::signature::ECDSA_P384_SHA384_FIXED,
@@ -251,6 +276,7 @@ fn ecdsa_verify(c: &mut Criterion) {
     });
 
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         use rind::ecdsa::{PublicKey, verify};
 
         b.iter(|| {
@@ -287,7 +313,11 @@ fn ecdsa_verify(c: &mut Criterion) {
         })
     });
 
-    #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+    #[cfg(all(
+        feature = "__bench_openssl",
+        target_family = "unix",
+        not(target_arch = "xtensa")
+    ))]
     group.bench_function("openssl", |b| {
         let mut curve = ossl_ec::Curve::new(
             openssl::nid::Nid::SECP384R1,
@@ -302,6 +332,7 @@ fn ecdsa_verify(c: &mut Criterion) {
     let mut group = c.benchmark_group("p384-ecdsa-verify-parsed");
     group.throughput(Throughput::Elements(1));
 
+    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
     group.bench_function("aws-lc-rs", |b| {
         use aws_lc_rs::signature;
         let public_key =
@@ -314,6 +345,7 @@ fn ecdsa_verify(c: &mut Criterion) {
     });
 
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         use rind::ecdsa::{PublicKey, verify};
         let public_key = PublicKey::new(&verify::P384_SHA384_FIXED, public_key).unwrap();
 
@@ -327,6 +359,7 @@ fn ecdsa_verify(c: &mut Criterion) {
     let mut group = c.benchmark_group("p384-ecdsa-verify-digest");
     group.throughput(Throughput::Elements(1));
 
+    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
     group.bench_function("aws-lc-rs", |b| {
         use aws_lc_rs::{digest, signature};
         let public_key =
@@ -340,6 +373,7 @@ fn ecdsa_verify(c: &mut Criterion) {
     });
 
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         use rind::digest;
         use rind::ecdsa::{PublicKey, verify};
         let public_key = PublicKey::new(&verify::P384_SHA384_FIXED, public_key).unwrap();
@@ -371,6 +405,7 @@ fn ecdsa_verify(c: &mut Criterion) {
     });
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn ecdsa_sign(c: &mut Criterion) {
     let mut group = c.benchmark_group("p384-ecdsa-sign");
     group.throughput(Throughput::Elements(1));
@@ -397,6 +432,7 @@ fn ecdsa_sign(c: &mut Criterion) {
         })
     });
 
+    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
     group.bench_function("aws-lc-rs", |b| {
         use aws_lc_rs::{rand, signature};
         let rng = rand::SystemRandom::new();
@@ -429,6 +465,7 @@ fn ecdsa_sign(c: &mut Criterion) {
     });
 
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         use rind::ecdsa::{KeyPair, sign};
         let signing_key = KeyPair::generate(&sign::P384_SHA384_FIXED).unwrap();
 
@@ -468,7 +505,11 @@ fn ecdsa_sign(c: &mut Criterion) {
         });
     });
 
-    #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+    #[cfg(all(
+        feature = "__bench_openssl",
+        target_family = "unix",
+        not(target_arch = "xtensa")
+    ))]
     group.bench_function("openssl", |b| {
         let curve = ossl_ec::Curve::new(
             openssl::nid::Nid::SECP384R1,
@@ -483,6 +524,7 @@ fn ecdsa_sign(c: &mut Criterion) {
     let mut group = c.benchmark_group("p384-ecdsa-sign-digest");
     group.throughput(Throughput::Elements(1));
 
+    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
     group.bench_function("aws-lc-rs", |b| {
         use aws_lc_rs::{digest, rand, signature};
         let private_key = signature::EcdsaKeyPair::generate_pkcs8(
@@ -503,6 +545,7 @@ fn ecdsa_sign(c: &mut Criterion) {
     });
 
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         use rind::digest;
         use rind::ecdsa::{KeyPair, sign};
         let signing_key = KeyPair::generate(&sign::P384_SHA384_FIXED).unwrap();
@@ -536,12 +579,14 @@ fn ecdsa_sign(c: &mut Criterion) {
 
 // Agree with a stored key, loaded once, as WebCrypto's `deriveBits` and
 // node's `ECDH` do: the variable-base multiplication alone.
+#[cfg(not(target_arch = "xtensa"))]
 fn stored(c: &mut Criterion) {
     let mut group = c.benchmark_group("p384-ecdh-stored");
     group.throughput(Throughput::Elements(1));
     let public_key: &[u8] = PUBLIC_KEY;
     let scalar = [1u8; 48];
 
+    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
     group.bench_function("aws-lc-rs", |b| {
         use aws_lc_rs::{agreement, error};
         let key = agreement::PrivateKey::from_private_key(&agreement::ECDH_P384, &scalar).unwrap();
@@ -557,6 +602,7 @@ fn stored(c: &mut Criterion) {
     });
 
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         use rind::agreement::*;
         let key = PrivateKey::from_scalar(&ECDH_P384, &scalar).unwrap();
 
@@ -578,6 +624,7 @@ fn stored(c: &mut Criterion) {
 
 // Checks verified-garbage's public key and exchange against rind's, from a
 // fixed scalar, before any of its rows times them.
+#[cfg(not(target_arch = "xtensa"))]
 fn vg_agrees_with_rind() {
     use rind::agreement::{self, ECDH_P384};
     use verified_garbage::ec::{PrivateKey, PublicKey};
@@ -596,5 +643,7 @@ fn vg_agrees_with_rind() {
     );
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 criterion_group!(benches, ecdh, keygen, ecdsa_verify, ecdsa_sign, stored);
+#[cfg(not(target_arch = "xtensa"))]
 criterion_main!(benches);

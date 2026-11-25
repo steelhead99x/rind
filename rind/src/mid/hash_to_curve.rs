@@ -13,7 +13,7 @@
 //!
 //! [RFC 9380]: https://www.rfc-editor.org/rfc/rfc9380.html
 
-use crate::error::Error;
+use crate::error::{Error, KeyFormatError};
 use crate::mid::sha2::{Sha256Context, Sha384Context, Sha512Context};
 
 /// A SHA-2 hash, as `expand_message_xmd` takes it.
@@ -90,7 +90,9 @@ impl Xmd for Sha512Context {
 ///
 /// A `dst` over 255 bytes is hashed down, as section 5.3.3 says. An empty
 /// `dst`, which the RFC forbids, and an `out` longer than 255 hashes are
-/// refused, as aws-lc refuses them.
+/// refused, as aws-lc's `crypto/ec_extra/hash_to_curve.c`
+/// (`expand_message_xmd`) refuses a zero `dst_len` and a counter that wraps
+/// after 255 hashes.
 pub(crate) fn expand_message_xmd<H: Xmd>(
     msg: &[&[u8]],
     dst: &[u8],
@@ -269,6 +271,18 @@ pub(crate) fn sum<C: Curve>(q0: &[C; 3], q1: &[C; 3]) -> [C; 3] {
     let opposite = same_x & !same_y;
     let [x, y, z] = [0, 1, 2].map(|i| added[i].select(&doubled[i], same));
     [x, y, z.select(&C::ZERO, opposite)]
+}
+
+/// The affine image of `point`, or [`KeyFormatError::SmallOrder`] at infinity,
+/// which no message is known to reach. Only that verdict is public.
+pub(crate) fn affine_or_small_order<C: Curve, P>(
+    point: [C; 3],
+    affine: impl FnOnce([C; 3]) -> P,
+) -> Result<P, Error> {
+    match crate::low::ct::into_public(point[2].ct_eq(&C::ZERO)) {
+        true => Err(KeyFormatError::SmallOrder.into()),
+        false => Ok(affine(point)),
+    }
 }
 
 #[cfg(test)]
@@ -462,9 +476,25 @@ pub(crate) mod tests {
         assert_eq!(file.vectors.len(), 5);
     }
 
+    /// An actual sum at infinity, without needing a hash preimage for it.
+    /// Its coordinates stay secret through the wrappers' validation.
+    pub(crate) fn opposite_sum<C: Curve>() -> [C; 3] {
+        let q = low::ct::into_secret(map_to_curve(&C::from_wide(&[7; MAX_L][..C::L])));
+        let neg = [q[0], q[1].neg(), q[2]];
+        sum(&q, &neg)
+    }
+
     /// `sum` doubles equal points and gives infinity for opposite ones,
-    /// whatever `Z` each has.
-    pub(crate) fn check_sum<C: Curve>(affine: impl Fn(&[C; 3]) -> Vec<u8>) {
+    /// whatever `Z` each has. The expected double is the affine slope
+    /// `(3x^2 + A) / (2y)`, so a bug in `double_point` fails this check.
+    /// `scaled` is `q` under another `Z`: a `same_y` comparison by the
+    /// wrong power of `Z` makes that sum infinity. `shifted` has `q`'s
+    /// affine `Y` and `r`'s affine `X` under another `Z`. It is off the
+    /// curve, so this checks the same-`Y` select: `same_x | same_y` doubles
+    /// `q` there.
+    ///
+    /// `inv` is the field inverse in the same form as `C`'s arithmetic.
+    pub(crate) fn check_sum<C: Curve>(affine: impl Fn(&[C; 3]) -> Vec<u8>, inv: impl Fn(&C) -> C) {
         let _entry = low::Entry::new_public();
         let q = map_to_curve(&C::from_wide(&[7; MAX_L][..C::L]));
         let r = map_to_curve(&C::from_wide(&[9; MAX_L][..C::L]));
@@ -474,10 +504,74 @@ pub(crate) mod tests {
         let scaled = [q[0].mul(&k2), q[1].mul(&k3), q[2].mul(&k)];
         let neg = [scaled[0], scaled[1].neg(), scaled[2]];
 
-        assert_eq!(affine(&sum(&q, &scaled)), affine(&C::double_point(&q)));
+        assert_eq!(affine(&sum(&q, &scaled)), affine(&affine_double(&q, &inv)));
         assert!(sum(&q, &neg)[2].ct_eq(&C::ZERO));
         assert_eq!(affine(&sum(&q, &r)), affine(&C::add_points(&q, &r)));
         assert_eq!(affine(&sum(&q, &r)), affine(&sum(&r, &q)));
+
+        // `q`'s affine `Y`, `r`'s affine `X`, and `Z` scaled by `k`.
+        // Jacobian `X` is `r_x * (q_z / r_z)^2 * k^2`, so the affine `X`
+        // is `r`'s (`r_x / r_z^2`) even when `q_z` and `r_z` differ.
+        // The pair is off the curve: it exercises the select, and the
+        // curve equation below records that.
+        let qz_over_rz = q[2].mul(&inv(&r[2]));
+        let shifted = [
+            r[0].mul(&qz_over_rz.sqr()).mul(&k2),
+            q[1].mul(&k3),
+            q[2].mul(&k),
+        ];
+        assert!(!q[2].ct_eq(&r[2]));
+        assert!(
+            shifted[0]
+                .mul(&r[2].sqr())
+                .ct_eq(&r[0].mul(&shifted[2].sqr()))
+        );
+        assert!(!q[2].ct_eq(&shifted[2]));
+        assert!(
+            !q[0]
+                .mul(&shifted[2].sqr())
+                .ct_eq(&shifted[0].mul(&q[2].sqr()))
+        );
+        assert!(
+            q[1].mul(&shifted[2].sqr().mul(&shifted[2]))
+                .ct_eq(&shifted[1].mul(&q[2].sqr().mul(&q[2])))
+        );
+        assert!(on_curve(&q));
+        assert!(on_curve(&r));
+        assert!(!on_curve(&shifted));
+        let got = sum(&q, &shifted);
+        let expect = C::add_points(&q, &shifted);
+        assert!(got.iter().zip(expect).all(|(a, b)| a.ct_eq(&b)));
+    }
+
+    /// `2p` as a Jacobian point with `Z = 1`, by the affine slope
+    /// `(3x^2 + A) * (2y)^-1`. This is not `Curve::double_point`.
+    fn affine_double<C: Curve>(p: &[C; 3], inv: impl Fn(&C) -> C) -> [C; 3] {
+        let [x, y, z] = *p;
+        assert!(!z.ct_eq(&C::ZERO));
+        let x = x.mul(&inv(&z.sqr()));
+        let y = y.mul(&inv(&z.sqr().mul(&z)));
+        assert!(!y.ct_eq(&C::ZERO));
+        let two = C::ONE.add(&C::ONE);
+        let three = two.add(&C::ONE);
+        let slope = three.mul(&x.sqr()).add(&C::A).mul(&inv(&two.mul(&y)));
+        let x2 = slope.sqr().add(&x.neg().add(&x.neg()));
+        let y2 = slope.mul(&x.add(&x2.neg())).add(&y.neg());
+        [x2, y2, C::ONE]
+    }
+
+    /// `Y^2 = X^3 + A X Z^4 + B Z^6`.
+    fn on_curve<C: Curve>(p: &[C; 3]) -> bool {
+        let [x, y, z] = *p;
+        let z2 = z.sqr();
+        let z4 = z2.sqr();
+        let z6 = z4.mul(&z2);
+        y.sqr().ct_eq(
+            &x.sqr()
+                .mul(&x)
+                .add(&C::A.mul(&x).mul(&z4))
+                .add(&C::B.mul(&z6)),
+        )
     }
 
     /// `pow_c1` raises to `(p - 3) / 4`: one more factor gives
@@ -521,6 +615,12 @@ pub(crate) mod tests {
                 .fold(C::ZERO, |r, &b| r.mul(&b256).add(&byte(b)));
             assert!(C::from_wide(&input).ct_eq(&horner));
         }
+    }
+
+    /// The public wrappers refuse an empty DST.
+    pub(crate) fn check_empty_dst(curve: Result<(), Error>, scalar: Result<(), Error>) {
+        assert_eq!(curve, Err(Error::WrongLength));
+        assert_eq!(scalar, Err(Error::WrongLength));
     }
 
     /// Hashes a secret message, so `admin/ctgrind` checks nothing branches

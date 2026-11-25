@@ -3,7 +3,8 @@
 //!
 //! This crate provides rcgen's [`KeyPair`](https://docs.rs/rcgen/0.14/rcgen/struct.KeyPair.html)
 //! for [rcgen](https://github.com/rustls/rcgen), backed by [rind](https://github.com/kixel-ai/rind/), a fork of [Graviola](https://github.com/ctz/graviola/).
-//! It generates and loads ECDSA P-256 and P-384 and Ed25519 keys, and loads RSA keys.
+//! It generates and loads ECDSA P-256 and P-384, Ed25519, and RSA keys, as
+//! rcgen's `aws_lc_rs` backend does.
 //!
 //! Build rcgen with `default-features = false` so it compiles no other crypto backend,
 //! and use `rind_rcgen::KeyPair` where rcgen's `crypto` feature would give `rcgen::KeyPair`.
@@ -61,26 +62,35 @@ impl KeyPair {
         Self::generate_for(&PKCS_ECDSA_P256_SHA256)
     }
 
-    /// Generates a random key pair for `alg`: ECDSA P-256 or P-384, or Ed25519.
-    ///
-    /// RSA fails with [`Error::KeyGenerationUnavailable`], as on rcgen's `ring` backend.
+    /// Generates a random key pair for `alg`: ECDSA P-256 or P-384, Ed25519,
+    /// or RSA, whose modulus is then 2048 bits.
     pub fn generate_for(alg: &'static SignatureAlgorithm) -> Result<Self, Error> {
         let key = match signer(alg)? {
-            Signer::Ecdsa(signing) => {
-                Key::Ecdsa(EcdsaKeyPair::generate(signing).map_err(|_| Error::RingUnspecified)?)
+            Signer::Ecdsa(signing) => EcdsaKeyPair::generate(signing).map(Key::Ecdsa),
+            Signer::Ed25519 => Ed25519KeyPair::generate().map(Key::Ed25519),
+            Signer::Rsa(padding) => {
+                RsaKeyPair::generate(rsa::KeySize::Rsa2048).map(|key| Key::Rsa(key, padding))
             }
-            Signer::Ed25519 => {
-                Key::Ed25519(Ed25519KeyPair::generate().map_err(|_| Error::RingUnspecified)?)
-            }
-            Signer::Rsa(_) => return Err(Error::KeyGenerationUnavailable),
         };
-        let pkcs8 = match &key {
-            Key::Ecdsa(key) => key.to_pkcs8(),
-            Key::Ed25519(key) => key.to_pkcs8(),
-            Key::Rsa(key, _) => key.to_pkcs8(),
+        Self::generated(key, alg)
+    }
+
+    /// Generates a random RSA key pair of `key_size` for `alg`, which must be
+    /// an RSA algorithm.
+    pub fn generate_rsa_for(
+        alg: &'static SignatureAlgorithm,
+        key_size: RsaKeySize,
+    ) -> Result<Self, Error> {
+        let Ok(Signer::Rsa(padding)) = signer(alg) else {
+            return Err(Error::KeyGenerationUnavailable);
         };
-        let serialized_der = pkcs8.as_ref().to_vec();
-        Ok(Self::new(key, alg, serialized_der))
+        let size = match key_size {
+            RsaKeySize::_2048 => rsa::KeySize::Rsa2048,
+            RsaKeySize::_3072 => rsa::KeySize::Rsa3072,
+            RsaKeySize::_4096 => rsa::KeySize::Rsa4096,
+        };
+        let key = RsaKeyPair::generate(size).map(|key| Key::Rsa(key, padding));
+        Self::generated(key, alg)
     }
 
     /// Returns the key pair's signature algorithm.
@@ -95,33 +105,38 @@ impl KeyPair {
         alg: &'static SignatureAlgorithm,
     ) -> Result<Self, Error> {
         let der = pkcs8.secret_pkcs8_der();
-        let signer = signer(alg)?;
-        ring_pkcs8_version(der, matches!(signer, Signer::Ed25519))?;
-        let key = match signer {
-            Signer::Ecdsa(signing) => {
-                Key::Ecdsa(EcdsaKeyPair::from_pkcs8(signing, der).map_err(rejected)?)
-            }
-            Signer::Ed25519 => Key::Ed25519(Ed25519KeyPair::from_pkcs8(der).map_err(rejected)?),
-            Signer::Rsa(padding) => {
-                Key::Rsa(RsaKeyPair::from_pkcs8(der).map_err(rejected)?, padding)
-            }
+        let key = match signer(alg)? {
+            Signer::Ecdsa(signing) => EcdsaKeyPair::from_pkcs8(signing, der).map(Key::Ecdsa),
+            Signer::Ed25519 => Ed25519KeyPair::from_pkcs8(der).map(Key::Ed25519),
+            Signer::Rsa(padding) => RsaKeyPair::from_pkcs8(der).map(|key| Key::Rsa(key, padding)),
         };
-        Ok(Self::new(key, alg, der.to_vec()))
+        Ok(Self::new(key.map_err(rejected)?, alg, der.to_vec()))
     }
 
-    /// Loads a private key that signs with `alg`, which must be PKCS#8, as on
-    /// rcgen's `ring` backend.
+    /// Loads a private key that signs with `alg`: PKCS#8, or SEC1 for ECDSA
+    /// and PKCS#1 for RSA. Its serialized DER is then the key as given.
     pub fn from_der_and_sign_algo(
         key: &PrivateKeyDer<'_>,
         alg: &'static SignatureAlgorithm,
     ) -> Result<Self, Error> {
-        match key {
-            PrivateKeyDer::Pkcs8(key) => Self::from_pkcs8_der_and_sign_algo(key, alg),
-            _ => Err(Error::CouldNotParseKeyPair),
-        }
+        let der = key.secret_der();
+        let loaded = match signer(alg)? {
+            // As aws-lc-rs, which reads either for ECDSA whatever the key's
+            // label, and PKCS#1 for RSA unless it is labeled PKCS#8.
+            Signer::Ecdsa(signing) => EcdsaKeyPair::from_pkcs8(signing, der)
+                .or_else(|_| EcdsaKeyPair::from_sec1(signing, der))
+                .map(Key::Ecdsa),
+            Signer::Ed25519 => Ed25519KeyPair::from_pkcs8(der).map(Key::Ed25519),
+            Signer::Rsa(padding) => match key {
+                PrivateKeyDer::Pkcs8(_) => RsaKeyPair::from_pkcs8(der),
+                _ => RsaKeyPair::from_pkcs1(der),
+            }
+            .map(|key| Key::Rsa(key, padding)),
+        };
+        Ok(Self::new(loaded.map_err(rejected)?, alg, der.to_vec()))
     }
 
-    /// Parses a PEM private key, which must be PKCS#8, finding its algorithm.
+    /// Parses a PEM private key, PKCS#8, SEC1, or PKCS#1, finding its algorithm.
     #[cfg(feature = "pem")]
     pub fn from_pem(pem_str: &str) -> Result<Self, Error> {
         Self::try_from(pem::decode(pem_str)?.as_slice())
@@ -137,7 +152,8 @@ impl KeyPair {
         Self::from_pkcs8_der_and_sign_algo(&PrivatePkcs8KeyDer::from(pem.as_slice()), alg)
     }
 
-    /// Parses a PEM private key that signs with `alg`, which must be PKCS#8.
+    /// Parses a PEM private key that signs with `alg`: PKCS#8, or SEC1 for
+    /// ECDSA and PKCS#1 for RSA.
     #[cfg(feature = "pem")]
     pub fn from_pem_and_sign_algo(
         pem_str: &str,
@@ -170,20 +186,38 @@ impl KeyPair {
         pem::encode("PUBLIC KEY", &self.subject_public_key_info())
     }
 
-    /// Encodes the key pair as PKCS#8 DER.
+    /// Returns a copy of the key pair's DER: the key as loaded, or PKCS#8
+    /// for a generated one.
     pub fn serialize_der(&self) -> Vec<u8> {
         self.serialized_der.0.clone()
     }
 
-    /// Returns the key pair's PKCS#8 DER encoding.
+    /// Returns the key pair's DER: the key as loaded, or PKCS#8 for a
+    /// generated one.
     pub fn serialized_der(&self) -> &[u8] {
         &self.serialized_der.0
     }
 
-    /// Encodes the key pair as PEM PKCS#8.
+    /// Encodes the key pair's DER as PEM labeled `PRIVATE KEY`, as rcgen
+    /// does, even when that DER is a loaded SEC1 or PKCS#1 key.
     #[cfg(feature = "pem")]
     pub fn serialize_pem(&self) -> String {
         pem::encode("PRIVATE KEY", self.serialized_der())
+    }
+
+    /// A key pair just generated, whose serialized DER is its PKCS#8.
+    fn generated(
+        key: Result<Key, rind::Error>,
+        algorithm: &'static SignatureAlgorithm,
+    ) -> Result<Self, Error> {
+        let key = key.map_err(|_| Error::RingUnspecified)?;
+        let pkcs8 = match &key {
+            Key::Ecdsa(key) => key.to_pkcs8(),
+            Key::Ed25519(key) => key.to_pkcs8(),
+            Key::Rsa(key, _) => key.to_pkcs8(),
+        };
+        let serialized_der = pkcs8.as_ref().to_vec();
+        Ok(Self::new(key, algorithm, serialized_der))
     }
 
     fn new(key: Key, algorithm: &'static SignatureAlgorithm, serialized_der: Vec<u8>) -> Self {
@@ -195,7 +229,19 @@ impl KeyPair {
     }
 }
 
-/// The key pair's PKCS#8 encoding, wiped on drop, as rind wipes the key itself.
+/// The modulus size of an RSA key [`KeyPair::generate_rsa_for`] generates.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum RsaKeySize {
+    /// 2048 bits.
+    _2048,
+    /// 3072 bits.
+    _3072,
+    /// 4096 bits.
+    _4096,
+}
+
+/// The key pair's DER, wiped on drop, as rind wipes the key itself.
 struct Wiped(Vec<u8>);
 
 impl Drop for Wiped {
@@ -204,7 +250,7 @@ impl Drop for Wiped {
     }
 }
 
-/// Clears the key pair's PKCS#8 copy, as rcgen's `zeroize` feature does; the
+/// Clears the key pair's DER copy, as rcgen's `zeroize` feature does; the
 /// rind key it wraps is wiped on drop.
 #[cfg(feature = "zeroize")]
 impl zeroize::Zeroize for KeyPair {
@@ -238,44 +284,6 @@ fn signer(algorithm: &SignatureAlgorithm) -> Result<Signer, Error> {
     } else {
         return Err(Error::UnsupportedSignatureAlgorithm);
     })
-}
-
-/// Refuses the PKCS#8 v2 documents ring does, which rind takes as aws-lc-rs
-/// does: any for ECDSA and RSA, and for Ed25519 one without its public key.
-fn ring_pkcs8_version(der: &[u8], ed25519: bool) -> Result<(), Error> {
-    /// The tag, body, and remainder of the DER element starting `der`, for
-    /// lengths up to 0xffff; anything else is left for rind to refuse.
-    fn element(der: &[u8]) -> Option<(u8, &[u8], &[u8])> {
-        let (&tag, rest) = der.split_first()?;
-        let (&len, rest) = rest.split_first()?;
-        let (len, rest) = match len {
-            0..=0x7f => (usize::from(len), rest),
-            0x81 => (usize::from(*rest.first()?), rest.get(1..)?),
-            0x82 => (
-                usize::from(u16::from_be_bytes([*rest.first()?, *rest.get(1)?])),
-                rest.get(2..)?,
-            ),
-            _ => return None,
-        };
-        rest.split_at_checked(len)
-            .map(|(body, rest)| (tag, body, rest))
-    }
-
-    let Some((_, body, _)) = element(der) else {
-        return Ok(());
-    };
-    let v2 = element(body).is_some_and(|(tag, version, _)| (tag, version) == (0x02, &[1][..]));
-    let mut public_key = false;
-    let mut fields = body;
-    while let Some((tag, _, rest)) = element(fields) {
-        public_key |= tag == 0x81;
-        fields = rest;
-    }
-    match (v2, ed25519, public_key) {
-        (true, false, _) => Err(Error::RingKeyRejected("VersionNotSupported".into())),
-        (true, true, false) => Err(Error::RingKeyRejected("PublicKeyIsMissing".into())),
-        _ => Ok(()),
-    }
 }
 
 /// Keeps rind's reason for refusing a key, as rcgen does for its backends.
@@ -316,7 +324,8 @@ impl rcgen::SigningKey for KeyPair {
 impl TryFrom<&[u8]> for KeyPair {
     type Error = Error;
 
-    /// Loads a PKCS#8 private key, finding its algorithm; RSA keys sign with SHA-256.
+    /// Loads a private key, finding its algorithm and encoding as
+    /// `rustls_pki_types` does; RSA keys sign with SHA-256.
     fn try_from(key: &[u8]) -> Result<Self, Error> {
         let key = PrivateKeyDer::try_from(key).map_err(|_| Error::CouldNotParseKeyPair)?;
         Self::try_from(&key)
@@ -326,7 +335,8 @@ impl TryFrom<&[u8]> for KeyPair {
 impl TryFrom<Vec<u8>> for KeyPair {
     type Error = Error;
 
-    /// Loads a PKCS#8 private key, finding its algorithm; RSA keys sign with SHA-256.
+    /// Loads a private key, finding its algorithm and encoding as
+    /// `rustls_pki_types` does; RSA keys sign with SHA-256.
     fn try_from(key: Vec<u8>) -> Result<Self, Error> {
         Self::try_from(key.as_slice())
     }
@@ -344,21 +354,37 @@ impl TryFrom<&PrivatePkcs8KeyDer<'_>> for KeyPair {
 impl TryFrom<&PrivateKeyDer<'_>> for KeyPair {
     type Error = Error;
 
-    /// Loads a PKCS#8 private key, finding its algorithm; RSA keys sign with SHA-256.
+    /// Loads a private key, finding its algorithm: PKCS#8, or SEC1 for ECDSA
+    /// and PKCS#1 for RSA, whose keys sign with SHA-256. Its serialized DER
+    /// is then the key as given.
     fn try_from(key: &PrivateKeyDer<'_>) -> Result<Self, Error> {
-        let PrivateKeyDer::Pkcs8(key) = key else {
-            return Err(Error::CouldNotParseKeyPair);
+        let der = key.secret_der();
+        let pkcs8 = matches!(key, PrivateKeyDer::Pkcs8(_));
+        // As aws-lc-rs: PKCS#8 for Ed25519 and ECDSA, then SEC1 for ECDSA,
+        // whatever the key's label, and for RSA PKCS#8 or PKCS#1 by its label.
+        let (key, alg) = match rind::KeyPair::from_pkcs8(der) {
+            Ok(rind::KeyPair::Ed25519(key)) => (Key::Ed25519(key), &PKCS_ED25519),
+            Ok(rind::KeyPair::EcdsaP256(key)) => (Key::Ecdsa(key), &PKCS_ECDSA_P256_SHA256),
+            Ok(rind::KeyPair::EcdsaP384(key)) => (Key::Ecdsa(key), &PKCS_ECDSA_P384_SHA384),
+            Ok(rind::KeyPair::Rsa(key)) if pkcs8 => {
+                (Key::Rsa(key, &rsa::sign::PKCS1_SHA256), &PKCS_RSA_SHA256)
+            }
+            // rcgen names P-521 only with its `aws_lc_rs` feature.
+            Ok(rind::KeyPair::EcdsaP521(_)) => return Err(Error::CouldNotParseKeyPair),
+            _ => {
+                let sec1 = |alg| EcdsaKeyPair::from_sec1(alg, der).map(Key::Ecdsa);
+                if let Ok(key) = sec1(&ecdsa::sign::P256_SHA256_ASN1) {
+                    (key, &PKCS_ECDSA_P256_SHA256)
+                } else if let Ok(key) = sec1(&ecdsa::sign::P384_SHA384_ASN1) {
+                    (key, &PKCS_ECDSA_P384_SHA384)
+                } else if let (false, Ok(key)) = (pkcs8, RsaKeyPair::from_pkcs1(der)) {
+                    (Key::Rsa(key, &rsa::sign::PKCS1_SHA256), &PKCS_RSA_SHA256)
+                } else {
+                    return Err(Error::CouldNotParseKeyPair);
+                }
+            }
         };
-        // rcgen's `ring` backend tries the algorithms in this order.
-        [
-            &PKCS_ED25519,
-            &PKCS_ECDSA_P256_SHA256,
-            &PKCS_ECDSA_P384_SHA384,
-            &PKCS_RSA_SHA256,
-        ]
-        .into_iter()
-        .find_map(|alg| Self::from_pkcs8_der_and_sign_algo(key, alg).ok())
-        .ok_or(Error::CouldNotParseKeyPair)
+        Ok(Self::new(key, alg, der.to_vec()))
     }
 }
 
@@ -386,53 +412,13 @@ impl fmt::Debug for KeyPair {
 mod tests {
     use super::*;
 
-    /// `pkcs8` with its version set to `version`.
-    fn with_version(pkcs8: &[u8], version: u8) -> Vec<u8> {
-        let mut der = pkcs8.to_vec();
-        let at = match der[1] {
-            0x81 => 3,
-            0x82 => 4,
-            _ => 2,
-        };
-        assert_eq!(der[at..at + 2], [0x02, 0x01]);
-        der[at + 2] = version;
-        der
-    }
-
-    fn load(der: &[u8], alg: &'static SignatureAlgorithm) -> Result<KeyPair, Error> {
-        KeyPair::from_pkcs8_der_and_sign_algo(&PrivatePkcs8KeyDer::from(der), alg)
-    }
-
-    /// ring refuses a v2 document that rind takes: any for ECDSA and RSA,
-    /// and for Ed25519 one without its public key.
+    /// rcgen requires `Debug`, which shows the algorithm but no key.
     #[test]
-    fn pkcs8_v2_as_ring() {
-        let rejected = |reason: &str| Some(Error::RingKeyRejected(reason.into()));
-
-        let ecdsa = EcdsaKeyPair::generate(&ecdsa::sign::P256_SHA256_ASN1)
-            .unwrap()
-            .to_pkcs8();
-        let rsa = RsaKeyPair::from_pkcs1(include_bytes!("../../rind/src/high/rsa/rsa2048.der"))
-            .unwrap()
-            .to_pkcs8();
-        for (pkcs8, alg) in [
-            (ecdsa.as_ref(), &PKCS_ECDSA_P256_SHA256),
-            (rsa.as_ref(), &PKCS_RSA_SHA256),
-        ] {
-            assert!(load(pkcs8, alg).is_ok());
-            let v2 = with_version(pkcs8, 1);
-            assert_eq!(load(&v2, alg).err(), rejected("VersionNotSupported"));
-        }
-
-        let ed25519 = Ed25519KeyPair::generate().unwrap();
-        assert!(load(ed25519.to_pkcs8().as_ref(), &PKCS_ED25519).is_ok());
-        let v1 = ed25519.to_pkcs8v1();
-        assert!(load(v1.as_ref(), &PKCS_ED25519).is_ok());
-        let v2 = with_version(v1.as_ref(), 1);
-        assert!(Ed25519KeyPair::from_pkcs8(&v2).is_ok());
+    fn debug_shows_the_algorithm_without_the_key() {
+        let key = KeyPair::generate_for(&rcgen::PKCS_ED25519).unwrap();
         assert_eq!(
-            load(&v2, &PKCS_ED25519).err(),
-            rejected("PublicKeyIsMissing")
+            format!("{key:?}"),
+            format!("KeyPair {{ algorithm: {:?}, .. }}", rcgen::PKCS_ED25519)
         );
     }
 }

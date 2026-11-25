@@ -6,7 +6,7 @@ use super::{
     CURVE_A, CURVE_B, CURVE_ONE, CURVE_ORDER_MM, FieldElement, JacobianPoint, PublicKey, Scalar,
     util,
 };
-use crate::error::{Error, KeyFormatError};
+use crate::error::Error;
 use crate::low;
 use crate::mid::hash_to_curve::{self, Curve};
 use crate::mid::sha2::Sha512Context;
@@ -18,13 +18,21 @@ use crate::mid::sha2::Sha512Context;
 /// a small-order point.
 pub(crate) fn hash_to_curve(msg: &[u8], dst: &[u8]) -> Result<PublicKey, Error> {
     let _entry = low::Entry::new_secret();
-    let point = hash_to_curve::hash_to_curve::<FieldElement, Sha512Context>(msg, dst)?;
-    match low::ct::into_public(point[2].ct_eq(&FieldElement::ZERO)) {
-        true => Err(KeyFormatError::SmallOrder.into()),
-        false => Ok(PublicKey {
-            point: jacobian(&point).as_affine(),
-        }),
-    }
+    public_key(hash_to_curve::hash_to_curve::<FieldElement, Sha512Context>(
+        msg, dst,
+    )?)
+}
+
+fn public_key(point: [FieldElement; 3]) -> Result<PublicKey, Error> {
+    hash_to_curve::affine_or_small_order(point, |point| PublicKey {
+        point: jacobian(&point).as_affine(),
+    })
+}
+
+/// Converts an opposite-point sum for the OPRF boundary tests.
+#[cfg(test)]
+pub(crate) fn hash_to_infinity(_msg: &[u8], _dst: &[u8]) -> Result<PublicKey, Error> {
+    public_key(hash_to_curve::tests::opposite_sum::<FieldElement>())
 }
 
 /// Hashes `msg` to a scalar mod n, by RFC 9380's `hash_to_field` over
@@ -150,6 +158,7 @@ mod tests {
     use p521::hash2curve::{self as rustcrypto, GroupDigest};
 
     use super::*;
+    use crate::error::KeyFormatError;
     use crate::mid::hash_to_curve::tests;
 
     fn affine(p: &[FieldElement; 3]) -> Vec<u8> {
@@ -163,7 +172,18 @@ mod tests {
 
     #[test]
     fn sum() {
-        tests::check_sum::<FieldElement>(affine);
+        tests::check_sum::<FieldElement>(affine, |x| x.inv());
+    }
+
+    #[test]
+    fn opposite_points_are_refused() {
+        let _entry = low::Entry::new_secret();
+        let point = tests::opposite_sum::<FieldElement>();
+        assert!(low::ct::into_public(point[2].ct_eq(&FieldElement::ZERO)));
+        assert_eq!(
+            public_key(point).map(|_| ()),
+            Err(KeyFormatError::SmallOrder.into())
+        );
     }
 
     #[test]
@@ -190,6 +210,10 @@ mod tests {
             low::ct::public_slice(&p);
             p
         });
+        // The wrapper, so a branch on Z is under taint.
+        let msg = low::ct::into_secret(*b"password");
+        let point = hash_to_curve(&msg, b"QUUX-V01-CS02").unwrap();
+        low::ct::public_slice(&point.point.as_bytes_uncompressed());
     }
 
     /// The public functions, against RustCrypto's, as aws-lc has no
@@ -212,7 +236,39 @@ mod tests {
             >(&[&msg], &[&dst])
             .unwrap();
             assert_eq!(ours.as_bytes()[..], theirs.to_bytes()[..]);
+
+            // armv7 and the portable backend run fiat-crypto's field
+            // arithmetic, as RustCrypto and aws-lc do there, so the
+            // independent oracle is the textbook reference.
+            #[cfg(all(
+                any(rind_backend = "arm", rind_backend = "portable"),
+                not(any(miri, target_family = "wasm"))
+            ))]
+            {
+                let reference = crate::test::reference::p521();
+                let point = hash_to_curve(&msg, &dst).unwrap();
+                assert_eq!(
+                    point.point.as_bytes_uncompressed()[..],
+                    reference.hash_to_curve(&msg, &dst).unwrap()[..]
+                );
+                let scalar = hash_to_scalar(&[&msg], &dst).unwrap();
+                assert_eq!(
+                    scalar.as_bytes()[..],
+                    reference.hash_to_scalar(&msg, &dst).unwrap()[..]
+                );
+            }
         }
+    }
+
+    /// An empty DST is refused, as RustCrypto refuses it, since aws-lc has
+    /// no P-521 suite.
+    #[test]
+    fn empty_dst() {
+        tests::check_empty_dst(
+            hash_to_curve(b"msg", b"").map(|_| ()),
+            hash_to_scalar(&[b"msg"], b"").map(|_| ()),
+        );
+        assert!(NistP521::hash_from_bytes(&[b"msg"], &[b""]).is_err());
     }
 
     #[test]

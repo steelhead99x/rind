@@ -52,9 +52,9 @@ pub fn has_aes_hardware() -> bool {
 
 /// Holds data-independent timing (DIT) on for this thread until dropped.
 ///
-/// rind sets DIT only on Apple's platforms, which the module does not run
-/// on, so this guard does nothing; it is here so code written for `rind`
-/// compiles against `rind-fips`.
+/// The module sets DIT around each call on an aarch64 CPU that has it, as
+/// `rind::cpu::Dit` describes, and the guard holds it across a batch of
+/// calls; on x86_64 it does nothing.
 ///
 /// ```compile_fail,E0277
 /// let dit = rind_fips::cpu::Dit::hold();
@@ -63,14 +63,107 @@ pub fn has_aes_hardware() -> bool {
 #[must_use = "DIT turns back off when the guard drops"]
 #[derive(Debug)]
 pub struct Dit {
+    // Neither `Send` nor `Sync`: the module counts holds per thread.
     _thread: PhantomData<*const ()>,
 }
 
 impl Dit {
     /// Turns DIT on for this thread, if rind sets it here, until the guard drops.
     pub fn hold() -> Self {
+        // SAFETY: no arguments.
+        unsafe { ffi::rind_fips_dit_hold() };
         Self {
             _thread: PhantomData,
         }
+    }
+
+    /// Runs `f` with DIT held, as [`Dit::hold`] over its body would, and
+    /// returns what it returns.
+    pub fn with<R>(f: impl FnOnce() -> R) -> R {
+        let _dit = Self::hold();
+        f()
+    }
+
+    /// Runs `each` on every item of `items` under one guard, stopping at the
+    /// first error, which it returns.
+    pub fn batch<I: IntoIterator, E>(
+        items: I,
+        mut each: impl FnMut(I::Item) -> Result<(), E>,
+    ) -> Result<(), E> {
+        let _dit = Self::hold();
+        items.into_iter().try_for_each(&mut each)
+    }
+
+    /// Whether a guard on this thread is holding DIT on: never, since the
+    /// module sets no DIT.
+    ///
+    /// ```
+    /// let total = rind_fips::cpu::Dit::with(|| {
+    ///     assert!(!rind_fips::cpu::Dit::is_held());
+    ///     2 + 2
+    /// });
+    /// assert_eq!(total, 4);
+    /// assert_eq!(
+    ///     rind_fips::cpu::Dit::batch([1, 2, 3], |n| if n < 3 { Ok(()) } else { Err(n) }),
+    ///     Err(3)
+    /// );
+    /// ```
+    #[must_use]
+    pub fn is_held() -> bool {
+        false
+    }
+}
+
+impl Drop for Dit {
+    fn drop(&mut self) {
+        // SAFETY: this guard's hold, on the thread that made it.
+        unsafe { ffi::rind_fips_dit_release() };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    // A guard in a thread-local drops while the thread tears down, which may
+    // follow the module's own thread-locals; the release must still run.
+    #[test]
+    fn dit_releases_during_thread_teardown() {
+        std::thread_local! {
+            static HELD: core::cell::RefCell<Option<super::Dit>> = const { core::cell::RefCell::new(None) };
+        }
+        // Touched first, so its destructor runs after the module's.
+        std::thread::spawn(|| {
+            HELD.with(|_| ());
+            HELD.set(Some(super::Dit::hold()));
+        })
+        .join()
+        .unwrap();
+    }
+
+    /// PSTATE.DIT, which only a core with DIT may read.
+    #[cfg(target_arch = "aarch64")]
+    fn dit() -> bool {
+        let pstate: u64;
+        // SAFETY: the caller checked that the core has DIT.
+        unsafe { core::arch::asm!("mrs {}, S3_3_C4_C2_5", out(reg) pstate) };
+        pstate & (1 << 24) != 0
+    }
+
+    // The module holds DIT until the last of this thread's guards drops, in
+    // whatever order.
+    #[cfg(target_arch = "aarch64")]
+    #[test]
+    fn dit_hold_holds_dit() {
+        if !std::arch::is_aarch64_feature_detected!("dit") {
+            drop(super::Dit::hold());
+            return;
+        }
+        assert!(!dit());
+        let first = super::Dit::hold();
+        let second = super::Dit::hold();
+        assert!(dit());
+        drop(first);
+        assert!(dit());
+        drop(second);
+        assert!(!dit());
     }
 }

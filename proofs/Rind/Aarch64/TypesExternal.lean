@@ -23,6 +23,13 @@ opaque low.aarch64.p256_vg.P256 : Type
 /-- x86_64's AVX-512 IFMA X25519 and Ed25519 token, which no aarch64 CPU
 builds. -/
 opaque low.aarch64.curve25519_ifma.Curve25519Ifma : Type
+/-- The token proving the CPU runs pyca/verified-garbage's P-384 `d·G`, which
+no proof here covers. -/
+opaque low.aarch64.p384_vg.MulBase : Type
+
+/-- The token proving the CPU runs pyca/verified-garbage's P-384 ECDSA
+verification, which no proof here covers. -/
+opaque low.aarch64.p384_vg.Verify : Type
 
 /-- The token proving the CPU has the SHA-512 instructions. -/
 opaque low.aarch64.cpu.HaveSha3 : Type
@@ -49,6 +56,24 @@ opaque low.aarch64.vpaes_armv8.VpaesDecKey : Type
 /-- The token proving pyca/verified-garbage's ML-KEM-768 encapsulation runs
 here: the CPU has the SHA-3 instructions. -/
 opaque low.aarch64.mlkem768_vg.Encaps : Type
+
+/-- The token proving the CPU has SVE2, on which ChaCha20-Poly1305's one pass
+and `cipher::ChaCha20` run pyca/verified-garbage's routines. -/
+opaque low.aarch64.cpu.HaveSve2 : Type
+
+/-- pyca/verified-garbage's ChaCha20 streaming state, as its routines see it:
+the 768 bytes of memory they keep it in, all that VG's spec reads of it, as
+`Rind.VgChaCha20` proves. Rust leaves it uninitialised: `init` writes the bytes
+`apply` reads on entry, and `apply` writes its scratch before reading it, so
+the model gives the rest any bytes.
+`admin/prove` fails unless this quote is still the type:
+
+```rust
+struct VgState(MaybeUninit<[u64; 96]>);
+
+```
+-/
+@[reducible] def low.aarch64.chacha20.VgState : Type := Std.Array Std.U8 768#usize
 
 /-- MD5's chaining state, which no proof covers. -/
 opaque mid.md5.Md5State : Type

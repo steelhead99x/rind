@@ -1,9 +1,16 @@
+#[cfg(target_arch = "xtensa")]
+fn main() {}
+
+#[cfg(not(target_arch = "xtensa"))]
 mod criterion;
+#[cfg(not(target_arch = "xtensa"))]
 use std::hint::black_box;
 
-use criterion::{Criterion, Throughput, criterion_group, criterion_main};
+#[cfg(not(target_arch = "xtensa"))]
+use criterion::{Bencher, Criterion, Throughput, criterion_group, criterion_main};
 
 // Generate a fresh key and make a PKCS8 document of it.
+#[cfg(not(target_arch = "xtensa"))]
 fn keygen(c: &mut Criterion) {
     let mut group = c.benchmark_group("ed25519-keygen");
     group.throughput(Throughput::Elements(1));
@@ -21,6 +28,7 @@ fn keygen(c: &mut Criterion) {
         })
     });
 
+    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
     group.bench_function("aws-lc-rs", |b| {
         use aws_lc_rs::{rand, signature};
         let rng = rand::SystemRandom::new();
@@ -46,6 +54,7 @@ fn keygen(c: &mut Criterion) {
     });
 
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         b.iter(|| {
             let our_private_key = rind::ed25519::KeyPair::generate().unwrap();
             black_box(our_private_key.to_pkcs8());
@@ -88,7 +97,11 @@ fn keygen(c: &mut Criterion) {
         })
     });
 
-    #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+    #[cfg(all(
+        feature = "__bench_openssl",
+        target_family = "unix",
+        not(target_arch = "xtensa")
+    ))]
     group.bench_function("openssl", |b| {
         b.iter(|| {
             let key = openssl::pkey::PKey::generate_ed25519().unwrap();
@@ -97,6 +110,7 @@ fn keygen(c: &mut Criterion) {
     });
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn verify(c: &mut Criterion) {
     let mut group = c.benchmark_group("ed25519-verify");
     group.throughput(Throughput::Elements(1));
@@ -116,6 +130,7 @@ fn verify(c: &mut Criterion) {
         })
     });
 
+    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
     group.bench_function("aws-lc-rs", |b| {
         let public_key =
             aws_lc_rs::signature::ParsedPublicKey::new(&aws_lc_rs::signature::ED25519, public_key)
@@ -138,12 +153,16 @@ fn verify(c: &mut Criterion) {
         });
     });
 
-    group.bench_function("rind", |b| {
+    let rind = |b: &mut Bencher<'_>| {
         let public_key = rind::ed25519::PublicKey::new(public_key).unwrap();
 
         b.iter(|| {
             public_key.verify(message, signature).unwrap();
         })
+    };
+    group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
+        rind(b)
     });
 
     #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
@@ -172,7 +191,11 @@ fn verify(c: &mut Criterion) {
         })
     });
 
-    #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+    #[cfg(all(
+        feature = "__bench_openssl",
+        target_family = "unix",
+        not(target_arch = "xtensa")
+    ))]
     group.bench_function("openssl", |b| {
         use openssl::pkey::{Id, PKey};
         use openssl::sign::Verifier;
@@ -183,8 +206,15 @@ fn verify(c: &mut Criterion) {
             assert!(verifier.verify_oneshot(signature, message).unwrap());
         })
     });
+    group.finish();
+
+    if let Some(mut group) = criterion::dit_per_call(c, "ed25519-verify") {
+        group.throughput(Throughput::Elements(1));
+        group.bench_function("rind", rind);
+    }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn sign(c: &mut Criterion) {
     let mut group = c.benchmark_group("ed25519-sign");
     group.throughput(Throughput::Elements(1));
@@ -202,6 +232,7 @@ fn sign(c: &mut Criterion) {
         })
     });
 
+    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
     group.bench_function("aws-lc-rs", |b| {
         use aws_lc_rs::{rand, signature};
         let rng = rand::SystemRandom::new();
@@ -225,12 +256,16 @@ fn sign(c: &mut Criterion) {
         });
     });
 
-    group.bench_function("rind", |b| {
+    let rind = |b: &mut Bencher<'_>| {
         let signing_key = rind::ed25519::KeyPair::generate().unwrap();
 
         b.iter(|| {
             black_box(signing_key.sign(message));
         });
+    };
+    group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
+        rind(b)
     });
 
     #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
@@ -271,7 +306,11 @@ fn sign(c: &mut Criterion) {
         });
     });
 
-    #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+    #[cfg(all(
+        feature = "__bench_openssl",
+        target_family = "unix",
+        not(target_arch = "xtensa")
+    ))]
     group.bench_function("openssl", |b| {
         use openssl::sign::Signer;
         let signing_key = openssl::pkey::PKey::generate_ed25519().unwrap();
@@ -281,7 +320,15 @@ fn sign(c: &mut Criterion) {
             black_box(signer.sign_oneshot_to_vec(message).unwrap());
         });
     });
+    group.finish();
+
+    if let Some(mut group) = criterion::dit_per_call(c, "ed25519-sign") {
+        group.throughput(Throughput::Elements(1));
+        group.bench_function("rind", rind);
+    }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 criterion_group!(benches, keygen, verify, sign);
+#[cfg(not(target_arch = "xtensa"))]
 criterion_main!(benches);

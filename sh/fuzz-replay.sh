@@ -30,7 +30,7 @@ case "$arch" in
     x86_64)
         tiers=(
             "avx512f avx512bw"
-            "vaes sha sha512 intel"
+            "vaes sha intel"
             "adx"
             "avx2 movbe"
             "avx"
@@ -39,9 +39,9 @@ case "$arch" in
         )
         ;;
     # A runner has AVX-512, VAES, and the SHA extensions or lacks them from run
-    # to run, and has no SHA512 instructions, so Diamond Rapids, which selects
-    # every path, runs them all, then VAES without AVX-512. The x86_64 replay
-    # covers the tiers below. LeakSanitizer is off under SDE: see UPSTREAM.md,
+    # to run, so Diamond Rapids, which selects every path, runs them all, then
+    # VAES without AVX-512. The x86_64 replay covers the tiers below.
+    # LeakSanitizer is off under SDE: see UPSTREAM.md,
     # "LeakSanitizer deadlocks under Intel SDE".
     x86_64-sde)
         runner=(env ASAN_OPTIONS=detect_leaks=0 sde -dmr --)
@@ -70,6 +70,30 @@ case "$arch" in
         exit 1
         ;;
 esac
+
+# The FIPS module refuses to load on a CPU without the features it requires
+# (rind-fips/README.md), so its target stops before the first tier that
+# denies one.
+if [[ $(basename "$target") == fips ]]; then
+    case "$arch" in
+        x86_64 | x86_64-sde) required=" aes pclmulqdq adx movbe " ;;
+        aarch64) required=" aes pmull sha2 " ;;
+        *)
+            echo "error: the FIPS module does not build for $arch" >&2
+            exit 1
+            ;;
+    esac
+    kept=()
+    for tier in "${tiers[@]}"; do
+        for feature in $tier; do
+            if [[ $required == *" $feature "* ]]; then
+                break 2
+            fi
+        done
+        kept+=("$tier")
+    done
+    tiers=("${kept[@]}")
+fi
 
 deny=()
 for tier in "${tiers[@]}"; do

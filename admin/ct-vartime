@@ -22,15 +22,11 @@
 #
 # On the x86_64 backend, it also fails if a function reached from one rind
 # exports, which is all its callers can call, holds an instruction in MCDT
-# without passing through a function that enters Intel's MXCSR mitigation,
-# `rind::low::Mcdt`. Everything such a function calls counts as mitigated,
-# and so does all of the function itself, so it enters the mitigation first,
-# holds it to its end, and is `#[inline(never)]` or `target_feature`, so it
-# never inlines into a caller whose own work the scan would then skip. The
-# scan does not check that order: LLVM lays out the path for a CPU that
-# needs no mitigation, which never calls `enter`, beside the one that does,
-# so an instruction's address says nothing about whether the mitigation is
-# held there. Nothing in `admin/ct-vartime.toml`
+# that can run outside Intel's MXCSR mitigation, `rind::low::Mcdt`. In a
+# function that calls MITIGATION, it follows the control flow, so an
+# instruction, and whatever a call there reaches, counts as mitigated only
+# where every path from the function's start calls MITIGATION with no call
+# in RELEASE since: the mitigation must dominate it. Nothing in `admin/ct-vartime.toml`
 # excuses these, public operands included: the mitigation costs little
 # beside the arithmetic that runs them. A generic function compiles in its
 # caller, which exports what it calls, so the mitigation goes in code that
@@ -42,8 +38,10 @@
 #
 # The build sets `--cfg rind_vartime_planted`, which adds the divisions of a
 # secret in `rind/src/low/vartime_planted.rs`, and for the x86_64 backend a
-# multiply outside the mitigation and one inside it. Each outside must be found, so a scan
-# that finds nothing fails, and the one inside must not.
+# multiply inside the mitigation and three outside it: in a function that
+# never enters it, and before and after the mitigation in one that does.
+# Each outside must be found, so a scan that finds nothing fails, and the
+# one inside must not.
 #
 # Run it in `nix develop .#ct-vartime`, which has llvm-objdump and each
 # target's standard library.
@@ -83,7 +81,8 @@ PORTABLE = '--cfg rind_portable --cfg curve25519_dalek_backend="serial"'
 # instructions:
 # - Intel, "Data Operand Independent Timing Instructions", updated
 #   2026-02-23, https://www.intel.com/content/www/us/en/developer/articles/technical/software-security-guidance/resources/data-operand-independent-timing-instructions.html
-#   lists no DIV, IDIV, or floating-point arithmetic.
+#   lists no DIV, IDIV, or floating-point arithmetic, and none of
+#   VSHA512RNDS2, VSHA512MSG1, or VSHA512MSG2.
 # - Arm, DDI 0601 2026-09, "DIT, Data Independent Timing",
 #   https://developer.arm.com/documentation/ddi0601/2026-09/AArch64-Registers/DIT--Data-Independent-Timing
 #   lists no UDIV, SDIV, or floating-point instruction but FCSEL. For
@@ -120,6 +119,9 @@ VARTIME = {
         r"|vfn?m(add|sub|addsub|subadd)\d*[sp][sdh]|v(rcp|rsqrt)(14|28)[sp][sdh]"
         r"|v(scalef|getexp|getmant|reduce|rndscale|range|fixupimm)[sp][sdh]|v?cvt\w+"
         r"|v?u?comis[sdh]|v?cmp\w*[ps][sdh]"
+        # VSHA512RNDS2, VSHA512MSG1, and VSHA512MSG2 are absent from Intel's
+        # list. SHA-256's SHA extensions are on it, so they stay allowed.
+        r"|vsha512\w*"
         # Every x87 mnemonic begins with `f`; all but these control and
         # state ones take floating-point operands.
         r"|f(?!(n?stcw|ldcw|n?stsw|n?clex|n?init|n?save|rstor|n?stenv|ldenv|x(save|rstor)(64)?|wait|emms|freep?|decstp|incstp|nop)$)\w+"
@@ -188,16 +190,28 @@ MCDT_SAMPLES = (
     "mul mulx imul pmullq vpmultishiftqb vpclmulqdq vpaddq lzcnt vpdpwssd vpmovzxwd",
 )
 
-# The function `rind::low::Mcdt` calls to enter the mitigation.
+# The function `rind::low::Mcdt` calls to enter the mitigation, and those
+# that end it: its `Drop`, which calls `leave`, and may stay out of line.
 MITIGATION = "rind::low::mcdt::enter"
+RELEASE = re.compile(
+    r"rind::low::mcdt::leave|core::ptr::drop_(glue|in_place)::<rind::low::mcdt::Mcdt>"
+    r"|<rind::low::mcdt::Mcdt as core::ops::drop::Drop>::drop"
+)
+
+# x86 control flow, for following a function that enters the mitigation: a
+# conditional branch also falls through, and these end a path.
+BRANCH = re.compile(r"j(?!mp$)[a-z]+|loop\w*")
+END = {"ret", "ud2", "int3", "hlt"}
+TARGET = re.compile(r"^(?:0x)?([0-9a-f]+)(?: <.*>)?$")
 
 # Mnemonics each VARTIME pattern must refuse, then must allow, checked
 # before every scan.
 SAMPLES = {
     "x86": (
         "div idiv aam divsd vsqrtpd haddps addsubps vfmadd231pd vfmaddps vrcp14ps cvtsi2sd fdivp"
-        " ucomisd vcmpltpd cmpss fsin fld fcomip",
-        "mulx adcx vpmuludq vpaddd movaps xorps vpclmulqdq aesenc shrx cmp cmpxchg fnstcw fxsave64",
+        " ucomisd vcmpltpd cmpss fsin fld fcomip vsha512rnds2 vsha512msg1 vsha512msg2",
+        "mulx adcx vpmuludq vpaddd movaps xorps vpclmulqdq aesenc shrx cmp cmpxchg fnstcw fxsave64"
+        " sha256rnds2 sha256msg1 sha256msg2",
     ),
     "aarch64": (
         "udiv sdiv fdiv fsqrt faddp fmul fmla fcvtzs scvtf",
@@ -251,6 +265,8 @@ PLANTED = {
     ],
     "rind::low::vartime_planted::planted_float": TARGETS,
     "rind::low::vartime_planted::planted_mcdt": ["x86_64-unknown-linux-gnu"],
+    "rind::low::vartime_planted::planted_mcdt_before": ["x86_64-unknown-linux-gnu"],
+    "rind::low::vartime_planted::planted_mcdt_after": ["x86_64-unknown-linux-gnu"],
 }
 
 # x86 prefixes, which llvm-objdump prints as their own word before the
@@ -404,10 +420,20 @@ class Objects:
                 while arch == "x86" and len(words) > 1 and (words[0] in PREFIXES or words[0].startswith("{")):
                     words.pop(0)
                 mnemonic = words[0] if words else ""
-                self.insns[section].append((int(m[1], 16), mnemonic))
+                self.insns[section].append((int(m[1], 16), mnemonic, " ".join(words[1:])))
 
     def name(self, name):
         return self.names.get(name, name)
+
+    def target_name(self, member, target):
+        """The function a relocation in `member` names, which is the first in
+        its section when it names the section."""
+        name = self.name(target)
+        if name.startswith("."):
+            to = self.resolve(member, target)
+            if to is not None:
+                return self.section_name(to)
+        return name
 
     def function(self, node, offset):
         """The function holding `offset` in section `node`."""
@@ -438,11 +464,79 @@ class Objects:
         return defined
 
 
+def mitigated(objects, node):
+    """Which instructions of x86 section `node` run with the mitigation held
+    on every path from the start of its function, which a relocation's
+    offset in the instruction finds: `covered(offset)`."""
+    insns = objects.insns[node]
+    offsets = [offset for offset, _, _ in insns]
+    index = {offset: i for i, offset in enumerate(offsets)}
+    named = collections.defaultdict(list)
+    for offset, target in objects.relocs.get(node, ()):
+        named[bisect.bisect_right(offsets, offset) - 1].append(objects.target_name(node[0], target))
+
+    def successors(i):
+        _, mnemonic, operands = insns[i]
+        names = named.get(i, ())
+        if mnemonic in END:
+            return []
+        # A call or jump to a panic never returns; a conditional jump to one
+        # falls through when not taken.
+        if mnemonic in ("call", "jmp") and any(PANICS.match(n) for n in names):
+            return []
+        # A jump with a relocation leaves the section, as a tail call.
+        jump = mnemonic == "jmp" or BRANCH.fullmatch(mnemonic)
+        to = TARGET.match(operands) if jump and not names else None
+        if jump and not names and not to:
+            sys.exit("ct-vartime: {} at {:#x} jumps indirectly in {}, which the MXCSR scan cannot follow".format(
+                mnemonic, offsets[i], objects.section_name(node)))
+        out = [] if mnemonic == "jmp" else [i + 1]
+        if to:
+            if int(to[1], 16) not in index:
+                sys.exit("ct-vartime: {} at {:#x} jumps outside an instruction in {}".format(
+                    mnemonic, offsets[i], objects.section_name(node)))
+            out.append(index[int(to[1], 16)])
+        return [s for s in out if s < len(insns)]
+
+    # A forward must-analysis: held into an instruction only if held out of
+    # every one that leads to it. Each function starts unmitigated.
+    held = [None] * len(insns)
+    queue = collections.deque()
+    for start, _ in objects.labels.get(node, [(offsets[0], None)]):
+        if start in index:
+            held[index[start]] = False
+            queue.append(index[start])
+    while queue:
+        i = queue.popleft()
+        state = held[i]
+        # Only a call to `enter` returns here holding the mitigation; any
+        # other reference to it, such as a conditional tail call, does not.
+        for name in named.get(i, ()):
+            if name == MITIGATION and insns[i][1] == "call":
+                state = True
+            elif RELEASE.fullmatch(name):
+                state = False
+        for s in successors(i):
+            new = state if held[s] is None else held[s] and state
+            if new != held[s]:
+                held[s] = new
+                queue.append(s)
+    # Code no path reaches, such as a landing pad, counts as unmitigated.
+    covered = {offsets[i] for i, h in enumerate(held) if h}
+
+    def at(offset):
+        return offsets[bisect.bisect_right(offsets, offset) - 1] in covered
+
+    return at
+
+
 def scan(objects, starts, pattern, helpers=None, barrier=None):
     """Every instruction matching `pattern` reached from `starts`, and every
     call to a routine in `helpers`, as {function: Counter(what)}, with a path
-    from a start to each, and how many sections were reached. A section that
-    calls `barrier` is reached, but neither searched nor left."""
+    from a start to each, how many sections were reached, and how many it
+    followed for the mitigation. In a section
+    that calls `barrier`, what runs while it is held, by `mitigated`, is
+    neither searched nor left."""
     parent = {}
     queue = collections.deque()
     for node in starts:
@@ -451,17 +545,22 @@ def scan(objects, starts, pattern, helpers=None, barrier=None):
 
     findings = collections.defaultdict(collections.Counter)
     paths = {}
+    followed = 0
     while queue:
         node = queue.popleft()
         relocs = objects.relocs.get(node, ())
-        if barrier and any(objects.name(target) == barrier for _, target in relocs):
-            continue
-        for offset, mnemonic in objects.insns.get(node, ()):
-            if pattern.fullmatch(mnemonic):
+        covered = None
+        if barrier and any(objects.target_name(node[0], target) == barrier for _, target in relocs):
+            covered = mitigated(objects, node)
+            followed += 1
+        for offset, mnemonic, _ in objects.insns.get(node, ()):
+            if pattern.fullmatch(mnemonic) and not (covered and covered(offset)):
                 function = objects.function(node, offset)
                 findings[function][mnemonic] += 1
                 paths.setdefault(function, node)
         for offset, target in relocs:
+            if covered and covered(offset):
+                continue
             name = objects.name(target)
             if helpers and helpers.fullmatch(name):
                 function = objects.function(node, offset)
@@ -481,7 +580,7 @@ def scan(objects, starts, pattern, helpers=None, barrier=None):
             node = parent[node]
         return names[1:]
 
-    return findings, {f: path(n) for f, n in paths.items()}, len(parent)
+    return findings, {f: path(n) for f, n in paths.items()}, len(parent), followed
 
 
 def describe(counts):
@@ -500,15 +599,15 @@ def check(tool, target, rind, others, public):
         node for node in objects.insns
         if node[0] in roots and any("rind::" in objects.name(l) for _, l in objects.labels[node])
     ]
-    findings, paths, reached = scan(objects, starts, VARTIME[arch], helpers=HELPERS)
+    findings, paths, reached, _ = scan(objects, starts, VARTIME[arch], helpers=HELPERS)
     lines = ["{}: reached {} sections".format(target, reached)]
     failed = False
 
     if target == "x86_64-unknown-linux-gnu":
         exported = sorted(node for node in objects.exported if node[0] in roots)
-        mcdt, mcdt_paths, mcdt_reached = scan(objects, exported, MCDT, barrier=MITIGATION)
-        lines.append("{}: reached {} sections from {} exported outside the MXCSR mitigation".format(
-            target, mcdt_reached, len(exported)))
+        mcdt, mcdt_paths, mcdt_reached, followed = scan(objects, exported, MCDT, barrier=MITIGATION)
+        lines.append("{}: reached {} sections from {} exported outside the MXCSR mitigation, following {} that enter it".format(
+            target, mcdt_reached, len(exported), followed))
         for function, counts in sorted(mcdt.items()):
             if function in PLANTED:
                 findings[function].update(counts)

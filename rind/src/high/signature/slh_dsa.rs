@@ -12,12 +12,12 @@ use crate::error::{Error, KeyFormatError};
 use crate::high::asn1;
 use crate::high::{pkcs8, spki};
 use crate::low;
-use crate::mid::mldsa::Array;
 use crate::mid::slhdsa::{
     self, Params, SlhDsaSha2_128f, SlhDsaSha2_128s, SlhDsaSha2_192f, SlhDsaSha2_192s,
     SlhDsaSha2_256f, SlhDsaSha2_256s, SlhDsaShake128f, SlhDsaShake128s, SlhDsaShake192f,
     SlhDsaShake192s, SlhDsaShake256f, SlhDsaShake256s,
 };
+use crate::mid::util::Array;
 
 /// Pure SLH-DSA's message prefix with the empty context, as X.509 signs:
 /// `0 || len(context)`.
@@ -200,16 +200,18 @@ impl<P: ParameterSet> KeyPair<P> {
     }
 }
 
+impl<P: ParameterSet> KeyPair<P> {
+    /// The parameter set's OID.
+    pub(crate) const fn oid() -> &'static asn1::ObjectId {
+        P::ALGORITHM.oid
+    }
+}
+
 #[cfg(test)]
 impl<P: ParameterSet> KeyPair<P> {
     /// The key pair the mid layer holds.
     pub(crate) fn inner(&self) -> &slhdsa::KeyPair<P> {
         &self.pair
-    }
-
-    /// The parameter set's OID.
-    pub(crate) fn oid() -> &'static asn1::ObjectId {
-        P::ALGORITHM.oid
     }
 }
 

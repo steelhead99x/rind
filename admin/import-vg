@@ -7,10 +7,12 @@ verified-garbage (VG) proves its assembly in Lean and prints each routine as
 a Rust naked function in `crates/verified-garbage-asm-<arch>/src`, and each
 table its routines load as a `static`. This copies the items rind runs, the
 `ROOTS` below and every item they reach through a `sym` operand, one file per
-item, with three mechanical edits:
+item, with four mechanical edits:
 
 - each `sym` path, which names the item's module in VG's crate, becomes
   `super::<item's file>::<item>`;
+- a `sym` of a table in `SHARED` names rind's own copy of the same bytes
+  instead, and VG's table compiles only into the test that compares them;
 - on x86_64, each `.base64 "..."` line, which the assembler of rind's MSRV
   rejects, becomes `.byte` lines of the same bytes; see UPSTREAM.md,
   "Rust 1.90's assembler cannot read verified-garbage's `.base64`";
@@ -42,6 +44,9 @@ ROOTS = {
         "vg_chacha20_init",
         "vg_chacha20_apply_avx2",
         "vg_chacha20_apply_avx512vl",
+        # ChaCha20-Poly1305 with AVX512_IFMA.
+        "vg_chacha20_poly1305_seal_ifma",
+        "vg_chacha20_poly1305_open_ifma",
         # ML-KEM-768's encapsulation key check and encapsulation, by key or
         # with its hash, on every CPU; key generation and decapsulation
         # with AVX-512.
@@ -78,8 +83,19 @@ ROOTS = {
         # keys, and its twin for CPUs with two 512-bit multipliers.
         "vg_rsa_private_crt_precomputed_ifma",
         "vg_rsa_private_crt_precomputed_ifma512",
+        # P-384's k·G, for ECDSA's keys and nonces, with BMI2 and ADX and
+        # without, and its ECDSA verification with them.
+        "vg_ec_p384_public_key",
+        "vg_ec_p384_public_key_adx",
+        "vg_ecdsa_p384_verify_adx",
+        # RSA's R² mod n for a public modulus, with BMI2 and ADX.
+        "vg_rsa_public_precompute_adx",
     ],
     "aarch64": [
+        # cipher::ChaCha20 with NEON, and with SVE2.
+        "vg_chacha20_init",
+        "vg_chacha20_apply_neon",
+        "vg_chacha20_apply_sve2",
         # ChaCha20-Poly1305 with SVE2.
         "vg_chacha20_poly1305_seal_sve2",
         "vg_chacha20_poly1305_open_sve2",
@@ -101,6 +117,12 @@ ROOTS = {
         "vg_pbkdf2_hmac_sha256_sha2",
         "vg_pbkdf2_hmac_sha384_sha512",
         "vg_pbkdf2_hmac_sha512_sha512",
+        # P-384's k·G, for ECDSA's keys and nonces, and its ECDSA
+        # verification.
+        "vg_ec_p384_public_key",
+        "vg_ecdsa_p384_verify",
+        # RSA's R² mod n for a public modulus.
+        "vg_rsa_public_precompute",
     ],
 }
 
@@ -109,6 +131,21 @@ HEADER = """\
 // crates/verified-garbage-asm-{arch}/{source}. Do not edit by hand.
 // SPDX-License-Identifier: Apache-2.0 OR BSD-3-Clause
 """
+
+# VG's tables that rind already holds byte for byte, per architecture: the
+# static a `sym` names in place of each, so a program links one copy. The
+# static's own tests hold its bytes to VG's, and `admin/vg-bytes` reads the
+# same names.
+SHARED = {
+    "x86_64": {
+        # Lean proves `mid`'s table (`proofs/Rind/X86_64/P256Table.lean`),
+        # which its type aligns to a cache line as VG's `Table` is: the
+        # routine's 32-byte loads take any address, but measured 1.3% slower
+        # where they crossed lines.
+        "VG_P256_COMB": "crate::mid::p256::precomp::CURVE_GENERATOR_PRECOMP",
+    },
+    "aarch64": {},
+}
 
 SYM = re.compile(r"\bsym ((?:crate|super)::[A-Za-z0-9_:]+)")
 BASE64 = re.compile(r'^\.base64 "([A-Za-z0-9+/=]*)"$')
@@ -173,7 +210,7 @@ def rewrite(arch, text):
 
     def sym(m):
         name = m.group(1).rsplit("::", 1)[1]
-        return f"sym super::{module_of(name)}::{name}"
+        return f"sym {SHARED[arch].get(name) or f'super::{module_of(name)}::{name}'}"
 
     text = SYM.sub(sym, text)
     out = []
@@ -254,6 +291,8 @@ def import_arch(vg, arch, roots):
     if uses_table:
         mod += [table(crate)]
     for name in sorted(names, key=module_of):
+        if name in SHARED[arch]:
+            mod += ["#[cfg(test)]"]
         mod += ["#[rustfmt::skip]", f"pub(crate) mod {module_of(name)};"]
     write(os.path.join(out_dir, "mod.rs"), "\n".join(mod) + "\n")
 

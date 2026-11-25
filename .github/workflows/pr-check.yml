@@ -23,8 +23,8 @@ concurrency:
 
 jobs:
   # release-plz's release PR, which only bumps versions and changelogs, skips
-  # this as it does the other advisory checks: a `release-plz-` branch that
-  # moq-bot, release.yml's app, opened. The queue's `just ci` still runs on it.
+  # this: a `release-plz-` branch that moq-bot, release.yml's app, opened.
+  # The queue's `just ci` still runs on it.
   check:
     name: Check
     if: ${{ !(startsWith(github.head_ref, 'release-plz-') && github.event.pull_request.user.login == 'moq-bot[bot]') }}

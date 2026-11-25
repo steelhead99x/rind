@@ -4,20 +4,6 @@ on:
   schedule:
     - cron: "0 18 * * *"
   workflow_dispatch:
-  # A pull request runs only the jobs whose inputs it touches, as `changes`
-  # decides: armv7 and portable on their backends and scripts, the Dart jobs
-  # on rind-dart, openmls's suite on rind-openmls. The nightly runs every job.
-  pull_request:
-    branches: [main]
-    paths:
-      - rind/src/low/arm/**
-      - rind/src/low/portable/**
-      - sh/armv7.sh
-      - sh/portable.sh
-      - rind-dart/**
-      - rind-openmls/**
-      - sh/openmls.sh
-      - .github/workflows/build.yml
 
 permissions:
   contents: read
@@ -30,47 +16,10 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  changes:
-    runs-on: ubuntu-latest
-    outputs:
-      armv7: ${{ steps.match.outputs.armv7 }}
-      portable: ${{ steps.match.outputs.portable }}
-      dart: ${{ steps.match.outputs.dart }}
-      openmls: ${{ steps.match.outputs.openmls }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          fetch-depth: 0
-
-      # Outside a pull request every job runs, and in release-plz's release
-      # PR, which only bumps versions and changelogs, none does: a
-      # `release-plz-` branch that moq-bot, release.yml's app, opened.
-      - id: match
-        env:
-          RELEASE_PR: ${{ startsWith(github.head_ref, 'release-plz-') && github.event.pull_request.user.login == 'moq-bot[bot]' }}
-        run: |
-          changed=
-          if [[ "$GITHUB_EVENT_NAME" == pull_request && "$RELEASE_PR" != true ]]; then
-            changed=$(sh/changed.sh)
-          fi
-          for rule in \
-            'armv7=^(rind/src/low/arm/|sh/armv7\.sh$|\.github/workflows/build\.yml$)' \
-            'portable=^(rind/src/low/portable/|sh/portable\.sh$|\.github/workflows/build\.yml$)' \
-            'dart=^(rind-dart/|\.github/workflows/build\.yml$)' \
-            'openmls=^(rind-openmls/|sh/openmls\.sh$|\.github/workflows/build\.yml$)'; do
-            if [ "$GITHUB_EVENT_NAME" != pull_request ] || printf '%s\n' "$changed" | grep -qE "${rule#*=}"; then
-              echo "${rule%%=*}=true"
-            else
-              echo "${rule%%=*}=false"
-            fi
-          done >>"$GITHUB_OUTPUT"
-
   # rind-fips's module answers ACVP's sets through rind-acvp on each of the
-  # runner's paths, with the large-data hash tests, 15 GiB a hash, which
-  # pull requests skip. x86-cpu.yml covers the AVX-512 paths under SDE.
+  # runner's paths, with the large-data hash tests, 15 GiB a hash, which run
+  # only with SLOW_TESTS. x86-cpu.yml covers the AVX-512 paths under SDE.
   acvp:
-    if: github.event_name != 'pull_request'
     strategy:
       matrix:
         os: [ubuntu-24.04, ubuntu-24.04-arm]
@@ -88,7 +37,6 @@ jobs:
           SLOW_TESTS: 1
 
   build:
-    if: github.event_name != 'pull_request'
     strategy:
       matrix:
         include:
@@ -136,70 +84,21 @@ jobs:
         if: runner.os == 'Linux'
         run: cargo test -p rind-fips --features __break_tests
 
-      - name: Artificial CPU feature tests (x86_64)
-        if: runner.arch == 'X64'
+      # Each tier runs the tests, then CCTV's million ML-KEM vectors in a
+      # release build, which honours the tier's denials only with
+      # `--cfg rind_cpu_disable`, alongside the check that they took effect.
+      # rind-fips is left out: its module refuses a CPU masked below its
+      # baseline.
+      - name: Artificial CPU feature tests
         shell: bash
         run: |
-          # Each tier runs the tests, then CCTV's million ML-KEM vectors in a
-          # release build, which honours the tier's denials only with
-          # `--cfg rind_cpu_disable`, alongside the check that they took effect
-          # rind-fips is left out: its module refuses a CPU masked below its
-          # baseline.
-          tier() { env "$@" cargo test --workspace --exclude rind-fips; env "$@" SLOW_TESTS=1 RUSTFLAGS='--cfg rind_cpu_disable' cargo test --release -p rind --lib -- cctv_accumulated detects_the_expected_cpu; }
-          # test rind's AVX2 SHA-1 and OpenSSL's AVX2 SHA-256 for CPUs without
-          # the SHA extensions
-          tier RIND_CPU_DISABLE_sha=1 RIND_CPU_DISABLE_intel=1
-          # test Vale's aes-gcm and avx2 ML-KEM without avx512 or vaes, and
-          # RSA's CRT one exponentiation at a time on a runner with AVX-512 IFMA
-          tier RIND_CPU_DISABLE_avx512bw=1 RIND_CPU_DISABLE_avx512f=1 RIND_CPU_DISABLE_vaes=1 RIND_TEST_X86_AVX512_RSA=0
-          # test s2n-bignum's _alt routines, and aws-lc's Montgomery
-          # multiplication and RSAZ exponentiation, for CPUs with AVX2 but
-          # without BMI2 and ADX, such as Haswell; the last variables fail the
-          # run that lands on the wrong path
-          tier RIND_CPU_DISABLE_adx=1 RIND_TEST_X86_BMI2_ADX=0 RIND_TEST_X86_AVX2=1
-          # test aws-lc's SSE4.1 ChaCha20-Poly1305, its SSSE3 ChaCha20, SHA-1,
-          # and SHA-256, its scalar SHA-512, the portable ML-KEM arithmetic,
-          # and the SSE2 selects for CPUs without AVX2, such as AMD's Bulldozer
-          # and Jaguar;
-          # x86-cpu's Sandy Bridge run covers aws-lc's AVX SHA routines, which
-          # Intel's cores run there
-          tier RIND_CPU_DISABLE_avx2=1 RIND_CPU_DISABLE_sha=1 RIND_CPU_DISABLE_intel=1 RIND_TEST_X86_AVX2=0 RIND_TEST_X86_SSE41=1
-          # test rind's AES-GCM and GHASH intrinsics without VEX encoding, and
-          # aws-lc's AES-NI CTR, for CPUs with AES-NI but without AVX, such as
-          # Westmere and the Goldmont and Tremont Atoms
-          tier RIND_CPU_DISABLE_avx=1 RIND_TEST_X86_AVX=0 RIND_TEST_X86_AES_HARDWARE=1
-          # test aws-lc's vpaes and SSSE3 GHASH for CPUs without AES-NI or
-          # PCLMULQDQ, such as Core 2 and Nehalem, where rind-rustls and
-          # rind-dimpl prefer ChaCha20-Poly1305, and without SSE4.1 too, as
-          # the first Core 2s lack it, ChaCha20 and Poly1305 in separate passes
-          tier RIND_CPU_DISABLE_aes=1 RIND_CPU_DISABLE_pclmulqdq=1 RIND_CPU_DISABLE_avx=1 RIND_CPU_DISABLE_sse41=1 RIND_TEST_X86_AES_HARDWARE=0 RIND_TEST_X86_SSE41=0
-          # test aws-lc's integer SHA-1 and SHA-256, its SSE2 AES and integer
-          # GHASH, and HACL*'s ChaCha20 at every length, for CPUs without
-          # SSSE3, such as QEMU's default `qemu64` model; every faster path
-          # needs SSSE3 too
-          tier RIND_CPU_DISABLE_ssse3=1 RIND_TEST_X86_SSSE3=0 RIND_TEST_X86_SSE41=0 RIND_TEST_X86_AVX2=0 RIND_TEST_X86_AES_HARDWARE=0
-
-      - name: Artificial CPU feature tests (aarch64)
-        if: runner.arch == 'ARM64'
-        shell: bash
-        run: |
-          tier() { env "$@" cargo test --workspace --exclude rind-fips; env "$@" SLOW_TESTS=1 RUSTFLAGS='--cfg rind_cpu_disable' cargo test --release -p rind --lib -- cctv_accumulated detects_the_expected_cpu; }
-          # test the by-4 AES-GCM and Keccak-f kernels for cores without SHA3,
-          # and aws-lc's NEON ChaCha20-Poly1305 for those without SVE2, such
-          # as Neoverse N1, failing a run whose OS hides the crypto extension,
-          # and on Apple silicon the `dsb nsh; isb sy` barrier after DIT for
-          # cores without `sb`
-          tier RIND_CPU_DISABLE_sha3=1 RIND_CPU_DISABLE_sve2=1 RIND_CPU_DISABLE_sb=1 RIND_TEST_ARM_CRYPTO_EXT=1 RIND_TEST_ARM_SVE2=0
-          # test vpaes, NEON GHASH, and scalar SHA-1 and SHA-256 for cores
-          # without the crypto extension, such as the Raspberry Pi 4's; the
-          # last variable fails the run that lands on the wrong path
-          tier RIND_CPU_DISABLE_aes=1 RIND_CPU_DISABLE_pmull=1 RIND_CPU_DISABLE_sha2=1 RIND_TEST_ARM_CRYPTO_EXT=0
+          sh/cpu-tiers.sh cargo test --workspace --exclude rind-fips
+          SLOW_TESTS=1 RUSTFLAGS='--cfg rind_cpu_disable' sh/cpu-tiers.sh cargo test --release -p rind --lib -- cctv_accumulated detects_the_expected_cpu
 
   # musl runs the glibc build's code, so these test the packages consumers
   # link, without the CPU feature passes. The bench and fuzz crates need C++
   # built for musl, which musl-tools lacks.
   musl:
-    if: github.event_name != 'pull_request'
     strategy:
       matrix:
         include:
@@ -230,14 +129,13 @@ jobs:
           echo "CC_${CARGO_BUILD_TARGET//-/_}=musl-gcc" >> "$GITHUB_ENV"
 
       - name: Run tests (debug)
-        run: cargo test -p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-ring -p rind-aws-lc-rs -p rind-dimpl -p rind-openmls -p rind-str0m
+        run: cargo test -p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-rand-core -p rind-ring -p rind-aws-lc-rs -p rind-dimpl -p rind-openmls -p rind-str0m
       - name: Run tests (release)
-        run: env SLOW_TESTS=1 cargo test -p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-ring -p rind-aws-lc-rs -p rind-dimpl -p rind-openmls -p rind-str0m --release
+        run: env SLOW_TESTS=1 cargo test -p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-rand-core -p rind-ring -p rind-aws-lc-rs -p rind-dimpl -p rind-openmls -p rind-str0m --release
 
   # 32-bit x86 Windows on the portable backend, which the x86_64 runner runs
   # natively. The qemu job tests Linux's, and the android job Android's.
   i686-windows:
-    if: github.event_name != 'pull_request'
     runs-on: windows-latest
     env:
       CARGO_BUILD_TARGET: i686-pc-windows-msvc
@@ -253,9 +151,9 @@ jobs:
           targets: i686-pc-windows-msvc
 
       - name: Run tests (debug)
-        run: cargo test -p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-ring -p rind-aws-lc-rs -p rind-dimpl -p rind-openmls -p rind-str0m --locked
+        run: cargo test -p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-rand-core -p rind-ring -p rind-aws-lc-rs -p rind-dimpl -p rind-openmls -p rind-str0m --locked
       - name: Run tests (release)
-        run: env SLOW_TESTS=1 cargo test -p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-ring -p rind-aws-lc-rs -p rind-dimpl -p rind-openmls -p rind-str0m --locked --release
+        run: env SLOW_TESTS=1 cargo test -p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-rand-core -p rind-ring -p rind-aws-lc-rs -p rind-dimpl -p rind-openmls -p rind-str0m --locked --release
 
   # 32-bit ARM runs libcrux, or aws-lc's assembly for ChaCha20, NEON, and the
   # crypto extension. The recipe builds and lints Android and Linux gnueabihf,
@@ -263,8 +161,6 @@ jobs:
   # run does: the arm64 runner runs the crypto extension's tier and the
   # NEON-denied one natively, and qemu the Cortex-A15's.
   armv7:
-    needs: changes
-    if: needs.changes.outputs.armv7 == 'true'
     runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -282,9 +178,9 @@ jobs:
 
   # wasm32-wasip2 on the portable backend, under wasmtime: rind's vector tests
   # and rind-rustls's and rind-ring's tests, without the differential ones,
-  # whose aws-lc does not build for wasm.
+  # whose aws-lc does not build for wasm; then the adapters' tests on
+  # wasm32-unknown-unknown in Node.
   wasm:
-    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -303,7 +199,6 @@ jobs:
   # big-endian, the armv6 shells run on qemu's ARM1176, and the runner runs
   # i686 natively.
   qemu:
-    if: github.event_name != 'pull_request'
     strategy:
       fail-fast: false
       matrix:
@@ -325,8 +220,6 @@ jobs:
   # run natively, and its build hook cross-builds the mobile targets, whose
   # libraries the hook's test checks are for the right architecture.
   dart:
-    needs: changes
-    if: needs.changes.outputs.dart == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -357,7 +250,7 @@ jobs:
           toolchain: stable
           targets: ${{ matrix.targets }}
 
-      - uses: dart-lang/setup-dart@6afc89df92d6eb3834022f73cd65adc8cdfcb92d # v1.8.1
+      - uses: dart-lang/setup-dart@2286a0c042b44434fe26d292bbce8d34f7ec662b # v1.8.2
 
       - run: dart pub get
 
@@ -382,8 +275,6 @@ jobs:
   # rind-dart/integration. The x86_64 image runs x86_64 natively, and armv7,
   # for its 32-bit pointers, under its ARM translation.
   dart-android:
-    needs: changes
-    if: needs.changes.outputs.dart == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     defaults:
@@ -426,8 +317,6 @@ jobs:
 
   # rind-dart's tests on the iOS simulator, through the same Flutter app.
   dart-ios:
-    needs: changes
-    if: needs.changes.outputs.dart == 'true'
     runs-on: macos-latest
     timeout-minutes: 30
     defaults:
@@ -465,8 +354,6 @@ jobs:
   # runs, forced on x86_64 so it runs without emulation. The recipe lints and
   # tests it with the checks a debug build has.
   portable:
-    needs: changes
-    if: needs.changes.outputs.portable == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -483,8 +370,6 @@ jobs:
   # openmls's own tests and vectors, run on rind-openmls in place of the
   # openmls_rust_crypto it mirrors.
   openmls:
-    needs: changes
-    if: needs.changes.outputs.openmls == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -501,7 +386,6 @@ jobs:
   # The simulator runs the iOS tests natively on the Apple silicon runner;
   # devices' code is only built, since GitHub has no iOS device to run it.
   ios:
-    if: github.event_name != 'pull_request'
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -521,7 +405,7 @@ jobs:
       - name: Build tests (device)
         run: |
           export "$(rustc --print deployment-target --target aarch64-apple-ios)"
-          cargo test -p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-ring -p rind-aws-lc-rs -p rind-dimpl -p rind-openmls -p rind-str0m --target aarch64-apple-ios --no-run
+          cargo test -p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-rand-core -p rind-ring -p rind-aws-lc-rs -p rind-dimpl -p rind-openmls -p rind-str0m --target aarch64-apple-ios --no-run
 
       - name: Boot a simulator
         run: |
@@ -535,15 +419,14 @@ jobs:
           RIND_TEST_ARM_CRYPTO_EXT: 1
         run: |
           export "$(rustc --print deployment-target --target aarch64-apple-ios-sim)"
-          cargo test -p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-ring -p rind-aws-lc-rs -p rind-dimpl -p rind-openmls -p rind-str0m --target aarch64-apple-ios-sim
-          env SLOW_TESTS=1 cargo test -p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-ring -p rind-aws-lc-rs -p rind-dimpl -p rind-openmls -p rind-str0m --target aarch64-apple-ios-sim --release
+          cargo test -p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-rand-core -p rind-ring -p rind-aws-lc-rs -p rind-dimpl -p rind-openmls -p rind-str0m --target aarch64-apple-ios-sim
+          env SLOW_TESTS=1 cargo test -p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-rand-core -p rind-ring -p rind-aws-lc-rs -p rind-dimpl -p rind-openmls -p rind-str0m --target aarch64-apple-ios-sim --release
 
   # cross's images (see Cross.toml) hold an Android system for the tests, and
   # run aarch64, armv7, and i686 under qemu-user. The aarch64 and armv7 CPUs
   # have the crypto extension; i686's Atom N270 has none of x86's.
   # armv7 Linux covers the paths without it. ARMv5TE runs the portable backend.
   android:
-    if: github.event_name != 'pull_request'
     strategy:
       matrix:
         include:
@@ -585,4 +468,4 @@ jobs:
         env:
           CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS: true
           CARGO_PROFILE_RELEASE_OVERFLOW_CHECKS: true
-        run: env ${{ matrix.expect }} cross test -p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-ring -p rind-aws-lc-rs -p rind-dimpl -p rind-openmls -p rind-str0m --locked --release --target ${{ matrix.target }}
+        run: env ${{ matrix.expect }} cross test -p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-rand-core -p rind-ring -p rind-aws-lc-rs -p rind-dimpl -p rind-openmls -p rind-str0m --locked --release --target ${{ matrix.target }}

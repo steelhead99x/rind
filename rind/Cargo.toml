@@ -4,7 +4,7 @@ version = "0.3.2"
 edition = "2024"
 repository = "https://github.com/kixel-ai/rind"
 homepage = "https://rind.kixel.ai"
-license = "(Apache-2.0 OR ISC OR MIT-0) AND (Apache-2.0 OR ISC OR MIT) AND Apache-2.0 AND ISC AND BSD-3-Clause"
+license = "(Apache-2.0 OR ISC OR MIT-0) AND (Apache-2.0 OR ISC OR MIT) AND Apache-2.0 AND ISC AND BSD-3-Clause AND MIT"
 readme = "README.md"
 description = "Pure-Rust cryptography for MoQ, forked from graviola"
 categories = ["network-programming", "cryptography"]
@@ -13,31 +13,59 @@ rust-version.workspace = true
 # One target per backend: x86_64, aarch64, and i686 for the portable one.
 [package.metadata.docs.rs]
 targets = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu", "i686-unknown-linux-gnu"]
+features = ["zeroize"]
 
 [features]
+# Every algorithm. `rind::KeyPair::from_pkcs8` links each signing algorithm
+# built in, so a dependent that never loads these keys leaves them out with
+# `default-features = false`. Every other algorithm is linked only when the
+# program names it, and so has no feature.
+default = ["ml-dsa", "slh-dsa"]
+# ML-DSA (FIPS 204): `rind::ml_dsa` and the `rind::KeyPair` variants.
+ml-dsa = []
+# SLH-DSA (FIPS 205): `rind::slh_dsa` and the `rind::KeyPair` variants.
+slh-dsa = []
+# zeroize's `ZeroizeOnDrop` on every type that wipes itself on drop.
+zeroize = ["dep:zeroize"]
+# Runs the unrolled SHA-512 body on the ESP32-S3 instead of the rolled loop
+# every 32-bit microcontroller runs by default. The unrolled body is about 18 KiB of
+# code against the rolled loop's 1.4 KiB. On `xtensa-esp32s3-espidf` it is
+# placed in IRAM (and `K` in internal DRAM); it was 0.911 to 0.918 of the
+# rolled loop's cycles at 240 MHz and about 8.7% faster than it at 80 MHz
+# (one board; see ALGORITHMS.md); the IRAM that costs is what the
+# `ESP32-S3 SHA-512 layout` workflow prints, and admin/esp32s3-sha512-layout
+# caps it at 20 KiB. On `xtensa-esp32s3-none-elf` there is no IRAM placement,
+# the body runs from flash and measured the same speed as from IRAM at 80 MHz,
+# for 17 KiB more flash text than the default. It does nothing elsewhere.
+esp32s3-sha512-unrolled = []
 __ctgrind = ["dep:crabgrind"]
 
 [dependencies]
 cfg-if = "1"
 getrandom = "0.4"
 crabgrind = { version = "0.4", optional = true }
+zeroize = { version = "1.9", default-features = false, optional = true }
 
 # The portable backend, which armv7 builds on: libcrux's portable Rust, with
 # no C or intrinsics features enabled, fiat-crypto's for the NIST curves, and
 # curve25519-dalek's for X25519 and Ed25519. The cfg is build.rs's choice of
 # the arm or portable backend (or portable for aarch64 without NEON), which a
-# manifest cannot read, so armv7 builds libcrux-sha2 too, though it runs
-# aws-lc's assembly for SHA-512.
+# manifest cannot read.
 [target.'cfg(any(rind_portable, target_endian = "big", all(target_arch = "aarch64", not(target_feature = "neon")), all(target_arch = "x86_64", not(target_feature = "sse2")), not(any(target_arch = "x86_64", target_arch = "aarch64"))))'.dependencies]
 curve25519-dalek = { version = "5", default-features = false, features = ["precomputed-tables"] }
 fiat-crypto = { version = "0.3", default-features = false }
 libcrux-hacl-rs = { version = "0.0.6", features = ["alloc"] }
 libcrux-macros = "0.0.4"
 libcrux-poly1305 = { version = "0.0.7", features = ["expose-hacl"] }
-libcrux-sha2 = { version = "0.0.9", features = ["expose-hacl"] }
 
 # Reads the AArch32 crypto extension's HWCAP2 bits.
 [target.'cfg(all(target_arch = "arm", target_endian = "little", not(rind_portable), any(target_os = "linux", target_os = "android")))'.dependencies]
+libc = { version = "0.2", default-features = false }
+
+# Reads `AT_HWCAP` for `HWCAP_CPUID` before reading `MIDR_EL1`, which
+# picks the multiplier schedule without opening a file. A libc-less Linux
+# target (`target_env = ""`) builds without `std` and has no `getauxval`.
+[target.'cfg(all(target_arch = "aarch64", target_os = "linux", not(target_env = "")))'.dependencies]
 libc = { version = "0.2", default-features = false }
 
 [dev-dependencies]
@@ -52,11 +80,15 @@ fiat-crypto = { version = "0.3", default-features = false }
 # CCTV gzips its ML-KEM modulus vectors.
 flate2 = { version = "1.1.11", default-features = false, features = ["rust_backend"] }
 hex = { version = "0.4", features = ["serde"] }
+# The textbook curve arithmetic in `src/test/reference.rs`, the independent
+# oracle where every crate covering a curve shares code with rind's path.
+num-bigint = "0.5"
 # The reference for P-521's hash-to-curve, which aws-lc lacks, and for each
-# curve's hash to a scalar, which aws-lc does not export.
-p256 = { version = "0.14", default-features = false, features = ["group-digest"] }
-p384 = { version = "0.14", default-features = false, features = ["group-digest"] }
-p521 = { version = "0.14", default-features = false, features = ["group-digest"] }
+# curve's hash to a scalar, which aws-lc does not export, and the curves'
+# independent oracle on x86_64 and aarch64.
+p256 = { version = "0.14", default-features = false, features = ["ecdh", "ecdsa", "group-digest", "pkcs8"] }
+p384 = { version = "0.14", default-features = false, features = ["ecdh", "ecdsa", "group-digest", "pkcs8"] }
+p521 = { version = "0.14", default-features = false, features = ["ecdh", "ecdsa", "group-digest", "pkcs8"] }
 # Without `fork` and `timeout`, which spawn processes wasm cannot.
 proptest = { version = "1.5.0", default-features = false, features = ["std", "bit-set"] }
 serde = { version = "1", features = ["derive"] }
@@ -73,6 +105,37 @@ libc = { version = "0.2", default-features = false }
 aws-lc-rs = { version = "1.19", default-features = false, features = ["alloc", "prebuilt-nasm", "non-fips"] }
 # aws-lc's XChaCha20-Poly1305, which aws-lc-rs does not expose.
 aws-lc-sys = { version = "0.47", default-features = false }
+# The differential tests' second oracle beside aws-lc-rs, which shares no
+# code with rind: RustCrypto's symmetric primitives.
+aes = "0.9"
+aes-gcm = { version = "0.11", default-features = false, features = ["aes"] }
+aes-kw = "0.3"
+cbc = { version = "0.2", features = ["alloc"] }
+chacha20 = "0.10"
+chacha20poly1305 = { version = "0.11", default-features = false }
+ctr = "0.10"
+ghash = "0.6"
+hkdf = "0.13"
+hmac = "0.13"
+md-5 = { version = "0.11", default-features = false }
+pbkdf2 = { version = "0.13", default-features = false, features = ["hmac"] }
+sha1 = { version = "0.11", default-features = false, features = ["oid"] }
+sha2 = { version = "0.11", default-features = false }
+sha3 = { version = "0.12", default-features = false }
+# ML-KEM's and ML-DSA's: `hazmat` encapsulates with a given message.
+ml-dsa = { version = "0.1", default-features = false }
+ml-kem = { version = "0.3", default-features = false, features = ["hazmat"] }
+# RSA's, over crypto-bigint, with its PKCS#1 v1.5 signatures; `getrandom`'s
+# `SysRng` draws its OAEP seeds.
+getrandom = { version = "0.4", features = ["sys_rng"] }
+rsa = { version = "0.10", features = ["pkcs1v15"] }
+# HACL*'s curves, which rind runs nowhere: the X25519 oracle on every tier,
+# Ed25519's except on the portable backend, where rind runs HACL*'s
+# SHA-512, and P-256's on armv7 and the portable backend, where rind and
+# aws-lc-rs both run fiat-crypto's field arithmetic.
+libcrux-curve25519 = "0.0.10"
+libcrux-ed25519 = "0.0.11"
+libcrux-p256 = { version = "0.0.10", features = ["expose-hacl"] }
 # HPKE, which aws-lc-rs does not expose either; `hazmat` reads its private keys.
 hpke-rs = { version = "0.8", default-features = false, features = ["hazmat", "rustcrypto", "std"] }
 # SPAKE2+ differential tests. aws-lc-rs has no SPAKE2+.
@@ -106,11 +169,43 @@ p384-voprf = { package = "p384", version = "0.13", default-features = false, fea
 p521-voprf = { package = "p521", version = "0.13.3", default-features = false, features = ["hash2curve", "voprf"] }
 rand_core-voprf = { package = "rand_core", version = "0.6", features = ["getrandom"] }
 
+# These cover every algorithm, so a build that leaves one out skips them.
+[[test]]
+name = "crosschecks"
+required-features = ["ml-dsa", "slh-dsa"]
+
+[[test]]
+name = "debug"
+required-features = ["ml-dsa", "slh-dsa"]
+
+[[test]]
+name = "heap_scratch"
+required-features = ["ml-dsa", "slh-dsa"]
+
+[[test]]
+name = "wycheproof"
+required-features = ["ml-dsa", "slh-dsa"]
+
+[[test]]
+name = "zeroing"
+required-features = ["ml-dsa", "slh-dsa"]
+
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = [
   "cfg(coverage_nightly)",
   # Lets an optimised build honour `RIND_CPU_DISABLE_*`, for benches and ctgrind.
   "cfg(rind_cpu_disable)",
+  # Leaves DIT on once rind sets it, to measure the toggle's cost (see
+  # src/low/entry.rs, `leave_secret`).
+  "cfg(rind_dit_sticky)",
+  # Picks the barrier after setting DIT on any target, to measure its cost:
+  # "apple" (the default on Apple's targets, and in the FIPS module's code,
+  # though the module sets no DIT), "isb", or "none" (the default elsewhere;
+  # see src/low/aarch64/cpu.rs, `barrier_after_set`).
+  'cfg(rind_dit_barrier, values("apple", "isb", "none"))',
+  # Leaves DIT on between calls for a bounded batch, to measure coalescing
+  # without a guard (see src/low/entry.rs, `autohold`).
+  "cfg(rind_dit_autohold)",
   # Plants the variable-time operations `admin/ct-vartime` must find.
   "cfg(rind_vartime_planted)",
   # Forces the portable backend, for testing it on x86_64 (see build.rs).
