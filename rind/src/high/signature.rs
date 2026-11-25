@@ -9,13 +9,16 @@ use super::digest::Digest;
 use super::sec1;
 use crate::error::Error;
 use crate::low::{self, Zeroable};
+#[cfg(feature = "ml-dsa")]
 use crate::mid::mldsa::{self, MlDsa87};
 
 pub(crate) mod any;
 pub(crate) mod ecdsa;
 pub(crate) mod ed25519;
+#[cfg(feature = "ml-dsa")]
 pub(crate) mod ml_dsa;
 pub(crate) mod rsa;
+#[cfg(feature = "slh-dsa")]
 pub(crate) mod slh_dsa;
 
 #[cfg(test)]
@@ -121,10 +124,14 @@ impl<const N: usize> AsRef<[u8]> for Buffer<N> {
 impl<const N: usize> Zeroable for Buffer<N> {}
 
 /// The longest public key encoding: ML-DSA-87's, longer than RSA's largest.
+#[cfg(feature = "ml-dsa")]
 const MAX_PUBLIC_KEY_LEN: usize = max(
     super::rsa::MAX_PUBLIC_KEY_LEN,
     mldsa::public_key_len::<MlDsa87>(),
 );
+/// The longest public key encoding: RSA's, longer than SLH-DSA's.
+#[cfg(not(feature = "ml-dsa"))]
+const MAX_PUBLIC_KEY_LEN: usize = super::rsa::MAX_PUBLIC_KEY_LEN;
 
 /// The longest `SubjectPublicKeyInfo`: the longest key in a bit string,
 /// after its algorithm identifier.
@@ -132,8 +139,13 @@ const MAX_SPKI_LEN: usize = MAX_PUBLIC_KEY_LEN + 32;
 
 /// The longest PKCS#8 private key: RSA's, or an ML-DSA-87 key in its
 /// expanded form.
+#[cfg(feature = "ml-dsa")]
 const MAX_PKCS8_LEN: usize = max(super::rsa::MAX_PKCS8_LEN, ml_dsa::MAX_PRIVATE_KEY_LEN + 64);
+/// The longest PKCS#8 private key: RSA's, longer than SLH-DSA's.
+#[cfg(not(feature = "ml-dsa"))]
+const MAX_PKCS8_LEN: usize = super::rsa::MAX_PKCS8_LEN;
 
+#[cfg(feature = "ml-dsa")]
 #[cfg_attr(coverage_nightly, coverage(off))] // const-evaluated only
 const fn max(a: usize, b: usize) -> usize {
     if a > b { a } else { b }

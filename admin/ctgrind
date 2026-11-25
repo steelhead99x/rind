@@ -80,52 +80,6 @@ export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER="$self --run"
 export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUNNER="$self --run"
 export CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_RUNNER="$self --run"
 
-# RIND_SCOPE=BASE skips the run when nothing the branch changed since BASE
-# reaches a backend this run builds, as `sh/backends.sh` decides: the one
-# rind/build.rs picks for each `--target` (`host-tuple` is the host), else
-# `CARGO_BUILD_TARGET`, else the host, or the portable one under
-# `--cfg rind_portable`. Which of Cargo's
-# `*RUSTFLAGS` variables wins depends on precedence and target, so when any
-# names `rind_portable`, the run checks both backends it could build. The fips
-# suite's module build replaces the caller's flags (rind-fips/build.rs), so it
-# always takes the target's.
-if [ -n "${RIND_SCOPE:-}" ]; then
-    # Cargo builds every `--target` it is given.
-    targets=
-    prev=
-    for arg in "$@"; do
-        case "$prev:$arg" in
-            --target:*) targets="$targets $arg" ;;
-            *:--target=*) targets="$targets ${arg#--target=}" ;;
-        esac
-        prev=$arg
-    done
-    [ -n "$targets" ] || targets=${CARGO_BUILD_TARGET:-$(uname -m)}
-    backend=
-    for target in $targets; do
-        [ "$target" != host-tuple ] || target=$(uname -m)
-        case "$target" in
-            x86_64*) backend="$backend|x86_64" ;;
-            aarch64* | arm64*) backend="$backend|aarch64" ;;
-            armv7*) backend="$backend|arm" ;;
-            *) backend="$backend|portable" ;;
-        esac
-    done
-    backend=${backend#|}
-    if [ "$suite" != fips ] && env | grep -q '^[A-Z0-9_]*RUSTFLAGS=.*rind_portable'; then
-        backend="$backend|portable"
-    fi
-    root=$(dirname "$self")/..
-    # Its own command, so a base it cannot resolve fails the run under
-    # `set -e` rather than reading as an empty diff.
-    changed=$("$root/sh/changed.sh" "$RIND_SCOPE")
-    reached=$(printf '%s\n' "$changed" | "$root/sh/backends.sh" -)
-    if ! printf '%s\n' "$reached" | grep -qxE "all|$backend"; then
-        echo "ctgrind: nothing changed since $RIND_SCOPE reaches the $(printf '%s' "$backend" | sed 's/|/ or /g') backend" >&2
-        exit 0
-    fi
-fi
-
 # `--no-fail-fast` reports every test memcheck fails, not just the first.
 set -- --no-fail-fast "$@"
 

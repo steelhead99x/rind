@@ -32,7 +32,9 @@ lab to test.
   from the OS, outside the module's boundary: one per thread, which wipes
   itself as its thread exits, and as the process exits, the module wipes
   those of threads still running. A forked child wipes its copies of the
-  DRBGs of its parent's other threads, which it does not run.
+  DRBGs of its parent's other threads, which it does not run. Every draw
+  reseeds from the OS first, so a child never repeats its parent's output,
+  even one forked by a raw `clone` that skips the module's fork handlers.
 - **AES-GCM IVs.** The module seals only under IVs it generates (IG C.H).
   A `RandomizedNonceKey` draws each 96-bit IV whole from the DRBG
   (scenario 2) and seals at most 2^32 messages. A `TlsRecordSealingKey`

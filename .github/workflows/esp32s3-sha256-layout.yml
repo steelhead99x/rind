@@ -4,21 +4,10 @@ name: ESP32-S3 SHA-256 layout
 # checks the ESP32-S3 image: block and driver in IRAM, K in `.dram1`, no
 # call in the block, no relocation into flash text. The toolchain is the
 # one the board image uses (esp rustc 1.97.0.0).
+# Weekly, at its own hour: see TESTING.md, "Scheduled workflows".
 on:
-  pull_request:
-    # A draft skips every job until it is marked ready, and turning a PR back
-    # into a draft cancels its ready run: see CONTRIBUTING.md.
-    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
-    paths:
-      - rind/src/lib.rs
-      - rind/src/low/mod.rs
-      - rind/src/low/portable/sha.rs
-      - rind/src/low/portable/sha256_iram.rs
-      - rind/src/low/generic/sha256_k.rs
-      - rind/src/low/generic/sha256.rs
-      - admin/esp32s3-sha256-layout
-      - admin/esp32s3-sha256-layout.py
-      - .github/workflows/esp32s3-sha256-layout.yml
+  schedule:
+    - cron: "23 12 * * 0"
   workflow_dispatch:
 
 permissions:
@@ -30,7 +19,6 @@ concurrency:
 
 jobs:
   layout:
-    if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:

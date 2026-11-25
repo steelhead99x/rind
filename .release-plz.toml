@@ -19,3 +19,8 @@ git_release_latest = true
 [[package]]
 name = "rind-python"
 git_only = true
+
+# Published by hand after rind 0.4.0: trusted publishing cannot create a crate.
+[[package]]
+name = "rind-openmls"
+release = false

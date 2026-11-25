@@ -32,7 +32,11 @@ Each bullet names one file.
   `p_params`/`q_params`, still `None`, so a derived key signs without CRT as
   before. Also `rsa`'s renamed `PrivateKey`/`PublicKey` and crypto-bigint's
   `bit_width`, for their deprecated names.
-- `src/lib.rs`: the same renames.
+- `src/lib.rs`: the same renames, and `to_bytes_be_padded` trims a
+  `BoxedUint`'s leading zero bytes to the length it is asked for. Upstream
+  returned all of them, so a modulus whose size is not a multiple of 64 bits,
+  such as 2056 bits, blinded, signed, and finalized to values longer than the
+  modulus, which RFC 9474 and rind refuse.
 - `tests/vectors.rs`: decodes the vectors' byte strings as hex instead of
   through a `BoxedUint`, which since crypto-bigint 0.7.11 turns an empty
   string, such as the PSSZERO salt, into eight zero bytes and fails the RFC

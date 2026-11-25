@@ -287,6 +287,17 @@ pyca/verified-garbage <https://github.com/pyca/verified-garbage>
   License: Apache-2.0 OR BSD-3-Clause, taken under Apache-2.0.
   verified-garbage has no NOTICE file.
 
+libsecp256k1 <https://github.com/bitcoin-core/secp256k1>
+
+  What: rind/src/low/generic/safegcd.rs, a Rust port of its
+  constant-time safegcd inversion, secp256k1_modinv32 and
+  secp256k1_modinv64 (src/modinv32_impl.h and src/modinv64_impl.h),
+  generalised to any length, for inversion and coprimality on armv7 and
+  the portable backend.
+  Copyright (c) 2020 Peter Dettman
+  Copyright (c) 2013 Pieter Wuille
+  License: MIT. libsecp256k1 has no NOTICE file.
+
 SPHINCS+ <https://github.com/sphincs/sphincsplus>
 
   What: rind/src/mid/slhdsa.rs, a port of the SPHINCS+ team's FIPS 205
@@ -540,6 +551,8 @@ Copyright (c) 2022 Arm Limited
 Copyright (c) 2022 Hanno Becker
 Copyright (c) 2022 Matthias Kannwischer
 Copyright (c) 2023 Amin Abdulrahman, Matthias Kannwischer
+Copyright (c) 2020 Peter Dettman
+Copyright (c) 2013 Pieter Wuille
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

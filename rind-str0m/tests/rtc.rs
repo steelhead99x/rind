@@ -271,6 +271,8 @@ fn fresh_connection_reports_dimpl_state() {
         .new_dtls(&cert, Instant::now(), DtlsVersion::Dtls13, None)
         .unwrap();
     assert_eq!(format!("{:?}", dtls13.protocol_version()), "Some(DTLS1_3)");
+    // str0m requires `Debug`, which names the connection and nothing else.
+    assert_eq!(format!("{dtls13:?}"), "Dtls { .. }");
     assert!(!dtls12.is_closing());
     assert!(!dtls12.is_closed());
     dtls12.set_active(true);

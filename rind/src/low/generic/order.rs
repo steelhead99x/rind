@@ -2,12 +2,12 @@
 
 //! s2n-bignum's routines that are generic over an odd modulus, for armv7:
 //! the arithmetic for the group orders it has, n_256, n_384, and n_521,
-//! and `bignum`'s for any other modulus, as RSA's are. Montgomery
+//! and `bignum`'s and `safegcd`'s for any other modulus, as RSA's are. Montgomery
 //! multiplication and its inverse serve only the group orders, and refuse
 //! any other modulus.
 
 use super::bignum;
-use super::limbs::{p256, p384, p521};
+use super::limbs::{p256, p384, p521, safegcd};
 use crate::low::{bignum_eq, ct};
 
 /// z := x * y / 2^(64k) mod m, for m = n_256, n_384, or n_521 of k words
@@ -44,7 +44,7 @@ pub(crate) fn bignum_modinv(z: &mut [u64], a: &[u64], b: &[u64], t: &mut [u64]) 
         Some(Order::N256) => p256::bignum_modinv(z, a, b, t),
         Some(Order::N384) => p384::bignum_modinv(z, a, b, t),
         Some(Order::N521) => p521::bignum_modinv(z, a, b, t),
-        None => bignum::bignum_modinv(z, a, b, t),
+        None => safegcd::bignum_modinv(z, a, b, t),
     }
 }
 

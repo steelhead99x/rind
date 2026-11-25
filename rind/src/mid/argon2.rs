@@ -6,11 +6,9 @@
 //! (`ref.c`'s `fill_segment` and `index_alpha`), and checked against both's
 //! vectors and RustCrypto's `argon2`.
 
-use alloc::vec::Vec;
-
 use super::blake2b::{self, Blake2b};
 use crate::Error;
-use crate::low::{self, Argon2Block as Block, argon2_compress};
+use crate::low::{self, Argon2Block as Block, Argon2Kernel, Argon2Memory as Memory};
 
 const VERSION: u32 = 0x13;
 // RFC 9106's type `y` for Argon2id.
@@ -56,13 +54,7 @@ pub(crate) fn argon2id(
         segment_len,
         lane_len: segment_len * SYNC_POINTS,
     };
-    let blocks = geometry.lane_len * lanes;
-
-    let mut memory = Vec::new();
-    memory
-        .try_reserve_exact(blocks)
-        .map_err(|_| Error::OutOfMemory)?;
-    memory.resize(blocks, Block::ZERO);
+    let mut memory = Memory::new(lanes, geometry.lane_len)?;
 
     let mut h = Blake2b::new(blake2b::MAX_OUT_LEN);
     for word in [
@@ -90,20 +82,23 @@ pub(crate) fn argon2id(
             h0[64..68].copy_from_slice(&column.to_le_bytes());
             h0[68..].copy_from_slice(&lane.to_le_bytes());
             long_hash(&[&h0], &mut bytes);
-            let block = &mut memory[lane as usize * geometry.lane_len + column as usize];
-            for (word, bytes) in block.0.iter_mut().zip(bytes.as_chunks::<8>().0) {
-                *word = u64::from_le_bytes(*bytes);
-            }
+            let words = bytes.as_chunks::<8>().0;
+            memory.push(
+                lane as usize,
+                Block(core::array::from_fn(|i| u64::from_le_bytes(words[i]))),
+            );
         }
     }
 
+    // Picked once, so no block checks the CPU again.
+    let g = Argon2Kernel::new();
     for pass in 0..cost.passes {
         for slice in 0..SYNC_POINTS {
             // A slice's segments reference only each other's earlier slices,
             // so filling them one after another gives what filling them in
             // parallel would.
             for lane in 0..cost.lanes {
-                geometry.fill_segment(&mut memory, pass, slice, lane);
+                geometry.fill_segment(g, &mut memory, pass, slice, lane);
             }
         }
     }
@@ -112,11 +107,11 @@ pub(crate) fn argon2id(
     // `chunks_exact`, whose `len % chunk` the compiler folds away only in
     // some builds, so `admin/ct-vartime` would find it in others.
     let mut last = Block::ZERO;
-    for lane in 1..=lanes {
+    for lane in 0..lanes {
         for (last, word) in last
             .0
             .iter_mut()
-            .zip(&memory[lane * geometry.lane_len - 1].0)
+            .zip(&memory.block(lane, geometry.lane_len - 1).0)
         {
             *last ^= word;
         }
@@ -125,10 +120,6 @@ pub(crate) fn argon2id(
         *bytes = word.to_le_bytes();
     }
     long_hash(&[&bytes], out);
-
-    // As good as the password to an attacker, who could otherwise finish the
-    // hash from it without paying for the memory.
-    low::zeroise(&mut memory);
     Ok(())
 }
 
@@ -143,7 +134,14 @@ struct Geometry {
 }
 
 impl Geometry {
-    fn fill_segment(&self, memory: &mut [Block], pass: u32, slice: usize, lane: u32) {
+    fn fill_segment(
+        &self,
+        g: Argon2Kernel,
+        memory: &mut Memory,
+        pass: u32,
+        slice: usize,
+        lane: u32,
+    ) {
         // Argon2id takes its first pass's first half of references from a
         // stream that depends only on public values, and the rest from the
         // memory itself.
@@ -155,7 +153,7 @@ impl Geometry {
                 pass as u64,
                 lane as u64,
                 slice as u64,
-                memory.len() as u64,
+                (self.lanes as usize * self.lane_len) as u64,
                 self.passes as u64,
                 ARGON2ID as u64,
             ]);
@@ -164,39 +162,41 @@ impl Geometry {
         // The first two blocks of each lane were set from H0.
         let first = if pass == 0 && slice == 0 { 2 } else { 0 };
         if independent && first != 0 {
-            next_addresses(&mut input, &mut addresses);
+            addresses = next_addresses(g, &mut input);
         }
 
-        let lane_start = lane as usize * self.lane_len;
         for index in first..self.segment_len {
-            let current = lane_start + slice * self.segment_len + index;
-            let previous = match current == lane_start {
-                true => lane_start + self.lane_len - 1,
-                false => current - 1,
-            };
-
+            let column = slice * self.segment_len + index;
             let random = match independent {
                 true => {
                     if index % ADDRESSES_PER_BLOCK == 0 {
-                        next_addresses(&mut input, &mut addresses);
+                        addresses = next_addresses(g, &mut input);
                     }
                     addresses.0[index % ADDRESSES_PER_BLOCK]
                 }
                 // The one place Argon2 indexes by a secret: the leak that
                 // buys its resistance to time-memory trade-offs, which
                 // RFC 9106 and RFC 9807 accept, and `AGENTS.md` excepts.
-                false => low::ct::into_public(memory[previous].0[0]),
+                false => {
+                    let previous = match column {
+                        0 => self.lane_len - 1,
+                        _ => column - 1,
+                    };
+                    low::ct::into_public(memory.block(lane as usize, previous).0[0])
+                }
             };
 
             let reference_lane = match pass == 0 && slice == 0 {
                 true => lane,
                 false => self.lane_of((random >> 32) as u32),
             };
-            let reference = reference_lane as usize * self.lane_len
-                + self.reference_index(pass, slice, index, random as u32, reference_lane == lane);
-
-            let (out, previous, reference) = three(memory, current, previous, reference);
-            argon2_compress(previous, reference, out, pass > 0);
+            let reference_column =
+                self.reference_index(pass, slice, index, random as u32, reference_lane == lane);
+            memory.compress(
+                g,
+                (lane as usize, column),
+                (reference_lane as usize, reference_column),
+            );
         }
     }
 
@@ -245,23 +245,9 @@ impl Geometry {
 
 // The next 128 data-independent references: G(0, G(0, input)), after
 // counting `input` up.
-fn next_addresses(input: &mut Block, addresses: &mut Block) {
+fn next_addresses(g: Argon2Kernel, input: &mut Block) -> Block {
     input.0[6] += 1;
-    let mut once = Block::ZERO;
-    argon2_compress(&Block::ZERO, input, &mut once, false);
-    argon2_compress(&Block::ZERO, &once, addresses, false);
-}
-
-// Block `out` to write, and blocks `a` and `b` to read, none of them `out`.
-fn three(memory: &mut [Block], out: usize, a: usize, b: usize) -> (&mut Block, &Block, &Block) {
-    let (before, rest) = memory.split_at_mut(out);
-    let (out_block, after) = rest.split_first_mut().unwrap();
-    let (before, after): (&[Block], &[Block]) = (before, after);
-    let pick = move |i: usize| match i < out {
-        true => &before[i],
-        false => &after[i - out - 1],
-    };
-    (out_block, pick(a), pick(b))
+    g.g(&Block::ZERO, &g.g(&Block::ZERO, input))
 }
 
 // RFC 9106's variable-length hash H', of `out.len()` bytes over the

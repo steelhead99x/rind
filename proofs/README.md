@@ -10,8 +10,10 @@ the theorems are about that translation.
 every proof against the translation, after the HOL Light proofs below and
 `admin/prove bytes`, which checks that each imported routine those proofs
 build on, from s2n-bignum, Vale, and aws-lc, is in rind's build the object
-code its own proof is about. The `prove` workflow runs it nightly and on pull
-requests that change rind's source or these files.
+code its own proof is about. The `prove` workflow runs it nightly and on each
+push to main that changes rind's source or these files. A failure gates no
+merge; it alerts, and a release publishes only once these proofs passed on
+the code it releases.
 
 `lakefile.toml` turns on Lake's artifact cache, which lives in the Lean
 toolchain's directory under `~/.elan` and every checkout of a user shares, so
@@ -69,6 +71,13 @@ those inputs, in any worktree, restores in under a second.
   the instructions rind's fork adds (`thirdparty/s2n-bignum/RIND.md`); the proof checks its round
   constants against FIPS 180-4's. Its stack frame, which the routine aligns
   down to 2048 bytes, lies in the 3440 bytes below the stack pointer.
+- `x86_64/sha256_block_data_order_avx2.ml`:
+  `SHA256_AVX2_SUBROUTINE_CORRECT`, rind's proof that the naked function
+  `low::x86_64::sha256::sha256_block_data_order_avx2`, OpenSSL's routine for
+  AVX2, computes s2n-bignum's FIPS 180-4 spec, `sha256_hash_blocks`, and
+  stores it to the state, as `sha512`'s above, on the same model; the proof
+  checks its round constants against FIPS 180-4's. Its stack frame, which the routine aligns down to 1024
+  bytes, lies in the 1648 bytes below the stack pointer.
 - `aarch64/bn_mul_mont.ml`: `BN_MUL_MONT_SUBROUTINE_CORRECT`, rind's
   proof that the naked function `low::aarch64::mont::bn_mul_mont`, aws-lc's
   Montgomery multiplication, writes the Montgomery product
@@ -155,9 +164,10 @@ known-answer tests `admin/prove hol-light` runs, the SHA extensions and
 other instructions an s2n-bignum pull request adds to the x86 model, rind's
 own additions to it, which `x86/proofs/rind_cosim.ml` checks against the CPU
 with the pull request's, and `aarch32/`, an AArch32 model of the A32
-instructions armv7's proofs need, which `aarch32/proofs/simulator.ml` checks
-against qemu-arm. `nix develop .#hol-light --command admin/prove cosim` runs
-both cosimulations, on an x86_64 CPU with AVX2.
+integer instructions armv7's assembly runs, which
+`aarch32/proofs/simulator.ml` checks against qemu-arm.
+`nix develop .#hol-light --command admin/prove cosim` runs both
+cosimulations, on an x86_64 CPU with AVX2.
 
 ## verified-garbage's models
 
@@ -558,8 +568,24 @@ backend, from `HeaderProtectionKey` to HACL*'s rounds, in
 HACL*'s rounds are Rust, so they are translated and proven with the rest, and
 no axiom stands in for HACL*'s proof of them. `chacha20_mask` assumes only
 `RunsChaCha20`, that the entry guard admits it, which each target's `Runs`
-implies. armv7's translation reaches only this API: its other operations run
-assembly or Rust that other proofs are still to cover.
+implies. armv7's translation also reaches the AES-GCM API, below.
+
+The bitsliced AES armv7 runs with neither NEON nor the crypto extension,
+`low/generic/aes_nohw.rs` in 32-bit words, is proven up to its key schedule:
+`encrypt_block_spec` in `Rind/Armv7/AesNohwBlock.lean` proves that
+`Schedule::encrypt_block` is `cipherRounds`, Vale's `eval_cipher` for the
+schedule's number of rounds, on the round keys the schedule holds, and
+`encrypt_batch_spec` the same of both blocks of a batch. Under them,
+`Rind/Armv7/AesNohw.lean` proves the S-box circuit, `AesNohwRound.lean`
+`ShiftRows`, `MixColumns`, and `AddRoundKey`, and `AesNohwBatch.lean` the
+compact form and the transpose, each at every bit position by `bv_decide`,
+against the FIPS 197 functions Vale's spec names: `sbox` and `mixColumns` are
+irreducible definitions rather than opaque ones, so these proofs alone unfold
+them, through `sbox_eq` and `mixColumns_eq`, and `Rind/AesSbox.lean` has the
+kernel check the S-box table against a decision tree on its input's bits. No
+theorem yet states that the schedule's round keys are FIPS 197's key
+expansion, that `ctr32` is counter mode, or anything of GHASH and the GCM
+above them, so [armv7's AES-GCM](/quest/m5/verified-armv7/prove.md) has no ✓.
 
 Theorems that run an entry guard assume `Runs`: rind's CPU-feature checks
 pass, which no input affects. `Rind/<Arch>/P256Table.lean` proves that each
@@ -600,13 +626,15 @@ against FIPS 180-4 and RFC 2104 as `Rind/HashSpec.lean` transliterates them:
 Below rind's padding, these theorems take `Sha1Blocks` or `Sha256Blocks` as
 a hypothesis, in each target's own `Rind/<Arch>/ShaBlocks.lean`. No proof
 covers a SHA-1 block function rind runs, or SHA-256's on x86_64 without the
-SHA extensions, so there each states that every such routine computes FIPS
-180-4's block function, x86_64's SHA extensions' routine for SHA-1's padded
-last blocks pads as FIPS 180-4 does, and that rind's checks pass.
+SHA extensions or AVX2, so there each states that every such routine computes
+FIPS 180-4's block function, x86_64's SHA extensions' routine for SHA-1's
+padded last blocks pads as FIPS 180-4 does, and that rind's checks pass.
 `Rind/X86_64/Sha256Shaext.lean` restates the HOL Light proofs above of
 SHA-256's routines for the SHA extensions as the axioms
 `sha256_compress_blocks_shaext_spec` and `finish_padded_spec`, and proves that
 the finish's padding, `padded` and `ended`, gives FIPS 180-4's last blocks.
+`Rind/X86_64/ShaBlocks.lean` restates the one above of OpenSSL's AVX2
+routine as the axiom `sha256_compress_blocks_avx2_spec`.
 On aarch64, `Sha256Blocks` states only that the CPU has the crypto extension
 and rind's checks pass: `Rind/Aarch64/Sha256Hw.lean` restates the Lean proof
 above, in `Rind/Aarch64/Sha256HwAsm.lean`, as the axiom
@@ -1504,6 +1532,9 @@ Beyond Lean's kernel:
   `Rind/Core.lean`'s.
 - That each hand model computes what the Rust it quotes does. They add no
   axiom.
+- For the theorems that rest on `bv_decide`, the bitsliced AES's among them,
+  Lean's compiler and its LRAT checker: each call adds an axiom that the
+  compiled checker accepted a SAT solver's certificate.
 - That `Rind/HashSpec.lean` transliterates FIPS 180-4, RFC 2104, RFC 5869,
   and RFC 8018.
 - The restatement of each s2n-bignum and aws-lc-verification theorem, and of
@@ -1588,9 +1619,8 @@ compared with rind's output, and fails on any disagreement. The seed
 reproduces every random input but those rind draws itself, having no seeded
 API for them (RSA and ML-KEM keys, ML-KEM encapsulations, ECDSA nonces,
 RSA-PSS salts, and XChaCha20-Poly1305 nonces), which the module
-documentation of `admin/spec-tests/src/main.rs` lists. A pull request
-that changes the specs, their driver, their vectors, or the tools that build
-them runs a sample in the `prove` workflow's `spec-tests` job: a vector file
+documentation of `admin/spec-tests/src/main.rs` lists. By default
+`admin/prove spec-tests` runs a sample: a vector file
 of more than 400 cases runs every k-th, the specs too slow for that fewer (PBKDF2's 4096-iteration vectors, SymCrypt's
 ML-KEM, and s2n-bignum's SHA-512 forms, as `admin/spec-tests/src/cases.rs`
 says of each), and a budget of 8 random cases a test from seed 1. The

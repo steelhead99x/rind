@@ -227,6 +227,19 @@ fn aes128_gcm(c: &mut Criterion) {
             b.iter(|| key.seal(&nonce, aad, &mut buf));
         });
     }
+    group.finish();
+
+    if let Some(mut group) = criterion::dit_per_call(c, "aes128-gcm") {
+        for (size, size_name, aad) in criterion::dit_per_call_aead_rows() {
+            let mut buf = vec![0u8; size];
+            group.throughput(Throughput::Bytes(size as u64));
+            group.bench_function(BenchmarkId::new("rind", size_name), |b| {
+                use rind::aead::{AES_128_GCM, Key};
+                let key = Key::new(&AES_128_GCM, &key).unwrap();
+                b.iter(|| test_rind_aes_gcm(&key, &nonce, aad, &mut buf));
+            });
+        }
+    }
 }
 
 #[cfg(not(target_arch = "xtensa"))]

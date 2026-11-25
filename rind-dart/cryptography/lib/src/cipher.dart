@@ -2,11 +2,25 @@
 
 part of 'cryptography.dart';
 
-/// Seals and opens with a rind AEAD of 12-byte nonces and 16-byte tags.
-mixin _Aead on Cipher {
-  rind.AeadAlgorithm get _algorithm;
+/// Seals and opens with a rind AEAD of 16-byte tags, whose nonces are [N].
+mixin _Aead<N> on Cipher {
+  /// [nonce] as the AEAD takes it, throwing [ArgumentError] for a length it
+  /// refuses.
+  N _nonce(List<int> nonce);
 
-  Future<rind.AeadKey> _key(SecretKey secretKey) async {
+  /// [clearText] sealed under [key] and [nonce], followed by its tag.
+  Uint8List _sealWith(
+    Uint8List key,
+    N nonce,
+    Uint8List clearText,
+    Uint8List aad,
+  );
+
+  /// [sealed], a ciphertext followed by its tag, opened under [key] and
+  /// [nonce].
+  Uint8List _openWith(Uint8List key, N nonce, Uint8List sealed, Uint8List aad);
+
+  Future<Uint8List> _key(SecretKey secretKey) async {
     final bytes = await secretKey.extractBytes();
     if (bytes.length != secretKeyLength) {
       throw ArgumentError(
@@ -14,14 +28,7 @@ mixin _Aead on Cipher {
         '${bytes.length} bytes',
       );
     }
-    return rind.AeadKey(_algorithm, _bytes(bytes));
-  }
-
-  static rind.Nonce _nonce(List<int> nonce) {
-    if (nonce.length != 12) {
-      throw ArgumentError.value(nonce, 'nonce', 'Must be 12 bytes');
-    }
-    return rind.Nonce.assumeUniqueForKey(_bytes(nonce));
+    return _bytes(bytes);
   }
 
   Future<SecretBox> _seal(
@@ -32,7 +39,12 @@ mixin _Aead on Cipher {
   ) async {
     final key = await _key(secretKey);
     nonce ??= newNonce();
-    final sealed = key.seal(_nonce(nonce), _bytes(clearText), aad: _bytes(aad));
+    final sealed = _sealWith(
+      key,
+      _nonce(nonce),
+      _bytes(clearText),
+      _bytes(aad),
+    );
     return _split(sealed, nonce);
   }
 
@@ -44,7 +56,7 @@ mixin _Aead on Cipher {
     final key = await _key(secretKey);
     final nonce = _nonce(secretBox.nonce);
     return _authenticated(
-      () => key.open(nonce, _joined(secretBox), aad: _bytes(aad)),
+      () => _openWith(key, nonce, _joined(secretBox), _bytes(aad)),
     );
   }
 }
@@ -91,21 +103,14 @@ void _checkKeyStreamIndex(int keyStreamIndex) {
   }
 }
 
-final class _AesGcm extends AesGcm with _Aead {
+/// AES-GCM, which takes a nonce of any length but zero whatever its
+/// [nonceLength], as the package's Dart implementation does.
+final class _AesGcm extends AesGcm with _Aead<rind.GcmIv> {
   _AesGcm(this.secretKeyLength, this.nonceLength, Random? random)
-    : _algorithm = switch (secretKeyLength) {
-        16 => rind.AeadAlgorithm.aes128Gcm,
-        24 => rind.AeadAlgorithm.aes192Gcm,
-        32 => rind.AeadAlgorithm.aes256Gcm,
-        _ => throw ArgumentError.value(
-          secretKeyLength,
-          'secretKeyLength',
-          'Must be 16, 24, or 32',
-        ),
-      },
+    : _algorithm = _aes(secretKeyLength),
       super.constructor(random: random) {
-    if (nonceLength != 12) {
-      throw _unsupported('AES-GCM with $nonceLength-byte nonces');
+    if (nonceLength < 1) {
+      throw RangeError.range(nonceLength, 1, null, 'nonceLength');
     }
   }
 
@@ -115,8 +120,31 @@ final class _AesGcm extends AesGcm with _Aead {
   @override
   final int nonceLength;
 
+  final rind.CipherAlgorithm _algorithm;
+
   @override
-  final rind.AeadAlgorithm _algorithm;
+  rind.GcmIv _nonce(List<int> nonce) {
+    if (nonce.isEmpty) {
+      throw ArgumentError.value(nonce, 'nonce', 'Must not be empty');
+    }
+    return rind.GcmIv.assumeUniqueForKey(_bytes(nonce));
+  }
+
+  @override
+  Uint8List _sealWith(
+    Uint8List key,
+    rind.GcmIv nonce,
+    Uint8List clearText,
+    Uint8List aad,
+  ) => rind.GcmKey(_algorithm, key).seal(nonce, clearText, aad: aad);
+
+  @override
+  Uint8List _openWith(
+    Uint8List key,
+    rind.GcmIv nonce,
+    Uint8List sealed,
+    Uint8List aad,
+  ) => rind.GcmKey(_algorithm, key).open(nonce, sealed, aad: aad);
 
   @override
   Future<SecretBox> encrypt(
@@ -136,14 +164,41 @@ final class _AesGcm extends AesGcm with _Aead {
   }) => _open(secretBox, secretKey, aad);
 }
 
-final class _Chacha20Poly1305 extends Chacha20 with _Aead {
+final class _Chacha20Poly1305 extends Chacha20 with _Aead<rind.Nonce> {
   _Chacha20Poly1305(Random? random) : super.constructor(random: random);
 
   @override
   MacAlgorithm get macAlgorithm => const DartChacha20Poly1305AeadMacAlgorithm();
 
   @override
-  rind.AeadAlgorithm get _algorithm => rind.AeadAlgorithm.chacha20Poly1305;
+  rind.Nonce _nonce(List<int> nonce) {
+    if (nonce.length != 12) {
+      throw ArgumentError.value(nonce, 'nonce', 'Must be 12 bytes');
+    }
+    return rind.Nonce.assumeUniqueForKey(_bytes(nonce));
+  }
+
+  @override
+  Uint8List _sealWith(
+    Uint8List key,
+    rind.Nonce nonce,
+    Uint8List clearText,
+    Uint8List aad,
+  ) => rind.AeadKey(
+    rind.AeadAlgorithm.chacha20Poly1305,
+    key,
+  ).seal(nonce, clearText, aad: aad);
+
+  @override
+  Uint8List _openWith(
+    Uint8List key,
+    rind.Nonce nonce,
+    Uint8List sealed,
+    Uint8List aad,
+  ) => rind.AeadKey(
+    rind.AeadAlgorithm.chacha20Poly1305,
+    key,
+  ).open(nonce, sealed, aad: aad);
 
   @override
   Future<SecretBox> encrypt(

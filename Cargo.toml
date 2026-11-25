@@ -45,7 +45,10 @@ debug = true
 # fiat-crypto's plain arithmetic is proven never to overflow but still checks
 # the flags, as does base64ct's on 8-bit values in 16-bit lanes, curve25519-dalek
 # checks its arithmetic and asserts on scalar digits, and subtle asserts that
-# each `Choice` is 0 or 1.
+# each `Choice` is 0 or 1. dalek's X25519 ladder also loops over the scalar's
+# bits as an iterator of `bool`, testing each secret bit against `None`'s
+# niche, which a bit never equals, until optimization folds the test away:
+# `opt-level = 1` does not, so dalek takes release's level.
 [profile.dev.package.fiat-crypto]
 overflow-checks = false
 
@@ -55,6 +58,7 @@ overflow-checks = false
 [profile.dev.package.curve25519-dalek]
 debug-assertions = false
 overflow-checks = false
+opt-level = 3
 
 [profile.dev.package.subtle]
 debug-assertions = false

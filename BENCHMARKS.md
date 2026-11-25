@@ -8,12 +8,12 @@ How long rind and the usual Rust crypto libraries take for the same operations, 
 
 | Host | CPU | OS | Measured |
 |---|---|---|---|
-| `nixos` | AMD Ryzen 9 5900XT 16-Core Processor | NixOS 26.11 (Zokor) (Linux 6.18.63) | 2026-11-18 at [`93c8bcd7`](https://github.com/kixel-ai/rind/commit/93c8bcd705a05136e534fee4b463ab1ba56162bf), noisy |
+| `nixos` | AMD Ryzen 9 5900XT 16-Core Processor | NixOS 26.11 (Zokor) (Linux 6.18.63) | 2026-11-24 at [`d481966c`](https://github.com/kixel-ai/rind/commit/d481966c12a136fa82b10afbf81e25d26f7fb0cd) |
 | `desktop` | Intel(R) Core(TM) Ultra 7 270K Plus | Ubuntu 26.04.1 LTS (Linux 7.0.0-42-generic) | 2026-11-07 at [`9e7f6a5a`](https://github.com/kixel-ai/rind/commit/9e7f6a5a9ea59a0cf1251c24af6c5d4f21c2b0fd) |
-| `fedora` | AMD Ryzen 9 9950X 16-Core Processor | Fedora Linux 45 (Workstation Edition) (Linux 7.3.3-300.fc45.x86_64) | 2026-11-21 at [`fbdc801e`](https://github.com/kixel-ai/rind/commit/fbdc801e090ec1d476a01ca8c24be688baed5a7f) |
-| `kixtop` | Apple M4 | macOS 26.6.2 (25.6.0) | 2026-11-12 at [`0d2e74b4`](https://github.com/kixel-ai/rind/commit/0d2e74b489c1067beeab373f9de75d24574b4bc5) |
-| `ovh-iad` | Intel Core Processor (Haswell, no TSX) | NixOS 26.11 (Zokor) (Linux 6.18.40) | 2026-11-17 at [`93c8bcd7`](https://github.com/kixel-ai/rind/commit/93c8bcd705a05136e534fee4b463ab1ba56162bf) |
-| `ovh-sea` | Intel Core Processor (Haswell, no TSX) | NixOS 26.11 (Zokor) (Linux 6.18.40) | 2026-11-17 at [`93c8bcd7`](https://github.com/kixel-ai/rind/commit/93c8bcd705a05136e534fee4b463ab1ba56162bf) |
+| `fedora` | AMD Ryzen 9 9950X 16-Core Processor | Fedora Linux 45 (Workstation Edition) (Linux 7.3.3-300.fc45.x86_64) | 2026-11-24 at [`d481966c`](https://github.com/kixel-ai/rind/commit/d481966c12a136fa82b10afbf81e25d26f7fb0cd) |
+| `kixtop` | Apple M4 | macOS 26.6.2 (25.6.0) | 2026-11-24 at [`3f76a53f`](https://github.com/kixel-ai/rind/commit/3f76a53f35ae185f0e9ea0a58f3455766fc4d643) |
+| `ovh-iad` | Intel Core Processor (Haswell, no TSX) | NixOS 26.11 (Zokor) (Linux 6.18.40) | 2026-11-24 at [`3f76a53f`](https://github.com/kixel-ai/rind/commit/3f76a53f35ae185f0e9ea0a58f3455766fc4d643) |
+| `ovh-sea` | Intel Core Processor (Haswell, no TSX) | NixOS 26.11 (Zokor) (Linux 6.18.40) | 2026-11-24 at [`3f76a53f`](https://github.com/kixel-ai/rind/commit/3f76a53f35ae185f0e9ea0a58f3455766fc4d643) |
 
 Each host builds with the pinned toolchain in the Nix dev shell, and runs `admin/bench-report` only when idle. Times are criterion's estimates.
 
@@ -30,11 +30,11 @@ The rustls rows run both peers in one process. The every-logical-CPU rows run on
 
 ### `nixos`: AMD Ryzen 9 5900XT 16-Core Processor
 
-Measured 2026-11-18 at [`93c8bcd7`](https://github.com/kixel-ai/rind/commit/93c8bcd705a05136e534fee4b463ab1ba56162bf), noisy, on NixOS 26.11 (Zokor) (Linux 6.18.63) with rustc 1.98.1 (48a229cea 2026-09-01).
+Measured 2026-11-24 at [`d481966c`](https://github.com/kixel-ai/rind/commit/d481966c12a136fa82b10afbf81e25d26f7fb0cd), on NixOS 26.11 (Zokor) (Linux 6.18.63) with rustc 1.98.1 (48a229cea 2026-09-01).
 
-Not timed on `nixos`: SHA-1, 64 B, SHA-1, 1350 B, SHA-1, 16 KB, MD5, 64 B, MD5, 1350 B, MD5, 16 KB.
+Not timed on `nixos`: one record, AES-128-GCM, 64 B, one record, AES-128-GCM, 256 B, one record, AES-128-GCM, 1 KB, one record, ChaCha20-Poly1305, 64 B, one record, ChaCha20-Poly1305, 256 B, one record, ChaCha20-Poly1305, 1 KB, SHA-1, 64 B, SHA-1, 1350 B, SHA-1, 16 KB, MD5, 64 B, MD5, 1350 B, MD5, 16 KB, SLH-DSA-SHA2-128s key generation, SLH-DSA-SHA2-128s sign, SLH-DSA-SHA2-128s verify, SLH-DSA-SHA2-128f key generation, SLH-DSA-SHA2-128f sign, SLH-DSA-SHA2-128f verify, SLH-DSA-SHAKE-128f key generation, SLH-DSA-SHAKE-128f sign, SLH-DSA-SHAKE-128f verify.
 
-rind-rustls on all 32 logical CPUs runs full handshakes at 7.6 times and resumed handshakes at 10.2 times its one-thread rate.
+rind-rustls on all 32 logical CPUs runs full handshakes at 12.5 times and resumed handshakes at 12.8 times its one-thread rate.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="benchmarks/nixos-dark.svg">
@@ -46,113 +46,128 @@ rind-rustls on all 32 logical CPUs runs full handshakes at 7.6 times and resumed
 
 | Operation | rind | aws-lc-rs | ring | RustCrypto + dalek | graviola | libcrux | OpenSSL | verified-garbage |
 |---|---|---|---|---|---|---|---|---|
-| full handshake, X25519MLKEM768 | 246.79 µs | 335.67 µs | - | - | 315.78 µs | - | 1.32 ms | - |
-| full handshake, X25519 | 219.80 µs | 283.39 µs | 462.03 µs | - | 249.85 µs | - | 576.87 µs | - |
-| full handshake, P-256 | 267.67 µs | 328.88 µs | 301.34 µs | - | 280.31 µs | - | 719.10 µs | - |
-| full handshake, Ed25519 certificate | 166.42 µs | 227.59 µs | 316.49 µs | - | 171.89 µs | - | 642.61 µs | - |
-| full handshake, RSA-2048 certificate | 611.94 µs | 700.37 µs | 717.87 µs | - | 764.02 µs | - | 1.03 ms | - |
-| resumed handshake, X25519 | 130.12 µs | 226.98 µs | 222.12 µs | - | 98.73 µs | - | 458.00 µs | - |
-| full handshake, X25519, every logical CPU | 29.10 µs | 46.17 µs | 43.25 µs | - | 31.15 µs | - | 93.75 µs | - |
-| resumed handshake, X25519, every logical CPU | 12.76 µs | 27.62 µs | 21.95 µs | - | 25.94 µs | - | 75.81 µs | - |
-| 1 MB transfer, AES-128-GCM | 291.77 µs | 561.10 µs | 356.01 µs | - | 467.73 µs | - | 664.39 µs | - |
-| 1 MB transfer, AES-256-GCM | 478.16 µs | 775.45 µs | 506.13 µs | - | 696.58 µs | - | 938.74 µs | - |
-| 1 MB transfer, ChaCha20-Poly1305 | 1.10 ms | 1.13 ms | 1.21 ms | - | 1.88 ms | - | 959.63 µs | - |
-| AES-128-GCM seal, 32 B | 39 ns | 72 ns | 54 ns | 94 ns | 69 ns | 308 ns | 115 ns | 50 ns |
-| AES-128-GCM seal, 1350 B | 160 ns | 281 ns | 185 ns | 432 ns | 295 ns | 4.37 µs | 322 ns | 188 ns |
-| AES-128-GCM seal, 16 KB | 1.37 µs | 2.61 µs | 1.39 µs | 4.19 µs | 2.57 µs | 53.90 µs | 2.63 µs | 1.48 µs |
-| AES-128-GCM open, 32 B | 33 ns | 77 ns | 58 ns | 103 ns | 65 ns | 317 ns | 118 ns | 52 ns |
-| AES-128-GCM open, 1350 B | 162 ns | 299 ns | 187 ns | 449 ns | 305 ns | 3.92 µs | 329 ns | 196 ns |
-| AES-128-GCM open, 16 KB | 1.44 µs | 2.72 µs | 1.47 µs | 4.28 µs | 2.66 µs | 44.38 µs | 2.79 µs | 1.55 µs |
-| AES-256-GCM seal, 32 B | 43 ns | 79 ns | 57 ns | 101 ns | 75 ns | 427 ns | 120 ns | 53 ns |
-| AES-256-GCM seal, 1350 B | 189 ns | 307 ns | 205 ns | 487 ns | 337 ns | 6.90 µs | 346 ns | 207 ns |
-| AES-256-GCM seal, 16 KB | 1.55 µs | 2.81 µs | 1.56 µs | 4.82 µs | 2.99 µs | 80.98 µs | 2.85 µs | 1.65 µs |
-| AES-256-GCM open, 32 B | 36 ns | 84 ns | 61 ns | 108 ns | 68 ns | 442 ns | 122 ns | 54 ns |
-| AES-256-GCM open, 1350 B | 176 ns | 324 ns | 206 ns | 506 ns | 343 ns | 6.77 µs | 352 ns | 214 ns |
-| AES-256-GCM open, 16 KB | 1.60 µs | 2.93 µs | 1.61 µs | 4.92 µs | 3.07 µs | 79.65 µs | 2.93 µs | 1.76 µs |
-| ChaCha20-Poly1305 seal, 32 B | 114 ns | 120 ns | 113 ns | 1.20 µs | 216 ns | 219 ns ✓ | 253 ns | 122 ns |
-| ChaCha20-Poly1305 seal, 1350 B | 533 ns | 533 ns | 531 ns | 1.94 µs | 1.44 µs | 2.36 µs ✓ | 751 ns | 565 ns |
-| ChaCha20-Poly1305 seal, 16 KB | 4.57 µs | 4.57 µs | 4.56 µs | 9.84 µs | 15.46 µs | 25.87 µs ✓ | 5.09 µs | 4.68 µs |
-| XChaCha20-Poly1305 seal, 32 B | 226 ns | 252 ns | - | 1.32 µs | 336 ns | 333 ns | - | - |
-| XChaCha20-Poly1305 seal, 1350 B | 644 ns | 681 ns | - | 2.07 µs | 1.20 µs | 2.45 µs | - | - |
-| XChaCha20-Poly1305 seal, 16 KB | 4.71 µs | 4.76 µs | - | 9.74 µs | 9.97 µs | 25.93 µs | - | - |
-| AES-128 header protection | 4 ns ✓ | 6 ns | 7 ns | - | - | - | - | 5 ns |
-| AES-256 header protection | 5 ns ✓ | 8 ns | 10 ns | - | - | - | - | 6 ns |
-| ChaCha20 header protection | 61 ns ✓ | 81 ns | 74 ns | - | - | - | - | 82 ns |
-| X25519 | 23.63 µs ✓ | 24.40 µs | 45.33 µs | 51.41 µs | 23.61 µs | 62.19 µs ✓ | 48.06 µs | 23.26 µs |
-| P-256 ECDH | 38.63 µs ✓ | 41.23 µs | 41.92 µs | 248.24 µs | 41.64 µs | 244.71 µs ✓ | 68.21 µs | 37.02 µs |
-| Ed25519 sign | 5.71 µs ✓ | 6.03 µs | 17.14 µs | 13.48 µs | 5.79 µs | 40.44 µs ✓ | 23.18 µs | 5.88 µs |
-| Ed25519 verify | 20.14 µs | 26.95 µs | 34.57 µs | 24.73 µs | 25.07 µs | 53.74 µs ✓ | 77.63 µs | 22.09 µs |
-| P-256 ECDSA sign | 8.63 µs ✓ | 11.99 µs | 12.82 µs | 58.42 µs | 10.44 µs | 87.13 µs ✓ | 16.46 µs | 8.55 µs |
-| P-256 ECDSA verify | 38.18 µs ✓ | 37.97 µs | 38.90 µs | 215.47 µs | 40.37 µs | 211.90 µs ✓ | 56.82 µs | 30.64 µs |
-| SHA-256, 64 B | 63 ns ✓ | 97 ns | 86 ns | 64 ns | 74 ns | 443 ns ✓ | 254 ns | 85 ns |
-| SHA-256, 1350 B | 601 ns ✓ | 700 ns | 664 ns | 629 ns | 614 ns | 3.84 µs ✓ | 792 ns | 651 ns |
-| SHA-256, 16 KB | 7.13 µs ✓ | 7.18 µs | 7.35 µs | 7.18 µs | 7.35 µs | 44.45 µs ✓ | 7.31 µs | 7.42 µs |
-| SHA-512, 64 B | 138 ns ✓ | 216 ns | 196 ns | 195 ns | 189 ns | 240 ns ✓ | 328 ns | 149 ns |
-| SHA-512, 1350 B | 1.26 µs ✓ | 1.83 µs | 1.82 µs | 1.86 µs | 2.35 µs | 2.74 µs ✓ | 1.48 µs | 2.21 µs |
-| SHA-512, 16 KB | 14.66 µs ✓ | 21.16 µs | 21.15 µs | 21.36 µs | 20.69 µs | 29.25 µs ✓ | 14.91 µs | 16.87 µs |
-| SHA3-256, 64 B | 241 ns ✓ | 273 ns | - | 276 ns | - | 275 ns | - | 230 ns |
-| SHA3-256, 1350 B | 2.10 µs ✓ | 2.14 µs | - | 2.67 µs | - | 2.60 µs | - | 2.21 µs |
-| SHA3-256, 16 KB | 29.21 µs ✓ | 25.25 µs | - | 32.21 µs | - | 32.86 µs | - | 33.27 µs |
-| SHA3-512, 64 B | 250 ns ✓ | 304 ns | - | 292 ns | - | 278 ns | - | 239 ns |
-| SHA3-512, 1350 B | 4.09 µs ✓ | 4.06 µs | - | 5.16 µs | - | 4.92 µs | - | 4.22 µs |
-| SHA3-512, 16 KB | 54.28 µs ✓ | 47.96 µs | - | 61.69 µs | - | 67.41 µs | - | 61.78 µs |
+| full handshake, X25519MLKEM768 | 206.71 µs | 302.86 µs | - | - | 246.03 µs | - | 644.30 µs | - |
+| full handshake, X25519 | 180.51 µs | 258.67 µs | 284.31 µs | - | 213.74 µs | - | 548.31 µs | - |
+| full handshake, P-256 | 208.53 µs | 295.35 µs | 281.39 µs | - | 249.78 µs | - | 600.42 µs | - |
+| full handshake, Ed25519 certificate | 154.27 µs | 215.55 µs | 273.68 µs | - | 164.48 µs | - | 615.37 µs | - |
+| full handshake, RSA-2048 certificate | 517.28 µs | 612.97 µs | 634.31 µs | - | 545.71 µs | - | 877.39 µs | - |
+| resumed handshake, X25519 | 74.66 µs | 128.16 µs | 153.82 µs | - | 76.23 µs | - | 359.95 µs | - |
+| full handshake, X25519, every logical CPU | 14.47 µs | 21.81 µs | 21.82 µs | - | 18.06 µs | - | 54.26 µs | - |
+| resumed handshake, X25519, every logical CPU | 5.85 µs | 11.16 µs | 11.72 µs | - | 5.99 µs | - | 49.43 µs | - |
+| 1 MB transfer, AES-128-GCM | 271.30 µs | 422.44 µs | 267.29 µs | - | 420.85 µs | - | 469.73 µs | - |
+| 1 MB transfer, AES-256-GCM | 288.07 µs | 458.76 µs | 292.94 µs | - | 473.49 µs | - | 495.25 µs | - |
+| 1 MB transfer, ChaCha20-Poly1305 | 681.91 µs | 680.77 µs | 678.28 µs | - | 1.37 ms | - | 785.82 µs | - |
+| one record, AES-128-GCM, 64 B | - | - | - | - | - | - | - | - |
+| one record, AES-128-GCM, 256 B | - | - | - | - | - | - | - | - |
+| one record, AES-128-GCM, 1 KB | - | - | - | - | - | - | - | - |
+| one record, ChaCha20-Poly1305, 64 B | - | - | - | - | - | - | - | - |
+| one record, ChaCha20-Poly1305, 256 B | - | - | - | - | - | - | - | - |
+| one record, ChaCha20-Poly1305, 1 KB | - | - | - | - | - | - | - | - |
+| AES-128-GCM seal, 32 B | 38 ns | 73 ns | 55 ns | 96 ns | 68 ns | 312 ns | 118 ns | 51 ns |
+| AES-128-GCM seal, 1350 B | 162 ns | 283 ns | 186 ns | 435 ns | 297 ns | 4.50 µs | 317 ns | 188 ns |
+| AES-128-GCM seal, 16 KB | 1.35 µs | 2.60 µs | 1.36 µs | 4.14 µs | 2.57 µs | 55.27 µs | 2.63 µs | 1.45 µs |
+| AES-128-GCM open, 32 B | 33 ns | 72 ns | 59 ns | 102 ns | 65 ns | 321 ns | 121 ns | 53 ns |
+| AES-128-GCM open, 1350 B | 159 ns | 296 ns | 184 ns | 455 ns | 306 ns | 3.94 µs | 333 ns | 195 ns |
+| AES-128-GCM open, 16 KB | 1.46 µs | 2.71 µs | 1.47 µs | 4.29 µs | 2.70 µs | 44.94 µs | 2.74 µs | 1.57 µs |
+| AES-256-GCM seal, 32 B | 42 ns | 80 ns | 58 ns | 102 ns | 76 ns | 428 ns | 121 ns | 53 ns |
+| AES-256-GCM seal, 1350 B | 195 ns | 310 ns | 213 ns | 488 ns | 338 ns | 7.00 µs | 343 ns | 210 ns |
+| AES-256-GCM seal, 16 KB | 1.53 µs | 2.80 µs | 1.55 µs | 4.80 µs | 3.02 µs | 81.13 µs | 2.82 µs | 1.65 µs |
+| AES-256-GCM open, 32 B | 37 ns | 80 ns | 62 ns | 109 ns | 68 ns | 448 ns | 123 ns | 54 ns |
+| AES-256-GCM open, 1350 B | 175 ns | 321 ns | 203 ns | 513 ns | 343 ns | 6.79 µs | 353 ns | 211 ns |
+| AES-256-GCM open, 16 KB | 1.62 µs | 2.90 µs | 1.62 µs | 4.90 µs | 3.09 µs | 80.22 µs | 2.94 µs | 1.78 µs |
+| ChaCha20-Poly1305 seal, 32 B | 115 ns | 119 ns | 114 ns | 1.21 µs | 218 ns | 218 ns ✓ | 252 ns | 118 ns |
+| ChaCha20-Poly1305 seal, 1350 B | 533 ns | 532 ns | 536 ns | 1.94 µs | 1.09 µs | 2.33 µs ✓ | 742 ns | 558 ns |
+| ChaCha20-Poly1305 seal, 16 KB | 4.67 µs | 4.61 µs | 4.63 µs | 9.63 µs | 9.95 µs | 26.30 µs ✓ | 5.10 µs | 4.65 µs |
+| XChaCha20-Poly1305 seal, 32 B | 223 ns | 253 ns | - | 1.32 µs | 341 ns | 333 ns | - | - |
+| XChaCha20-Poly1305 seal, 1350 B | 635 ns | 668 ns | - | 2.07 µs | 1.20 µs | 2.48 µs | - | - |
+| XChaCha20-Poly1305 seal, 16 KB | 4.72 µs | 4.70 µs | - | 9.78 µs | 9.95 µs | 25.98 µs | - | - |
+| AES-128 header protection | 4 ns ✓ | 6 ns | 7 ns | - | - | - | - | 4 ns |
+| AES-256 header protection | 5 ns ✓ | 8 ns | 9 ns | - | - | - | - | 6 ns |
+| ChaCha20 header protection | 74 ns ✓ | 81 ns | 74 ns | - | - | - | - | 81 ns |
+| X25519 | 23.68 µs ✓ | 24.30 µs | 45.17 µs | 51.32 µs | 23.80 µs | 61.90 µs ✓ | 47.50 µs | 23.46 µs |
+| P-256 ECDH | 38.00 µs ✓ | 41.63 µs | 42.93 µs | 259.76 µs | 42.67 µs | 252.57 µs ✓ | 70.40 µs | 37.87 µs |
+| Ed25519 sign | 5.74 µs ✓ | 6.05 µs | 17.15 µs | 13.51 µs | 5.80 µs | 41.17 µs ✓ | 23.34 µs | 5.84 µs |
+| Ed25519 verify | 20.05 µs | 27.32 µs | 34.71 µs | 26.02 µs | 25.06 µs | 54.63 µs ✓ | 78.40 µs | 22.11 µs |
+| P-256 ECDSA sign | 8.97 µs ✓ | 12.21 µs | 13.05 µs | 66.28 µs | 10.48 µs | 88.39 µs ✓ | 16.58 µs | 8.63 µs |
+| P-256 ECDSA verify | 31.27 µs ✓ | 39.80 µs | 39.95 µs | 222.50 µs | 42.90 µs | 213.12 µs ✓ | 57.62 µs | 31.80 µs |
+| SHA-256, 64 B | 57 ns ✓ | 92 ns | 79 ns | 58 ns | 62 ns | 350 ns ✓ | 233 ns | 73 ns |
+| SHA-256, 1350 B | 574 ns ✓ | 626 ns | 609 ns | 594 ns | 593 ns | 3.58 µs ✓ | 766 ns | 611 ns |
+| SHA-256, 16 KB | 6.81 µs ✓ | 6.80 µs | 6.79 µs | 6.81 µs | 6.76 µs | 41.95 µs ✓ | 6.95 µs | 6.76 µs |
+| SHA-512, 64 B | 131 ns ✓ | 208 ns | 187 ns | 189 ns | 183 ns | 238 ns ✓ | 320 ns | 146 ns |
+| SHA-512, 1350 B | 1.24 µs ✓ | 1.77 µs | 1.76 µs | 1.77 µs | 1.75 µs | 2.47 µs ✓ | 1.44 µs | 1.35 µs |
+| SHA-512, 16 KB | 14.09 µs ✓ | 20.29 µs | 20.27 µs | 20.30 µs | 20.07 µs | 28.22 µs ✓ | 14.61 µs | 15.39 µs |
+| SHA3-256, 64 B | 235 ns ✓ | 277 ns | - | 273 ns | - | 275 ns | - | 232 ns |
+| SHA3-256, 1350 B | 2.11 µs ✓ | 2.14 µs | - | 2.63 µs | - | 2.58 µs | - | 2.16 µs |
+| SHA3-256, 16 KB | 25.14 µs ✓ | 24.90 µs | - | 31.95 µs | - | 30.94 µs | - | 26.08 µs |
+| SHA3-512, 64 B | 235 ns ✓ | 279 ns | - | 276 ns | - | 269 ns | - | 232 ns |
+| SHA3-512, 1350 B | 3.95 µs ✓ | 3.99 µs | - | 4.97 µs | - | 4.86 µs | - | 4.03 µs |
+| SHA3-512, 16 KB | 46.78 µs ✓ | 47.08 µs | - | 60.02 µs | - | 57.12 µs | - | 48.42 µs |
 | SHA-1, 64 B | - | - | - | - | - | - | - | - |
 | SHA-1, 1350 B | - | - | - | - | - | - | - | - |
 | SHA-1, 16 KB | - | - | - | - | - | - | - | - |
 | MD5, 64 B | - | - | - | - | - | - | - | - |
 | MD5, 1350 B | - | - | - | - | - | - | - | - |
 | MD5, 16 KB | - | - | - | - | - | - | - | - |
-| HMAC-SHA256, 64 B | 143 ns ✓ | 269 ns | 215 ns | 165 ns | 168 ns | 820 ns ✓ | 2.52 µs | 157 ns |
-| HMAC-SHA256, 1350 B | 666 ns ✓ | 795 ns | 749 ns | 693 ns | 695 ns | 4.05 µs ✓ | 3.02 µs | 694 ns |
-| HKDF-SHA256 extract and expand | 264 ns ✓ | 372 ns | 405 ns | 319 ns | - | 1.38 µs ✓ | 2.79 µs | 280 ns |
-| HKDF-SHA256 expand | 86 ns ✓ | 177 ns | 143 ns | 109 ns | - | 716 ns ✓ | 2.03 µs | 153 ns |
-| RSA-2048 PKCS#1 sign | 579.19 µs | 486.31 µs | 458.09 µs | 2.44 ms | 522.25 µs | - | 487.82 µs | 638.74 µs |
-| RSA-2048 PKCS#1 verify | 12.48 µs ✓ | 15.15 µs | 16.83 µs | 51.22 µs | 18.43 µs | - | 21.71 µs | 12.13 µs |
-| RSA-2048 PSS sign | 437.82 µs | 479.83 µs | 474.88 µs | 2.05 ms | 464.90 µs | 5.51 ms ✓ | 472.40 µs | 491.27 µs |
-| RSA-2048 PSS verify | 12.71 µs ✓ | 14.61 µs | 16.82 µs | 59.27 µs | 19.30 µs | 309.05 µs ✓ | 23.73 µs | 13.03 µs |
-| ML-KEM-768 key generation | 8.00 µs | 9.07 µs | - | 57.75 µs | 8.53 µs | 17.14 µs | 25.77 µs | 6.41 µs |
-| ML-KEM-768 encapsulate | 5.85 µs | 9.41 µs | - | 67.11 µs | 10.23 µs | 15.29 µs | 27.00 µs | 5.80 µs |
-| ML-KEM-768 decapsulate | 5.69 µs | 11.24 µs | - | 87.12 µs | 7.11 µs | 15.98 µs | 22.43 µs | 6.23 µs |
-| ML-KEM-1024 key generation | 11.44 µs | 12.98 µs | - | - | - | 23.29 µs | - | - |
-| ML-KEM-1024 encapsulate | 11.58 µs | 13.12 µs | - | - | - | 20.88 µs | - | - |
-| ML-KEM-1024 decapsulate | 7.58 µs | 15.75 µs | - | - | - | 22.18 µs | - | - |
-| ML-KEM-512 key generation | 5.03 µs | 5.54 µs | - | - | - | 12.86 µs | - | - |
-| ML-KEM-512 encapsulate | 5.33 µs | 5.98 µs | - | - | - | 11.16 µs | - | - |
-| ML-KEM-512 decapsulate | 4.64 µs | 7.41 µs | - | - | - | 11.65 µs | - | - |
-| ML-DSA-65 key generation | 28.33 µs | 33.29 µs | - | 253.01 µs | - | 44.60 µs | 131.03 µs | 46.71 µs |
-| ML-DSA-65 sign | 54.61 µs | 93.50 µs | - | 929.62 µs | - | 112.45 µs | 720.03 µs | 80.73 µs |
-| ML-DSA-65 verify | 5.93 µs | 29.87 µs | - | 101.57 µs | - | 47.62 µs | 131.52 µs | 24.67 µs |
-| ML-DSA-65 load and verify | 25.10 µs | 30.07 µs | - | 184.91 µs | - | 47.61 µs | 136.87 µs | - |
-| P-384 ECDH | 129.05 µs ✓ | 145.56 µs | 580.44 µs | 768.20 µs | 206.31 µs | - | 458.63 µs | 125.34 µs |
-| P-384 ECDSA sign | 31.59 µs ✓ | 64.11 µs | 312.66 µs | 189.79 µs | 109.28 µs | - | 152.41 µs | 23.99 µs |
-| P-384 ECDSA verify | 120.50 µs ✓ | 151.04 µs | 559.39 µs | 664.82 µs | 204.67 µs | - | 372.24 µs | 110.85 µs |
-| P-521 ECDH | 219.05 µs | 233.68 µs | - | 603.69 µs | - | - | 388.36 µs | 223.66 µs |
-| P-521 ECDSA sign | 55.55 µs | 127.68 µs | - | 153.98 µs | - | - | 202.86 µs | 60.45 µs |
-| P-521 ECDSA verify | 194.49 µs | 256.75 µs | - | 478.83 µs | - | - | 377.27 µs | 206.72 µs |
-| HPKE X25519 sender setup | 25.13 µs | 26.91 µs | - | 65.77 µs | - | 71.83 µs | - | - |
-| HPKE X25519 recipient setup | 19.61 µs | 26.80 µs | - | 53.12 µs | - | 68.81 µs | - | - |
-| HPKE AES-128-GCM seal, 1350 B | 181 ns | 458 ns | - | 443 ns | - | 3.97 µs | - | - |
-| HPKE AES-128-GCM open, 1350 B | 159 ns | 459 ns | - | 442 ns | - | 4.06 µs | - | - |
-| Blind RSA-2048 blind | 53.32 µs | - | - | 402.40 µs | - | - | - | - |
-| Blind RSA-2048 sign | 398.85 µs | - | - | 1.75 ms | - | - | - | - |
-| Blind RSA-2048 finalize | 10.92 µs | - | - | 55.26 µs | - | - | - | - |
-| Blind RSA-2048 verify | 10.57 µs | - | - | 48.86 µs | - | - | - | - |
-| OPRF ristretto255 blind | 37.11 µs | - | - | 31.54 µs | - | - | - | - |
-| OPRF ristretto255 evaluate | 27.60 µs | - | - | 22.23 µs | - | - | - | - |
-| OPRF ristretto255 finalize | 28.87 µs | - | - | 34.81 µs | - | - | - | - |
-| VOPRF P-384 blind | 130.05 µs | - | - | 718.90 µs | - | - | - | - |
-| VOPRF P-384 evaluate | 455.37 µs | - | - | 3.11 ms | - | - | - | - |
-| VOPRF P-384 finalize | 657.49 µs | - | - | 4.34 ms | - | - | - | - |
-| ECVRF edwards25519 prove | 79.32 µs | - | - | 100.34 µs | - | - | - | - |
-| ECVRF edwards25519 verify | 101.00 µs | - | - | 109.80 µs | - | - | - | - |
-| ECVRF P-256 prove | 85.96 µs | - | - | 544.92 µs | - | - | - | - |
-| ECVRF P-256 verify | 118.70 µs | - | - | 675.15 µs | - | - | - | - |
-| SPAKE2+ P-256 prover share | 41.86 µs | - | - | 425.08 µs | - | - | - | - |
-| SPAKE2+ P-256 verifier share and confirmation | 155.07 µs | - | - | 1.10 ms | - | - | - | - |
-| SPAKE2+ P-256 prover confirmation and key | 112.23 µs | - | - | 646.38 µs | - | - | - | - |
-| SPAKE2+ P-256 verifier key | 57 ns | - | - | 363 ns | - | - | - | - |
-| Argon2id 16 MiB t=1 p=1 | 3.12 ms | - | - | 4.24 ms | - | - | 5.89 ms | - |
-| Argon2id 64 MiB t=3 p=4 | 81.24 ms | - | - | 102.88 ms | - | - | 122.27 ms | - |
+| HMAC-SHA256, 64 B | 140 ns ✓ | 281 ns | 215 ns | 167 ns | 171 ns | 819 ns ✓ | 2.49 µs | 162 ns |
+| HMAC-SHA256, 1350 B | 675 ns ✓ | 811 ns | 761 ns | 692 ns | 697 ns | 4.10 µs ✓ | 3.01 µs | 695 ns |
+| HKDF-SHA256 extract and expand | 265 ns ✓ | 372 ns | 407 ns | 314 ns | - | 1.38 µs ✓ | 2.76 µs | 284 ns |
+| HKDF-SHA256 expand | 89 ns ✓ | 178 ns | 148 ns | 106 ns | - | 712 ns ✓ | 2.01 µs | 152 ns |
+| RSA-2048 PKCS#1 sign | 400.58 µs | 430.95 µs | 421.80 µs | 1.75 ms | 408.89 µs | - | 438.93 µs | 456.24 µs |
+| RSA-2048 PKCS#1 verify | 10.81 µs ✓ | 13.68 µs | 15.36 µs | 47.38 µs | 17.64 µs | - | 20.74 µs | 11.62 µs |
+| RSA-2048 PSS sign | 400.24 µs | 434.63 µs | 425.34 µs | 1.76 ms | 409.39 µs | 4.84 ms ✓ | 442.15 µs | 454.60 µs |
+| RSA-2048 PSS verify | 11.24 µs ✓ | 14.22 µs | 15.99 µs | 55.87 µs | 17.82 µs | 282.44 µs ✓ | 21.97 µs | 12.01 µs |
+| ML-KEM-768 key generation | 8.12 µs | 9.16 µs | - | 57.71 µs | 8.53 µs | 17.11 µs | 25.93 µs | 6.47 µs |
+| ML-KEM-768 encapsulate | 5.84 µs | 9.41 µs | - | 67.96 µs | 10.31 µs | 15.06 µs | 27.23 µs | 5.79 µs |
+| ML-KEM-768 decapsulate | 5.71 µs | 11.31 µs | - | 87.10 µs | 7.21 µs | 15.94 µs | 22.33 µs | 6.23 µs |
+| ML-KEM-1024 key generation | 11.74 µs | 12.70 µs | - | - | - | 23.08 µs | - | - |
+| ML-KEM-1024 encapsulate | 11.52 µs | 13.34 µs | - | - | - | 20.69 µs | - | - |
+| ML-KEM-1024 decapsulate | 7.60 µs | 15.66 µs | - | - | - | 23.80 µs | - | - |
+| ML-KEM-512 key generation | 4.93 µs | 5.62 µs | - | - | - | 13.01 µs | - | - |
+| ML-KEM-512 encapsulate | 5.24 µs | 6.06 µs | - | - | - | 11.26 µs | - | - |
+| ML-KEM-512 decapsulate | 4.65 µs | 7.29 µs | - | - | - | 11.72 µs | - | - |
+| ML-DSA-65 key generation | 28.26 µs | 33.47 µs | - | 252.23 µs | - | 44.82 µs | 130.86 µs | 47.49 µs |
+| ML-DSA-65 sign | 50.79 µs | 94.11 µs | - | 943.01 µs | - | 113.55 µs | 729.28 µs | 79.90 µs |
+| ML-DSA-65 verify | 5.98 µs | 30.02 µs | - | 100.98 µs | - | 47.77 µs | 132.19 µs | 24.52 µs |
+| ML-DSA-65 load and verify | 25.92 µs | 30.00 µs | - | 182.94 µs | - | 47.72 µs | 138.16 µs | - |
+| P-384 ECDH | 123.97 µs ✓ | 147.27 µs | 595.59 µs | 768.48 µs | 208.49 µs | - | 458.96 µs | 127.89 µs |
+| P-384 ECDSA sign | 25.83 µs ✓ | 64.10 µs | 317.78 µs | 182.53 µs | 109.50 µs | - | 152.24 µs | 23.82 µs |
+| P-384 ECDSA verify | 111.13 µs ✓ | 151.95 µs | 567.27 µs | 668.45 µs | 205.63 µs | - | 374.23 µs | 110.42 µs |
+| P-521 ECDH | 218.24 µs | 234.82 µs | - | 608.72 µs | - | - | 393.08 µs | 224.63 µs |
+| P-521 ECDSA sign | 56.03 µs | 127.78 µs | - | 145.69 µs | - | - | 186.16 µs | 59.47 µs |
+| P-521 ECDSA verify | 190.77 µs | 257.09 µs | - | 490.03 µs | - | - | 385.83 µs | 209.54 µs |
+| HPKE X25519 sender setup | 25.21 µs | 27.15 µs | - | 65.43 µs | - | 72.53 µs | - | - |
+| HPKE X25519 recipient setup | 19.79 µs | 26.72 µs | - | 52.54 µs | - | 69.51 µs | - | - |
+| HPKE AES-128-GCM seal, 1350 B | 182 ns | 464 ns | - | 444 ns | - | 4.61 µs | - | - |
+| HPKE AES-128-GCM open, 1350 B | 155 ns | 453 ns | - | 446 ns | - | 4.03 µs | - | - |
+| Blind RSA-2048 blind | 54.43 µs | - | - | 405.18 µs | - | - | - | - |
+| Blind RSA-2048 sign | 397.55 µs | - | - | 1.75 ms | - | - | - | - |
+| Blind RSA-2048 finalize | 10.82 µs | - | - | 54.38 µs | - | - | - | - |
+| Blind RSA-2048 verify | 10.61 µs | - | - | 48.54 µs | - | - | - | - |
+| OPRF ristretto255 blind | 37.06 µs | - | - | 34.05 µs | - | - | - | - |
+| OPRF ristretto255 evaluate | 27.82 µs | - | - | 21.99 µs | - | - | - | - |
+| OPRF ristretto255 finalize | 28.67 µs | - | - | 36.70 µs | - | - | - | - |
+| VOPRF P-384 blind | 130.60 µs | - | - | 717.90 µs | - | - | - | - |
+| VOPRF P-384 evaluate | 457.29 µs | - | - | 3.15 ms | - | - | - | - |
+| VOPRF P-384 finalize | 661.94 µs | - | - | 4.42 ms | - | - | - | - |
+| ECVRF edwards25519 prove | 76.85 µs | - | - | 96.96 µs | - | - | - | - |
+| ECVRF edwards25519 verify | 98.33 µs | - | - | 108.77 µs | - | - | - | - |
+| ECVRF P-256 prove | 85.06 µs | - | - | 524.38 µs | - | - | - | - |
+| ECVRF P-256 verify | 117.71 µs | - | - | 675.81 µs | - | - | - | - |
+| SPAKE2+ P-256 prover share | 40.27 µs | - | - | 403.65 µs | - | - | - | - |
+| SPAKE2+ P-256 verifier share and confirmation | 140.82 µs | - | - | 1.02 ms | - | - | - | - |
+| SPAKE2+ P-256 prover confirmation and key | 100.93 µs | - | - | 605.19 µs | - | - | - | - |
+| SPAKE2+ P-256 verifier key | 28 ns | - | - | 60 ns | - | - | - | - |
+| Argon2id 16 MiB t=1 p=1 | 3.01 ms | - | - | 4.24 ms | - | - | 5.82 ms | - |
+| Argon2id 64 MiB t=3 p=4 | 83.75 ms | - | - | 103.46 ms | - | - | 126.37 ms | - |
+| SLH-DSA-SHA2-128s key generation | - | - | - | - | - | - | - | - |
+| SLH-DSA-SHA2-128s sign | - | - | - | - | - | - | - | - |
+| SLH-DSA-SHA2-128s verify | - | - | - | - | - | - | - | - |
+| SLH-DSA-SHA2-128f key generation | - | - | - | - | - | - | - | - |
+| SLH-DSA-SHA2-128f sign | - | - | - | - | - | - | - | - |
+| SLH-DSA-SHA2-128f verify | - | - | - | - | - | - | - | - |
+| SLH-DSA-SHAKE-128f key generation | - | - | - | - | - | - | - | - |
+| SLH-DSA-SHAKE-128f sign | - | - | - | - | - | - | - | - |
+| SLH-DSA-SHAKE-128f verify | - | - | - | - | - | - | - | - |
 
 </details>
 
@@ -160,7 +175,7 @@ rind-rustls on all 32 logical CPUs runs full handshakes at 7.6 times and resumed
 
 Measured 2026-11-07 at [`9e7f6a5a`](https://github.com/kixel-ai/rind/commit/9e7f6a5a9ea59a0cf1251c24af6c5d4f21c2b0fd), on Ubuntu 26.04.1 LTS (Linux 7.0.0-42-generic) with rustc 1.98.1 (48a229cea 2026-09-01).
 
-Not timed on `desktop`: full handshake, X25519, every logical CPU, resumed handshake, X25519, every logical CPU, SHA3-256, 64 B, SHA3-256, 1350 B, SHA3-256, 16 KB, SHA3-512, 64 B, SHA3-512, 1350 B, SHA3-512, 16 KB, SHA-1, 64 B, SHA-1, 1350 B, SHA-1, 16 KB, MD5, 64 B, MD5, 1350 B, MD5, 16 KB, ML-KEM-1024 key generation, ML-KEM-1024 encapsulate, ML-KEM-1024 decapsulate, ML-KEM-512 key generation, ML-KEM-512 encapsulate, ML-KEM-512 decapsulate, ML-DSA-65 key generation, ML-DSA-65 sign, ML-DSA-65 verify, ML-DSA-65 load and verify, HPKE X25519 sender setup, HPKE X25519 recipient setup, HPKE AES-128-GCM seal, 1350 B, HPKE AES-128-GCM open, 1350 B, Blind RSA-2048 blind, Blind RSA-2048 sign, Blind RSA-2048 finalize, Blind RSA-2048 verify, OPRF ristretto255 blind, OPRF ristretto255 evaluate, OPRF ristretto255 finalize, VOPRF P-384 blind, VOPRF P-384 evaluate, VOPRF P-384 finalize, ECVRF edwards25519 prove, ECVRF edwards25519 verify, ECVRF P-256 prove, ECVRF P-256 verify, SPAKE2+ P-256 prover share, SPAKE2+ P-256 verifier share and confirmation, SPAKE2+ P-256 prover confirmation and key, SPAKE2+ P-256 verifier key, Argon2id 16 MiB t=1 p=1, Argon2id 64 MiB t=3 p=4.
+Not timed on `desktop`: full handshake, X25519, every logical CPU, resumed handshake, X25519, every logical CPU, one record, AES-128-GCM, 64 B, one record, AES-128-GCM, 256 B, one record, AES-128-GCM, 1 KB, one record, ChaCha20-Poly1305, 64 B, one record, ChaCha20-Poly1305, 256 B, one record, ChaCha20-Poly1305, 1 KB, SHA3-256, 64 B, SHA3-256, 1350 B, SHA3-256, 16 KB, SHA3-512, 64 B, SHA3-512, 1350 B, SHA3-512, 16 KB, SHA-1, 64 B, SHA-1, 1350 B, SHA-1, 16 KB, MD5, 64 B, MD5, 1350 B, MD5, 16 KB, ML-KEM-1024 key generation, ML-KEM-1024 encapsulate, ML-KEM-1024 decapsulate, ML-KEM-512 key generation, ML-KEM-512 encapsulate, ML-KEM-512 decapsulate, ML-DSA-65 key generation, ML-DSA-65 sign, ML-DSA-65 verify, ML-DSA-65 load and verify, HPKE X25519 sender setup, HPKE X25519 recipient setup, HPKE AES-128-GCM seal, 1350 B, HPKE AES-128-GCM open, 1350 B, Blind RSA-2048 blind, Blind RSA-2048 sign, Blind RSA-2048 finalize, Blind RSA-2048 verify, OPRF ristretto255 blind, OPRF ristretto255 evaluate, OPRF ristretto255 finalize, VOPRF P-384 blind, VOPRF P-384 evaluate, VOPRF P-384 finalize, ECVRF edwards25519 prove, ECVRF edwards25519 verify, ECVRF P-256 prove, ECVRF P-256 verify, SPAKE2+ P-256 prover share, SPAKE2+ P-256 verifier share and confirmation, SPAKE2+ P-256 prover confirmation and key, SPAKE2+ P-256 verifier key, Argon2id 16 MiB t=1 p=1, Argon2id 64 MiB t=3 p=4, SLH-DSA-SHA2-128s key generation, SLH-DSA-SHA2-128s sign, SLH-DSA-SHA2-128s verify, SLH-DSA-SHA2-128f key generation, SLH-DSA-SHA2-128f sign, SLH-DSA-SHA2-128f verify, SLH-DSA-SHAKE-128f key generation, SLH-DSA-SHAKE-128f sign, SLH-DSA-SHAKE-128f verify.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="benchmarks/desktop-dark.svg">
@@ -183,6 +198,12 @@ Not timed on `desktop`: full handshake, X25519, every logical CPU, resumed hands
 | 1 MB transfer, AES-128-GCM | 168.21 µs | 233.34 µs | 170.08 µs | - | 289.61 µs | - | 250.85 µs |
 | 1 MB transfer, AES-256-GCM | 184.54 µs | 265.29 µs | 188.67 µs | - | 337.96 µs | - | 285.79 µs |
 | 1 MB transfer, ChaCha20-Poly1305 | 596.91 µs | 595.41 µs | 590.49 µs | - | 1.16 ms | - | 658.48 µs |
+| one record, AES-128-GCM, 64 B | - | - | - | - | - | - | - |
+| one record, AES-128-GCM, 256 B | - | - | - | - | - | - | - |
+| one record, AES-128-GCM, 1 KB | - | - | - | - | - | - | - |
+| one record, ChaCha20-Poly1305, 64 B | - | - | - | - | - | - | - |
+| one record, ChaCha20-Poly1305, 256 B | - | - | - | - | - | - | - |
+| one record, ChaCha20-Poly1305, 1 KB | - | - | - | - | - | - | - |
 | AES-128-GCM seal, 32 B | 20 ns | 38 ns | 41 ns | 73 ns | 42 ns | 171 ns | 57 ns |
 | AES-128-GCM seal, 1350 B | 93 ns | 159 ns | 119 ns | 278 ns | 226 ns | 1.98 µs | 160 ns |
 | AES-128-GCM seal, 16 KB | 799 ns | 1.32 µs | 818 ns | 2.49 µs | 2.05 µs | 22.05 µs | 1.35 µs |
@@ -279,18 +300,27 @@ Not timed on `desktop`: full handshake, X25519, every logical CPU, resumed hands
 | SPAKE2+ P-256 verifier key | - | - | - | - | - | - | - |
 | Argon2id 16 MiB t=1 p=1 | - | - | - | - | - | - | - |
 | Argon2id 64 MiB t=3 p=4 | - | - | - | - | - | - | - |
+| SLH-DSA-SHA2-128s key generation | - | - | - | - | - | - | - |
+| SLH-DSA-SHA2-128s sign | - | - | - | - | - | - | - |
+| SLH-DSA-SHA2-128s verify | - | - | - | - | - | - | - |
+| SLH-DSA-SHA2-128f key generation | - | - | - | - | - | - | - |
+| SLH-DSA-SHA2-128f sign | - | - | - | - | - | - | - |
+| SLH-DSA-SHA2-128f verify | - | - | - | - | - | - | - |
+| SLH-DSA-SHAKE-128f key generation | - | - | - | - | - | - | - |
+| SLH-DSA-SHAKE-128f sign | - | - | - | - | - | - | - |
+| SLH-DSA-SHAKE-128f verify | - | - | - | - | - | - | - |
 
 </details>
 
 ### `fedora`: AMD Ryzen 9 9950X 16-Core Processor
 
-Measured 2026-11-21 at [`fbdc801e`](https://github.com/kixel-ai/rind/commit/fbdc801e090ec1d476a01ca8c24be688baed5a7f), on Fedora Linux 45 (Workstation Edition) (Linux 7.3.3-300.fc45.x86_64) with rustc 1.98.1 (48a229cea 2026-09-01).
+Measured 2026-11-24 at [`d481966c`](https://github.com/kixel-ai/rind/commit/d481966c12a136fa82b10afbf81e25d26f7fb0cd), on Fedora Linux 45 (Workstation Edition) (Linux 7.3.3-300.fc45.x86_64) with rustc 1.98.1 (48a229cea 2026-09-01).
 
 The maintainer's Fedora workstation and the report's only AVX-512 host, so the one whose table times rind's AVX-512 AES-GCM, IFMA RSA, and 8-way ML-KEM sampler against every library. It also runs CI runners and agent sessions, so its times are noisier than the other dedicated hosts'. Zen 5 keeps its clock with 512-bit vectors, so this host cannot show what they cost on the Intel cores that slow down.
 
-Not timed on `fedora`: SHA-1, 64 B, SHA-1, 1350 B, SHA-1, 16 KB, MD5, 64 B, MD5, 1350 B, MD5, 16 KB.
+Not timed on `fedora`: one record, AES-128-GCM, 64 B, one record, AES-128-GCM, 256 B, one record, AES-128-GCM, 1 KB, one record, ChaCha20-Poly1305, 64 B, one record, ChaCha20-Poly1305, 256 B, one record, ChaCha20-Poly1305, 1 KB, SHA-1, 64 B, SHA-1, 1350 B, SHA-1, 16 KB, MD5, 64 B, MD5, 1350 B, MD5, 16 KB, SLH-DSA-SHA2-128s key generation, SLH-DSA-SHA2-128s sign, SLH-DSA-SHA2-128s verify, SLH-DSA-SHA2-128f key generation, SLH-DSA-SHA2-128f sign, SLH-DSA-SHA2-128f verify, SLH-DSA-SHAKE-128f key generation, SLH-DSA-SHAKE-128f sign, SLH-DSA-SHAKE-128f verify.
 
-rind-rustls on all 32 logical CPUs runs full handshakes at 16.9 times and resumed handshakes at 15.8 times its one-thread rate.
+rind-rustls on all 32 logical CPUs runs full handshakes at 26.0 times and resumed handshakes at 18.3 times its one-thread rate.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="benchmarks/fedora-dark.svg">
@@ -302,123 +332,140 @@ rind-rustls on all 32 logical CPUs runs full handshakes at 16.9 times and resume
 
 | Operation | rind | aws-lc-rs | ring | RustCrypto + dalek | graviola | libcrux | OpenSSL | verified-garbage |
 |---|---|---|---|---|---|---|---|---|
-| full handshake, X25519MLKEM768 | 118.74 µs | 203.30 µs | - | - | 168.56 µs | - | 403.65 µs | - |
-| full handshake, X25519 | 101.16 µs | 165.98 µs | 187.46 µs | - | 149.97 µs | - | 333.79 µs | - |
-| full handshake, P-256 | 124.41 µs | 188.09 µs | 183.07 µs | - | 182.14 µs | - | 357.84 µs | - |
-| full handshake, Ed25519 certificate | 81.33 µs | 136.58 µs | 181.24 µs | - | 107.67 µs | - | 361.66 µs | - |
-| full handshake, RSA-2048 certificate | 192.56 µs | 267.75 µs | 451.16 µs | - | 377.82 µs | - | 423.00 µs | - |
-| resumed handshake, X25519 | 41.13 µs | 83.13 µs | 102.24 µs | - | 51.52 µs | - | 229.12 µs | - |
-| full handshake, X25519, every logical CPU | 5.98 µs | 11.45 µs | 12.59 µs | - | 9.68 µs | - | 44.30 µs | - |
-| resumed handshake, X25519, every logical CPU | 2.60 µs | 5.95 µs | 6.87 µs | - | 3.27 µs | - | 49.38 µs | - |
-| 1 MB transfer, AES-128-GCM | 113.66 µs | 119.60 µs | 185.84 µs | - | 135.82 µs | - | 141.69 µs | - |
-| 1 MB transfer, AES-256-GCM | 124.78 µs | 127.60 µs | 197.07 µs | - | 153.14 µs | - | 150.64 µs | - |
-| 1 MB transfer, ChaCha20-Poly1305 | 614.84 µs | 611.29 µs | 612.24 µs | - | 1.18 ms | - | 398.36 µs | - |
-| AES-128-GCM seal, 32 B | 29 ns | 54 ns | 44 ns | 108 ns | 57 ns | 240 ns | 73 ns | 35 ns |
-| AES-128-GCM seal, 1350 B | 91 ns | 121 ns | 155 ns | 403 ns | 146 ns | 2.50 µs | 133 ns | 86 ns |
-| AES-128-GCM seal, 16 KB | 506 ns | 611 ns | 1.06 µs | 3.42 µs | 755 ns | 27.79 µs | 606 ns | 470 ns |
-| AES-128-GCM open, 32 B | 31 ns | 53 ns | 66 ns | 107 ns | 49 ns | 248 ns | 73 ns | 33 ns |
-| AES-128-GCM open, 1350 B | 86 ns | 120 ns | 165 ns | 422 ns | 147 ns | 2.73 µs | 159 ns | 108 ns |
-| AES-128-GCM open, 16 KB | 650 ns | 665 ns | 1.20 µs | 3.64 µs | 710 ns | 29.38 µs | 666 ns | 587 ns |
-| AES-256-GCM seal, 32 B | 30 ns | 56 ns | 48 ns | 130 ns | 58 ns | 300 ns | 78 ns | 37 ns |
-| AES-256-GCM seal, 1350 B | 106 ns | 130 ns | 169 ns | 460 ns | 157 ns | 3.33 µs | 144 ns | 93 ns |
-| AES-256-GCM seal, 16 KB | 626 ns | 604 ns | 1.21 µs | 3.69 µs | 959 ns | 41.00 µs | 656 ns | 578 ns |
-| AES-256-GCM open, 32 B | 28 ns | 52 ns | 65 ns | 127 ns | 50 ns | 322 ns | 72 ns | 35 ns |
-| AES-256-GCM open, 1350 B | 95 ns | 134 ns | 180 ns | 480 ns | 153 ns | 3.70 µs | 156 ns | 121 ns |
-| AES-256-GCM open, 16 KB | 680 ns | 700 ns | 1.24 µs | 3.82 µs | 766 ns | 40.66 µs | 759 ns | 649 ns |
-| ChaCha20-Poly1305 seal, 32 B | 157 ns | 165 ns | 142 ns | 1.34 µs | 313 ns | 169 ns ✓ | 289 ns | 143 ns |
-| ChaCha20-Poly1305 seal, 1350 B | 515 ns | 520 ns | 509 ns | 2.00 µs | 1.19 µs | 1.65 µs ✓ | 644 ns | 386 ns |
-| ChaCha20-Poly1305 seal, 16 KB | 4.71 µs | 4.58 µs | 4.57 µs | 11.02 µs | 9.36 µs | 18.94 µs ✓ | 2.67 µs | 2.78 µs |
-| XChaCha20-Poly1305 seal, 32 B | 241 ns | 250 ns | - | 1.08 µs | 447 ns | 252 ns | - | - |
-| XChaCha20-Poly1305 seal, 1350 B | 589 ns | 601 ns | - | 1.94 µs | 1.29 µs | 1.66 µs | - | - |
-| XChaCha20-Poly1305 seal, 16 KB | 4.54 µs | 4.57 µs | - | 10.62 µs | 8.84 µs | 17.32 µs | - | - |
-| AES-128 header protection | 3 ns ✓ | 4 ns | 5 ns | - | - | - | - | 3 ns |
-| AES-256 header protection | 2 ns ✓ | 5 ns | 6 ns | - | - | - | - | 3 ns |
+| full handshake, X25519MLKEM768 | 120.30 µs | 210.27 µs | - | - | 171.70 µs | - | 410.10 µs | - |
+| full handshake, X25519 | 142.68 µs | 169.61 µs | 240.87 µs | - | 153.56 µs | - | 338.07 µs | - |
+| full handshake, P-256 | 124.86 µs | 188.19 µs | 183.54 µs | - | 182.84 µs | - | 359.64 µs | - |
+| full handshake, Ed25519 certificate | 80.62 µs | 136.41 µs | 182.21 µs | - | 107.85 µs | - | 364.26 µs | - |
+| full handshake, RSA-2048 certificate | 190.86 µs | 269.78 µs | 454.07 µs | - | 383.13 µs | - | 424.43 µs | - |
+| resumed handshake, X25519 | 40.32 µs | 83.30 µs | 101.45 µs | - | 51.60 µs | - | 229.02 µs | - |
+| full handshake, X25519, every logical CPU | 5.48 µs | 10.97 µs | 11.91 µs | - | 9.25 µs | - | 40.54 µs | - |
+| resumed handshake, X25519, every logical CPU | 2.20 µs | 5.66 µs | 6.45 µs | - | 3.10 µs | - | 45.28 µs | - |
+| 1 MB transfer, AES-128-GCM | 113.43 µs | 118.66 µs | 187.41 µs | - | 136.32 µs | - | 140.25 µs | - |
+| 1 MB transfer, AES-256-GCM | 121.38 µs | 126.11 µs | 196.65 µs | - | 148.76 µs | - | 147.17 µs | - |
+| 1 MB transfer, ChaCha20-Poly1305 | 392.55 µs | 612.84 µs | 615.77 µs | - | 1.18 ms | - | 402.05 µs | - |
+| one record, AES-128-GCM, 64 B | - | - | - | - | - | - | - | - |
+| one record, AES-128-GCM, 256 B | - | - | - | - | - | - | - | - |
+| one record, AES-128-GCM, 1 KB | - | - | - | - | - | - | - | - |
+| one record, ChaCha20-Poly1305, 64 B | - | - | - | - | - | - | - | - |
+| one record, ChaCha20-Poly1305, 256 B | - | - | - | - | - | - | - | - |
+| one record, ChaCha20-Poly1305, 1 KB | - | - | - | - | - | - | - | - |
+| AES-128-GCM seal, 32 B | 26 ns | 51 ns | 43 ns | 99 ns | 51 ns | 199 ns | 63 ns | 33 ns |
+| AES-128-GCM seal, 1350 B | 86 ns | 114 ns | 150 ns | 384 ns | 140 ns | 2.40 µs | 131 ns | 84 ns |
+| AES-128-GCM seal, 16 KB | 510 ns | 533 ns | 1.10 µs | 3.45 µs | 741 ns | 27.57 µs | 549 ns | 452 ns |
+| AES-128-GCM open, 32 B | 27 ns | 50 ns | 62 ns | 104 ns | 48 ns | 241 ns | 61 ns | 32 ns |
+| AES-128-GCM open, 1350 B | 86 ns | 121 ns | 162 ns | 399 ns | 137 ns | 2.49 µs | 132 ns | 107 ns |
+| AES-128-GCM open, 16 KB | 602 ns | 618 ns | 1.14 µs | 3.50 µs | 693 ns | 27.39 µs | 611 ns | 495 ns |
+| AES-256-GCM seal, 32 B | 28 ns | 55 ns | 46 ns | 125 ns | 53 ns | 282 ns | 69 ns | 36 ns |
+| AES-256-GCM seal, 1350 B | 105 ns | 126 ns | 167 ns | 435 ns | 159 ns | 3.40 µs | 140 ns | 93 ns |
+| AES-256-GCM seal, 16 KB | 590 ns | 605 ns | 1.20 µs | 3.55 µs | 916 ns | 39.49 µs | 628 ns | 533 ns |
+| AES-256-GCM open, 32 B | 27 ns | 51 ns | 63 ns | 127 ns | 50 ns | 309 ns | 64 ns | 34 ns |
+| AES-256-GCM open, 1350 B | 90 ns | 126 ns | 169 ns | 449 ns | 144 ns | 3.40 µs | 138 ns | 109 ns |
+| AES-256-GCM open, 16 KB | 625 ns | 647 ns | 1.19 µs | 3.50 µs | 711 ns | 37.94 µs | 691 ns | 581 ns |
+| ChaCha20-Poly1305 seal, 32 B | 134 ns | 140 ns | 135 ns | 977 ns | 273 ns | 147 ns ✓ | 272 ns | 130 ns |
+| ChaCha20-Poly1305 seal, 1350 B | 395 ns | 484 ns | 490 ns | 1.85 µs | 1.16 µs | 1.56 µs ✓ | 612 ns | 372 ns |
+| ChaCha20-Poly1305 seal, 16 KB | 2.70 µs | 4.52 µs | 4.42 µs | 10.67 µs | 8.98 µs | 17.65 µs ✓ | 2.61 µs | 2.70 µs |
+| XChaCha20-Poly1305 seal, 32 B | 242 ns | 251 ns | - | 1.08 µs | 448 ns | 258 ns | - | - |
+| XChaCha20-Poly1305 seal, 1350 B | 507 ns | 600 ns | - | 1.97 µs | 1.29 µs | 1.67 µs | - | - |
+| XChaCha20-Poly1305 seal, 16 KB | 2.78 µs | 4.56 µs | - | 10.64 µs | 9.03 µs | 17.66 µs | - | - |
+| AES-128 header protection | 2 ns ✓ | 3 ns | 4 ns | - | - | - | - | 2 ns |
+| AES-256 header protection | 3 ns ✓ | 5 ns | 6 ns | - | - | - | - | 3 ns |
 | ChaCha20 header protection | 51 ns ✓ | 58 ns | 52 ns | - | - | - | - | 58 ns |
-| X25519 | 10.98 µs ✓ | 15.70 µs | 30.59 µs | 34.59 µs | 15.43 µs | 41.92 µs ✓ | 31.60 µs | 11.02 µs |
-| P-256 ECDH | 22.31 µs ✓ | 26.58 µs | 28.00 µs | 127.07 µs | 31.26 µs | 167.14 µs ✓ | 44.66 µs | 22.38 µs |
-| Ed25519 sign | 2.39 µs ✓ | 3.94 µs | 12.13 µs | 9.37 µs | 3.78 µs | 30.13 µs ✓ | 13.92 µs | 2.42 µs |
-| Ed25519 verify | 11.07 µs ✓ | 17.55 µs | 23.98 µs | 20.14 µs | 15.98 µs | 38.30 µs ✓ | 43.97 µs | 11.41 µs |
-| P-256 ECDSA sign | 5.86 µs ✓ | 8.36 µs | 8.71 µs | 35.25 µs | 7.57 µs | 59.53 µs ✓ | 10.98 µs | 5.44 µs |
-| P-256 ECDSA verify | 18.08 µs ✓ | 25.53 µs | 26.55 µs | 104.72 µs | 30.00 µs | 141.08 µs ✓ | 37.69 µs | 18.00 µs |
-| SHA-256, 64 B | 38 ns ✓ | 74 ns | 62 ns | 53 ns | 56 ns | 202 ns ✓ | 177 ns | 56 ns |
-| SHA-256, 1350 B | 502 ns ✓ | 528 ns | 524 ns | 508 ns | 511 ns | 2.14 µs ✓ | 636 ns | 522 ns |
-| SHA-256, 16 KB | 5.83 µs ✓ | 5.87 µs | 5.86 µs | 5.84 µs | 5.84 µs | 24.91 µs ✓ | 5.97 µs | 5.85 µs |
-| SHA-512, 64 B | 93 ns ✓ | 136 ns | 132 ns | 120 ns | 144 ns | 128 ns ✓ | 239 ns | 111 ns |
-| SHA-512, 1350 B | 876 ns ✓ | 1.21 µs | 1.20 µs | 1.19 µs | 1.40 µs | 1.37 µs ✓ | 1.02 µs | 932 ns |
-| SHA-512, 16 KB | 10.12 µs ✓ | 13.80 µs | 13.80 µs | 13.85 µs | 16.19 µs | 15.52 µs ✓ | 10.22 µs | 10.42 µs |
-| SHA3-256, 64 B | 195 ns ✓ | 200 ns | - | 199 ns | - | 197 ns | - | 176 ns |
-| SHA3-256, 1350 B | 1.66 µs ✓ | 1.67 µs | - | 1.91 µs | - | 1.91 µs | - | 1.69 µs |
-| SHA3-256, 16 KB | 19.70 µs ✓ | 19.75 µs | - | 22.96 µs | - | 23.01 µs | - | 20.21 µs |
-| SHA3-512, 64 B | 190 ns ✓ | 203 ns | - | 201 ns | - | 203 ns | - | 176 ns |
-| SHA3-512, 1350 B | 3.12 µs ✓ | 3.12 µs | - | 3.59 µs | - | 3.58 µs | - | 3.12 µs |
-| SHA3-512, 16 KB | 36.95 µs ✓ | 36.97 µs | - | 42.83 µs | - | 42.80 µs | - | 37.12 µs |
+| X25519 | 10.95 µs ✓ | 15.77 µs | 30.72 µs | 34.70 µs | 15.39 µs | 42.06 µs ✓ | 31.99 µs | 11.03 µs |
+| P-256 ECDH | 22.57 µs ✓ | 26.91 µs | 28.03 µs | 127.14 µs | 31.30 µs | 168.09 µs ✓ | 44.83 µs | 22.64 µs |
+| Ed25519 sign | 2.37 µs ✓ | 3.96 µs | 11.96 µs | 9.43 µs | 3.78 µs | 30.18 µs ✓ | 13.93 µs | 2.40 µs |
+| Ed25519 verify | 11.07 µs ✓ | 17.52 µs | 23.19 µs | 20.02 µs | 16.17 µs | 36.95 µs ✓ | 43.91 µs | 11.18 µs |
+| P-256 ECDSA sign | 5.87 µs ✓ | 8.40 µs | 8.73 µs | 35.39 µs | 7.61 µs | 59.33 µs ✓ | 11.01 µs | 5.57 µs |
+| P-256 ECDSA verify | 18.35 µs ✓ | 25.64 µs | 27.02 µs | 106.24 µs | 30.02 µs | 141.24 µs ✓ | 38.20 µs | 18.16 µs |
+| SHA-256, 64 B | 38 ns ✓ | 75 ns | 62 ns | 53 ns | 56 ns | 200 ns ✓ | 179 ns | 56 ns |
+| SHA-256, 1350 B | 512 ns ✓ | 541 ns | 526 ns | 513 ns | 515 ns | 2.17 µs ✓ | 639 ns | 527 ns |
+| SHA-256, 16 KB | 5.94 µs ✓ | 5.89 µs | 5.88 µs | 5.87 µs | 5.85 µs | 24.92 µs ✓ | 6.00 µs | 5.93 µs |
+| SHA-512, 64 B | 94 ns ✓ | 136 ns | 133 ns | 120 ns | 145 ns | 130 ns ✓ | 225 ns | 112 ns |
+| SHA-512, 1350 B | 882 ns ✓ | 1.21 µs | 1.21 µs | 1.20 µs | 1.39 µs | 1.34 µs ✓ | 1.01 µs | 950 ns |
+| SHA-512, 16 KB | 10.12 µs ✓ | 13.90 µs | 13.85 µs | 13.87 µs | 16.23 µs | 15.54 µs ✓ | 10.28 µs | 10.47 µs |
+| SHA3-256, 64 B | 191 ns ✓ | 199 ns | - | 200 ns | - | 193 ns | - | 176 ns |
+| SHA3-256, 1350 B | 1.66 µs ✓ | 1.67 µs | - | 1.91 µs | - | 1.91 µs | - | 1.70 µs |
+| SHA3-256, 16 KB | 19.78 µs ✓ | 19.79 µs | - | 22.94 µs | - | 23.05 µs | - | 20.28 µs |
+| SHA3-512, 64 B | 187 ns ✓ | 205 ns | - | 202 ns | - | 204 ns | - | 176 ns |
+| SHA3-512, 1350 B | 3.30 µs ✓ | 3.16 µs | - | 3.76 µs | - | 3.92 µs | - | 3.25 µs |
+| SHA3-512, 16 KB | 37.67 µs ✓ | 38.09 µs | - | 43.24 µs | - | 43.45 µs | - | 37.21 µs |
 | SHA-1, 64 B | - | - | - | - | - | - | - | - |
 | SHA-1, 1350 B | - | - | - | - | - | - | - | - |
 | SHA-1, 16 KB | - | - | - | - | - | - | - | - |
 | MD5, 64 B | - | - | - | - | - | - | - | - |
 | MD5, 1350 B | - | - | - | - | - | - | - | - |
 | MD5, 16 KB | - | - | - | - | - | - | - | - |
-| HMAC-SHA256, 64 B | 112 ns ✓ | 205 ns | 170 ns | 135 ns | 139 ns | 492 ns ✓ | 1.73 µs | 136 ns |
-| HMAC-SHA256, 1350 B | 566 ns ✓ | 668 ns | 626 ns | 588 ns | 593 ns | 2.43 µs ✓ | 2.16 µs | 595 ns |
-| HKDF-SHA256 extract and expand | 236 ns ✓ | 315 ns | 346 ns | 292 ns | - | 822 ns ✓ | 1.93 µs | 261 ns |
-| HKDF-SHA256 expand | 74 ns ✓ | 141 ns | 116 ns | 89 ns | - | 417 ns ✓ | 1.39 µs | 122 ns |
-| RSA-2048 PKCS#1 sign | 132.97 µs | 157.78 µs | 313.21 µs | 1.12 ms | 289.48 µs | - | 159.05 µs | 132.26 µs |
-| RSA-2048 PKCS#1 verify | 5.88 µs ✓ | 10.09 µs | 11.61 µs | 30.22 µs | 12.37 µs | - | 14.75 µs | 4.80 µs |
-| RSA-2048 PSS sign | 135.05 µs | 155.56 µs | 313.45 µs | 1.12 ms | 292.96 µs | 3.65 ms ✓ | 160.30 µs | 132.75 µs |
-| RSA-2048 PSS verify | 6.20 µs ✓ | 10.41 µs | 12.19 µs | 36.45 µs | 12.81 µs | 222.64 µs ✓ | 15.58 µs | 5.25 µs |
-| ML-KEM-768 key generation | 4.42 µs | 9.43 µs | - | 38.30 µs | 4.37 µs | 12.67 µs | 19.98 µs | 4.33 µs |
-| ML-KEM-768 encapsulate | 3.77 µs | 9.69 µs | - | 40.04 µs | 4.59 µs | 11.08 µs | 19.82 µs | 3.74 µs |
-| ML-KEM-768 decapsulate | 4.13 µs | 11.40 µs | - | 52.18 µs | 3.91 µs | 11.47 µs | 16.64 µs | 4.07 µs |
-| ML-KEM-1024 key generation | 6.56 µs | 13.99 µs | - | - | - | 16.78 µs | - | - |
-| ML-KEM-1024 encapsulate | 6.39 µs | 14.38 µs | - | - | - | 14.73 µs | - | - |
-| ML-KEM-1024 decapsulate | 5.24 µs | 16.51 µs | - | - | - | 15.85 µs | - | - |
-| ML-KEM-512 key generation | 3.79 µs | 5.18 µs | - | - | - | 9.48 µs | - | - |
-| ML-KEM-512 encapsulate | 3.96 µs | 5.70 µs | - | - | - | 8.05 µs | - | - |
-| ML-KEM-512 decapsulate | 3.28 µs | 6.87 µs | - | - | - | 8.49 µs | - | - |
-| ML-DSA-65 key generation | 24.23 µs | 28.37 µs | - | 156.78 µs | - | 33.19 µs | 99.87 µs | 35.96 µs |
-| ML-DSA-65 sign | 40.13 µs | 82.30 µs | - | 526.81 µs | - | 80.73 µs | 530.40 µs | 58.02 µs |
-| ML-DSA-65 verify | 4.76 µs | 24.79 µs | - | 57.72 µs | - | 34.96 µs | 98.77 µs | 16.82 µs |
-| ML-DSA-65 load and verify | 22.27 µs | 24.70 µs | - | 111.26 µs | - | 35.01 µs | 102.67 µs | - |
-| P-384 ECDH | 82.72 µs ✓ | 97.72 µs | 363.81 µs | 424.84 µs | 148.68 µs | - | 312.44 µs | 88.75 µs |
-| P-384 ECDSA sign | 16.78 µs ✓ | 43.57 µs | 197.02 µs | 104.42 µs | 78.13 µs | - | 102.74 µs | 15.21 µs |
-| P-384 ECDSA verify | 79.52 µs ✓ | 101.57 µs | 354.75 µs | 364.97 µs | 145.63 µs | - | 254.22 µs | 78.94 µs |
-| P-521 ECDH | 148.81 µs | 159.38 µs | - | 406.13 µs | - | - | 240.99 µs | 150.94 µs |
-| P-521 ECDSA sign | 37.49 µs | 84.06 µs | - | 92.62 µs | - | - | 118.38 µs | 38.31 µs |
-| P-521 ECDSA verify | 141.58 µs | 175.49 µs | - | 312.35 µs | - | - | 235.91 µs | 144.73 µs |
-| HPKE X25519 sender setup | 12.14 µs | 17.90 µs | - | 45.00 µs | - | 48.45 µs | - | - |
-| HPKE X25519 recipient setup | 9.95 µs | 17.66 µs | - | 36.02 µs | - | 46.16 µs | - | - |
-| HPKE AES-128-GCM seal, 1350 B | 106 ns | 237 ns | - | 390 ns | - | 2.45 µs | - | - |
-| HPKE AES-128-GCM open, 1350 B | 79 ns | 239 ns | - | 388 ns | - | 2.48 µs | - | - |
-| Blind RSA-2048 blind | 38.05 µs | - | - | 308.17 µs | - | - | - | - |
-| Blind RSA-2048 sign | 140.61 µs | - | - | 1.20 ms | - | - | - | - |
-| Blind RSA-2048 finalize | 5.71 µs | - | - | 38.32 µs | - | - | - | - |
-| Blind RSA-2048 verify | 5.44 µs | - | - | 33.04 µs | - | - | - | - |
-| OPRF ristretto255 blind | 25.16 µs | - | - | 25.63 µs | - | - | - | - |
-| OPRF ristretto255 evaluate | 18.23 µs | - | - | 17.68 µs | - | - | - | - |
-| OPRF ristretto255 finalize | 19.12 µs | - | - | 27.07 µs | - | - | - | - |
-| VOPRF P-384 blind | 88.49 µs | - | - | 404.48 µs | - | - | - | - |
-| VOPRF P-384 evaluate | 309.69 µs | - | - | 1.73 ms | - | - | - | - |
-| VOPRF P-384 finalize | 450.71 µs | - | - | 2.42 ms | - | - | - | - |
-| ECVRF edwards25519 prove | 51.38 µs | - | - | 73.26 µs | - | - | - | - |
-| ECVRF edwards25519 verify | 64.79 µs | - | - | 82.87 µs | - | - | - | - |
-| ECVRF P-256 prove | 55.25 µs | - | - | 256.99 µs | - | - | - | - |
-| ECVRF P-256 verify | 76.58 µs | - | - | 325.73 µs | - | - | - | - |
-| SPAKE2+ P-256 prover share | 26.29 µs | - | - | 198.74 µs | - | - | - | - |
-| SPAKE2+ P-256 verifier share and confirmation | 90.33 µs | - | - | 498.15 µs | - | - | - | - |
-| SPAKE2+ P-256 prover confirmation and key | 64.32 µs | - | - | 300.53 µs | - | - | - | - |
-| SPAKE2+ P-256 verifier key | 18 ns | - | - | 32 ns | - | - | - | - |
-| Argon2id 16 MiB t=1 p=1 | 2.54 ms | - | - | 4.13 ms | - | - | 4.65 ms | - |
-| Argon2id 64 MiB t=3 p=4 | 68.89 ms | - | - | 82.39 ms | - | - | 100.66 ms | - |
+| HMAC-SHA256, 64 B | 113 ns ✓ | 210 ns | 170 ns | 141 ns | 142 ns | 516 ns ✓ | 1.69 µs | 136 ns |
+| HMAC-SHA256, 1350 B | 567 ns ✓ | 677 ns | 632 ns | 593 ns | 596 ns | 2.44 µs ✓ | 2.14 µs | 598 ns |
+| HKDF-SHA256 extract and expand | 236 ns ✓ | 329 ns | 342 ns | 292 ns | - | 823 ns ✓ | 1.93 µs | 262 ns |
+| HKDF-SHA256 expand | 74 ns ✓ | 140 ns | 115 ns | 89 ns | - | 413 ns ✓ | 1.37 µs | 122 ns |
+| RSA-2048 PKCS#1 sign | 134.57 µs | 155.75 µs | 324.42 µs | 1.13 ms | 294.00 µs | - | 162.40 µs | 135.54 µs |
+| RSA-2048 PKCS#1 verify | 5.45 µs ✓ | 10.04 µs | 11.77 µs | 30.42 µs | 12.40 µs | - | 14.82 µs | 4.84 µs |
+| RSA-2048 PSS sign | 136.91 µs | 155.97 µs | 316.06 µs | 1.12 ms | 289.91 µs | 3.56 ms ✓ | 161.04 µs | 139.48 µs |
+| RSA-2048 PSS verify | 5.82 µs ✓ | 10.55 µs | 12.21 µs | 37.24 µs | 13.06 µs | 235.52 µs ✓ | 16.09 µs | 5.29 µs |
+| ML-KEM-768 key generation | 4.42 µs | 10.02 µs | - | 40.71 µs | 4.52 µs | 13.38 µs | 21.62 µs | 4.61 µs |
+| ML-KEM-768 encapsulate | 3.99 µs | 9.92 µs | - | 41.67 µs | 4.77 µs | 11.32 µs | 19.87 µs | 3.85 µs |
+| ML-KEM-768 decapsulate | 4.24 µs | 11.66 µs | - | 54.02 µs | 4.12 µs | 12.03 µs | 17.12 µs | 4.18 µs |
+| ML-KEM-1024 key generation | 6.79 µs | 14.21 µs | - | - | - | 17.40 µs | - | - |
+| ML-KEM-1024 encapsulate | 6.46 µs | 14.55 µs | - | - | - | 14.88 µs | - | - |
+| ML-KEM-1024 decapsulate | 5.47 µs | 16.82 µs | - | - | - | 16.03 µs | - | - |
+| ML-KEM-512 key generation | 4.20 µs | 5.89 µs | - | - | - | 10.08 µs | - | - |
+| ML-KEM-512 encapsulate | 5.68 µs | 7.04 µs | - | - | - | 10.04 µs | - | - |
+| ML-KEM-512 decapsulate | 4.18 µs | 7.85 µs | - | - | - | 9.02 µs | - | - |
+| ML-DSA-65 key generation | 22.88 µs | 29.45 µs | - | 163.19 µs | - | 33.67 µs | 104.87 µs | 36.71 µs |
+| ML-DSA-65 sign | 40.38 µs | 82.88 µs | - | 565.82 µs | - | 92.67 µs | 528.85 µs | 72.67 µs |
+| ML-DSA-65 verify | 4.50 µs | 34.00 µs | - | 95.75 µs | - | 47.80 µs | 159.46 µs | 17.38 µs |
+| ML-DSA-65 load and verify | 23.57 µs | 25.80 µs | - | 118.36 µs | - | 37.09 µs | 111.60 µs | - |
+| P-384 ECDH | 83.21 µs ✓ | 98.70 µs | 366.56 µs | 432.18 µs | 149.23 µs | - | 314.02 µs | 112.60 µs |
+| P-384 ECDSA sign | 16.73 µs ✓ | 43.86 µs | 198.47 µs | 105.06 µs | 90.99 µs | - | 104.06 µs | 15.84 µs |
+| P-384 ECDSA verify | 79.15 µs ✓ | 103.22 µs | 355.04 µs | 366.80 µs | 146.72 µs | - | 255.98 µs | 83.45 µs |
+| P-521 ECDH | 153.59 µs | 164.35 µs | - | 411.51 µs | - | - | 245.23 µs | 154.77 µs |
+| P-521 ECDSA sign | 37.96 µs | 85.51 µs | - | 95.42 µs | - | - | 119.31 µs | 45.50 µs |
+| P-521 ECDSA verify | 145.53 µs | 178.97 µs | - | 319.09 µs | - | - | 240.60 µs | 145.89 µs |
+| HPKE X25519 sender setup | 12.69 µs | 24.86 µs | - | 51.43 µs | - | 55.84 µs | - | - |
+| HPKE X25519 recipient setup | 10.20 µs | 18.20 µs | - | 36.86 µs | - | 62.14 µs | - | - |
+| HPKE AES-128-GCM seal, 1350 B | 161 ns | 279 ns | - | 545 ns | - | 2.77 µs | - | - |
+| HPKE AES-128-GCM open, 1350 B | 88 ns | 329 ns | - | 568 ns | - | 2.71 µs | - | - |
+| Blind RSA-2048 blind | 35.17 µs | - | - | 235.95 µs | - | - | - | - |
+| Blind RSA-2048 sign | 135.82 µs | - | - | 1.13 ms | - | - | - | - |
+| Blind RSA-2048 finalize | 5.50 µs | - | - | 36.13 µs | - | - | - | - |
+| Blind RSA-2048 verify | 5.22 µs | - | - | 31.72 µs | - | - | - | - |
+| OPRF ristretto255 blind | 25.35 µs | - | - | 25.66 µs | - | - | - | - |
+| OPRF ristretto255 evaluate | 18.33 µs | - | - | 18.24 µs | - | - | - | - |
+| OPRF ristretto255 finalize | 19.29 µs | - | - | 27.26 µs | - | - | - | - |
+| VOPRF P-384 blind | 106.47 µs | - | - | 407.42 µs | - | - | - | - |
+| VOPRF P-384 evaluate | 382.87 µs | - | - | 1.74 ms | - | - | - | - |
+| VOPRF P-384 finalize | 540.41 µs | - | - | 2.43 ms | - | - | - | - |
+| ECVRF edwards25519 prove | 52.17 µs | - | - | 73.51 µs | - | - | - | - |
+| ECVRF edwards25519 verify | 65.26 µs | - | - | 84.04 µs | - | - | - | - |
+| ECVRF P-256 prove | 55.43 µs | - | - | 258.45 µs | - | - | - | - |
+| ECVRF P-256 verify | 76.93 µs | - | - | 327.21 µs | - | - | - | - |
+| SPAKE2+ P-256 prover share | 26.53 µs | - | - | 199.08 µs | - | - | - | - |
+| SPAKE2+ P-256 verifier share and confirmation | 91.14 µs | - | - | 500.46 µs | - | - | - | - |
+| SPAKE2+ P-256 prover confirmation and key | 64.62 µs | - | - | 301.98 µs | - | - | - | - |
+| SPAKE2+ P-256 verifier key | 17 ns | - | - | 36 ns | - | - | - | - |
+| Argon2id 16 MiB t=1 p=1 | 2.42 ms | - | - | 3.31 ms | - | - | 4.29 ms | - |
+| Argon2id 64 MiB t=3 p=4 | 53.00 ms | - | - | 65.24 ms | - | - | 75.55 ms | - |
+| SLH-DSA-SHA2-128s key generation | - | - | - | - | - | - | - | - |
+| SLH-DSA-SHA2-128s sign | - | - | - | - | - | - | - | - |
+| SLH-DSA-SHA2-128s verify | - | - | - | - | - | - | - | - |
+| SLH-DSA-SHA2-128f key generation | - | - | - | - | - | - | - | - |
+| SLH-DSA-SHA2-128f sign | - | - | - | - | - | - | - | - |
+| SLH-DSA-SHA2-128f verify | - | - | - | - | - | - | - | - |
+| SLH-DSA-SHAKE-128f key generation | - | - | - | - | - | - | - | - |
+| SLH-DSA-SHAKE-128f sign | - | - | - | - | - | - | - | - |
+| SLH-DSA-SHAKE-128f verify | - | - | - | - | - | - | - | - |
 
 </details>
 
 ### `kixtop`: Apple M4
 
-Measured 2026-11-12 at [`0d2e74b4`](https://github.com/kixel-ai/rind/commit/0d2e74b489c1067beeab373f9de75d24574b4bc5), on macOS 26.6.2 (25.6.0) with rustc 1.98.1 (48a229cea 2026-09-01).
+Measured 2026-11-24 at [`3f76a53f`](https://github.com/kixel-ai/rind/commit/3f76a53f35ae185f0e9ea0a58f3455766fc4d643), on macOS 26.6.2 (25.6.0) with rustc 1.98.1 (48a229cea 2026-09-01).
 
-The maintainer's MacBook, in daily use. Its cores have DIT, and this run timed rind two ways. The AES-GCM, ChaCha20-Poly1305, header protection, SHA-2, HMAC, and HKDF rows hold `rind::cpu::Dit::hold()` across calls, as MoQ does and as the report's rind column assumes. rind's other rows set DIT around each call. In the run before, rows timed both ways paid 20 to 120 ns a call for that toggle, so the other primitive rows likely overstate rind's time until re-measured holding DIT. In the rustls rows, holding DIT would also run rustls' own code with it on, a cost not yet measured, so which way they would move is open.
+The maintainer's MacBook, in daily use. Its cores have DIT, and every rind row holds `rind::cpu::Dit::hold()` across calls, as MoQ does, so the rustls rows run rustls' own code with DIT on too.
 
-Not timed on `kixtop`: full handshake, X25519, every logical CPU, resumed handshake, X25519, every logical CPU, SHA-1, 64 B, SHA-1, 1350 B, SHA-1, 16 KB, MD5, 64 B, MD5, 1350 B, MD5, 16 KB, ML-KEM-1024 key generation, ML-KEM-1024 encapsulate, ML-KEM-1024 decapsulate, ML-KEM-512 key generation, ML-KEM-512 encapsulate, ML-KEM-512 decapsulate, ML-DSA-65 load and verify, HPKE X25519 sender setup, HPKE X25519 recipient setup, HPKE AES-128-GCM seal, 1350 B, HPKE AES-128-GCM open, 1350 B, Blind RSA-2048 blind, Blind RSA-2048 sign, Blind RSA-2048 finalize, Blind RSA-2048 verify, OPRF ristretto255 blind, OPRF ristretto255 evaluate, OPRF ristretto255 finalize, VOPRF P-384 blind, VOPRF P-384 evaluate, VOPRF P-384 finalize, ECVRF edwards25519 prove, ECVRF edwards25519 verify, ECVRF P-256 prove, ECVRF P-256 verify, SPAKE2+ P-256 prover share, SPAKE2+ P-256 verifier share and confirmation, SPAKE2+ P-256 prover confirmation and key, SPAKE2+ P-256 verifier key, Argon2id 16 MiB t=1 p=1, Argon2id 64 MiB t=3 p=4.
+Not timed on `kixtop`: one record, AES-128-GCM, 64 B, one record, AES-128-GCM, 256 B, one record, AES-128-GCM, 1 KB, one record, ChaCha20-Poly1305, 64 B, one record, ChaCha20-Poly1305, 256 B, one record, ChaCha20-Poly1305, 1 KB, SHA-1, 64 B, SHA-1, 1350 B, SHA-1, 16 KB, MD5, 64 B, MD5, 1350 B, MD5, 16 KB, SLH-DSA-SHA2-128s key generation, SLH-DSA-SHA2-128s sign, SLH-DSA-SHA2-128s verify, SLH-DSA-SHA2-128f key generation, SLH-DSA-SHA2-128f sign, SLH-DSA-SHA2-128f verify, SLH-DSA-SHAKE-128f key generation, SLH-DSA-SHAKE-128f sign, SLH-DSA-SHAKE-128f verify, AES-128-GCM seal, 32 B, DIT set per call, AES-128-GCM seal, 1350 B, DIT set per call, ChaCha20-Poly1305 seal, 32 B, DIT set per call, ChaCha20-Poly1305 seal, 1350 B, DIT set per call, X25519, DIT set per call, Ed25519 sign, DIT set per call, Ed25519 verify, DIT set per call, P-256 ECDSA sign, DIT set per call, P-256 ECDSA verify, DIT set per call, one record, AES-128-GCM, 64 B, DIT set per call.
+
+rind-rustls on all 10 logical CPUs runs full handshakes at 5.0 times and resumed handshakes at 4.6 times its one-thread rate.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="benchmarks/kixtop-dark.svg">
@@ -428,127 +475,152 @@ Not timed on `kixtop`: full handshake, X25519, every logical CPU, resumed handsh
 <details>
 <summary>Times on kixtop</summary>
 
-| Operation | rind | aws-lc-rs | ring | RustCrypto + dalek | graviola | libcrux | OpenSSL |
-|---|---|---|---|---|---|---|---|
-| full handshake, X25519MLKEM768 | 173.23 µs | 212.56 µs | - | - | 180.17 µs | - | 456.82 µs |
-| full handshake, X25519 | 151.22 µs | 185.85 µs | 184.69 µs | - | 159.17 µs | - | 372.49 µs |
-| full handshake, P-256 | 170.52 µs | 206.23 µs | 200.21 µs | - | 190.85 µs | - | 399.16 µs |
-| full handshake, Ed25519 certificate | 126.33 µs | 150.61 µs | 154.72 µs | - | 123.77 µs | - | 380.72 µs |
-| full handshake, RSA-2048 certificate | 369.16 µs | 405.76 µs | 444.92 µs | - | 678.21 µs | - | 640.42 µs |
-| resumed handshake, X25519 | 65.26 µs | 91.11 µs | 87.09 µs | - | 61.83 µs | - | 254.27 µs |
-| full handshake, X25519, every logical CPU | - | - | - | - | - | - | - |
-| resumed handshake, X25519, every logical CPU | - | - | - | - | - | - | - |
-| 1 MB transfer, AES-128-GCM | 296.33 µs | 292.60 µs | 361.56 µs | - | 312.02 µs | - | 323.80 µs |
-| 1 MB transfer, AES-256-GCM | 330.76 µs | 324.80 µs | 373.95 µs | - | 387.84 µs | - | 356.52 µs |
-| 1 MB transfer, ChaCha20-Poly1305 | 1.11 ms | 1.11 ms | 1.10 ms | - | 1.75 ms | - | 1.09 ms |
-| AES-128-GCM seal, 32 B | 12 ns | 50 ns | 42 ns | 24 ns | 78 ns | 54 ns | 70 ns |
-| AES-128-GCM seal, 1350 B | 163 ns | 180 ns | 212 ns | 216 ns | 217 ns | 617 ns | 196 ns |
-| AES-128-GCM seal, 16 KB | 1.43 µs | 1.45 µs | 1.95 µs | 2.31 µs | 1.61 µs | 6.94 µs | 1.52 µs |
-| AES-128-GCM open, 32 B | 14 ns | 47 ns | 39 ns | 28 ns | 84 ns | 63 ns | 67 ns |
-| AES-128-GCM open, 1350 B | 180 ns | 193 ns | 245 ns | 234 ns | 226 ns | 638 ns | 199 ns |
-| AES-128-GCM open, 16 KB | 1.56 µs | 1.58 µs | 2.18 µs | 2.45 µs | 1.72 µs | 6.87 µs | 1.66 µs |
-| AES-256-GCM seal, 32 B | 12 ns | 54 ns | 45 ns | 25 ns | 80 ns | 53 ns | 67 ns |
-| AES-256-GCM seal, 1350 B | 189 ns | 204 ns | 218 ns | 242 ns | 260 ns | 643 ns | 222 ns |
-| AES-256-GCM seal, 16 KB | 1.69 µs | 1.73 µs | 2.03 µs | 2.67 µs | 2.15 µs | 7.20 µs | 1.78 µs |
-| AES-256-GCM open, 32 B | 14 ns | 50 ns | 40 ns | 41 ns | 85 ns | 66 ns | 69 ns |
-| AES-256-GCM open, 1350 B | 201 ns | 217 ns | 250 ns | 264 ns | 265 ns | 657 ns | 226 ns |
-| AES-256-GCM open, 16 KB | 1.85 µs | 1.83 µs | 2.23 µs | 2.84 µs | 2.19 µs | 7.23 µs | 1.92 µs |
-| ChaCha20-Poly1305 seal, 32 B | 150 ns | 160 ns | 147 ns | 344 ns | 196 ns | 170 ns ✓ | 217 ns |
-| ChaCha20-Poly1305 seal, 1350 B | 753 ns | 765 ns | 748 ns | 1.78 µs | 1.23 µs | 1.96 µs ✓ | 841 ns |
-| ChaCha20-Poly1305 seal, 16 KB | 7.64 µs | 7.60 µs | 7.61 µs | 15.17 µs | 12.68 µs | 22.16 µs ✓ | 7.42 µs |
-| XChaCha20-Poly1305 seal, 32 B | 891 ns | 872 ns | - | 1.05 µs | 916 ns | 905 ns | - |
-| XChaCha20-Poly1305 seal, 1350 B | 1.50 µs | 1.47 µs | - | 2.50 µs | 1.95 µs | 2.73 µs | - |
-| XChaCha20-Poly1305 seal, 16 KB | 8.36 µs | 8.33 µs | - | 15.79 µs | 13.27 µs | 22.71 µs | - |
-| AES-128 header protection | 4 ns ✓ | 3 ns | 3 ns | - | - | - | - |
-| AES-256 header protection | 4 ns ✓ | 3 ns | 4 ns | - | - | - | - |
-| ChaCha20 header protection | 58 ns ✓ | 73 ns | 68 ns | - | - | - | - |
-| X25519 | 16.53 µs | 17.71 µs | 24.40 µs | 30.01 µs | 16.56 µs | 37.33 µs ✓ | 35.93 µs |
-| P-256 ECDH | 26.26 µs ✓ | 28.65 µs | 32.28 µs | 178.86 µs | 31.14 µs | 183.27 µs ✓ | 50.46 µs |
-| Ed25519 sign | 3.95 µs | 4.07 µs | 7.08 µs | 8.64 µs | 4.15 µs | 22.14 µs ✓ | 16.50 µs |
-| Ed25519 verify | 16.50 µs | 18.52 µs | 19.97 µs | 18.44 µs | 16.65 µs | 29.49 µs ✓ | 40.52 µs |
-| P-256 ECDSA sign | 7.17 µs ✓ | 11.31 µs | 11.03 µs | 44.56 µs | 8.68 µs | 67.09 µs ✓ | 12.59 µs |
-| P-256 ECDSA verify | 26.16 µs ✓ | 27.18 µs | 29.20 µs | 152.42 µs | 28.23 µs | 156.63 µs ✓ | 41.84 µs |
-| SHA-256, 64 B | 37 ns ✓ | 71 ns | 45 ns | 37 ns | 35 ns | 226 ns ✓ | 161 ns |
-| SHA-256, 1350 B | 408 ns ✓ | 434 ns | 410 ns | 472 ns | 474 ns | 2.51 µs ✓ | 530 ns |
-| SHA-256, 16 KB | 4.85 µs ✓ | 4.86 µs | 4.85 µs | 5.74 µs | 5.74 µs | 29.30 µs ✓ | 4.98 µs |
-| SHA-512, 64 B | 78 ns ✓ | 106 ns | 87 ns | 78 ns | 174 ns | 141 ns ✓ | 206 ns |
-| SHA-512, 1350 B | 734 ns ✓ | 768 ns | 738 ns | 723 ns | 1.87 µs | 1.56 µs ✓ | 886 ns |
-| SHA-512, 16 KB | 8.73 µs ✓ | 8.71 µs | 8.68 µs | 8.51 µs | 21.67 µs | 18.50 µs ✓ | 8.78 µs |
-| SHA3-256, 64 B | 166 ns ✓ | 176 ns | - | 128 ns | - | 154 ns | - |
-| SHA3-256, 1350 B | 1.37 µs ✓ | 1.35 µs | - | 1.28 µs | - | 1.66 µs | - |
-| SHA3-256, 16 KB | 16.17 µs ✓ | 15.90 µs | - | 15.43 µs | - | 20.22 µs | - |
-| SHA3-512, 64 B | 170 ns ✓ | 173 ns | - | 137 ns | - | 175 ns | - |
-| SHA3-512, 1350 B | 2.55 µs ✓ | 2.51 µs | - | 2.43 µs | - | 3.22 µs | - |
-| SHA3-512, 16 KB | 30.52 µs ✓ | 30.21 µs | - | 29.20 µs | - | 38.27 µs | - |
-| SHA-1, 64 B | - | - | - | - | - | - | - |
-| SHA-1, 1350 B | - | - | - | - | - | - | - |
-| SHA-1, 16 KB | - | - | - | - | - | - | - |
-| MD5, 64 B | - | - | - | - | - | - | - |
-| MD5, 1350 B | - | - | - | - | - | - | - |
-| MD5, 16 KB | - | - | - | - | - | - | - |
-| HMAC-SHA256, 64 B | 106 ns ✓ | 247 ns | 136 ns | 101 ns | 114 ns | 568 ns ✓ | 2.08 µs |
-| HMAC-SHA256, 1350 B | 477 ns ✓ | 612 ns | 505 ns | 541 ns | 559 ns | 2.84 µs ✓ | 2.45 µs |
-| HKDF-SHA256 extract and expand | 213 ns ✓ | 330 ns | 316 ns | 216 ns | - | 937 ns ✓ | 2.16 µs |
-| HKDF-SHA256 expand | 74 ns ✓ | 153 ns | 100 ns | 69 ns | - | 482 ns ✓ | 1.53 µs |
-| RSA-2048 PKCS#1 sign | 274.60 µs | 284.43 µs | 322.81 µs | 585.97 µs | 555.17 µs | - | 340.99 µs |
-| RSA-2048 PKCS#1 verify | 8.66 µs | 9.49 µs | 10.95 µs | 30.53 µs | 18.52 µs | - | 16.53 µs |
-| RSA-2048 PSS sign | 275.24 µs | 285.88 µs | 322.64 µs | 586.71 µs | 556.25 µs | 4.44 ms ✓ | 342.04 µs |
-| RSA-2048 PSS verify | 9.00 µs | 9.82 µs | 11.41 µs | 38.86 µs | 18.87 µs | 296.70 µs ✓ | 17.26 µs |
-| ML-KEM-768 key generation | 6.14 µs | 7.47 µs | - | 26.54 µs | 6.19 µs | 12.00 µs | 25.12 µs |
-| ML-KEM-768 encapsulate | 6.77 µs | 7.98 µs | - | 27.68 µs | 6.42 µs | 9.30 µs | 23.71 µs |
-| ML-KEM-768 decapsulate | 4.13 µs | 7.63 µs | - | 34.46 µs | 4.04 µs | 9.57 µs | 24.40 µs |
-| ML-KEM-1024 key generation | - | - | - | - | - | - | - |
-| ML-KEM-1024 encapsulate | - | - | - | - | - | - | - |
-| ML-KEM-1024 decapsulate | - | - | - | - | - | - | - |
-| ML-KEM-512 key generation | - | - | - | - | - | - | - |
-| ML-KEM-512 encapsulate | - | - | - | - | - | - | - |
-| ML-KEM-512 decapsulate | - | - | - | - | - | - | - |
-| ML-DSA-65 key generation | 20.33 µs | 23.73 µs | - | 131.64 µs | - | 46.24 µs | 82.69 µs |
-| ML-DSA-65 sign | 54.96 µs | 64.06 µs | - | 453.30 µs | - | 130.86 µs | 397.50 µs |
-| ML-DSA-65 verify | 17.21 µs | 20.23 µs | - | 49.54 µs | - | 35.99 µs | 73.00 µs |
-| ML-DSA-65 load and verify | - | - | - | - | - | - | - |
-| P-384 ECDH | 90.83 µs ✓ | 104.30 µs | 411.40 µs | 494.73 µs | 153.28 µs | - | 279.58 µs |
-| P-384 ECDSA sign | 22.52 µs ✓ | 49.14 µs | 224.55 µs | 112.02 µs | 81.02 µs | - | 103.75 µs |
-| P-384 ECDSA verify | 85.87 µs ✓ | 110.86 µs | 395.56 µs | 425.01 µs | 150.92 µs | - | 236.60 µs |
-| P-521 ECDH | 129.89 µs | 142.21 µs | - | 398.58 µs | - | - | 247.94 µs |
-| P-521 ECDSA sign | 36.21 µs | 83.82 µs | - | 79.54 µs | - | - | 132.25 µs |
-| P-521 ECDSA verify | 120.80 µs | 166.18 µs | - | 250.16 µs | - | - | 253.32 µs |
-| HPKE X25519 sender setup | - | - | - | - | - | - | - |
-| HPKE X25519 recipient setup | - | - | - | - | - | - | - |
-| HPKE AES-128-GCM seal, 1350 B | - | - | - | - | - | - | - |
-| HPKE AES-128-GCM open, 1350 B | - | - | - | - | - | - | - |
-| Blind RSA-2048 blind | - | - | - | - | - | - | - |
-| Blind RSA-2048 sign | - | - | - | - | - | - | - |
-| Blind RSA-2048 finalize | - | - | - | - | - | - | - |
-| Blind RSA-2048 verify | - | - | - | - | - | - | - |
-| OPRF ristretto255 blind | - | - | - | - | - | - | - |
-| OPRF ristretto255 evaluate | - | - | - | - | - | - | - |
-| OPRF ristretto255 finalize | - | - | - | - | - | - | - |
-| VOPRF P-384 blind | - | - | - | - | - | - | - |
-| VOPRF P-384 evaluate | - | - | - | - | - | - | - |
-| VOPRF P-384 finalize | - | - | - | - | - | - | - |
-| ECVRF edwards25519 prove | - | - | - | - | - | - | - |
-| ECVRF edwards25519 verify | - | - | - | - | - | - | - |
-| ECVRF P-256 prove | - | - | - | - | - | - | - |
-| ECVRF P-256 verify | - | - | - | - | - | - | - |
-| SPAKE2+ P-256 prover share | - | - | - | - | - | - | - |
-| SPAKE2+ P-256 verifier share and confirmation | - | - | - | - | - | - | - |
-| SPAKE2+ P-256 prover confirmation and key | - | - | - | - | - | - | - |
-| SPAKE2+ P-256 verifier key | - | - | - | - | - | - | - |
-| Argon2id 16 MiB t=1 p=1 | - | - | - | - | - | - | - |
-| Argon2id 64 MiB t=3 p=4 | - | - | - | - | - | - | - |
+| Operation | rind | aws-lc-rs | ring | RustCrypto + dalek | graviola | libcrux | OpenSSL | verified-garbage |
+|---|---|---|---|---|---|---|---|---|
+| full handshake, X25519MLKEM768 | 155.01 µs | 216.94 µs | - | - | 182.56 µs | - | 459.12 µs | - |
+| full handshake, X25519 | 132.87 µs | 185.16 µs | 185.47 µs | - | 159.42 µs | - | 375.62 µs | - |
+| full handshake, P-256 | 151.14 µs | 207.37 µs | 201.43 µs | - | 190.23 µs | - | 400.92 µs | - |
+| full handshake, Ed25519 certificate | 118.88 µs | 151.69 µs | 159.78 µs | - | 123.81 µs | - | 381.97 µs | - |
+| full handshake, RSA-2048 certificate | 363.72 µs | 413.68 µs | 446.38 µs | - | 684.12 µs | - | 641.40 µs | - |
+| resumed handshake, X25519 | 58.21 µs | 92.58 µs | 87.97 µs | - | 61.70 µs | - | 256.57 µs | - |
+| full handshake, X25519, every logical CPU | 26.50 µs | 34.77 µs | 35.94 µs | - | 31.40 µs | - | 132.29 µs | - |
+| resumed handshake, X25519, every logical CPU | 12.63 µs | 18.53 µs | 18.31 µs | - | 12.87 µs | - | 183.47 µs | - |
+| 1 MB transfer, AES-128-GCM | 296.49 µs | 299.52 µs | 365.08 µs | - | 318.45 µs | - | 331.98 µs | - |
+| 1 MB transfer, AES-256-GCM | 331.41 µs | 333.06 µs | 377.56 µs | - | 390.22 µs | - | 364.80 µs | - |
+| 1 MB transfer, ChaCha20-Poly1305 | 1.14 ms | 1.15 ms | 1.13 ms | - | 1.88 ms | - | 1.12 ms | - |
+| one record, AES-128-GCM, 64 B | - | - | - | - | - | - | - | - |
+| one record, AES-128-GCM, 256 B | - | - | - | - | - | - | - | - |
+| one record, AES-128-GCM, 1 KB | - | - | - | - | - | - | - | - |
+| one record, ChaCha20-Poly1305, 64 B | - | - | - | - | - | - | - | - |
+| one record, ChaCha20-Poly1305, 256 B | - | - | - | - | - | - | - | - |
+| one record, ChaCha20-Poly1305, 1 KB | - | - | - | - | - | - | - | - |
+| AES-128-GCM seal, 32 B | 10 ns | 49 ns | 42 ns | 24 ns | 78 ns | 53 ns | 70 ns | 93 ns |
+| AES-128-GCM seal, 1350 B | 162 ns | 181 ns | 208 ns | 216 ns | 215 ns | 634 ns | 198 ns | 231 ns |
+| AES-128-GCM seal, 16 KB | 1.44 µs | 1.46 µs | 1.96 µs | 2.32 µs | 1.59 µs | 7.06 µs | 1.51 µs | 1.56 µs |
+| AES-128-GCM open, 32 B | 13 ns | 47 ns | 39 ns | 28 ns | 86 ns | 66 ns | 67 ns | 98 ns |
+| AES-128-GCM open, 1350 B | 168 ns | 195 ns | 247 ns | 236 ns | 228 ns | 660 ns | 197 ns | 237 ns |
+| AES-128-GCM open, 16 KB | 1.56 µs | 1.58 µs | 2.19 µs | 2.48 µs | 1.72 µs | 7.02 µs | 1.66 µs | 1.69 µs |
+| AES-256-GCM seal, 32 B | 11 ns | 52 ns | 45 ns | 25 ns | 80 ns | 54 ns | 66 ns | 92 ns |
+| AES-256-GCM seal, 1350 B | 188 ns | 203 ns | 218 ns | 248 ns | 260 ns | 653 ns | 221 ns | 255 ns |
+| AES-256-GCM seal, 16 KB | 1.71 µs | 1.73 µs | 2.07 µs | 2.73 µs | 2.16 µs | 7.34 µs | 1.79 µs | 1.84 µs |
+| AES-256-GCM open, 32 B | 13 ns | 50 ns | 40 ns | 41 ns | 85 ns | 67 ns | 67 ns | 93 ns |
+| AES-256-GCM open, 1350 B | 191 ns | 218 ns | 252 ns | 269 ns | 264 ns | 673 ns | 225 ns | 263 ns |
+| AES-256-GCM open, 16 KB | 1.81 µs | 1.83 µs | 2.25 µs | 2.91 µs | 2.19 µs | 7.36 µs | 1.92 µs | 1.97 µs |
+| ChaCha20-Poly1305 seal, 32 B | 150 ns | 164 ns | 150 ns | 373 ns | 196 ns | 170 ns ✓ | 216 ns | 195 ns |
+| ChaCha20-Poly1305 seal, 1350 B | 763 ns | 775 ns | 757 ns | 1.83 µs | 1.24 µs | 1.97 µs ✓ | 841 ns | 757 ns |
+| ChaCha20-Poly1305 seal, 16 KB | 8.08 µs | 7.75 µs | 7.68 µs | 15.49 µs | 12.84 µs | 22.01 µs ✓ | 7.45 µs | 5.51 µs |
+| XChaCha20-Poly1305 seal, 32 B | 700 ns | 883 ns | - | 1.07 µs | 922 ns | 914 ns | - | - |
+| XChaCha20-Poly1305 seal, 1350 B | 1.31 µs | 1.48 µs | - | 2.52 µs | 1.98 µs | 2.74 µs | - | - |
+| XChaCha20-Poly1305 seal, 16 KB | 8.21 µs | 8.37 µs | - | 15.83 µs | 13.61 µs | 22.87 µs | - | - |
+| AES-128 header protection | 4 ns ✓ | 3 ns | 3 ns | - | - | - | - | 36 ns |
+| AES-256 header protection | 4 ns ✓ | 3 ns | 4 ns | - | - | - | - | 38 ns |
+| ChaCha20 header protection | 59 ns ✓ | 73 ns | 68 ns | - | - | - | - | 111 ns |
+| X25519 | 16.51 µs | 17.76 µs | 24.40 µs | 29.61 µs | 16.62 µs | 37.30 µs ✓ | 36.31 µs | 16.69 µs |
+| P-256 ECDH | 25.66 µs ✓ | 28.56 µs | 32.48 µs | 182.26 µs | 31.16 µs | 183.65 µs ✓ | 50.16 µs | 26.08 µs |
+| Ed25519 sign | 3.90 µs | 4.10 µs | 7.04 µs | 8.64 µs | 4.16 µs | 22.15 µs ✓ | 16.48 µs | 4.04 µs |
+| Ed25519 verify | 16.60 µs | 18.62 µs | 20.06 µs | 18.58 µs | 16.64 µs | 29.37 µs ✓ | 40.82 µs | 21.08 µs |
+| P-256 ECDSA sign | 6.89 µs ✓ | 11.36 µs | 11.05 µs | 45.09 µs | 8.76 µs | 67.28 µs ✓ | 12.52 µs | 6.69 µs |
+| P-256 ECDSA verify | 21.26 µs ✓ | 27.37 µs | 29.49 µs | 153.89 µs | 28.39 µs | 156.84 µs ✓ | 42.04 µs | 20.95 µs |
+| SHA-256, 64 B | 37 ns ✓ | 71 ns | 46 ns | 39 ns | 36 ns | 228 ns ✓ | 161 ns | 41 ns |
+| SHA-256, 1350 B | 411 ns ✓ | 443 ns | 412 ns | 472 ns | 472 ns | 2.52 µs ✓ | 547 ns | 412 ns |
+| SHA-256, 16 KB | 4.84 µs ✓ | 4.92 µs | 4.89 µs | 5.67 µs | 5.76 µs | 29.41 µs ✓ | 4.98 µs | 4.83 µs |
+| SHA-512, 64 B | 77 ns ✓ | 110 ns | 89 ns | 86 ns | 175 ns | 141 ns ✓ | 213 ns | 82 ns |
+| SHA-512, 1350 B | 748 ns ✓ | 786 ns | 748 ns | 732 ns | 1.86 µs | 1.57 µs ✓ | 887 ns | 686 ns |
+| SHA-512, 16 KB | 8.89 µs ✓ | 8.88 µs | 8.77 µs | 8.71 µs | 21.71 µs | 18.41 µs ✓ | 8.92 µs | 7.89 µs |
+| SHA3-256, 64 B | 143 ns ✓ | 178 ns | - | 133 ns | - | 153 ns | - | 138 ns |
+| SHA3-256, 1350 B | 1.33 µs ✓ | 1.37 µs | - | 1.30 µs | - | 1.66 µs | - | 1.29 µs |
+| SHA3-256, 16 KB | 16.19 µs ✓ | 16.02 µs | - | 15.56 µs | - | 20.26 µs | - | 15.54 µs |
+| SHA3-512, 64 B | 141 ns ✓ | 173 ns | - | 141 ns | - | 175 ns | - | 141 ns |
+| SHA3-512, 1350 B | 2.54 µs ✓ | 2.54 µs | - | 2.45 µs | - | 3.19 µs | - | 2.42 µs |
+| SHA3-512, 16 KB | 30.57 µs ✓ | 30.60 µs | - | 29.12 µs | - | 38.26 µs | - | 29.19 µs |
+| SHA-1, 64 B | - | - | - | - | - | - | - | - |
+| SHA-1, 1350 B | - | - | - | - | - | - | - | - |
+| SHA-1, 16 KB | - | - | - | - | - | - | - | - |
+| MD5, 64 B | - | - | - | - | - | - | - | - |
+| MD5, 1350 B | - | - | - | - | - | - | - | - |
+| MD5, 16 KB | - | - | - | - | - | - | - | - |
+| HMAC-SHA256, 64 B | 107 ns ✓ | 249 ns | 150 ns | 128 ns | 115 ns | 570 ns ✓ | 2.10 µs | 227 ns |
+| HMAC-SHA256, 1350 B | 477 ns ✓ | 625 ns | 522 ns | 565 ns | 558 ns | 2.85 µs ✓ | 2.46 µs | 607 ns |
+| HKDF-SHA256 extract and expand | 232 ns ✓ | 334 ns | 282 ns | 250 ns | - | 946 ns ✓ | 2.19 µs | 374 ns |
+| HKDF-SHA256 expand | 69 ns ✓ | 154 ns | 94 ns | 76 ns | - | 492 ns ✓ | 1.57 µs | 247 ns |
+| RSA-2048 PKCS#1 sign | 275.11 µs | 283.99 µs | 322.32 µs | 1.09 ms | 558.57 µs | - | 341.83 µs | 283.75 µs |
+| RSA-2048 PKCS#1 verify | 8.11 µs | 9.43 µs | 11.06 µs | 30.98 µs | 18.75 µs | - | 16.56 µs | 7.86 µs |
+| RSA-2048 PSS sign | 276.19 µs | 285.47 µs | 323.94 µs | 1.10 ms | 557.63 µs | 4.46 ms ✓ | 344.10 µs | 284.95 µs |
+| RSA-2048 PSS verify | 8.37 µs | 9.79 µs | 11.44 µs | 39.33 µs | 18.92 µs | 298.23 µs ✓ | 17.40 µs | 8.45 µs |
+| ML-KEM-768 key generation | 6.36 µs | 7.56 µs | - | 26.88 µs | 6.30 µs | 11.96 µs | 24.96 µs | 5.22 µs |
+| ML-KEM-768 encapsulate | 4.78 µs | 8.02 µs | - | 27.77 µs | 6.45 µs | 9.55 µs | 23.77 µs | 5.00 µs |
+| ML-KEM-768 decapsulate | 4.21 µs | 7.70 µs | - | 33.89 µs | 4.06 µs | 9.70 µs | 24.66 µs | 4.79 µs |
+| ML-KEM-1024 key generation | 9.75 µs | 10.02 µs | - | - | - | 18.03 µs | - | - |
+| ML-KEM-1024 encapsulate | 9.38 µs | 10.77 µs | - | - | - | 13.73 µs | - | - |
+| ML-KEM-1024 decapsulate | 5.52 µs | 11.05 µs | - | - | - | 14.00 µs | - | - |
+| ML-KEM-512 key generation | 4.09 µs | 5.12 µs | - | - | - | 6.24 µs | - | - |
+| ML-KEM-512 encapsulate | 4.17 µs | 5.67 µs | - | - | - | 5.41 µs | - | - |
+| ML-KEM-512 decapsulate | 3.16 µs | 5.03 µs | - | - | - | 5.35 µs | - | - |
+| ML-DSA-65 key generation | 22.27 µs | 24.05 µs | - | 132.79 µs | - | 46.49 µs | 82.49 µs | 21.36 µs |
+| ML-DSA-65 sign | 36.10 µs | 63.96 µs | - | 471.66 µs | - | 131.30 µs | 402.20 µs | 52.96 µs |
+| ML-DSA-65 verify | 4.10 µs | 20.32 µs | - | 50.91 µs | - | 35.96 µs | 73.58 µs | 17.54 µs |
+| ML-DSA-65 load and verify | 19.28 µs | 20.65 µs | - | 92.37 µs | - | 36.11 µs | 77.21 µs | - |
+| P-384 ECDH | 87.56 µs ✓ | 104.82 µs | 411.20 µs | 495.56 µs | 153.74 µs | - | 279.69 µs | 96.08 µs |
+| P-384 ECDSA sign | 18.82 µs ✓ | 49.42 µs | 222.20 µs | 112.70 µs | 81.35 µs | - | 103.82 µs | 17.96 µs |
+| P-384 ECDSA verify | 82.99 µs ✓ | 110.96 µs | 397.03 µs | 426.72 µs | 152.01 µs | - | 236.67 µs | 82.19 µs |
+| P-521 ECDH | 130.46 µs | 143.65 µs | - | 399.46 µs | - | - | 246.75 µs | 150.54 µs |
+| P-521 ECDSA sign | 35.97 µs | 84.58 µs | - | 80.47 µs | - | - | 132.42 µs | 48.95 µs |
+| P-521 ECDSA verify | 118.77 µs | 167.52 µs | - | 253.03 µs | - | - | 254.13 µs | 168.35 µs |
+| HPKE X25519 sender setup | 17.66 µs | 20.86 µs | - | 39.95 µs | - | 45.54 µs | - | - |
+| HPKE X25519 recipient setup | 13.48 µs | 19.02 µs | - | 30.20 µs | - | 44.00 µs | - | - |
+| HPKE AES-128-GCM seal, 1350 B | 182 ns | 329 ns | - | 241 ns | - | 700 ns | - | - |
+| HPKE AES-128-GCM open, 1350 B | 152 ns | 315 ns | - | 225 ns | - | 759 ns | - | - |
+| Blind RSA-2048 blind | 34.26 µs | - | - | 299.55 µs | - | - | - | - |
+| Blind RSA-2048 sign | 275.05 µs | - | - | 1.12 ms | - | - | - | - |
+| Blind RSA-2048 finalize | 7.90 µs | - | - | 38.01 µs | - | - | - | - |
+| Blind RSA-2048 verify | 7.27 µs | - | - | 31.95 µs | - | - | - | - |
+| OPRF ristretto255 blind | 27.21 µs | - | - | 35.70 µs | - | - | - | - |
+| OPRF ristretto255 evaluate | 18.99 µs | - | - | 18.63 µs | - | - | - | - |
+| OPRF ristretto255 finalize | 19.97 µs | - | - | 29.34 µs | - | - | - | - |
+| VOPRF P-384 blind | 93.24 µs | - | - | 472.36 µs | - | - | - | - |
+| VOPRF P-384 evaluate | 319.74 µs | - | - | 2.03 ms | - | - | - | - |
+| VOPRF P-384 finalize | 464.16 µs | - | - | 2.84 ms | - | - | - | - |
+| ECVRF edwards25519 prove | 55.23 µs | - | - | 73.71 µs | - | - | - | - |
+| ECVRF edwards25519 verify | 69.47 µs | - | - | 83.27 µs | - | - | - | - |
+| ECVRF P-256 prove | 55.97 µs | - | - | 367.68 µs | - | - | - | - |
+| ECVRF P-256 verify | 77.41 µs | - | - | 475.50 µs | - | - | - | - |
+| SPAKE2+ P-256 prover share | 27.52 µs | - | - | 266.38 µs | - | - | - | - |
+| SPAKE2+ P-256 verifier share and confirmation | 91.86 µs | - | - | 668.75 µs | - | - | - | - |
+| SPAKE2+ P-256 prover confirmation and key | 64.63 µs | - | - | 404.72 µs | - | - | - | - |
+| SPAKE2+ P-256 verifier key | 19 ns | - | - | 46 ns | - | - | - | - |
+| Argon2id 16 MiB t=1 p=1 | 4.48 ms | - | - | 4.27 ms | - | - | 5.25 ms | - |
+| Argon2id 64 MiB t=3 p=4 | 67.27 ms | - | - | 67.63 ms | - | - | 79.46 ms | - |
+| SLH-DSA-SHA2-128s key generation | - | - | - | - | - | - | - | - |
+| SLH-DSA-SHA2-128s sign | - | - | - | - | - | - | - | - |
+| SLH-DSA-SHA2-128s verify | - | - | - | - | - | - | - | - |
+| SLH-DSA-SHA2-128f key generation | - | - | - | - | - | - | - | - |
+| SLH-DSA-SHA2-128f sign | - | - | - | - | - | - | - | - |
+| SLH-DSA-SHA2-128f verify | - | - | - | - | - | - | - | - |
+| SLH-DSA-SHAKE-128f key generation | - | - | - | - | - | - | - | - |
+| SLH-DSA-SHAKE-128f sign | - | - | - | - | - | - | - | - |
+| SLH-DSA-SHAKE-128f verify | - | - | - | - | - | - | - | - |
+| AES-128-GCM seal, 32 B, DIT set per call | - | - | - | - | - | - | - | - |
+| AES-128-GCM seal, 1350 B, DIT set per call | - | - | - | - | - | - | - | - |
+| ChaCha20-Poly1305 seal, 32 B, DIT set per call | - | - | - | - | - | - | - | - |
+| ChaCha20-Poly1305 seal, 1350 B, DIT set per call | - | - | - | - | - | - | - | - |
+| X25519, DIT set per call | - | - | - | - | - | - | - | - |
+| Ed25519 sign, DIT set per call | - | - | - | - | - | - | - | - |
+| Ed25519 verify, DIT set per call | - | - | - | - | - | - | - | - |
+| P-256 ECDSA sign, DIT set per call | - | - | - | - | - | - | - | - |
+| P-256 ECDSA verify, DIT set per call | - | - | - | - | - | - | - | - |
+| one record, AES-128-GCM, 64 B, DIT set per call | - | - | - | - | - | - | - | - |
 
 </details>
 
 ### `ovh-iad`: Intel Core Processor (Haswell, no TSX)
 
-Measured 2026-11-17 at [`93c8bcd7`](https://github.com/kixel-ai/rind/commit/93c8bcd705a05136e534fee4b463ab1ba56162bf), on NixOS 26.11 (Zokor) (Linux 6.18.40) with rustc 1.98.1 (48a229cea 2026-09-01).
+Measured 2026-11-24 at [`3f76a53f`](https://github.com/kixel-ai/rind/commit/3f76a53f35ae185f0e9ea0a58f3455766fc4d643), on NixOS 26.11 (Zokor) (Linux 6.18.40) with rustc 1.98.1 (48a229cea 2026-09-01).
 
 OVH VPS in Virginia, 4 shared vCPUs: other tenants add noise that a dedicated host's times lack.
 
-Not timed on `ovh-iad`: SHA-1, 64 B, SHA-1, 1350 B, SHA-1, 16 KB, MD5, 64 B, MD5, 1350 B, MD5, 16 KB.
+Not timed on `ovh-iad`: one record, AES-128-GCM, 64 B, one record, AES-128-GCM, 256 B, one record, AES-128-GCM, 1 KB, one record, ChaCha20-Poly1305, 64 B, one record, ChaCha20-Poly1305, 256 B, one record, ChaCha20-Poly1305, 1 KB, SHA-1, 64 B, SHA-1, 1350 B, SHA-1, 16 KB, MD5, 64 B, MD5, 1350 B, MD5, 16 KB, SLH-DSA-SHA2-128s key generation, SLH-DSA-SHA2-128s sign, SLH-DSA-SHA2-128s verify, SLH-DSA-SHA2-128f key generation, SLH-DSA-SHA2-128f sign, SLH-DSA-SHA2-128f verify, SLH-DSA-SHAKE-128f key generation, SLH-DSA-SHAKE-128f sign, SLH-DSA-SHAKE-128f verify.
 
-rind-rustls on all 4 logical CPUs runs full handshakes at 2.9 times and resumed handshakes at 2.7 times its one-thread rate.
+rind-rustls on all 4 logical CPUs runs full handshakes at 3.3 times and resumed handshakes at 3.5 times its one-thread rate.
 
 graviola isn't timed on `ovh-iad`: it requires ADX, which this CPU lacks.
 
@@ -562,123 +634,138 @@ graviola isn't timed on `ovh-iad`: it requires ADX, which this CPU lacks.
 
 | Operation | rind | aws-lc-rs | ring | RustCrypto + dalek | libcrux | OpenSSL | verified-garbage |
 |---|---|---|---|---|---|---|---|
-| full handshake, X25519MLKEM768 | 663.18 µs | 832.42 µs | - | - | - | 1.54 ms | - |
-| full handshake, X25519 | 525.53 µs | 593.83 µs | 629.82 µs | - | - | 1.24 ms | - |
-| full handshake, P-256 | 590.42 µs | 776.82 µs | 611.11 µs | - | - | 1.36 ms | - |
-| full handshake, Ed25519 certificate | 445.53 µs | 532.12 µs | 545.46 µs | - | - | 1.44 ms | - |
-| full handshake, RSA-2048 certificate | 1.26 ms | 1.48 ms | 1.74 ms | - | - | 2.09 ms | - |
-| resumed handshake, X25519 | 218.92 µs | 326.91 µs | 322.95 µs | - | - | 821.75 µs | - |
-| full handshake, X25519, every logical CPU | 183.78 µs | 202.09 µs | 229.02 µs | - | - | 469.30 µs | - |
-| resumed handshake, X25519, every logical CPU | 81.99 µs | 81.76 µs | 89.79 µs | - | - | 347.55 µs | - |
-| 1 MB transfer, AES-128-GCM | 728.87 µs | 783.43 µs | 805.42 µs | - | - | 810.57 µs | - |
-| 1 MB transfer, AES-256-GCM | 900.56 µs | 952.21 µs | 900.37 µs | - | - | 990.11 µs | - |
-| 1 MB transfer, ChaCha20-Poly1305 | 1.48 ms | 1.52 ms | 1.67 ms | - | - | 1.82 ms | - |
-| AES-128-GCM seal, 32 B | 71 ns ✓ | 143 ns | 116 ns | 159 ns | 449 ns | 244 ns | 103 ns |
-| AES-128-GCM seal, 1350 B | 405 ns ✓ | 560 ns | 453 ns | 896 ns | 5.52 µs | 594 ns | 466 ns |
-| AES-128-GCM seal, 16 KB | 3.74 µs ✓ | 3.93 µs | 3.95 µs | 8.97 µs | 61.44 µs | 4.03 µs | 3.81 µs |
-| AES-128-GCM open, 32 B | 62 ns ✓ | 148 ns | 131 ns | 166 ns | 508 ns | 274 ns | 122 ns |
-| AES-128-GCM open, 1350 B | 392 ns ✓ | 464 ns | 465 ns | 935 ns | 5.66 µs | 577 ns | 481 ns |
-| AES-128-GCM open, 16 KB | 4.35 µs ✓ | 4.11 µs | 4.15 µs | 9.59 µs | 64.32 µs | 4.28 µs | 4.02 µs |
-| AES-256-GCM seal, 32 B | 75 ns ✓ | 159 ns | 127 ns | 176 ns | 556 ns | 254 ns | 112 ns |
-| AES-256-GCM seal, 1350 B | 531 ns ✓ | 584 ns | 567 ns | 979 ns | 7.08 µs | 762 ns | 581 ns |
-| AES-256-GCM seal, 16 KB | 5.13 µs ✓ | 5.36 µs | 5.29 µs | 10.12 µs | 81.70 µs | 5.55 µs | 5.20 µs |
-| AES-256-GCM open, 32 B | 71 ns ✓ | 156 ns | 137 ns | 182 ns | 585 ns | 285 ns | 127 ns |
-| AES-256-GCM open, 1350 B | 517 ns ✓ | 603 ns | 571 ns | 1.13 µs | 7.41 µs | 840 ns | 656 ns |
-| AES-256-GCM open, 16 KB | 5.72 µs ✓ | 5.42 µs | 5.53 µs | 10.65 µs | 86.20 µs | 5.85 µs | 5.44 µs |
-| ChaCha20-Poly1305 seal, 32 B | 191 ns | 215 ns | 195 ns | 1.88 µs | 440 ns ✓ | 504 ns | 214 ns |
-| ChaCha20-Poly1305 seal, 1350 B | 1.07 µs | 1.10 µs | 1.09 µs | 3.29 µs | 4.71 µs ✓ | 1.60 µs | 1.20 µs |
-| ChaCha20-Poly1305 seal, 16 KB | 9.93 µs | 10.34 µs | 9.99 µs | 19.05 µs | 52.87 µs ✓ | 11.09 µs | 10.50 µs |
-| XChaCha20-Poly1305 seal, 32 B | 408 ns | 452 ns | - | 2.07 µs | 658 ns | - | - |
-| XChaCha20-Poly1305 seal, 1350 B | 1.29 µs | 1.33 µs | - | 3.50 µs | 5.04 µs | - | - |
-| XChaCha20-Poly1305 seal, 16 KB | 10.44 µs | 10.37 µs | - | 19.22 µs | 54.77 µs | - | - |
+| full handshake, X25519MLKEM768 | 633.64 µs | 728.68 µs | - | - | - | 1.37 ms | - |
+| full handshake, X25519 | 501.20 µs | 590.21 µs | 631.46 µs | - | - | 1.24 ms | - |
+| full handshake, P-256 | 564.20 µs | 644.92 µs | 595.96 µs | - | - | 1.34 ms | - |
+| full handshake, Ed25519 certificate | 397.85 µs | 484.29 µs | 518.54 µs | - | - | 1.25 ms | - |
+| full handshake, RSA-2048 certificate | 1.16 ms | 1.30 ms | 1.57 ms | - | - | 1.93 ms | - |
+| resumed handshake, X25519 | 201.68 µs | 272.79 µs | 289.90 µs | - | - | 762.59 µs | - |
+| full handshake, X25519, every logical CPU | 152.51 µs | 174.26 µs | 157.94 µs | - | - | 371.11 µs | - |
+| resumed handshake, X25519, every logical CPU | 58.38 µs | 77.53 µs | 88.86 µs | - | - | 256.17 µs | - |
+| 1 MB transfer, AES-128-GCM | 728.42 µs | 697.81 µs | 711.09 µs | - | - | 773.59 µs | - |
+| 1 MB transfer, AES-256-GCM | 886.45 µs | 906.86 µs | 881.62 µs | - | - | 980.52 µs | - |
+| 1 MB transfer, ChaCha20-Poly1305 | 1.49 ms | 1.51 ms | 1.51 ms | - | - | 1.75 ms | - |
+| one record, AES-128-GCM, 64 B | - | - | - | - | - | - | - |
+| one record, AES-128-GCM, 256 B | - | - | - | - | - | - | - |
+| one record, AES-128-GCM, 1 KB | - | - | - | - | - | - | - |
+| one record, ChaCha20-Poly1305, 64 B | - | - | - | - | - | - | - |
+| one record, ChaCha20-Poly1305, 256 B | - | - | - | - | - | - | - |
+| one record, ChaCha20-Poly1305, 1 KB | - | - | - | - | - | - | - |
+| AES-128-GCM seal, 32 B | 71 ns ✓ | 157 ns | 128 ns | 167 ns | 460 ns | 253 ns | 105 ns |
+| AES-128-GCM seal, 1350 B | 409 ns ✓ | 459 ns | 478 ns | 879 ns | 5.49 µs | 616 ns | 465 ns |
+| AES-128-GCM seal, 16 KB | 3.88 µs ✓ | 4.12 µs | 4.11 µs | 8.91 µs | 62.82 µs | 4.32 µs | 3.92 µs |
+| AES-128-GCM open, 32 B | 64 ns ✓ | 154 ns | 138 ns | 170 ns | 488 ns | 272 ns | 123 ns |
+| AES-128-GCM open, 1350 B | 401 ns ✓ | 465 ns | 495 ns | 899 ns | 5.49 µs | 574 ns | 484 ns |
+| AES-128-GCM open, 16 KB | 4.18 µs ✓ | 4.21 µs | 4.23 µs | 9.36 µs | 62.86 µs | 4.27 µs | 4.17 µs |
+| AES-256-GCM seal, 32 B | 81 ns ✓ | 161 ns | 124 ns | 176 ns | 560 ns | 277 ns | 120 ns |
+| AES-256-GCM seal, 1350 B | 540 ns ✓ | 606 ns | 574 ns | 1.04 µs | 7.20 µs | 694 ns | 625 ns |
+| AES-256-GCM seal, 16 KB | 5.22 µs ✓ | 5.48 µs | 5.47 µs | 10.44 µs | 84.01 µs | 5.54 µs | 5.44 µs |
+| AES-256-GCM open, 32 B | 73 ns ✓ | 153 ns | 142 ns | 181 ns | 597 ns | 268 ns | 122 ns |
+| AES-256-GCM open, 1350 B | 526 ns ✓ | 624 ns | 588 ns | 1.05 µs | 7.25 µs | 722 ns | 614 ns |
+| AES-256-GCM open, 16 KB | 5.61 µs ✓ | 5.74 µs | 5.91 µs | 10.72 µs | 84.51 µs | 5.68 µs | 5.59 µs |
+| ChaCha20-Poly1305 seal, 32 B | 198 ns | 218 ns | 196 ns | 1.85 µs | 495 ns ✓ | 533 ns | 216 ns |
+| ChaCha20-Poly1305 seal, 1350 B | 1.17 µs | 1.10 µs | 1.12 µs | 3.31 µs | 4.87 µs ✓ | 1.67 µs | 1.18 µs |
+| ChaCha20-Poly1305 seal, 16 KB | 10.49 µs | 9.88 µs | 10.06 µs | 19.96 µs | 56.56 µs ✓ | 11.24 µs | 11.06 µs |
+| XChaCha20-Poly1305 seal, 32 B | 415 ns | 457 ns | - | 2.14 µs | 678 ns | - | - |
+| XChaCha20-Poly1305 seal, 1350 B | 1.35 µs | 1.37 µs | - | 3.62 µs | 5.09 µs | - | - |
+| XChaCha20-Poly1305 seal, 16 KB | 11.43 µs | 10.37 µs | - | 19.30 µs | 54.42 µs | - | - |
 | AES-128 header protection | 8 ns ✓ | 13 ns | 13 ns | - | - | - | 9 ns |
-| AES-256 header protection | 9 ns ✓ | 15 ns | 16 ns | - | - | - | 10 ns |
-| ChaCha20 header protection | 126 ns ✓ | 155 ns | 140 ns | - | - | - | 170 ns |
-| X25519 | 52.07 µs ✓ | 53.15 µs | 77.47 µs | 93.78 µs | 114.03 µs ✓ | 99.11 µs | 62.13 µs |
-| P-256 ECDH | 84.42 µs ✓ | 88.18 µs | 90.56 µs | 366.69 µs | 442.39 µs ✓ | 154.96 µs | 99.51 µs |
-| Ed25519 sign | 12.82 µs ✓ | 14.12 µs | 31.60 µs | 26.66 µs | 79.98 µs ✓ | 49.78 µs | 15.05 µs |
-| Ed25519 verify | 38.32 µs | 60.80 µs | 60.56 µs | 50.79 µs | 103.05 µs ✓ | 149.20 µs | 66.11 µs |
-| P-256 ECDSA sign | 22.28 µs ✓ | 25.72 µs | 28.06 µs | 98.33 µs | 163.86 µs ✓ | 33.30 µs | 26.19 µs |
-| P-256 ECDSA verify | 80.99 µs ✓ | 78.66 µs | 81.09 µs | 321.15 µs | 404.34 µs ✓ | 120.93 µs | 84.39 µs |
-| SHA-256, 64 B | 424 ns | 497 ns | 526 ns | 766 ns | 784 ns ✓ | 810 ns | 467 ns |
-| SHA-256, 1350 B | 3.90 µs | 4.54 µs | 4.51 µs | 8.76 µs | 8.92 µs ✓ | 4.72 µs | 4.14 µs |
-| SHA-256, 16 KB | 49.04 µs | 54.94 µs | 55.44 µs | 103.03 µs | 101.06 µs ✓ | 48.42 µs | 52.67 µs |
-| SHA-512, 64 B | 315 ns ✓ | 372 ns ✓ | 360 ns | 456 ns | 452 ns ✓ | 700 ns | 324 ns |
-| SHA-512, 1350 B | 2.73 µs ✓ | 3.13 µs ✓ | 3.19 µs | 4.66 µs | 5.06 µs ✓ | 3.31 µs | 2.79 µs |
-| SHA-512, 16 KB | 29.82 µs ✓ | 35.03 µs ✓ | 38.38 µs | 50.09 µs | 55.49 µs ✓ | 31.13 µs | 31.23 µs |
-| SHA3-256, 64 B | 497 ns ✓ | 596 ns | - | 630 ns | 628 ns | - | 477 ns |
-| SHA3-256, 1350 B | 4.54 µs ✓ | 5.16 µs | - | 6.02 µs | 6.43 µs | - | 4.70 µs |
-| SHA3-256, 16 KB | 54.04 µs ✓ | 55.83 µs | - | 71.80 µs | 78.25 µs | - | 55.87 µs |
-| SHA3-512, 64 B | 516 ns ✓ | 593 ns | - | 610 ns | 651 ns | - | 491 ns |
-| SHA3-512, 1350 B | 8.84 µs ✓ | 8.79 µs | - | 11.44 µs | 11.39 µs | - | 8.55 µs |
-| SHA3-512, 16 KB | 104.68 µs ✓ | 107.43 µs | - | 143.25 µs | 137.71 µs | - | 100.41 µs |
+| AES-256 header protection | 10 ns ✓ | 15 ns | 16 ns | - | - | - | 11 ns |
+| ChaCha20 header protection | 151 ns ✓ | 157 ns | 144 ns | - | - | - | 179 ns |
+| X25519 | 52.31 µs ✓ | 52.60 µs | 78.35 µs | 94.06 µs | 119.61 µs ✓ | 103.69 µs | 54.29 µs |
+| P-256 ECDH | 83.00 µs ✓ | 88.20 µs | 88.59 µs | 391.62 µs | 461.05 µs ✓ | 141.28 µs | 114.64 µs |
+| Ed25519 sign | 13.13 µs ✓ | 13.12 µs | 31.16 µs | 26.39 µs | 77.49 µs ✓ | 44.70 µs | 14.17 µs |
+| Ed25519 verify | 38.60 µs | 63.27 µs | 69.61 µs | 47.73 µs | 102.13 µs ✓ | 151.83 µs | 53.77 µs |
+| P-256 ECDSA sign | 21.94 µs ✓ | 25.19 µs | 27.24 µs | 115.21 µs | 169.36 µs ✓ | 32.49 µs | 26.73 µs |
+| P-256 ECDSA verify | 79.95 µs ✓ | 79.83 µs | 82.18 µs | 329.95 µs | 395.75 µs ✓ | 120.76 µs | 82.26 µs |
+| SHA-256, 64 B | 382 ns ✓ | 511 ns | 454 ns | 745 ns | 789 ns ✓ | 819 ns | 448 ns |
+| SHA-256, 1350 B | 3.88 µs ✓ | 4.41 µs | 4.37 µs | 7.90 µs | 9.09 µs ✓ | 4.41 µs | 4.36 µs |
+| SHA-256, 16 KB | 45.17 µs ✓ | 50.29 µs | 53.12 µs | 91.61 µs | 101.65 µs ✓ | 44.80 µs | 49.64 µs |
+| SHA-512, 64 B | 322 ns ✓ | 365 ns ✓ | 331 ns | 437 ns | 474 ns ✓ | 691 ns | 342 ns |
+| SHA-512, 1350 B | 2.69 µs ✓ | 3.18 µs ✓ | 3.17 µs | 4.56 µs | 5.03 µs ✓ | 3.17 µs | 3.01 µs |
+| SHA-512, 16 KB | 31.39 µs ✓ | 35.27 µs ✓ | 34.90 µs | 52.36 µs | 57.46 µs ✓ | 30.59 µs | 32.54 µs |
+| SHA3-256, 64 B | 498 ns ✓ | 605 ns | - | 625 ns | 646 ns | - | 483 ns |
+| SHA3-256, 1350 B | 4.67 µs ✓ | 4.75 µs | - | 5.82 µs | 6.18 µs | - | 4.54 µs |
+| SHA3-256, 16 KB | 56.68 µs ✓ | 57.66 µs | - | 72.81 µs | 76.13 µs | - | 60.26 µs |
+| SHA3-512, 64 B | 486 ns ✓ | 612 ns | - | 645 ns | 641 ns | - | 467 ns |
+| SHA3-512, 1350 B | 8.86 µs ✓ | 8.96 µs | - | 11.49 µs | 11.27 µs | - | 8.63 µs |
+| SHA3-512, 16 KB | 103.68 µs ✓ | 106.39 µs | - | 136.00 µs | 137.97 µs | - | 102.72 µs |
 | SHA-1, 64 B | - | - | - | - | - | - | - |
 | SHA-1, 1350 B | - | - | - | - | - | - | - |
 | SHA-1, 16 KB | - | - | - | - | - | - | - |
 | MD5, 64 B | - | - | - | - | - | - | - |
 | MD5, 1350 B | - | - | - | - | - | - | - |
 | MD5, 16 KB | - | - | - | - | - | - | - |
-| HMAC-SHA256, 64 B | 1.04 µs | 1.33 µs | 1.13 µs | 2.00 µs | 1.96 µs ✓ | 6.80 µs | 1.12 µs |
-| HMAC-SHA256, 1350 B | 4.61 µs | 5.24 µs | 5.45 µs | 9.25 µs | 9.52 µs ✓ | 9.49 µs | 4.72 µs |
-| HKDF-SHA256 extract and expand | 1.81 µs | 2.17 µs | 1.95 µs | 3.32 µs | 3.29 µs ✓ | 7.25 µs | 1.98 µs |
-| HKDF-SHA256 expand | 483 ns | 1.06 µs | 645 ns | 837 ns | 1.62 µs ✓ | 4.67 µs | 961 ns |
-| RSA-2048 PKCS#1 sign | 839.70 µs | 956.57 µs | 1.05 ms | 3.74 ms | - | 902.90 µs | 1.88 ms |
-| RSA-2048 PKCS#1 verify | 34.31 µs | 35.06 µs | 42.80 µs | 87.97 µs | - | 50.49 µs | 76.19 µs |
-| RSA-2048 PSS sign | 784.79 µs | 835.04 µs | 1.10 ms | 3.34 ms | 12.09 ms ✓ | 872.63 µs | 1.81 ms |
-| RSA-2048 PSS verify | 35.68 µs | 39.17 µs | 45.78 µs | 111.46 µs | 626.88 µs ✓ | 55.11 µs | 72.26 µs |
-| ML-KEM-768 key generation | 18.52 µs | 25.40 µs | - | 97.89 µs | 36.42 µs | 64.91 µs | 16.19 µs |
-| ML-KEM-768 encapsulate | 14.57 µs | 24.99 µs | - | 105.60 µs | 36.01 µs | 66.58 µs | 14.08 µs |
-| ML-KEM-768 decapsulate | 12.53 µs | 28.83 µs | - | 139.61 µs | 36.47 µs | 50.75 µs | 15.35 µs |
-| ML-KEM-1024 key generation | 26.97 µs | 35.80 µs | - | - | 51.47 µs | - | - |
-| ML-KEM-1024 encapsulate | 27.73 µs | 38.60 µs | - | - | 46.68 µs | - | - |
-| ML-KEM-1024 decapsulate | 17.63 µs | 43.06 µs | - | - | 50.15 µs | - | - |
-| ML-KEM-512 key generation | 11.87 µs | 15.30 µs | - | - | 26.67 µs | - | - |
-| ML-KEM-512 encapsulate | 11.64 µs | 17.16 µs | - | - | 24.71 µs | - | - |
-| ML-KEM-512 decapsulate | 9.98 µs | 19.31 µs | - | - | 25.17 µs | - | - |
-| ML-DSA-65 key generation | 64.86 µs | 86.62 µs | - | 486.48 µs | 100.02 µs | 293.60 µs | 115.47 µs |
-| ML-DSA-65 sign | 132.14 µs | 237.44 µs | - | 1.50 ms | 285.58 µs | 1.57 ms | 229.71 µs |
-| ML-DSA-65 verify | 13.45 µs | 75.85 µs | - | 157.93 µs | 103.35 µs | 285.44 µs | 65.92 µs |
-| ML-DSA-65 load and verify | 58.50 µs | 73.90 µs | - | 325.86 µs | 104.65 µs | 297.75 µs | - |
-| P-384 ECDH | 283.20 µs ✓ | 309.31 µs | 1.03 ms | 1.29 ms | - | 766.32 µs | 298.36 µs |
-| P-384 ECDSA sign | 74.25 µs ✓ | 145.91 µs | 561.88 µs | 307.93 µs | - | 284.04 µs | 68.44 µs |
-| P-384 ECDSA verify | 266.30 µs ✓ | 312.66 µs | 987.34 µs | 1.10 ms | - | 641.39 µs | 254.14 µs |
-| P-521 ECDH | 485.52 µs | 530.93 µs | - | 1.38 ms | - | 816.66 µs | 638.26 µs |
-| P-521 ECDSA sign | 118.07 µs | 268.73 µs | - | 305.16 µs | - | 360.04 µs | 139.49 µs |
-| P-521 ECDSA verify | 459.56 µs | 632.74 µs | - | 1.06 ms | - | 755.02 µs | 563.23 µs |
-| HPKE X25519 sender setup | 59.55 µs | 65.85 µs | - | 140.98 µs | 147.82 µs | - | - |
-| HPKE X25519 recipient setup | 47.56 µs | 63.79 µs | - | 106.97 µs | 135.87 µs | - | - |
-| HPKE AES-128-GCM seal, 1350 B | 435 ns | 863 ns | - | 911 ns | 5.78 µs | - | - |
-| HPKE AES-128-GCM open, 1350 B | 562 ns | 1.44 µs | - | 1.05 µs | 5.84 µs | - | - |
-| Blind RSA-2048 blind | 115.49 µs | - | - | 751.07 µs | - | - | - |
-| Blind RSA-2048 sign | 777.57 µs | - | - | 3.85 ms | - | - | - |
-| Blind RSA-2048 finalize | 39.79 µs | - | - | 114.24 µs | - | - | - |
-| Blind RSA-2048 verify | 34.88 µs | - | - | 105.85 µs | - | - | - |
-| OPRF ristretto255 blind | 79.08 µs | - | - | 63.34 µs | - | - | - |
-| OPRF ristretto255 evaluate | 61.01 µs | - | - | 46.85 µs | - | - | - |
-| OPRF ristretto255 finalize | 61.20 µs | - | - | 65.07 µs | - | - | - |
-| VOPRF P-384 blind | 268.81 µs | - | - | 1.18 ms | - | - | - |
-| VOPRF P-384 evaluate | 948.87 µs | - | - | 5.01 ms | - | - | - |
-| VOPRF P-384 finalize | 1.37 ms | - | - | 7.67 ms | - | - | - |
-| ECVRF edwards25519 prove | 162.74 µs | - | - | 197.15 µs | - | - | - |
-| ECVRF edwards25519 verify | 207.44 µs | - | - | 209.03 µs | - | - | - |
-| ECVRF P-256 prove | 181.80 µs | - | - | 770.56 µs | - | - | - |
-| ECVRF P-256 verify | 243.37 µs | - | - | 1.01 ms | - | - | - |
-| SPAKE2+ P-256 prover share | 84.90 µs | - | - | 604.44 µs | - | - | - |
-| SPAKE2+ P-256 verifier share and confirmation | 295.97 µs | - | - | 1.49 ms | - | - | - |
-| SPAKE2+ P-256 prover confirmation and key | 226.64 µs | - | - | 904.74 µs | - | - | - |
-| SPAKE2+ P-256 verifier key | 130 ns | - | - | 293 ns | - | - | - |
-| Argon2id 16 MiB t=1 p=1 | 11.79 ms | - | - | 13.28 ms | - | 19.19 ms | - |
-| Argon2id 64 MiB t=3 p=4 | 185.63 ms | - | - | 227.05 ms | - | 281.00 ms | - |
+| HMAC-SHA256, 64 B | 1.06 µs ✓ | 1.35 µs | 1.20 µs | 1.96 µs | 1.98 µs ✓ | 5.97 µs | 1.15 µs |
+| HMAC-SHA256, 1350 B | 4.67 µs ✓ | 5.44 µs | 5.21 µs | 9.54 µs | 10.08 µs ✓ | 10.45 µs | 5.03 µs |
+| HKDF-SHA256 extract and expand | 1.84 µs ✓ | 2.07 µs | 2.06 µs | 3.19 µs | 3.29 µs ✓ | 7.60 µs | 1.92 µs |
+| HKDF-SHA256 expand | 502 ns ✓ | 1.07 µs | 566 ns | 853 ns | 1.71 µs ✓ | 4.85 µs | 972 ns |
+| RSA-2048 PKCS#1 sign | 799.01 µs | 833.56 µs | 1.05 ms | 3.26 ms | - | 824.69 µs | 1.77 ms |
+| RSA-2048 PKCS#1 verify | 33.03 µs | 34.48 µs | 39.05 µs | 87.12 µs | - | 51.85 µs | 68.96 µs |
+| RSA-2048 PSS sign | 801.25 µs | 833.56 µs | 1.05 ms | 3.37 ms | 11.55 ms ✓ | 841.21 µs | 1.72 ms |
+| RSA-2048 PSS verify | 34.67 µs | 37.73 µs | 45.76 µs | 107.51 µs | 598.28 µs ✓ | 52.33 µs | 69.08 µs |
+| ML-KEM-768 key generation | 19.03 µs | 24.92 µs | - | 96.26 µs | 35.23 µs | 67.73 µs | 15.61 µs |
+| ML-KEM-768 encapsulate | 16.27 µs | 25.58 µs | - | 116.37 µs | 39.57 µs | 68.21 µs | 14.36 µs |
+| ML-KEM-768 decapsulate | 13.95 µs | 30.14 µs | - | 138.36 µs | 35.75 µs | 53.32 µs | 16.13 µs |
+| ML-KEM-1024 key generation | 29.10 µs | 37.26 µs | - | - | 51.89 µs | - | - |
+| ML-KEM-1024 encapsulate | 30.06 µs | 37.45 µs | - | - | 48.16 µs | - | - |
+| ML-KEM-1024 decapsulate | 17.38 µs | 42.89 µs | - | - | 50.30 µs | - | - |
+| ML-KEM-512 key generation | 11.81 µs | 14.78 µs | - | - | 26.71 µs | - | - |
+| ML-KEM-512 encapsulate | 12.01 µs | 16.09 µs | - | - | 25.66 µs | - | - |
+| ML-KEM-512 decapsulate | 11.34 µs | 18.71 µs | - | - | 25.76 µs | - | - |
+| ML-DSA-65 key generation | 67.74 µs | 86.17 µs | - | 471.35 µs | 100.64 µs | 291.94 µs | 115.01 µs |
+| ML-DSA-65 sign | 113.84 µs | 241.79 µs | - | 1.45 ms | 252.46 µs | 1.50 ms | 228.71 µs |
+| ML-DSA-65 verify | 13.25 µs | 74.27 µs | - | 156.61 µs | 104.26 µs | 296.56 µs | 64.03 µs |
+| ML-DSA-65 load and verify | 63.06 µs | 73.35 µs | - | 327.28 µs | 105.48 µs | 300.00 µs | - |
+| P-384 ECDH | 281.26 µs ✓ | 315.80 µs | 1.05 ms | 1.27 ms | - | 849.52 µs | 301.81 µs |
+| P-384 ECDSA sign | 66.17 µs ✓ | 129.52 µs | 567.48 µs | 298.99 µs | - | 274.42 µs | 59.47 µs |
+| P-384 ECDSA verify | 264.70 µs ✓ | 318.60 µs | 1.02 ms | 1.12 ms | - | 659.76 µs | 256.29 µs |
+| P-521 ECDH | 478.90 µs | 519.49 µs | - | 1.35 ms | - | 788.49 µs | 622.98 µs |
+| P-521 ECDSA sign | 131.82 µs | 271.48 µs | - | 300.90 µs | - | 381.92 µs | 146.44 µs |
+| P-521 ECDSA verify | 432.20 µs | 582.05 µs | - | 1.05 ms | - | 806.94 µs | 557.66 µs |
+| HPKE X25519 sender setup | 67.06 µs | 66.85 µs | - | 136.18 µs | 143.46 µs | - | - |
+| HPKE X25519 recipient setup | 51.87 µs | 66.05 µs | - | 108.08 µs | 144.39 µs | - | - |
+| HPKE AES-128-GCM seal, 1350 B | 464 ns | 901 ns | - | 957 ns | 5.80 µs | - | - |
+| HPKE AES-128-GCM open, 1350 B | 513 ns | 1.35 µs | - | 1.19 µs | 6.75 µs | - | - |
+| Blind RSA-2048 blind | 116.67 µs | - | - | 695.26 µs | - | - | - |
+| Blind RSA-2048 sign | 808.61 µs | - | - | 3.19 ms | - | - | - |
+| Blind RSA-2048 finalize | 37.25 µs | - | - | 104.68 µs | - | - | - |
+| Blind RSA-2048 verify | 30.63 µs | - | - | 90.41 µs | - | - | - |
+| OPRF ristretto255 blind | 83.90 µs | - | - | 64.42 µs | - | - | - |
+| OPRF ristretto255 evaluate | 62.21 µs | - | - | 44.83 µs | - | - | - |
+| OPRF ristretto255 finalize | 64.36 µs | - | - | 69.83 µs | - | - | - |
+| VOPRF P-384 blind | 279.85 µs | - | - | 1.23 ms | - | - | - |
+| VOPRF P-384 evaluate | 952.55 µs | - | - | 5.22 ms | - | - | - |
+| VOPRF P-384 finalize | 1.42 ms | - | - | 7.20 ms | - | - | - |
+| ECVRF edwards25519 prove | 162.23 µs | - | - | 189.55 µs | - | - | - |
+| ECVRF edwards25519 verify | 211.36 µs | - | - | 209.38 µs | - | - | - |
+| ECVRF P-256 prove | 187.76 µs | - | - | 795.76 µs | - | - | - |
+| ECVRF P-256 verify | 241.43 µs | - | - | 992.28 µs | - | - | - |
+| SPAKE2+ P-256 prover share | 88.07 µs | - | - | 601.32 µs | - | - | - |
+| SPAKE2+ P-256 verifier share and confirmation | 306.75 µs | - | - | 1.54 ms | - | - | - |
+| SPAKE2+ P-256 prover confirmation and key | 224.51 µs | - | - | 919.08 µs | - | - | - |
+| SPAKE2+ P-256 verifier key | 179 ns | - | - | 183 ns | - | - | - |
+| Argon2id 16 MiB t=1 p=1 | 12.32 ms | - | - | 13.82 ms | - | 19.51 ms | - |
+| Argon2id 64 MiB t=3 p=4 | 180.70 ms | - | - | 225.50 ms | - | 280.79 ms | - |
+| SLH-DSA-SHA2-128s key generation | - | - | - | - | - | - | - |
+| SLH-DSA-SHA2-128s sign | - | - | - | - | - | - | - |
+| SLH-DSA-SHA2-128s verify | - | - | - | - | - | - | - |
+| SLH-DSA-SHA2-128f key generation | - | - | - | - | - | - | - |
+| SLH-DSA-SHA2-128f sign | - | - | - | - | - | - | - |
+| SLH-DSA-SHA2-128f verify | - | - | - | - | - | - | - |
+| SLH-DSA-SHAKE-128f key generation | - | - | - | - | - | - | - |
+| SLH-DSA-SHAKE-128f sign | - | - | - | - | - | - | - |
+| SLH-DSA-SHAKE-128f verify | - | - | - | - | - | - | - |
 
 </details>
 
 ### `ovh-sea`: Intel Core Processor (Haswell, no TSX)
 
-Measured 2026-11-17 at [`93c8bcd7`](https://github.com/kixel-ai/rind/commit/93c8bcd705a05136e534fee4b463ab1ba56162bf), on NixOS 26.11 (Zokor) (Linux 6.18.40) with rustc 1.98.1 (48a229cea 2026-09-01).
+Measured 2026-11-24 at [`3f76a53f`](https://github.com/kixel-ai/rind/commit/3f76a53f35ae185f0e9ea0a58f3455766fc4d643), on NixOS 26.11 (Zokor) (Linux 6.18.40) with rustc 1.98.1 (48a229cea 2026-09-01).
 
 OVH VPS in Oregon, 4 shared vCPUs: other tenants add noise that a dedicated host's times lack.
 
-Not timed on `ovh-sea`: SHA-1, 64 B, SHA-1, 1350 B, SHA-1, 16 KB, MD5, 64 B, MD5, 1350 B, MD5, 16 KB.
+Not timed on `ovh-sea`: one record, AES-128-GCM, 64 B, one record, AES-128-GCM, 256 B, one record, AES-128-GCM, 1 KB, one record, ChaCha20-Poly1305, 64 B, one record, ChaCha20-Poly1305, 256 B, one record, ChaCha20-Poly1305, 1 KB, SHA-1, 64 B, SHA-1, 1350 B, SHA-1, 16 KB, MD5, 64 B, MD5, 1350 B, MD5, 16 KB, SLH-DSA-SHA2-128s key generation, SLH-DSA-SHA2-128s sign, SLH-DSA-SHA2-128s verify, SLH-DSA-SHA2-128f key generation, SLH-DSA-SHA2-128f sign, SLH-DSA-SHA2-128f verify, SLH-DSA-SHAKE-128f key generation, SLH-DSA-SHAKE-128f sign, SLH-DSA-SHAKE-128f verify.
 
 rind-rustls on all 4 logical CPUs runs full handshakes at 3.4 times and resumed handshakes at 3.7 times its one-thread rate.
 
@@ -694,113 +781,128 @@ graviola isn't timed on `ovh-sea`: it requires ADX, which this CPU lacks.
 
 | Operation | rind | aws-lc-rs | ring | RustCrypto + dalek | libcrux | OpenSSL | verified-garbage |
 |---|---|---|---|---|---|---|---|
-| full handshake, X25519MLKEM768 | 588.16 µs | 729.17 µs | - | - | - | 1.31 ms | - |
-| full handshake, X25519 | 463.71 µs | 528.33 µs | 544.15 µs | - | - | 1.09 ms | - |
-| full handshake, P-256 | 531.16 µs | 584.69 µs | 560.40 µs | - | - | 1.23 ms | - |
-| full handshake, Ed25519 certificate | 370.26 µs | 447.98 µs | 471.11 µs | - | - | 1.17 ms | - |
-| full handshake, RSA-2048 certificate | 1.09 ms | 1.24 ms | 1.44 ms | - | - | 1.79 ms | - |
-| resumed handshake, X25519 | 198.52 µs | 257.79 µs | 286.13 µs | - | - | 769.07 µs | - |
-| full handshake, X25519, every logical CPU | 134.64 µs | 158.51 µs | 156.23 µs | - | - | 320.91 µs | - |
-| resumed handshake, X25519, every logical CPU | 53.97 µs | 70.76 µs | 75.13 µs | - | - | 241.02 µs | - |
-| 1 MB transfer, AES-128-GCM | 747.50 µs | 708.84 µs | 701.02 µs | - | - | 806.31 µs | - |
-| 1 MB transfer, AES-256-GCM | 862.38 µs | 886.37 µs | 842.84 µs | - | - | 948.07 µs | - |
-| 1 MB transfer, ChaCha20-Poly1305 | 1.44 ms | 1.44 ms | 1.44 ms | - | - | 1.74 ms | - |
-| AES-128-GCM seal, 32 B | 67 ns ✓ | 150 ns | 111 ns | 162 ns | 437 ns | 237 ns | 100 ns |
-| AES-128-GCM seal, 1350 B | 379 ns ✓ | 458 ns | 431 ns | 855 ns | 5.41 µs | 561 ns | 444 ns |
-| AES-128-GCM seal, 16 KB | 3.67 µs ✓ | 3.75 µs | 3.88 µs | 8.67 µs | 60.47 µs | 3.94 µs | 3.82 µs |
-| AES-128-GCM open, 32 B | 57 ns ✓ | 139 ns | 126 ns | 162 ns | 466 ns | 243 ns | 115 ns |
-| AES-128-GCM open, 1350 B | 370 ns ✓ | 442 ns | 438 ns | 873 ns | 5.36 µs | 553 ns | 462 ns |
-| AES-128-GCM open, 16 KB | 3.82 µs ✓ | 3.89 µs | 4.02 µs | 8.88 µs | 60.28 µs | 3.99 µs | 4.28 µs |
-| AES-256-GCM seal, 32 B | 71 ns ✓ | 147 ns | 117 ns | 166 ns | 529 ns | 242 ns | 109 ns |
-| AES-256-GCM seal, 1350 B | 511 ns ✓ | 581 ns | 563 ns | 970 ns | 6.98 µs | 651 ns | 570 ns |
-| AES-256-GCM seal, 16 KB | 4.97 µs ✓ | 5.09 µs | 5.00 µs | 9.92 µs | 82.86 µs | 5.22 µs | 5.06 µs |
-| AES-256-GCM open, 32 B | 68 ns ✓ | 146 ns | 131 ns | 176 ns | 570 ns | 255 ns | 121 ns |
-| AES-256-GCM open, 1350 B | 487 ns ✓ | 574 ns | 550 ns | 1.02 µs | 6.88 µs | 676 ns | 601 ns |
-| AES-256-GCM open, 16 KB | 5.26 µs ✓ | 5.39 µs | 5.21 µs | 10.20 µs | 78.28 µs | 5.38 µs | 5.21 µs |
-| ChaCha20-Poly1305 seal, 32 B | 190 ns | 210 ns | 189 ns | 1.81 µs | 421 ns ✓ | 498 ns | 204 ns |
-| ChaCha20-Poly1305 seal, 1350 B | 1.07 µs | 1.08 µs | 1.04 µs | 3.23 µs | 4.68 µs ✓ | 1.57 µs | 1.12 µs |
-| ChaCha20-Poly1305 seal, 16 KB | 9.66 µs | 9.65 µs | 9.67 µs | 18.37 µs | 52.44 µs ✓ | 10.72 µs | 10.12 µs |
-| XChaCha20-Poly1305 seal, 32 B | 393 ns | 430 ns | - | 2.02 µs | 627 ns | - | - |
-| XChaCha20-Poly1305 seal, 1350 B | 1.26 µs | 1.29 µs | - | 3.41 µs | 4.79 µs | - | - |
-| XChaCha20-Poly1305 seal, 16 KB | 9.96 µs | 10.02 µs | - | 18.58 µs | 52.51 µs | - | - |
-| AES-128 header protection | 8 ns ✓ | 12 ns | 12 ns | - | - | - | 8 ns |
+| full handshake, X25519MLKEM768 | 587.52 µs | 692.58 µs | - | - | - | 1.35 ms | - |
+| full handshake, X25519 | 463.54 µs | 535.21 µs | 534.93 µs | - | - | 1.12 ms | - |
+| full handshake, P-256 | 517.83 µs | 602.91 µs | 554.71 µs | - | - | 1.20 ms | - |
+| full handshake, Ed25519 certificate | 372.77 µs | 447.45 µs | 483.22 µs | - | - | 1.19 ms | - |
+| full handshake, RSA-2048 certificate | 1.12 ms | 1.23 ms | 1.42 ms | - | - | 1.80 ms | - |
+| resumed handshake, X25519 | 195.94 µs | 256.98 µs | 265.55 µs | - | - | 740.99 µs | - |
+| full handshake, X25519, every logical CPU | 136.13 µs | 169.46 µs | 149.86 µs | - | - | 323.08 µs | - |
+| resumed handshake, X25519, every logical CPU | 52.81 µs | 68.04 µs | 77.36 µs | - | - | 275.26 µs | - |
+| 1 MB transfer, AES-128-GCM | 692.81 µs | 695.62 µs | 683.15 µs | - | - | 759.69 µs | - |
+| 1 MB transfer, AES-256-GCM | 847.20 µs | 863.89 µs | 851.83 µs | - | - | 940.70 µs | - |
+| 1 MB transfer, ChaCha20-Poly1305 | 1.44 ms | 1.47 ms | 1.46 ms | - | - | 1.74 ms | - |
+| one record, AES-128-GCM, 64 B | - | - | - | - | - | - | - |
+| one record, AES-128-GCM, 256 B | - | - | - | - | - | - | - |
+| one record, AES-128-GCM, 1 KB | - | - | - | - | - | - | - |
+| one record, ChaCha20-Poly1305, 64 B | - | - | - | - | - | - | - |
+| one record, ChaCha20-Poly1305, 256 B | - | - | - | - | - | - | - |
+| one record, ChaCha20-Poly1305, 1 KB | - | - | - | - | - | - | - |
+| AES-128-GCM seal, 32 B | 65 ns ✓ | 139 ns | 109 ns | 162 ns | 434 ns | 232 ns | 99 ns |
+| AES-128-GCM seal, 1350 B | 379 ns ✓ | 452 ns | 430 ns | 865 ns | 5.43 µs | 548 ns | 447 ns |
+| AES-128-GCM seal, 16 KB | 3.62 µs ✓ | 3.69 µs | 3.69 µs | 8.58 µs | 60.59 µs | 3.76 µs | 3.76 µs |
+| AES-128-GCM open, 32 B | 59 ns ✓ | 137 ns | 122 ns | 164 ns | 469 ns | 243 ns | 114 ns |
+| AES-128-GCM open, 1350 B | 371 ns ✓ | 441 ns | 426 ns | 906 ns | 5.35 µs | 562 ns | 461 ns |
+| AES-128-GCM open, 16 KB | 3.75 µs ✓ | 3.85 µs | 3.87 µs | 8.81 µs | 60.74 µs | 4.01 µs | 3.84 µs |
+| AES-256-GCM seal, 32 B | 71 ns ✓ | 152 ns | 117 ns | 168 ns | 528 ns | 249 ns | 106 ns |
+| AES-256-GCM seal, 1350 B | 495 ns ✓ | 575 ns | 546 ns | 967 ns | 6.90 µs | 652 ns | 563 ns |
+| AES-256-GCM seal, 16 KB | 4.97 µs ✓ | 5.13 µs | 4.99 µs | 9.90 µs | 79.37 µs | 5.21 µs | 5.20 µs |
+| AES-256-GCM open, 32 B | 66 ns ✓ | 143 ns | 128 ns | 174 ns | 561 ns | 251 ns | 119 ns |
+| AES-256-GCM open, 1350 B | 479 ns ✓ | 566 ns | 542 ns | 990 ns | 6.87 µs | 652 ns | 579 ns |
+| AES-256-GCM open, 16 KB | 5.25 µs ✓ | 5.23 µs | 5.18 µs | 10.14 µs | 79.42 µs | 5.34 µs | 5.21 µs |
+| ChaCha20-Poly1305 seal, 32 B | 191 ns | 210 ns | 192 ns | 1.80 µs | 436 ns ✓ | 493 ns | 202 ns |
+| ChaCha20-Poly1305 seal, 1350 B | 1.05 µs | 1.09 µs | 1.05 µs | 3.24 µs | 4.68 µs ✓ | 1.60 µs | 1.18 µs |
+| ChaCha20-Poly1305 seal, 16 KB | 9.73 µs | 9.70 µs | 9.60 µs | 18.51 µs | 52.72 µs ✓ | 10.86 µs | 10.36 µs |
+| XChaCha20-Poly1305 seal, 32 B | 395 ns | 430 ns | - | 1.99 µs | 625 ns | - | - |
+| XChaCha20-Poly1305 seal, 1350 B | 1.24 µs | 1.31 µs | - | 3.48 µs | 4.77 µs | - | - |
+| XChaCha20-Poly1305 seal, 16 KB | 10.14 µs | 9.86 µs | - | 18.71 µs | 52.83 µs | - | - |
+| AES-128 header protection | 7 ns ✓ | 12 ns | 12 ns | - | - | - | 8 ns |
 | AES-256 header protection | 9 ns ✓ | 15 ns | 15 ns | - | - | - | 10 ns |
-| ChaCha20 header protection | 121 ns ✓ | 151 ns | 137 ns | - | - | - | 171 ns |
-| X25519 | 50.06 µs ✓ | 52.57 µs | 74.71 µs | 90.49 µs | 111.89 µs ✓ | 102.38 µs | 60.50 µs |
-| P-256 ECDH | 79.64 µs ✓ | 87.41 µs | 85.05 µs | 365.72 µs | 445.62 µs ✓ | 136.57 µs | 101.68 µs |
-| Ed25519 sign | 11.66 µs ✓ | 13.02 µs | 28.81 µs | 23.71 µs | 73.57 µs ✓ | 43.09 µs | 14.48 µs |
-| Ed25519 verify | 37.52 µs | 58.48 µs | 59.29 µs | 51.43 µs | 98.38 µs ✓ | 134.76 µs | 61.27 µs |
-| P-256 ECDSA sign | 23.14 µs ✓ | 25.01 µs | 29.51 µs | 101.00 µs | 158.50 µs ✓ | 33.12 µs | 25.81 µs |
-| P-256 ECDSA verify | 79.90 µs ✓ | 76.94 µs | 78.93 µs | 319.81 µs | 398.98 µs ✓ | 117.87 µs | 79.95 µs |
-| SHA-256, 64 B | 406 ns | 476 ns | 436 ns | 739 ns | 758 ns ✓ | 796 ns | 471 ns |
-| SHA-256, 1350 B | 3.82 µs | 4.33 µs | 4.56 µs | 7.84 µs | 8.21 µs ✓ | 4.25 µs | 3.99 µs |
-| SHA-256, 16 KB | 42.70 µs | 49.73 µs | 52.05 µs | 92.07 µs | 95.49 µs ✓ | 43.23 µs | 46.95 µs |
-| SHA-512, 64 B | 324 ns ✓ | 366 ns ✓ | 316 ns | 444 ns | 469 ns ✓ | 710 ns | 316 ns |
-| SHA-512, 1350 B | 2.59 µs ✓ | 3.00 µs ✓ | 2.96 µs | 4.41 µs | 4.94 µs ✓ | 2.99 µs | 2.69 µs |
-| SHA-512, 16 KB | 29.63 µs ✓ | 37.23 µs ✓ | 33.68 µs | 47.59 µs | 54.46 µs ✓ | 29.79 µs | 30.13 µs |
-| SHA3-256, 64 B | 481 ns ✓ | 582 ns | - | 605 ns | 602 ns | - | 467 ns |
-| SHA3-256, 1350 B | 4.46 µs ✓ | 4.77 µs | - | 6.06 µs | 6.07 µs | - | 4.49 µs |
-| SHA3-256, 16 KB | 53.66 µs ✓ | 53.91 µs | - | 69.36 µs | 73.57 µs | - | 53.74 µs |
-| SHA3-512, 64 B | 478 ns ✓ | 576 ns | - | 611 ns | 629 ns | - | 479 ns |
-| SHA3-512, 1350 B | 8.71 µs ✓ | 8.67 µs | - | 10.97 µs | 11.59 µs | - | 8.22 µs |
-| SHA3-512, 16 KB | 110.70 µs ✓ | 103.28 µs | - | 131.45 µs | 134.02 µs | - | 95.66 µs |
+| ChaCha20 header protection | 143 ns ✓ | 153 ns | 138 ns | - | - | - | 169 ns |
+| X25519 | 49.19 µs ✓ | 50.76 µs | 75.98 µs | 88.08 µs | 114.47 µs ✓ | 96.41 µs | 50.68 µs |
+| P-256 ECDH | 79.78 µs ✓ | 83.69 µs | 83.96 µs | 364.18 µs | 432.01 µs ✓ | 132.85 µs | 98.08 µs |
+| Ed25519 sign | 11.77 µs ✓ | 12.53 µs | 28.81 µs | 24.00 µs | 73.33 µs ✓ | 41.16 µs | 13.10 µs |
+| Ed25519 verify | 37.19 µs | 59.57 µs | 61.72 µs | 45.44 µs | 95.31 µs ✓ | 133.25 µs | 48.93 µs |
+| P-256 ECDSA sign | 21.63 µs ✓ | 23.86 µs | 25.04 µs | 106.22 µs | 154.55 µs ✓ | 31.76 µs | 25.29 µs |
+| P-256 ECDSA verify | 77.47 µs ✓ | 76.40 µs | 78.27 µs | 315.66 µs | 372.54 µs ✓ | 114.81 µs | 79.35 µs |
+| SHA-256, 64 B | 375 ns ✓ | 481 ns | 431 ns | 730 ns | 745 ns ✓ | 786 ns | 448 ns |
+| SHA-256, 1350 B | 3.80 µs ✓ | 4.35 µs | 4.26 µs | 7.77 µs | 8.14 µs ✓ | 4.14 µs | 4.00 µs |
+| SHA-256, 16 KB | 42.85 µs ✓ | 48.68 µs | 48.85 µs | 89.88 µs | 94.83 µs ✓ | 43.61 µs | 45.95 µs |
+| SHA-512, 64 B | 293 ns ✓ | 353 ns ✓ | 316 ns | 429 ns | 449 ns ✓ | 675 ns | 330 ns |
+| SHA-512, 1350 B | 2.56 µs ✓ | 2.98 µs ✓ | 2.98 µs | 4.20 µs | 4.69 µs ✓ | 2.98 µs | 2.76 µs |
+| SHA-512, 16 KB | 28.64 µs ✓ | 33.71 µs ✓ | 33.84 µs | 49.37 µs | 55.03 µs ✓ | 29.68 µs | 30.93 µs |
+| SHA3-256, 64 B | 482 ns ✓ | 568 ns | - | 607 ns | 604 ns | - | 459 ns |
+| SHA3-256, 1350 B | 4.44 µs ✓ | 4.58 µs | - | 5.89 µs | 6.07 µs | - | 4.53 µs |
+| SHA3-256, 16 KB | 53.70 µs ✓ | 53.24 µs | - | 69.68 µs | 71.90 µs | - | 55.02 µs |
+| SHA3-512, 64 B | 475 ns ✓ | 582 ns | - | 606 ns | 641 ns | - | 465 ns |
+| SHA3-512, 1350 B | 8.30 µs ✓ | 8.82 µs | - | 10.93 µs | 11.12 µs | - | 8.24 µs |
+| SHA3-512, 16 KB | 102.75 µs ✓ | 99.34 µs | - | 130.67 µs | 135.61 µs | - | 98.02 µs |
 | SHA-1, 64 B | - | - | - | - | - | - | - |
 | SHA-1, 1350 B | - | - | - | - | - | - | - |
 | SHA-1, 16 KB | - | - | - | - | - | - | - |
 | MD5, 64 B | - | - | - | - | - | - | - |
 | MD5, 1350 B | - | - | - | - | - | - | - |
 | MD5, 16 KB | - | - | - | - | - | - | - |
-| HMAC-SHA256, 64 B | 986 ns | 1.25 µs | 1.16 µs | 1.90 µs | 1.88 µs ✓ | 5.90 µs | 1.07 µs |
-| HMAC-SHA256, 1350 B | 4.34 µs | 5.12 µs | 4.92 µs | 9.04 µs | 9.25 µs ✓ | 9.10 µs | 4.58 µs |
-| HKDF-SHA256 extract and expand | 1.68 µs | 2.05 µs | 1.86 µs | 3.12 µs | 3.29 µs ✓ | 6.73 µs | 1.85 µs |
-| HKDF-SHA256 expand | 455 ns | 999 ns | 515 ns | 828 ns | 1.57 µs ✓ | 4.50 µs | 897 ns |
-| RSA-2048 PKCS#1 sign | 744.91 µs | 777.96 µs | 1.06 ms | 3.20 ms | - | 804.63 µs | 1.68 ms |
-| RSA-2048 PKCS#1 verify | 31.73 µs | 34.33 µs | 39.55 µs | 85.44 µs | - | 48.55 µs | 66.06 µs |
-| RSA-2048 PSS sign | 747.50 µs | 806.38 µs | 1.04 ms | 3.11 ms | 10.99 ms ✓ | 829.56 µs | 1.68 ms |
-| RSA-2048 PSS verify | 33.41 µs | 35.64 µs | 40.86 µs | 101.39 µs | 614.03 µs ✓ | 54.31 µs | 69.06 µs |
-| ML-KEM-768 key generation | 17.72 µs | 23.10 µs | - | 96.20 µs | 34.41 µs | 64.80 µs | 15.27 µs |
-| ML-KEM-768 encapsulate | 14.04 µs | 23.96 µs | - | 107.41 µs | 31.60 µs | 63.45 µs | 14.05 µs |
-| ML-KEM-768 decapsulate | 12.33 µs | 27.75 µs | - | 142.15 µs | 33.87 µs | 50.87 µs | 14.68 µs |
-| ML-KEM-1024 key generation | 25.42 µs | 33.40 µs | - | - | 46.24 µs | - | - |
-| ML-KEM-1024 encapsulate | 25.74 µs | 35.18 µs | - | - | 45.58 µs | - | - |
-| ML-KEM-1024 decapsulate | 16.02 µs | 40.16 µs | - | - | 48.72 µs | - | - |
-| ML-KEM-512 key generation | 12.05 µs | 14.39 µs | - | - | 25.36 µs | - | - |
-| ML-KEM-512 encapsulate | 11.85 µs | 16.06 µs | - | - | 25.39 µs | - | - |
-| ML-KEM-512 decapsulate | 9.90 µs | 17.90 µs | - | - | 24.99 µs | - | - |
-| ML-DSA-65 key generation | 62.71 µs | 85.03 µs | - | 444.09 µs | 96.64 µs | 277.50 µs | 117.14 µs |
-| ML-DSA-65 sign | 119.36 µs | 221.75 µs | - | 1.38 ms | 276.08 µs | 1.47 ms | 200.74 µs |
-| ML-DSA-65 verify | 13.20 µs | 68.93 µs | - | 149.74 µs | 102.28 µs | 280.09 µs | 62.44 µs |
-| ML-DSA-65 load and verify | 59.57 µs | 70.32 µs | - | 318.59 µs | 98.32 µs | 285.74 µs | - |
-| P-384 ECDH | 275.58 µs ✓ | 297.95 µs | 1.01 ms | 1.25 ms | - | 786.00 µs | 301.90 µs |
-| P-384 ECDSA sign | 71.51 µs ✓ | 126.14 µs | 536.32 µs | 295.04 µs | - | 261.07 µs | 57.44 µs |
-| P-384 ECDSA verify | 263.63 µs ✓ | 308.35 µs | 978.20 µs | 1.05 ms | - | 621.54 µs | 251.31 µs |
-| P-521 ECDH | 453.26 µs | 482.91 µs | - | 1.23 ms | - | 725.73 µs | 580.87 µs |
-| P-521 ECDSA sign | 116.85 µs | 255.40 µs | - | 286.93 µs | - | 355.02 µs | 138.00 µs |
-| P-521 ECDSA verify | 418.79 µs | 542.86 µs | - | 995.79 µs | - | 715.28 µs | 499.03 µs |
-| HPKE X25519 sender setup | 58.26 µs | 64.33 µs | - | 129.60 µs | 135.64 µs | - | - |
-| HPKE X25519 recipient setup | 46.83 µs | 63.30 µs | - | 104.64 µs | 127.74 µs | - | - |
-| HPKE AES-128-GCM seal, 1350 B | 428 ns | 820 ns | - | 911 ns | 5.54 µs | - | - |
-| HPKE AES-128-GCM open, 1350 B | 427 ns | 973 ns | - | 913 ns | 5.52 µs | - | - |
-| Blind RSA-2048 blind | 109.19 µs | - | - | 689.59 µs | - | - | - |
-| Blind RSA-2048 sign | 746.03 µs | - | - | 3.08 ms | - | - | - |
-| Blind RSA-2048 finalize | 33.18 µs | - | - | 98.60 µs | - | - | - |
-| Blind RSA-2048 verify | 28.45 µs | - | - | 85.50 µs | - | - | - |
-| OPRF ristretto255 blind | 78.66 µs | - | - | 64.12 µs | - | - | - |
-| OPRF ristretto255 evaluate | 57.56 µs | - | - | 45.63 µs | - | - | - |
-| OPRF ristretto255 finalize | 61.29 µs | - | - | 68.83 µs | - | - | - |
-| VOPRF P-384 blind | 267.05 µs | - | - | 1.23 ms | - | - | - |
-| VOPRF P-384 evaluate | 950.17 µs | - | - | 5.08 ms | - | - | - |
-| VOPRF P-384 finalize | 1.36 ms | - | - | 7.20 ms | - | - | - |
-| ECVRF edwards25519 prove | 164.18 µs | - | - | 188.99 µs | - | - | - |
-| ECVRF edwards25519 verify | 198.60 µs | - | - | 204.67 µs | - | - | - |
-| ECVRF P-256 prove | 174.73 µs | - | - | 759.38 µs | - | - | - |
-| ECVRF P-256 verify | 230.75 µs | - | - | 946.83 µs | - | - | - |
-| SPAKE2+ P-256 prover share | 81.79 µs | - | - | 574.64 µs | - | - | - |
-| SPAKE2+ P-256 verifier share and confirmation | 287.70 µs | - | - | 1.45 ms | - | - | - |
-| SPAKE2+ P-256 prover confirmation and key | 210.12 µs | - | - | 865.48 µs | - | - | - |
-| SPAKE2+ P-256 verifier key | 118 ns | - | - | 192 ns | - | - | - |
-| Argon2id 16 MiB t=1 p=1 | 11.48 ms | - | - | 12.23 ms | - | 16.94 ms | - |
-| Argon2id 64 MiB t=3 p=4 | 185.54 ms | - | - | 214.99 ms | - | 266.82 ms | - |
+| HMAC-SHA256, 64 B | 1.02 µs ✓ | 1.27 µs | 1.10 µs | 1.91 µs | 1.87 µs ✓ | 5.72 µs | 1.11 µs |
+| HMAC-SHA256, 1350 B | 4.41 µs ✓ | 5.17 µs | 4.98 µs | 9.19 µs | 9.48 µs ✓ | 9.22 µs | 4.66 µs |
+| HKDF-SHA256 extract and expand | 1.69 µs ✓ | 2.01 µs | 1.90 µs | 3.08 µs | 3.08 µs ✓ | 6.76 µs | 1.78 µs |
+| HKDF-SHA256 expand | 460 ns ✓ | 977 ns | 517 ns | 791 ns | 1.57 µs ✓ | 4.57 µs | 895 ns |
+| RSA-2048 PKCS#1 sign | 744.33 µs | 781.29 µs | 994.67 µs | 3.13 ms | - | 803.26 µs | 1.67 ms |
+| RSA-2048 PKCS#1 verify | 31.10 µs | 33.25 µs | 38.37 µs | 82.46 µs | - | 48.19 µs | 64.34 µs |
+| RSA-2048 PSS sign | 747.19 µs | 771.97 µs | 1.01 ms | 3.11 ms | 11.18 ms ✓ | 788.16 µs | 1.67 ms |
+| RSA-2048 PSS verify | 33.35 µs | 35.67 µs | 41.11 µs | 103.28 µs | 575.01 µs ✓ | 52.09 µs | 66.54 µs |
+| ML-KEM-768 key generation | 17.88 µs | 23.56 µs | - | 93.82 µs | 33.78 µs | 62.34 µs | 15.07 µs |
+| ML-KEM-768 encapsulate | 13.60 µs | 23.96 µs | - | 103.47 µs | 32.62 µs | 64.42 µs | 13.76 µs |
+| ML-KEM-768 decapsulate | 12.09 µs | 27.55 µs | - | 127.99 µs | 34.04 µs | 49.06 µs | 14.68 µs |
+| ML-KEM-1024 key generation | 25.70 µs | 33.21 µs | - | - | 46.57 µs | - | - |
+| ML-KEM-1024 encapsulate | 25.45 µs | 35.34 µs | - | - | 43.70 µs | - | - |
+| ML-KEM-1024 decapsulate | 17.00 µs | 40.09 µs | - | - | 47.87 µs | - | - |
+| ML-KEM-512 key generation | 11.16 µs | 14.56 µs | - | - | 25.45 µs | - | - |
+| ML-KEM-512 encapsulate | 11.31 µs | 15.16 µs | - | - | 23.09 µs | - | - |
+| ML-KEM-512 decapsulate | 9.81 µs | 17.49 µs | - | - | 24.28 µs | - | - |
+| ML-DSA-65 key generation | 62.19 µs | 80.37 µs | - | 437.20 µs | 96.01 µs | 275.09 µs | 110.96 µs |
+| ML-DSA-65 sign | 110.50 µs | 222.51 µs | - | 1.43 ms | 245.67 µs | 1.44 ms | 204.23 µs |
+| ML-DSA-65 verify | 12.82 µs | 69.64 µs | - | 154.47 µs | 99.84 µs | 279.24 µs | 59.08 µs |
+| ML-DSA-65 load and verify | 55.74 µs | 69.16 µs | - | 305.35 µs | 99.49 µs | 285.78 µs | - |
+| P-384 ECDH | 261.58 µs ✓ | 293.48 µs | 999.83 µs | 1.20 ms | - | 761.55 µs | 278.79 µs |
+| P-384 ECDSA sign | 59.52 µs ✓ | 125.13 µs | 536.29 µs | 288.26 µs | - | 255.93 µs | 56.15 µs |
+| P-384 ECDSA verify | 251.75 µs ✓ | 301.80 µs | 975.83 µs | 1.07 ms | - | 640.40 µs | 242.94 µs |
+| P-521 ECDH | 445.79 µs | 493.47 µs | - | 1.22 ms | - | 735.07 µs | 575.08 µs |
+| P-521 ECDSA sign | 118.45 µs | 257.74 µs | - | 285.72 µs | - | 344.36 µs | 135.13 µs |
+| P-521 ECDSA verify | 405.18 µs | 526.52 µs | - | 983.01 µs | - | 708.29 µs | 504.69 µs |
+| HPKE X25519 sender setup | 57.70 µs | 63.28 µs | - | 128.71 µs | 137.37 µs | - | - |
+| HPKE X25519 recipient setup | 47.05 µs | 61.36 µs | - | 103.42 µs | 126.89 µs | - | - |
+| HPKE AES-128-GCM seal, 1350 B | 431 ns | 820 ns | - | 903 ns | 5.50 µs | - | - |
+| HPKE AES-128-GCM open, 1350 B | 403 ns | 878 ns | - | 889 ns | 5.53 µs | - | - |
+| Blind RSA-2048 blind | 112.56 µs | - | - | 676.36 µs | - | - | - |
+| Blind RSA-2048 sign | 740.72 µs | - | - | 3.12 ms | - | - | - |
+| Blind RSA-2048 finalize | 33.62 µs | - | - | 98.66 µs | - | - | - |
+| Blind RSA-2048 verify | 28.08 µs | - | - | 85.94 µs | - | - | - |
+| OPRF ristretto255 blind | 77.94 µs | - | - | 59.66 µs | - | - | - |
+| OPRF ristretto255 evaluate | 57.55 µs | - | - | 41.27 µs | - | - | - |
+| OPRF ristretto255 finalize | 59.80 µs | - | - | 65.68 µs | - | - | - |
+| VOPRF P-384 blind | 266.25 µs | - | - | 1.16 ms | - | - | - |
+| VOPRF P-384 evaluate | 927.85 µs | - | - | 4.97 ms | - | - | - |
+| VOPRF P-384 finalize | 1.36 ms | - | - | 6.95 ms | - | - | - |
+| ECVRF edwards25519 prove | 154.05 µs | - | - | 184.28 µs | - | - | - |
+| ECVRF edwards25519 verify | 196.52 µs | - | - | 202.09 µs | - | - | - |
+| ECVRF P-256 prove | 174.40 µs | - | - | 758.34 µs | - | - | - |
+| ECVRF P-256 verify | 241.28 µs | - | - | 948.54 µs | - | - | - |
+| SPAKE2+ P-256 prover share | 81.94 µs | - | - | 575.85 µs | - | - | - |
+| SPAKE2+ P-256 verifier share and confirmation | 285.67 µs | - | - | 1.44 ms | - | - | - |
+| SPAKE2+ P-256 prover confirmation and key | 209.17 µs | - | - | 869.46 µs | - | - | - |
+| SPAKE2+ P-256 verifier key | 80 ns | - | - | 165 ns | - | - | - |
+| Argon2id 16 MiB t=1 p=1 | 10.90 ms | - | - | 12.07 ms | - | 17.04 ms | - |
+| Argon2id 64 MiB t=3 p=4 | 165.29 ms | - | - | 206.25 ms | - | 258.64 ms | - |
+| SLH-DSA-SHA2-128s key generation | - | - | - | - | - | - | - |
+| SLH-DSA-SHA2-128s sign | - | - | - | - | - | - | - |
+| SLH-DSA-SHA2-128s verify | - | - | - | - | - | - | - |
+| SLH-DSA-SHA2-128f key generation | - | - | - | - | - | - | - |
+| SLH-DSA-SHA2-128f sign | - | - | - | - | - | - | - |
+| SLH-DSA-SHA2-128f verify | - | - | - | - | - | - | - |
+| SLH-DSA-SHAKE-128f key generation | - | - | - | - | - | - | - |
+| SLH-DSA-SHAKE-128f sign | - | - | - | - | - | - | - |
+| SLH-DSA-SHAKE-128f verify | - | - | - | - | - | - | - |
 
 </details>
 
@@ -810,22 +912,22 @@ A cold `cargo build --release` of a minimal binary per library (AES-128-GCM, SHA
 
 ### `nixos`
 
-Measured 2026-11-18 at [`93c8bcd7`](https://github.com/kixel-ai/rind/commit/93c8bcd705a05136e534fee4b463ab1ba56162bf), with rustc 1.98.1 (48a229cea 2026-09-01), gcc (GCC) 16.2.0, and 16 jobs.
+Measured 2026-11-24 at [`d481966c`](https://github.com/kixel-ai/rind/commit/d481966c12a136fa82b10afbf81e25d26f7fb0cd), with rustc 1.98.1 (48a229cea 2026-09-01), gcc (GCC) 16.2.0, and 16 jobs.
 
 | Build | Wall s (range) | CPU s | Stripped MB | Tools needed | Crates |
 |---|---|---|---|---|---|
-| rind | 6.7 (6.6 to 6.7) | 20 | 0.90 | none | 5 |
-| aws-lc-rs | 18.1 (18.1 to 18.1) | 54 | 2.99 | cc | 14 |
-| ring | 6.9 (6.9 to 7.2) | 9 | 0.74 | cc | 9 |
-| RustCrypto + dalek | 4.0 (4.0 to 4.0) | 21 | 0.54 | none | 57 |
-| graviola | 2.6 (2.6 to 2.6) | 5 | 0.91 | none | 5 |
-| libcrux | 6.6 (6.6 to 6.6) | 16 | 0.75 | none | 27 |
+| rind | 7.0 (7.0 to 7.0) | 25 | 1.43 | none | 5 |
+| aws-lc-rs | 16.3 (16.3 to 16.3) | 55 | 2.99 | cc | 14 |
+| ring | 6.8 (6.7 to 6.8) | 10 | 0.74 | cc | 9 |
+| RustCrypto + dalek | 4.0 (4.0 to 4.0) | 20 | 0.54 | none | 57 |
+| graviola | 2.5 (2.5 to 2.6) | 5 | 0.91 | none | 5 |
+| libcrux | 6.7 (6.6 to 6.7) | 15 | 0.75 | none | 27 |
 | verified-garbage | 2.0 (2.0 to 2.0) | 5 | 1.56 | none | 7 |
-| OpenSSL, the system's, linked dynamically | 3.8 (3.8 to 3.8) | 10 | 0.38 | cc, pkg-config | 18 |
-| OpenSSL, vendored | 22.8 (22.7 to 23.0) | 201 | 5.13 | cc, make, perl | 19 |
-| rustls + rind-rustls | 7.4 (7.4 to 7.5) | 36 | 3.91 | none | 14 |
-| rustls + aws-lc-rs | 19.7 (19.6 to 19.8) | 70 | 4.11 | cc | 20 |
-| rustls + ring | 10.1 (10.1 to 10.1) | 24 | 1.94 | cc | 16 |
+| OpenSSL, the system's, linked dynamically | 3.8 (3.7 to 3.8) | 9 | 0.38 | cc, pkg-config | 18 |
+| OpenSSL, vendored | 24.3 (23.0 to 27.9) | 206 | 5.13 | cc, make, perl | 19 |
+| rustls + rind-rustls | 7.7 (7.7 to 7.8) | 41 | 5.66 | none | 14 |
+| rustls + aws-lc-rs | 19.8 (19.8 to 19.9) | 70 | 4.11 | cc | 20 |
+| rustls + ring | 10.2 (10.1 to 10.2) | 24 | 1.94 | cc | 16 |
 
 ### `desktop`
 
@@ -847,86 +949,87 @@ Measured 2026-11-07 at [`9e7f6a5a`](https://github.com/kixel-ai/rind/commit/9e7f
 
 ### `fedora`
 
-Measured 2026-11-21 at [`fbdc801e`](https://github.com/kixel-ai/rind/commit/fbdc801e090ec1d476a01ca8c24be688baed5a7f), with rustc 1.98.1 (48a229cea 2026-09-01), gcc (GCC) 16.2.0, and 16 jobs.
+Measured 2026-11-24 at [`d481966c`](https://github.com/kixel-ai/rind/commit/d481966c12a136fa82b10afbf81e25d26f7fb0cd), with rustc 1.98.1 (48a229cea 2026-09-01), gcc (GCC) 16.2.0, and 16 jobs.
 
 | Build | Wall s (range) | CPU s | Stripped MB | Tools needed | Crates |
 |---|---|---|---|---|---|
-| rind | 4.8 (4.7 to 4.8) | 17 | 1.43 | none | 5 |
-| aws-lc-rs | 10.8 (10.8 to 10.9) | 34 | 2.99 | cc | 14 |
-| ring | 4.3 (4.3 to 4.4) | 6 | 0.74 | cc | 9 |
-| RustCrypto + dalek | 2.5 (2.5 to 2.5) | 13 | 0.54 | none | 57 |
-| graviola | 1.7 (1.6 to 1.7) | 4 | 0.91 | none | 5 |
-| libcrux | 4.3 (4.2 to 4.3) | 10 | 0.75 | none | 27 |
-| verified-garbage | 1.2 (1.2 to 1.2) | 3 | 1.56 | none | 7 |
-| OpenSSL, the system's, linked dynamically | 2.4 (2.4 to 2.5) | 6 | 0.38 | cc, pkg-config | 18 |
-| OpenSSL, vendored | 12.9 (12.9 to 13.0) | 119 | 5.13 | cc, make, perl | 19 |
-| rustls + rind-rustls | 5.2 (5.2 to 5.3) | 29 | 5.57 | none | 14 |
-| rustls + aws-lc-rs | 13.4 (13.4 to 13.5) | 45 | 4.11 | cc | 20 |
-| rustls + ring | 6.8 (6.8 to 6.8) | 17 | 1.94 | cc | 16 |
+| rind | 4.9 (4.8 to 5.2) | 18 | 1.43 | none | 5 |
+| aws-lc-rs | 11.0 (11.0 to 11.1) | 34 | 2.99 | cc | 14 |
+| ring | 4.9 (4.7 to 4.9) | 7 | 0.74 | cc | 9 |
+| RustCrypto + dalek | 2.7 (2.7 to 2.7) | 15 | 0.54 | none | 57 |
+| graviola | 1.8 (1.8 to 1.9) | 4 | 0.91 | none | 5 |
+| libcrux | 4.3 (4.3 to 4.4) | 10 | 0.75 | none | 27 |
+| verified-garbage | 1.3 (1.3 to 1.3) | 3 | 1.56 | none | 7 |
+| OpenSSL, the system's, linked dynamically | 3.7 (3.3 to 4.1) | 9 | 0.38 | cc, pkg-config | 18 |
+| OpenSSL, vendored | 15.2 (14.6 to 50.1) | 143 | 5.13 | cc, make, perl | 19 |
+| rustls + rind-rustls | 6.1 (6.0 to 6.1) | 32 | 5.66 | none | 14 |
+| rustls + aws-lc-rs | 14.5 (14.3 to 14.5) | 51 | 4.11 | cc | 20 |
+| rustls + ring | 7.3 (7.2 to 7.4) | 18 | 1.94 | cc | 16 |
 
 ### `kixtop`
 
-Measured 2026-11-12 at [`0d2e74b4`](https://github.com/kixel-ai/rind/commit/0d2e74b489c1067beeab373f9de75d24574b4bc5), with rustc 1.98.1 (48a229cea 2026-09-01), clang version 21.1.8, and 4 jobs.
+Measured 2026-11-24 at [`3f76a53f`](https://github.com/kixel-ai/rind/commit/3f76a53f35ae185f0e9ea0a58f3455766fc4d643), with rustc 1.98.1 (48a229cea 2026-09-01), clang version 21.1.8, and 4 jobs.
 
 | Build | Wall s (range) | CPU s | Stripped MB | Tools needed | Crates |
 |---|---|---|---|---|---|
-| rind | 4.6 (4.5 to 4.6) | 9 | 0.69 | none | 5 |
-| aws-lc-rs | 29.4 (29.2 to 29.6) | 94 | 2.14 | cc | 14 |
-| ring | 8.2 (8.1 to 8.2) | 10 | 0.64 | cc | 9 |
-| RustCrypto + dalek | 5.2 (5.2 to 5.2) | 17 | 0.46 | none | 52 |
+| rind | 6.7 (6.7 to 6.7) | 15 | 0.87 | none | 5 |
+| aws-lc-rs | 29.8 (29.4 to 30.8) | 96 | 2.14 | cc | 14 |
+| ring | 8.2 (8.2 to 8.2) | 10 | 0.64 | cc | 9 |
+| RustCrypto + dalek | 5.3 (5.3 to 5.3) | 17 | 0.46 | none | 52 |
 | graviola | 3.1 (3.1 to 3.1) | 6 | 0.82 | none | 5 |
-| libcrux | 8.1 (8.0 to 8.3) | 18 | 0.59 | none | 27 |
-| OpenSSL, the system's, linked dynamically | 4.6 (4.6 to 4.6) | 10 | 0.36 | cc | 18 |
-| OpenSSL, vendored | 130.7 (129.9 to 141.4) | 423 | 3.75 | cc, make, perl | 19 |
-| rustls + rind-rustls | 7.2 (7.1 to 7.3) | 24 | 2.17 | none | 14 |
-| rustls + aws-lc-rs | 35.3 (35.3 to 35.5) | 114 | 3.06 | cc | 20 |
-| rustls + ring | 13.0 (12.6 to 13.5) | 25 | 1.60 | cc | 16 |
+| libcrux | 8.3 (8.3 to 8.5) | 19 | 0.59 | none | 27 |
+| verified-garbage | 2.5 (2.4 to 2.5) | 5 | 0.84 | none | 7 |
+| OpenSSL, the system's, linked dynamically | 4.7 (4.7 to 4.9) | 10 | 0.36 | cc | 18 |
+| OpenSSL, vendored | 139.9 (132.7 to 143.9) | 452 | 3.75 | cc, make, perl | 19 |
+| rustls + rind-rustls | 9.5 (9.3 to 9.6) | 32 | 3.31 | none | 14 |
+| rustls + aws-lc-rs | 37.3 (34.9 to 39.9) | 120 | 3.06 | cc | 20 |
+| rustls + ring | 12.5 (12.4 to 12.5) | 24 | 1.60 | cc | 16 |
 
 ### `ovh-iad`
 
-Measured 2026-11-17 at [`93c8bcd7`](https://github.com/kixel-ai/rind/commit/93c8bcd705a05136e534fee4b463ab1ba56162bf), with rustc 1.98.1 (48a229cea 2026-09-01), gcc (GCC) 16.2.0, and 4 jobs.
+Measured 2026-11-24 at [`3f76a53f`](https://github.com/kixel-ai/rind/commit/3f76a53f35ae185f0e9ea0a58f3455766fc4d643), with rustc 1.98.1 (48a229cea 2026-09-01), gcc (GCC) 16.2.0, and 4 jobs.
 
 | Build | Wall s (range) | CPU s | Stripped MB | Tools needed | Crates |
 |---|---|---|---|---|---|
-| rind | 21.4 (20.9 to 21.6) | 44 | 0.90 | none | 5 |
-| aws-lc-rs | 41.6 (41.6 to 42.4) | 104 | 2.99 | cc | 14 |
-| ring | 15.9 (15.7 to 15.9) | 21 | 0.74 | cc | 9 |
-| RustCrypto + dalek | 11.7 (11.3 to 11.9) | 41 | 0.54 | none | 57 |
-| libcrux | 16.8 (16.6 to 16.8) | 34 | 0.75 | none | 27 |
-| verified-garbage | 4.8 (4.7 to 4.9) | 12 | 1.56 | none | 7 |
-| OpenSSL, the system's, linked dynamically | 9.7 (9.4 to 9.7) | 20 | 0.38 | cc, pkg-config | 18 |
-| OpenSSL, vendored | 109.8 (104.7 to 117.1) | 366 | 5.13 | cc, make, perl | 19 |
-| rustls + rind-rustls | 22.6 (22.6 to 22.6) | 74 | 3.91 | none | 14 |
-| rustls + aws-lc-rs | 53.8 (53.1 to 54.1) | 137 | 4.11 | cc | 20 |
-| rustls + ring | 26.9 (26.7 to 27.2) | 52 | 1.94 | cc | 16 |
+| rind | 24.4 (24.1 to 24.5) | 54 | 1.43 | none | 5 |
+| aws-lc-rs | 43.9 (43.8 to 44.2) | 109 | 2.99 | cc | 14 |
+| ring | 16.2 (16.1 to 16.3) | 21 | 0.74 | cc | 9 |
+| RustCrypto + dalek | 12.2 (11.6 to 12.3) | 41 | 0.54 | none | 57 |
+| libcrux | 16.7 (16.7 to 17.8) | 34 | 0.75 | none | 27 |
+| verified-garbage | 4.7 (4.7 to 4.8) | 11 | 1.56 | none | 7 |
+| OpenSSL, the system's, linked dynamically | 9.6 (9.5 to 9.9) | 20 | 0.38 | cc, pkg-config | 18 |
+| OpenSSL, vendored | 105.7 (105.5 to 109.8) | 359 | 5.13 | cc, make, perl | 19 |
+| rustls + rind-rustls | 27.5 (26.8 to 28.6) | 90 | 5.66 | none | 14 |
+| rustls + aws-lc-rs | 56.9 (55.8 to 59.3) | 146 | 4.11 | cc | 20 |
+| rustls + ring | 27.8 (27.4 to 28.1) | 53 | 1.94 | cc | 16 |
 
 ### `ovh-sea`
 
-Measured 2026-11-17 at [`93c8bcd7`](https://github.com/kixel-ai/rind/commit/93c8bcd705a05136e534fee4b463ab1ba56162bf), with rustc 1.98.1 (48a229cea 2026-09-01), gcc (GCC) 16.2.0, and 4 jobs.
+Measured 2026-11-24 at [`3f76a53f`](https://github.com/kixel-ai/rind/commit/3f76a53f35ae185f0e9ea0a58f3455766fc4d643), with rustc 1.98.1 (48a229cea 2026-09-01), gcc (GCC) 16.2.0, and 4 jobs.
 
 | Build | Wall s (range) | CPU s | Stripped MB | Tools needed | Crates |
 |---|---|---|---|---|---|
-| rind | 19.7 (19.5 to 20.2) | 40 | 0.90 | none | 5 |
-| aws-lc-rs | 40.1 (39.8 to 40.6) | 100 | 2.99 | cc | 14 |
-| ring | 15.2 (15.2 to 15.3) | 20 | 0.74 | cc | 9 |
-| RustCrypto + dalek | 11.1 (10.7 to 11.5) | 39 | 0.54 | none | 57 |
-| libcrux | 15.8 (15.6 to 15.9) | 33 | 0.75 | none | 27 |
-| verified-garbage | 4.5 (4.5 to 4.5) | 11 | 1.56 | none | 7 |
-| OpenSSL, the system's, linked dynamically | 9.0 (8.9 to 9.1) | 19 | 0.38 | cc, pkg-config | 18 |
-| OpenSSL, vendored | 100.4 (100.1 to 101.4) | 338 | 5.13 | cc, make, perl | 19 |
-| rustls + rind-rustls | 21.7 (21.4 to 21.9) | 71 | 3.91 | none | 14 |
-| rustls + aws-lc-rs | 50.6 (50.2 to 51.9) | 130 | 4.11 | cc | 20 |
-| rustls + ring | 25.7 (25.4 to 25.9) | 49 | 1.94 | cc | 16 |
+| rind | 21.4 (21.2 to 21.5) | 47 | 1.43 | none | 5 |
+| aws-lc-rs | 38.5 (38.3 to 38.6) | 95 | 2.99 | cc | 14 |
+| ring | 14.7 (14.6 to 14.8) | 19 | 0.74 | cc | 9 |
+| RustCrypto + dalek | 10.5 (10.4 to 10.6) | 37 | 0.54 | none | 57 |
+| libcrux | 15.2 (15.2 to 15.3) | 32 | 0.75 | none | 27 |
+| verified-garbage | 4.5 (4.3 to 4.5) | 11 | 1.56 | none | 7 |
+| OpenSSL, the system's, linked dynamically | 8.8 (8.7 to 9.2) | 18 | 0.38 | cc, pkg-config | 18 |
+| OpenSSL, vendored | 95.5 (95.5 to 95.7) | 324 | 5.13 | cc, make, perl | 19 |
+| rustls + rind-rustls | 23.0 (22.9 to 23.2) | 77 | 5.66 | none | 14 |
+| rustls + aws-lc-rs | 49.0 (48.9 to 49.3) | 126 | 4.11 | cc | 20 |
+| rustls + ring | 25.0 (24.6 to 25.3) | 48 | 1.94 | cc | 16 |
 
 ## CPU tiers
 
-GitHub's runners, timed by the weekly `bench` workflow with CPU features denied as `bench.yml` describes: x86_64 runs every feature, its name suffixed with the AES-GCM tier the runner drew (AVX-512 or VAES AVX2); no IFMA denies AVX-512 IFMA, and no AVX-512 all of AVX-512 but VAES and VPCLMULQDQ; from no ADX, each column denies more (no ADX: ADX and AVX-512 IFMA; no AVX2: also AVX2, BMI2, SHA-NI, AVX-512, VAES, and VPCLMULQDQ; no AVX: also AVX; no AES-NI: also AES-NI, PCLMULQDQ, and SSE4.1; SSE2: also SSSE3). aarch64 runs with the crypto extension, no SHA-3 without the SHA-512 and SHA-3 instructions, no crypto without any of them, armv7 in 32-bit mode on the same core, and armv7 NEON there without the crypto extension. portable times rind's portable backend, forced with `--cfg rind_portable`, against aws-lc's C built without assembly; ring has no such build, and verified-garbage runs its assembly there, so both sit that column out. Each cell is rind's time over the fastest of aws-lc-rs, ring, and verified-garbage (without ring where a feature is denied, since ring can't be denied one), in the row's benchmark where rind trails most. Known gaps compares a tier against aws-lc-rs and ring only, so a cell that only verified-garbage beats gets a quest that switches rind to its proven code, not an entry there. An empty cell isn't timed: it runs the same code as the cell to its left, or, in a row built on other primitives such as `rustls-bulk/*` or HPKE, its tier times only those primitives, whose own rows show the difference.
+GitHub's runners, timed by the weekly `bench` workflow with CPU features denied as `bench.yml` describes: x86_64 runs every feature, its name suffixed with the AES-GCM tier the runner drew (AVX-512 or VAES AVX2); no IFMA denies AVX-512 IFMA, and no AVX-512 all of AVX-512 but VAES and VPCLMULQDQ; from no ADX, each column denies more (no ADX: ADX and AVX-512 IFMA; no AVX2: also AVX2, BMI2, SHA-NI, AVX-512, VAES, and VPCLMULQDQ; no AVX: also AVX; no AES-NI: also AES-NI, PCLMULQDQ, and SSE4.1; SSE2: also SSSE3). aarch64 runs with the crypto extension, no SHA-3 without the SHA-512 and SHA-3 instructions, no crypto without any of them, armv7 in 32-bit mode on the same core, and armv7 NEON there without the crypto extension. portable times rind's portable backend, forced with `--cfg rind_portable`, against aws-lc's C built without assembly; ring has no such build, and verified-garbage runs its assembly there, so both sit that column out. Each cell is rind's time over the fastest of aws-lc-rs, ring, and verified-garbage (without ring where a feature is denied, since ring can't be denied one), in the row's benchmark where rind trails most. Argon2id, SLH-DSA, and the protocols, which neither aws-lc-rs nor ring offers, are timed against RustCrypto instead, on the x86_64, aarch64, and armv7 columns alone, since RustCrypto's CPU detection can't be denied a feature. Known gaps compares a tier against aws-lc-rs, ring, and RustCrypto only, so a cell that only verified-garbage beats gets a quest that switches rind to its proven code, not an entry there. An empty cell isn't timed: it runs the same code as the cell to its left, or, in a row built on other primitives such as `rustls-bulk/*` or HPKE, its tier times only those primitives, whose own rows show the difference.
 
-From [run 43646114817](https://github.com/kixel-ai/rind/actions/runs/43646114817), 2026-11-14 at [`62856c6b`](https://github.com/kixel-ai/rind/commit/62856c6b461ecd7a263b7f05fc6fb1b8e1cc6e19), on AMD EPYC 7763 64-Core Processor, AMD EPYC 9V45 96-Core Processor, AMD EPYC 9V74 80-Core Processor, Intel(R) Xeon(R) 6975P-C, Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz, Neoverse-N2.
+From [run 44941104585](https://github.com/kixel-ai/rind/actions/runs/44941104585), 2026-11-21 at [`b26ffd6f`](https://github.com/kixel-ai/rind/commit/b26ffd6f008ce6d5f119968daab05518a6fe0518), on AMD EPYC 7763 64-Core Processor, Intel(R) Xeon(R) 6975P-C, Neoverse-N2.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="benchmarks/tiers-dark.svg">
-  <img alt="rind's time over the fastest of aws-lc-rs, ring, and verified-garbage, by CPU tier" src="benchmarks/tiers.svg">
+  <img alt="rind's time over the fastest of aws-lc-rs, ring, RustCrypto, and verified-garbage, by CPU tier" src="benchmarks/tiers.svg">
 </picture>
 
 <details>
@@ -934,351 +1037,366 @@ From [run 43646114817](https://github.com/kixel-ai/rind/actions/runs/43646114817
 
 | Benchmark | x86_64 AVX-512 | no IFMA | no AVX-512 | no ADX | no AVX2 | no AVX | no AES-NI | SSE2 | aarch64 | no SHA-3 | no crypto | armv7 | armv7 NEON | portable |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| `aes128-cbc-decrypt/*/1200B` | 0.85 |  |  |  | 0.92 | 0.99 | 1.01 | 0.84 | 0.88 |  | 0.55 | 0.90 | 1.22 | 1.14 |
-| `aes128-cbc-decrypt/*/1350B` | 0.92 |  |  |  | 0.94 | 1.00 | 1.01 | 0.84 | 0.89 |  | 0.56 | 0.92 | 1.23 | 1.22 |
-| `aes128-cbc-decrypt/*/16KB` | 0.98 |  |  |  | 1.00 | 0.99 | 1.01 | 0.84 | 0.89 |  | 0.55 | 0.99 | 1.22 | 1.24 |
-| `aes128-cbc-decrypt/*/32B` | 0.61 |  |  |  | 0.65 | 0.55 | 0.91 | 0.82 | 0.70 |  | 0.66 | 0.53 | 1.47 | 0.52 |
-| `aes128-cbc-encrypt/*/1200B` | 0.97 |  |  |  | 0.98 | 0.91 | 0.85 | 0.81 | 0.96 |  | 0.96 | 0.93 | 2.24 | 0.70 |
-| `aes128-cbc-encrypt/*/1350B` | 0.97 |  |  |  | 0.98 | 0.92 | 0.85 | 0.81 | 0.96 |  | 0.96 | 0.93 | 2.23 | 0.70 |
-| `aes128-cbc-encrypt/*/16KB` | 1.00 |  |  |  | 1.00 | 1.00 | 0.86 | 0.81 | 0.99 |  | 0.97 | 0.99 | 2.24 | 0.71 |
-| `aes128-cbc-encrypt/*/32B` | 0.40 |  |  |  | 0.44 | 0.42 | 0.74 | 0.81 | 0.39 |  | 0.87 | 0.46 | 2.02 | 0.65 |
-| `aes128-ctr/*/1200B` | 0.86 |  |  |  | 0.87 | 0.86 | 0.99 | 0.83 | 0.88 |  | 0.99 | 0.91 | 1.23 | 1.34 |
-| `aes128-ctr/*/1350B` | 0.89 |  |  |  | 0.88 | 0.89 | 0.99 | 0.84 | 0.83 |  | 0.99 | 0.91 | 1.23 | 1.27 |
-| `aes128-ctr/*/16KB` | 0.99 |  |  |  | 0.99 | 0.99 | 1.00 | 0.83 | 0.92 |  | 1.00 | 0.99 | 1.22 | 1.45 |
-| `aes128-ctr/*/32B` | 0.48 |  |  |  | 0.49 | 0.47 | 0.72 | 0.82 | 0.69 |  | 0.79 | 0.43 | 1.11 | 0.58 |
-| `aes128-gcm-open/*/1200B` | 0.68 |  | 0.47 |  | 0.83 | 0.60 | 1.00 | 0.85 | 0.83 | 0.87 | 0.99 | 0.91 | 3.16 | 1.11 |
-| `aes128-gcm-open/*/1350B` | 0.67 |  | 0.47 |  | 0.81 | 0.58 | 1.00 | 0.85 | 0.84 | 0.87 | 0.99 | 0.92 | 3.10 | 1.09 |
-| `aes128-gcm-open/*/16KB` | 0.90 |  | 0.56 |  | 1.01 | 0.67 | 1.00 | 0.85 | 0.81 | 0.85 | 0.99 | 0.99 | 3.39 | 1.18 |
-| `aes128-gcm-open/*/32B` | 0.44 |  | 0.31 |  | 0.37 | 0.31 | 0.92 | 0.83 | 0.41 | 0.40 | 0.94 | 0.49 | 1.79 | 0.64 |
-| `aes128-gcm-open/*/quic-128B` | 0.62 |  | 0.40 |  | 0.43 | 0.35 | 0.98 | 0.85 | 0.62 | 0.58 | 0.98 | 0.66 | 2.57 | 0.89 |
-| `aes128-gcm-open/*/quic-256B` | 0.49 |  | 0.31 |  | 0.54 | 0.43 | 0.97 | 0.84 | 0.73 | 0.70 | 0.99 | 0.76 | 2.89 | 0.99 |
-| `aes128-gcm-open/*/quic-32B` | 0.45 |  | 0.27 |  | 0.32 | 0.26 | 0.90 | 0.84 | 0.40 | 0.37 | 0.93 | 0.51 | 1.73 | 0.63 |
-| `aes128-gcm-open/*/quic-512B` | 0.57 |  | 0.36 |  | 0.64 | 0.51 | 0.99 | 0.84 | 0.82 | 0.86 | 0.99 | 0.83 | 3.12 | 1.07 |
-| `aes128-gcm-open/*/quic-64B` | 0.52 |  | 0.33 |  | 0.39 | 0.31 | 0.93 | 0.84 | 0.51 | 0.47 | 0.95 | 0.59 | 1.67 | 0.66 |
-| `aes128-gcm/*/1200B` | 0.83 |  | 0.49 |  | 0.84 | 0.66 | 1.00 | 0.85 | 0.78 | 0.83 | 0.99 | 0.90 | 3.17 | 1.11 |
-| `aes128-gcm/*/1350B` | 0.76 |  | 0.53 |  | 0.84 | 0.67 | 1.00 | 0.85 | 0.79 | 0.84 | 0.99 | 0.91 | 3.12 | 1.08 |
-| `aes128-gcm/*/16KB` | 0.90 |  | 0.58 |  | 1.02 | 0.76 | 0.99 | 0.86 | 0.75 | 0.79 | 1.00 | 0.99 | 3.39 | 1.18 |
-| `aes128-gcm/*/32B` | 0.52 |  | 0.29 |  | 0.37 | 0.30 | 0.88 | 0.83 | 0.44 | 0.42 | 0.94 | 0.48 | 1.78 | 0.62 |
-| `aes128-gcm/*/key` | 0.91 |  | 0.54 |  | 0.71 | 0.61 | 0.65 | 0.85 | 0.86 | 0.86 | 0.92 | 0.58 | 1.47 | 0.62 |
-| `aes128-gcm/*/quic-128B` | 0.69 |  | 0.36 |  | 0.42 | 0.38 | 0.97 | 0.86 | 0.79 | 0.69 | 0.99 | 0.63 | 2.57 | 0.88 |
-| `aes128-gcm/*/quic-256B` | 0.60 |  | 0.35 |  | 0.70 | 0.48 | 0.99 | 0.85 | 0.85 | 0.85 | 0.99 | 0.74 | 2.90 | 0.98 |
-| `aes128-gcm/*/quic-32B` | 0.49 |  | 0.27 |  | 0.36 | 0.29 | 0.90 | 0.84 | 0.48 | 0.42 | 0.95 | 0.50 | 1.73 | 0.62 |
-| `aes128-gcm/*/quic-512B` | 0.68 |  | 0.40 |  | 0.68 | 0.57 | 1.01 | 0.85 | 0.81 | 0.83 | 0.99 | 0.82 | 3.14 | 1.07 |
-| `aes128-gcm/*/quic-64B` | 0.56 |  | 0.31 |  | 0.39 | 0.31 | 0.93 | 0.84 | 0.62 | 0.54 | 0.96 | 0.57 | 1.66 | 0.65 |
-| `aes128-kw-unwrap/*/16B` | 1.20 |  |  |  | 1.12 |  | 1.04 | 0.86 | 0.68 |  | 0.95 | 0.95 | 2.02 | 0.59 |
-| `aes128-kw-unwrap/*/32B` | 1.06 |  |  |  | 1.07 |  | 1.02 | 0.85 | 0.71 |  | 0.95 | 0.96 | 2.05 | 0.59 |
-| `aes128-kw-wrap/*/16B` | 0.76 |  |  |  | 0.78 |  | 1.01 | 0.84 | 0.62 |  | 0.95 | 1.03 | 2.09 | 0.58 |
-| `aes128-kw-wrap/*/32B` | 0.80 |  |  |  | 0.82 |  | 1.02 | 0.85 | 0.68 |  | 0.96 | 1.02 | 2.12 | 0.58 |
-| `aes128-kwp-unwrap/*/16B` | 1.14 |  |  |  | 1.08 |  | 1.03 | 0.86 | 0.70 |  | 0.95 | 0.97 | 2.02 | 0.59 |
-| `aes128-kwp-unwrap/*/32B` | 1.03 |  |  |  | 1.05 |  | 1.02 | 0.86 | 0.71 |  | 0.96 | 0.97 | 2.05 | 0.59 |
-| `aes128-kwp-wrap/*/16B` | 0.72 |  |  |  | 0.75 |  | 1.00 | 0.85 | 0.65 |  | 0.95 | 0.87 | 2.06 | 0.58 |
-| `aes128-kwp-wrap/*/32B` | 0.77 |  |  |  | 0.80 |  | 1.02 | 0.84 | 0.69 |  | 0.96 | 0.92 | 2.09 | 0.58 |
-| `aes192-cbc-decrypt/*/1200B` | 0.87 |  |  |  | 0.95 | 1.05 | 1.00 | 0.85 | 0.88 |  | 0.55 | 0.91 | 1.19 | 1.14 |
-| `aes192-cbc-decrypt/*/1350B` | 0.93 |  |  |  | 0.95 | 1.06 | 1.01 | 0.85 | 0.89 |  | 0.55 | 0.92 | 1.21 | 1.20 |
-| `aes192-cbc-decrypt/*/16KB` | 1.00 |  |  |  | 1.00 | 0.99 | 1.00 | 0.85 | 0.88 |  | 0.55 | 0.99 | 1.20 | 1.23 |
-| `aes192-cbc-decrypt/*/32B` | 0.72 |  |  |  | 0.71 | 0.56 | 0.93 | 0.82 | 0.73 |  | 0.67 | 0.54 | 1.46 | 0.51 |
-| `aes192-cbc-encrypt/*/1200B` | 0.97 |  |  |  | 0.98 | 0.92 | 0.87 | 0.82 | 0.98 |  | 0.97 | 0.94 | 2.24 | 0.70 |
-| `aes192-cbc-encrypt/*/1350B` | 0.98 |  |  |  | 0.98 | 0.93 | 0.87 | 0.82 | 0.98 |  | 0.97 | 0.95 | 2.24 | 0.70 |
-| `aes192-cbc-encrypt/*/16KB` | 1.00 |  |  |  | 1.00 | 1.00 | 0.88 | 0.82 | 1.01 |  | 0.97 | 1.00 | 2.24 | 0.70 |
-| `aes192-cbc-encrypt/*/32B` | 0.44 |  |  |  | 0.46 | 0.40 | 0.77 | 0.82 | 0.40 |  | 0.89 | 0.48 | 2.05 | 0.65 |
-| `aes192-ctr/*/1200B` | 0.87 |  |  |  | 0.87 | 0.87 | 0.99 | 0.84 | 0.90 |  | 1.00 | 0.85 | 1.21 | 1.33 |
-| `aes192-ctr/*/1350B` | 0.89 |  |  |  | 0.89 | 0.91 | 0.99 | 0.84 | 0.85 |  | 0.99 | 0.86 | 1.20 | 1.26 |
-| `aes192-ctr/*/16KB` | 0.99 |  |  |  | 0.99 | 0.99 | 0.99 | 0.84 | 0.92 |  | 1.00 | 0.92 | 1.19 | 1.44 |
-| `aes192-ctr/*/32B` | 0.51 |  |  |  | 0.52 | 0.50 | 0.81 | 0.82 | 0.74 |  | 0.82 | 0.46 | 1.10 | 0.57 |
-| `aes192-gcm-open/*/1200B` | 0.65 |  | 0.47 |  | 0.82 | 0.62 | 1.00 | 0.85 | 0.83 | 1.07 | 0.99 | 0.88 | 3.17 | 1.12 |
-| `aes192-gcm-open/*/1350B` | 0.66 |  | 0.48 |  | 0.83 | 0.60 | 1.00 | 0.86 | 0.84 | 1.07 | 0.99 | 0.90 | 3.11 | 1.09 |
-| `aes192-gcm-open/*/16KB` | 0.89 |  | 0.56 |  | 1.01 | 0.70 | 1.00 | 0.85 | 0.80 | 1.04 | 1.00 | 0.95 | 3.41 | 1.19 |
-| `aes192-gcm-open/*/32B` | 0.46 |  | 0.28 |  | 0.38 | 0.31 | 0.95 | 0.83 | 0.40 | 0.40 | 0.94 | 0.50 | 1.74 | 0.63 |
-| `aes192-gcm-open/*/quic-128B` | 0.56 |  | 0.34 |  | 0.43 | 0.36 | 0.97 | 0.85 | 0.61 | 0.61 | 0.98 | 0.66 | 2.57 | 0.88 |
-| `aes192-gcm-open/*/quic-256B` | 0.45 |  | 0.31 |  | 0.53 | 0.45 | 0.98 | 0.84 | 0.73 | 0.72 | 0.99 | 0.74 | 2.90 | 0.99 |
-| `aes192-gcm-open/*/quic-32B` | 0.43 |  | 0.24 |  | 0.34 | 0.26 | 0.92 | 0.84 | 0.39 | 0.38 | 0.94 | 0.51 | 1.70 | 0.63 |
-| `aes192-gcm-open/*/quic-512B` | 0.45 |  | 0.37 |  | 0.64 | 0.53 | 0.99 | 0.84 | 0.81 | 0.94 | 0.99 | 0.82 | 3.14 | 1.08 |
-| `aes192-gcm-open/*/quic-64B` | 0.48 |  | 0.30 |  | 0.40 | 0.33 | 0.97 | 0.84 | 0.50 | 0.50 | 0.96 | 0.59 | 1.61 | 0.65 |
-| `aes192-gcm/*/1200B` | 0.71 |  | 0.51 |  | 0.84 | 0.69 | 1.00 | 0.85 | 0.78 | 1.08 | 0.99 | 0.87 | 3.18 | 1.12 |
-| `aes192-gcm/*/1350B` | 0.73 |  | 0.53 |  | 0.84 | 0.69 | 1.00 | 0.86 | 0.79 | 1.09 | 0.99 | 0.89 | 3.12 | 1.09 |
-| `aes192-gcm/*/16KB` | 0.91 |  | 0.58 |  | 1.03 | 0.78 | 1.00 | 0.86 | 0.74 | 1.05 | 1.00 | 0.95 | 3.42 | 1.19 |
-| `aes192-gcm/*/32B` | 0.42 |  | 0.29 |  | 0.39 | 0.30 | 0.91 | 0.83 | 0.42 | 0.42 | 0.94 | 0.49 | 1.74 | 0.62 |
-| `aes192-gcm/*/key` | 0.97 |  | 0.81 |  | 0.75 | 0.80 | 0.65 | 0.67 | 0.85 | 0.85 | 0.91 | 0.58 | 1.39 | 0.65 |
-| `aes192-gcm/*/quic-128B` | 0.60 |  | 0.36 |  | 0.44 | 0.39 | 0.96 | 0.85 | 0.71 | 0.70 | 0.99 | 0.64 | 2.57 | 0.87 |
-| `aes192-gcm/*/quic-256B` | 0.50 |  | 0.35 |  | 0.53 | 0.50 | 0.99 | 0.85 | 0.79 | 0.89 | 0.99 | 0.73 | 2.91 | 0.98 |
-| `aes192-gcm/*/quic-32B` | 0.43 |  | 0.27 |  | 0.39 | 0.29 | 0.90 | 0.84 | 0.41 | 0.42 | 0.95 | 0.50 | 1.69 | 0.61 |
-| `aes192-gcm/*/quic-512B` | 0.50 |  | 0.39 |  | 0.64 | 0.59 | 1.01 | 0.85 | 0.77 | 0.95 | 0.99 | 0.80 | 3.15 | 1.07 |
-| `aes192-gcm/*/quic-64B` | 0.48 |  | 0.32 |  | 0.42 | 0.33 | 0.97 | 0.84 | 0.55 | 0.55 | 0.97 | 0.57 | 1.61 | 0.64 |
-| `aes256-cbc-decrypt/*/1200B` | 0.90 |  |  |  | 0.97 | 1.04 | 1.00 | 0.85 | 0.88 |  | 0.54 | 0.92 | 1.17 | 1.14 |
-| `aes256-cbc-decrypt/*/1350B` | 0.96 |  |  |  | 0.97 | 1.07 | 1.00 | 0.84 | 0.89 |  | 0.55 | 0.93 | 1.19 | 1.17 |
-| `aes256-cbc-decrypt/*/16KB` | 0.99 |  |  |  | 1.00 | 0.99 | 1.00 | 0.85 | 0.88 |  | 0.54 | 0.99 | 1.18 | 1.17 |
-| `aes256-cbc-decrypt/*/32B` | 0.63 |  |  |  | 0.72 | 0.60 | 0.94 | 0.83 | 0.77 |  | 0.67 | 0.55 | 1.46 | 0.51 |
-| `aes256-cbc-encrypt/*/1200B` | 0.98 |  |  |  | 0.98 | 0.93 | 0.89 | 0.83 | 0.98 |  | 0.97 | 0.94 | 2.23 | 0.70 |
-| `aes256-cbc-encrypt/*/1350B` | 0.97 |  |  |  | 0.98 | 0.94 | 0.89 | 0.83 | 0.99 |  | 0.97 | 0.95 | 2.23 | 0.70 |
-| `aes256-cbc-encrypt/*/16KB` | 1.00 |  |  |  | 1.00 | 1.00 | 0.90 | 0.83 | 1.00 |  | 0.97 | 0.99 | 2.24 | 0.70 |
-| `aes256-cbc-encrypt/*/32B` | 0.48 |  |  |  | 0.47 | 0.39 | 0.80 | 0.82 | 0.43 |  | 0.91 | 0.51 | 2.07 | 0.65 |
-| `aes256-ctr/*/1200B` | 0.88 |  |  |  | 0.88 | 0.89 | 0.99 | 0.84 | 0.91 |  | 1.00 | 0.93 | 1.19 | 1.32 |
-| `aes256-ctr/*/1350B` | 0.90 |  |  |  | 0.90 | 0.91 | 0.99 | 0.84 | 0.86 |  | 0.99 | 0.93 | 1.18 | 1.26 |
-| `aes256-ctr/*/16KB` | 0.99 |  |  |  | 0.99 | 0.99 | 1.00 | 0.84 | 0.93 |  | 1.00 | 0.99 | 1.18 | 1.43 |
-| `aes256-ctr/*/32B` | 0.52 |  |  |  | 0.54 | 0.52 | 0.77 | 0.82 | 0.77 |  | 0.84 | 0.46 | 1.10 | 0.58 |
-| `aes256-gcm-open/*/1200B` | 0.73 |  | 0.48 |  | 0.83 | 0.64 | 1.00 | 0.85 | 0.82 | 0.90 | 0.99 | 0.92 | 3.18 | 1.13 |
-| `aes256-gcm-open/*/1350B` | 0.72 |  | 0.49 |  | 0.82 | 0.63 | 1.00 | 0.86 | 0.83 | 0.87 | 0.99 | 0.93 | 3.11 | 1.10 |
-| `aes256-gcm-open/*/16KB` | 0.90 |  | 0.57 |  | 1.01 | 0.71 | 0.99 | 0.85 | 0.80 | 0.86 | 1.00 | 0.99 | 3.44 | 1.21 |
-| `aes256-gcm-open/*/32B` | 0.54 |  | 0.34 |  | 0.39 | 0.32 | 0.92 | 0.83 | 0.40 | 0.39 | 0.95 | 0.51 | 1.71 | 0.62 |
-| `aes256-gcm-open/*/quic-128B` | 0.66 |  | 0.43 |  | 0.45 | 0.38 | 0.99 | 0.84 | 0.66 | 0.61 | 0.99 | 0.67 | 2.57 | 0.88 |
-| `aes256-gcm-open/*/quic-256B` | 0.58 |  | 0.33 |  | 0.60 | 0.47 | 0.97 | 0.84 | 0.78 | 0.73 | 0.99 | 0.78 | 2.91 | 0.99 |
-| `aes256-gcm-open/*/quic-32B` | 0.55 |  | 0.30 |  | 0.35 | 0.27 | 0.92 | 0.83 | 0.40 | 0.38 | 0.95 | 0.53 | 1.66 | 0.62 |
-| `aes256-gcm-open/*/quic-512B` | 0.71 |  | 0.38 |  | 0.66 | 0.55 | 0.99 | 0.84 | 0.83 | 0.87 | 0.99 | 0.85 | 3.15 | 1.09 |
-| `aes256-gcm-open/*/quic-64B` | 0.58 |  | 0.38 |  | 0.47 | 0.35 | 0.96 | 0.83 | 0.54 | 0.49 | 0.96 | 0.61 | 1.58 | 0.64 |
-| `aes256-gcm/*/1200B` | 0.89 |  | 0.51 |  | 0.86 | 0.70 | 1.00 | 0.86 | 0.82 | 0.85 | 0.99 | 0.91 | 3.19 | 1.13 |
-| `aes256-gcm/*/1350B` | 0.81 |  | 0.54 |  | 0.85 | 0.71 | 1.00 | 0.86 | 0.81 | 0.86 | 1.00 | 0.92 | 3.12 | 1.10 |
-| `aes256-gcm/*/16KB` | 0.91 |  | 0.59 |  | 1.02 | 0.81 | 1.00 | 0.86 | 0.77 | 0.83 | 1.00 | 0.99 | 3.44 | 1.21 |
-| `aes256-gcm/*/32B` | 0.57 |  | 0.30 |  | 0.40 | 0.30 | 0.89 | 0.83 | 0.45 | 0.42 | 0.95 | 0.49 | 1.70 | 0.61 |
-| `aes256-gcm/*/key` | 0.80 |  | 0.50 |  | 0.65 | 0.49 | 0.68 | 0.67 | 0.84 | 0.84 | 0.93 | 0.60 | 1.49 | 0.63 |
-| `aes256-gcm/*/quic-128B` | 0.75 |  | 0.38 |  | 0.46 | 0.41 | 0.97 | 0.85 | 0.83 | 0.73 | 0.99 | 0.65 | 2.57 | 0.87 |
-| `aes256-gcm/*/quic-256B` | 0.69 |  | 0.37 |  | 0.84 | 0.53 | 0.99 | 0.85 | 0.85 | 0.86 | 0.99 | 0.75 | 2.92 | 0.98 |
-| `aes256-gcm/*/quic-32B` | 0.55 |  | 0.29 |  | 0.41 | 0.29 | 0.92 | 0.83 | 0.48 | 0.41 | 0.96 | 0.51 | 1.66 | 0.61 |
-| `aes256-gcm/*/quic-512B` | 0.75 |  | 0.41 |  | 0.71 | 0.61 | 1.00 | 0.85 | 0.82 | 0.85 | 0.99 | 0.83 | 3.16 | 1.08 |
-| `aes256-gcm/*/quic-64B` | 0.65 |  | 0.34 |  | 0.46 | 0.35 | 0.94 | 0.83 | 0.66 | 0.56 | 0.97 | 0.58 | 1.57 | 0.63 |
-| `aes256-kw-unwrap/*/16B` | 1.11 |  |  |  | 1.09 |  | 1.04 | 0.82 | 0.69 |  | 0.96 | 0.95 | 2.02 | 0.60 |
-| `aes256-kw-unwrap/*/32B` | 1.04 |  |  |  | 1.08 |  | 1.03 | 0.84 | 0.73 |  | 0.96 | 0.96 | 2.05 | 0.59 |
-| `aes256-kw-wrap/*/16B` | 0.80 |  |  |  | 0.84 |  | 1.01 | 0.81 | 0.65 |  | 0.96 | 1.03 | 2.08 | 0.58 |
-| `aes256-kw-wrap/*/32B` | 0.90 |  |  |  | 0.90 |  | 1.02 | 0.83 | 0.70 |  | 0.97 | 1.03 | 2.11 | 0.58 |
-| `aes256-kwp-unwrap/*/16B` | 1.10 |  |  |  | 1.06 |  | 1.04 | 0.82 | 0.73 |  | 0.96 | 0.94 | 2.01 | 0.60 |
-| `aes256-kwp-unwrap/*/32B` | 1.05 |  |  |  | 1.06 |  | 1.03 | 0.83 | 0.75 |  | 0.97 | 0.96 | 2.05 | 0.60 |
-| `aes256-kwp-wrap/*/16B` | 0.77 |  |  |  | 0.83 |  | 1.00 | 0.81 | 0.66 |  | 0.96 | 0.88 | 2.06 | 0.58 |
-| `aes256-kwp-wrap/*/32B` | 0.87 |  |  |  | 0.88 |  | 1.01 | 0.82 | 0.70 |  | 0.97 | 0.94 | 2.10 | 0.58 |
-| `chacha20poly1305-open/*/1200B` | 0.99 |  |  |  | 0.99 |  | 1.08 | 1.04 | 0.99 |  | 0.99 | 0.96 | 0.96 | 0.81 |
-| `chacha20poly1305-open/*/1350B` | 0.99 |  |  |  | 1.00 |  | 1.10 | 1.06 | 0.99 |  | 0.99 | 0.95 | 0.95 | 0.81 |
-| `chacha20poly1305-open/*/16KB` | 1.00 |  |  |  | 1.00 |  | 1.19 | 1.09 | 1.00 |  | 1.00 | 0.99 | 0.99 | 0.82 |
-| `chacha20poly1305-open/*/32B` | 0.94 |  |  |  | 0.97 |  | 0.82 | 0.77 | 0.96 |  | 0.96 | 0.86 | 0.86 | 0.69 |
-| `chacha20poly1305-open/*/quic-128B` | 0.95 |  |  |  | 0.97 |  | 0.91 | 0.90 | 0.97 |  | 0.97 | 0.83 | 0.83 | 0.73 |
-| `chacha20poly1305-open/*/quic-256B` | 0.98 |  |  |  | 0.99 |  | 0.89 | 0.96 | 0.98 |  | 0.98 | 0.90 | 0.90 | 0.76 |
-| `chacha20poly1305-open/*/quic-512B` | 0.98 |  |  |  | 1.00 |  | 0.98 | 1.02 | 0.99 |  | 0.99 | 0.94 | 0.94 | 0.79 |
-| `chacha20poly1305/*/1200B` | 1.00 |  |  |  | 0.99 |  | 1.06 | 1.03 | 1.00 |  | 0.99 | 0.96 | 0.96 | 0.83 |
-| `chacha20poly1305/*/1350B` | 0.99 |  |  |  | 0.98 |  | 1.09 | 1.04 | 1.00 |  | 0.99 | 0.95 | 0.95 | 0.81 |
-| `chacha20poly1305/*/16KB` | 1.00 |  |  |  | 1.00 |  | 1.20 | 1.08 | 1.00 |  | 1.00 | 0.99 | 0.99 | 0.83 |
-| `chacha20poly1305/*/32B` | 0.97 |  |  |  | 0.93 |  | 0.78 | 0.72 | 0.99 |  | 0.95 | 0.86 | 0.84 | 0.68 |
-| `chacha20poly1305/*/quic-128B` | 1.00 |  |  |  | 0.93 |  | 0.86 | 0.84 | 0.99 |  | 0.96 | 0.83 | 0.82 | 0.70 |
-| `chacha20poly1305/*/quic-256B` | 1.01 |  |  |  | 0.98 |  | 0.85 | 0.92 | 0.99 |  | 0.97 | 0.90 | 0.88 | 0.74 |
-| `chacha20poly1305/*/quic-512B` | 0.99 |  |  |  | 0.98 |  | 0.95 | 0.98 | 0.99 |  | 0.98 | 0.94 | 0.93 | 0.77 |
-| `ed25519-keygen/*` | 1.00 |  |  | 0.99 | 0.99 |  |  |  | 0.78 |  | 0.75 | 0.70 | 0.69 | 0.56 |
-| `ed25519-sign/*` | 0.93 |  |  | 0.93 | 0.95 |  |  |  | 0.73 |  | 0.73 | 0.68 | 0.69 | 0.65 |
-| `ed25519-verify/*` | 0.91 |  |  | 0.66 | 0.91 |  |  |  | 0.82 |  | 0.66 | 0.82 | 0.59 | 0.54 |
-| `hkdf-sha1/expand-aes-256-gcm-key/*` | 0.64 |  |  |  | 0.58 |  |  |  | 0.60 | 0.61 | 0.69 | 0.53 | 0.88 | 0.61 |
-| `hkdf-sha1/expand/*` | 0.56 |  |  |  | 0.55 |  |  |  | 0.52 | 0.52 | 0.58 | 0.48 | 0.52 | 0.57 |
-| `hkdf-sha1/extract-expand/*` | 0.70 |  |  |  | 0.72 |  |  |  | 0.61 | 0.62 | 0.78 | 0.60 | 0.70 | 0.79 |
-| `hkdf-sha256/expand-aes-256-gcm-key/*` | 0.66 |  |  |  | 0.49 |  |  |  | 0.71 | 0.59 | 0.60 | 0.46 | 0.80 | 0.55 |
-| `hkdf-sha256/expand/*` | 0.60 |  |  |  | 0.45 |  |  |  | 0.67 | 0.45 | 0.47 | 0.33 | 0.39 | 0.50 |
-| `hkdf-sha256/extract-expand/*` | 0.64 |  |  |  | 0.81 |  |  |  | 0.68 | 0.60 | 0.84 | 0.54 | 0.73 | 0.96 |
-| `hkdf-sha384/expand-aes-256-gcm-key/*` | 0.70 |  |  |  | 0.48 |  |  |  | 0.82 | 0.52 | 0.58 | 0.71 | 0.69 | 0.53 |
-| `hkdf-sha384/expand/*` | 0.70 |  |  |  | 0.46 |  |  |  | 0.83 | 0.48 | 0.48 | 0.98 | 0.48 | 0.46 |
-| `hkdf-sha384/extract-expand/*` | 0.69 |  |  |  | 0.85 |  |  |  | 0.84 | 0.87 | 0.87 | 1.00 | 0.95 | 0.88 |
-| `hkdf-sha512/expand-aes-256-gcm-key/*` | 0.68 |  |  |  | 0.48 |  |  |  | 0.80 | 0.52 | 0.58 | 0.70 | 0.68 | 0.53 |
-| `hkdf-sha512/expand/*` | 0.67 |  |  |  | 0.45 |  |  |  | 0.83 | 0.47 | 0.47 | 0.97 | 0.48 | 0.46 |
-| `hkdf-sha512/extract-expand/*` | 0.68 |  |  |  | 0.84 |  |  |  | 0.83 | 0.87 | 0.87 | 1.00 | 0.94 | 0.88 |
-| `hmac-sha1/*/1200B` | 0.81 |  |  |  | 0.83 |  |  |  | 0.78 | 0.78 | 0.91 | 0.60 | 0.76 | 0.92 |
-| `hmac-sha1/*/1350B` | 0.83 |  |  |  | 0.84 |  |  |  | 0.80 | 0.80 | 0.92 | 0.63 | 0.78 | 0.93 |
-| `hmac-sha1/*/16KB` | 0.98 |  |  |  | 0.97 |  |  |  | 0.98 | 0.98 | 0.99 | 0.94 | 0.92 | 1.11 |
-| `hmac-sha1/*/32B` | 0.46 |  |  |  | 0.55 |  |  |  | 0.43 | 0.44 | 0.65 | 0.34 | 0.49 | 0.68 |
-| `hmac-sha1/*/64B` | 0.52 |  |  |  | 0.57 |  |  |  | 0.48 | 0.48 | 0.71 | 0.37 | 0.52 | 0.72 |
-| `hmac-sha1/*/8KB` | 0.96 |  |  |  | 0.95 |  |  |  | 0.96 | 0.96 | 0.98 | 0.89 | 0.90 | 1.08 |
-| `hmac-sha1/*/reused-key/1200B` | 0.82 |  |  |  | 0.87 |  |  |  | 0.84 | 0.84 | 0.93 | 0.66 | 0.80 | 0.98 |
-| `hmac-sha1/*/reused-key/1350B` | 0.84 |  |  |  | 0.88 |  |  |  | 0.86 | 0.86 | 0.94 | 0.69 | 0.81 | 1.01 |
-| `hmac-sha1/*/reused-key/16KB` | 0.99 |  |  |  | 0.98 |  |  |  | 0.99 | 0.99 | 0.99 | 0.96 | 0.92 | 1.12 |
-| `hmac-sha1/*/reused-key/32B` | 0.27 |  |  |  | 0.52 |  |  |  | 0.42 | 0.42 | 0.61 | 0.26 | 0.41 | 0.68 |
-| `hmac-sha1/*/reused-key/64B` | 0.38 |  |  |  | 0.57 |  |  |  | 0.49 | 0.49 | 0.69 | 0.31 | 0.48 | 0.74 |
-| `hmac-sha1/*/reused-key/8KB` | 0.97 |  |  |  | 0.96 |  |  |  | 0.98 | 0.98 | 0.99 | 0.92 | 0.91 | 1.10 |
-| `hmac-sha256/*/1200B` | 0.87 |  |  |  | 0.93 |  |  |  | 0.91 | 0.79 | 0.95 | 0.62 | 0.82 | 1.11 |
-| `hmac-sha256/*/1350B` | 0.87 |  |  |  | 0.93 |  |  |  | 0.92 | 0.81 | 0.95 | 0.65 | 0.83 | 1.12 |
-| `hmac-sha256/*/16KB` | 0.98 |  |  |  | 1.00 |  |  |  | 0.99 | 0.98 | 1.00 | 0.94 | 0.92 | 1.15 |
-| `hmac-sha256/*/32B` | 0.52 |  |  |  | 0.69 |  |  |  | 0.65 | 0.43 | 0.77 | 0.34 | 0.58 | 0.93 |
-| `hmac-sha256/*/64B` | 0.58 |  |  |  | 0.73 |  |  |  | 0.70 | 0.48 | 0.81 | 0.37 | 0.62 | 0.95 |
-| `hmac-sha256/*/8KB` | 0.97 |  |  |  | 1.00 |  |  |  | 0.98 | 0.95 | 0.99 | 0.90 | 0.91 | 1.15 |
-| `hmac-sha256/*/reused-key/1200B` | 0.88 |  |  |  | 0.96 |  |  |  | 0.92 | 0.86 | 0.96 | 0.68 | 0.85 | 1.14 |
-| `hmac-sha256/*/reused-key/1350B` | 0.89 |  |  |  | 0.96 |  |  |  | 0.93 | 0.87 | 0.97 | 0.71 | 0.85 | 1.14 |
-| `hmac-sha256/*/reused-key/16KB` | 0.99 |  |  |  | 1.01 |  |  |  | 0.99 | 0.99 | 1.00 | 0.96 | 0.92 | 1.16 |
-| `hmac-sha256/*/reused-key/32B` | 0.40 |  |  |  | 0.69 |  |  |  | 0.58 | 0.44 | 0.73 | 0.26 | 0.50 | 0.92 |
-| `hmac-sha256/*/reused-key/64B` | 0.53 |  |  |  | 0.75 |  |  |  | 0.66 | 0.51 | 0.79 | 0.31 | 0.58 | 0.98 |
-| `hmac-sha256/*/reused-key/8KB` | 0.98 |  |  |  | 1.00 |  |  |  | 0.98 | 0.97 | 0.99 | 0.93 | 0.92 | 1.16 |
-| `hmac-sha384/*/1200B` | 0.69 |  |  |  | 0.91 |  |  |  | 0.95 | 0.93 | 0.93 | 1.00 | 0.95 | 1.00 |
-| `hmac-sha384/*/1350B` | 0.69 |  |  |  | 0.91 |  |  |  | 0.95 | 0.93 | 0.93 | 1.00 | 0.95 | 1.01 |
-| `hmac-sha384/*/16KB` | 0.69 |  |  |  | 0.99 |  |  |  | 0.99 | 0.99 | 0.99 | 1.00 | 0.99 | 1.20 |
-| `hmac-sha384/*/32B` | 0.66 |  |  |  | 0.77 |  |  |  | 0.83 | 0.80 | 0.81 | 0.99 | 0.86 | 0.86 |
-| `hmac-sha384/*/64B` | 0.66 |  |  |  | 0.77 |  |  |  | 0.84 | 0.80 | 0.80 | 0.99 | 0.86 | 0.86 |
-| `hmac-sha384/*/8KB` | 0.70 |  |  |  | 0.98 |  |  |  | 0.99 | 0.98 | 0.98 | 1.00 | 0.99 | 1.15 |
-| `hmac-sha384/*/reused-key/1200B` | 0.69 |  |  |  | 0.93 |  |  |  | 0.97 | 0.95 | 0.95 | 0.99 | 0.95 | 1.03 |
-| `hmac-sha384/*/reused-key/1350B` | 0.69 |  |  |  | 0.94 |  |  |  | 0.96 | 0.95 | 0.95 | 0.99 | 0.96 | 1.04 |
-| `hmac-sha384/*/reused-key/16KB` | 0.70 |  |  |  | 0.99 |  |  |  | 1.00 | 0.99 | 0.99 | 1.00 | 1.00 | 1.22 |
-| `hmac-sha384/*/reused-key/32B` | 0.65 |  |  |  | 0.75 |  |  |  | 0.79 | 0.77 | 0.77 | 0.94 | 0.79 | 0.85 |
-| `hmac-sha384/*/reused-key/64B` | 0.66 |  |  |  | 0.75 |  |  |  | 0.80 | 0.77 | 0.77 | 0.94 | 0.79 | 0.84 |
-| `hmac-sha384/*/reused-key/8KB` | 0.70 |  |  |  | 0.99 |  |  |  | 0.99 | 0.99 | 0.99 | 1.00 | 0.99 | 1.18 |
-| `hpke-x25519-aes128-gcm-open/*/1350B` | 0.35 |  |  |  | 0.50 |  |  |  | 0.49 |  | 0.94 | 0.60 | 2.84 | 0.97 |
-| `hpke-x25519-aes128-gcm-seal/*/1350B` | 0.41 |  |  |  | 0.52 |  |  |  | 0.56 |  | 0.94 | 0.69 | 2.90 | 0.97 |
-| `hpke-x25519-setup-recipient/*` | 0.72 |  |  |  | 0.74 |  |  |  | 0.60 |  | 0.64 | 0.31 | 0.33 | 0.55 |
-| `hpke-x25519-setup-sender/*` | 0.93 |  |  |  | 0.93 |  |  |  | 0.76 |  | 0.78 | 0.49 | 0.50 | 0.68 |
-| `jwt-eddsa-sign/*/load` | 0.96 |  |  |  | 0.97 |  |  |  | 0.74 |  | 0.73 | 0.69 | 0.70 | 0.61 |
-| `jwt-eddsa-sign/*/token` | 0.94 |  |  |  | 0.95 |  |  |  | 0.73 |  | 0.73 | 0.69 | 0.70 | 0.61 |
-| `jwt-eddsa-verify/*/load` | 65.66 |  |  |  | 81.71 |  |  |  | 59.15 |  | 59.59 | 159.79 | 142.16 | 88.43 |
-| `jwt-eddsa-verify/*/token` | 1.00 |  |  |  | 1.01 |  |  |  | 0.72 |  | 0.72 | 0.63 | 0.64 | 0.58 |
-| `jwt-es256-sign/*/load` | 0.75 |  |  |  | 0.77 |  |  |  | 0.93 |  | 0.93 | 0.35 | 0.35 | 0.41 |
-| `jwt-es256-sign/*/token` | 0.77 |  |  |  | 0.87 |  |  |  | 0.86 |  | 0.95 | 0.39 | 0.40 | 0.49 |
-| `jwt-es256-verify/*/load` | 8.42 |  |  |  | 9.45 |  |  |  | 6.97 |  | 7.24 | 16.21 | 13.43 | 7.67 |
-| `jwt-es256-verify/*/token` | 0.99 |  |  |  | 1.05 |  |  |  | 1.01 |  | 1.01 | 0.64 | 0.64 | 0.58 |
-| `jwt-es384-sign/*/load` | 0.65 |  |  |  | 0.69 |  |  |  | 0.61 |  | 0.62 | 0.31 | 0.31 | 0.45 |
-| `jwt-es384-sign/*/token` | 0.57 |  |  |  | 0.61 |  |  |  | 0.54 |  | 0.55 | 0.36 | 0.36 | 0.49 |
-| `jwt-es384-verify/*/load` | 8.40 |  |  |  | 9.61 |  |  |  | 6.68 |  | 6.86 | 22.76 | 18.16 | 9.91 |
-| `jwt-es384-verify/*/token` | 0.82 |  |  |  | 0.84 |  |  |  | 0.72 |  | 0.71 | 0.46 | 0.45 | 0.55 |
-| `jwt-hs256-sign/*/load` | 0.38 |  |  |  | 0.65 |  |  |  | 0.36 |  | 0.70 | 0.38 | 0.58 | 0.82 |
-| `jwt-hs256-sign/*/token` | 0.49 |  |  |  | 0.74 |  |  |  | 0.47 |  | 0.80 | 0.38 | 0.63 | 0.93 |
-| `jwt-hs256-verify/*/load` | 0.36 |  |  |  | 0.65 |  |  |  | 0.36 |  | 0.70 | 0.38 | 0.58 | 0.85 |
-| `jwt-hs256-verify/*/token` | 0.52 |  |  |  | 0.76 |  |  |  | 0.50 |  | 0.80 | 0.38 | 0.63 | 0.94 |
-| `jwt-rs256-sign/*/load` | 267.15 |  |  |  | 261.62 |  |  |  | 152.20 |  | 152.71 | 663.60 | 662.42 | 465.41 |
-| `jwt-rs256-sign/*/token` | 0.45 |  |  |  | 0.68 |  |  |  | 0.44 |  | 0.44 | 0.69 | 0.69 | 0.63 |
-| `jwt-rs256-verify/*/load` | 18.33 |  |  |  | 20.40 |  |  |  | 17.04 |  | 16.86 | 54.13 | 53.50 | 20.55 |
-| `jwt-rs256-verify/*/token` | 0.86 |  |  |  | 0.92 |  |  |  | 0.62 |  | 0.62 | 0.95 | 0.95 | 0.84 |
-| `md5/*/1200B` | 1.00 |  |  |  | 0.99 |  |  |  | 1.01 |  | 1.01 | 0.87 | 0.87 | 0.90 |
-| `md5/*/1350B` | 1.00 |  |  |  | 0.99 |  |  |  | 1.01 |  | 1.01 | 0.87 | 0.87 | 0.90 |
-| `md5/*/16KB` | 1.01 |  |  |  | 1.00 |  |  |  | 1.03 |  | 1.03 | 0.89 | 0.89 | 0.91 |
-| `md5/*/32B` | 0.90 |  |  |  | 0.79 |  |  |  | 0.77 |  | 0.77 | 0.70 | 0.70 | 0.80 |
-| `md5/*/64B` | 0.93 |  |  |  | 0.87 |  |  |  | 0.89 |  | 0.89 | 0.78 | 0.78 | 0.83 |
-| `md5/*/8KB` | 1.00 |  |  |  | 1.00 |  |  |  | 1.02 |  | 1.02 | 0.89 | 0.89 | 0.91 |
-| `mldsa44-keygen/*` | 0.83 |  |  |  | 0.94 |  |  |  | 0.90 | 0.90 | 0.89 | 0.70 | 0.70 | 0.85 |
-| `mldsa44-sign/*` | 0.66 |  |  |  | 0.84 |  |  |  | 0.81 | 0.89 | 0.88 | 0.78 | 0.80 | 0.76 |
-| `mldsa44-verify/*` | 0.77 |  |  |  | 0.81 |  |  |  | 0.85 | 0.82 | 0.82 | 0.67 | 0.68 | 0.80 |
-| `mldsa65-keygen/*` | 0.83 |  |  |  | 0.95 |  |  |  | 0.87 | 0.88 | 0.87 | 0.66 | 0.66 | 0.89 |
-| `mldsa65-sign/*` | 0.73 |  |  |  | 0.86 |  |  |  | 0.85 | 0.90 | 0.90 | 0.81 | 0.82 | 0.76 |
-| `mldsa65-verify/*` | 0.79 |  |  |  | 0.84 |  |  |  | 0.84 | 0.84 | 0.84 | 0.67 | 0.68 | 0.82 |
-| `mldsa87-keygen/*` | 0.87 |  |  |  | 0.96 |  |  |  | 0.92 | 0.88 | 0.88 | 0.68 | 0.67 | 0.91 |
-| `mldsa87-sign/*` | 0.72 |  |  |  | 0.86 |  |  |  | 0.83 | 0.88 | 0.88 | 0.76 | 0.78 | 0.77 |
-| `mldsa87-verify/*` | 0.82 |  |  |  | 0.86 |  |  |  | 0.89 | 0.85 | 0.84 | 0.67 | 0.67 | 0.87 |
-| `mlkem768-combined/*` | 0.61 |  | 0.78 |  | 0.76 |  |  |  | 0.79 | 0.73 | 0.72 | 0.55 | 0.55 | 0.61 |
-| `mlkem768-decaps/*` | 0.42 |  | 0.52 |  | 0.55 |  |  |  | 0.50 | 0.46 | 0.46 | 0.36 | 0.37 | 0.43 |
-| `mlkem768-encaps/*` | 0.72 |  | 0.90 |  | 0.85 |  |  |  | 0.99 | 0.89 | 0.87 | 0.68 | 0.68 | 0.66 |
-| `mlkem768-keygen/*` | 0.75 |  | 0.95 |  | 0.89 |  |  |  | 0.97 | 0.89 | 0.86 | 0.67 | 0.66 | 0.72 |
-| `p256-ecdh-stored/*` | 0.96 |  |  | 0.97 | 0.96 |  |  |  | 0.73 |  | 0.73 | 0.55 | 0.52 | 0.53 |
-| `p256-ecdh/*` | 0.96 |  |  | 0.96 | 0.96 |  |  |  | 0.93 |  | 0.76 | 0.53 | 0.48 | 0.51 |
-| `p256-ecdsa-keygen/*` | 1.02 |  |  | 1.02 | 1.02 |  |  |  | 1.05 |  | 0.97 | 0.37 | 0.36 | 0.40 |
-| `p256-ecdsa-sign-digest/*` | 0.78 |  |  | 0.76 | 0.95 |  |  |  | 0.82 |  | 0.98 | 0.43 | 0.44 | 0.55 |
-| `p256-ecdsa-sign/*` | 0.78 |  |  | 0.75 | 0.94 |  |  |  | 0.81 |  | 0.97 | 0.43 | 0.44 | 0.55 |
-| `p256-ecdsa-verify-digest/*` | 0.93 |  |  | 0.99 | 0.98 |  |  |  | 0.93 |  | 0.93 | 0.58 | 0.58 | 0.52 |
-| `p256-ecdsa-verify-parsed/*` | 0.93 |  |  | 0.98 | 0.97 |  |  |  | 0.92 |  | 0.93 | 0.58 | 0.58 | 0.52 |
-| `p256-ecdsa-verify/*` | 1.02 |  |  | 1.08 | 1.07 |  |  |  | 1.01 |  | 1.02 | 0.65 | 0.65 | 0.59 |
-| `p256-keygen/*` | 0.99 |  |  | 0.98 | 0.98 |  |  |  | 1.01 |  | 0.94 | 0.36 | 0.35 | 0.39 |
-| `p384-ecdh-stored/*` | 0.98 |  |  | 0.99 | 0.99 |  |  |  | 0.83 |  | 0.83 | 0.38 | 0.38 | 0.49 |
-| `p384-ecdh/*` | 0.90 |  |  | 0.91 | 0.92 |  |  |  | 0.78 |  | 0.78 | 0.36 | 0.37 | 0.48 |
-| `p384-ecdsa-sign-digest/*` | 0.53 |  |  | 0.54 | 0.57 |  |  |  | 0.48 |  | 0.51 | 0.40 | 0.40 | 0.51 |
-| `p384-ecdsa-sign/*` | 0.53 |  |  | 0.54 | 0.57 |  |  |  | 0.48 |  | 0.51 | 0.40 | 0.40 | 0.51 |
-| `p384-ecdsa-verify-digest/*` | 0.77 |  |  | 0.78 | 0.78 |  |  |  | 0.66 |  | 0.66 | 0.40 | 0.41 | 0.50 |
-| `p384-ecdsa-verify-parsed/*` | 0.77 |  |  | 0.78 | 0.78 |  |  |  | 0.66 |  | 0.66 | 0.41 | 0.41 | 0.50 |
-| `p384-ecdsa-verify/*` | 0.82 |  |  | 0.83 | 0.84 |  |  |  | 0.71 |  | 0.71 | 0.44 | 0.45 | 0.55 |
-| `p384-keygen/*` | 0.70 |  |  | 0.71 | 0.72 |  |  |  | 0.63 |  | 0.64 | 0.31 | 0.32 | 0.45 |
-| `p521-ecdh-stored/*` | 0.99 |  |  | 0.99 | 0.99 |  |  |  | 0.67 |  | 0.67 | 0.84 | 0.83 | 1.12 |
-| `p521-ecdh/*` | 0.93 |  |  | 0.94 | 0.95 |  |  |  | 0.65 |  | 0.65 | 0.83 | 0.85 | 1.09 |
-| `p521-ecdsa-sign-digest/*` | 0.44 |  |  | 0.48 | 0.49 |  |  |  | 0.38 |  | 0.40 | 0.80 | 0.86 | 0.89 |
-| `p521-ecdsa-sign/*` | 0.44 |  |  | 0.48 | 0.49 |  |  |  | 0.38 |  | 0.39 | 0.80 | 0.86 | 0.89 |
-| `p521-ecdsa-verify-digest/*` | 0.70 |  |  | 0.74 | 0.74 |  |  |  | 0.52 |  | 0.52 | 0.82 | 0.82 | 0.96 |
-| `p521-ecdsa-verify-parsed/*` | 0.70 |  |  | 0.74 | 0.75 |  |  |  | 0.52 |  | 0.52 | 0.82 | 0.82 | 0.96 |
-| `p521-ecdsa-verify/*` | 0.74 |  |  | 0.79 | 0.79 |  |  |  | 0.55 |  | 0.55 | 0.90 | 0.90 | 1.05 |
-| `p521-keygen/*` | 0.77 |  |  | 0.79 | 0.80 |  |  |  | 0.60 |  | 0.60 | 0.81 | 0.90 | 1.02 |
-| `pbkdf2-sha1/*` | 0.82 |  |  |  | 0.84 |  |  |  | 0.81 |  | 0.90 | 0.80 | 0.83 | 0.85 |
-| `pbkdf2-sha256/*` | 0.84 |  |  |  | 0.92 |  |  |  | 0.89 |  | 0.93 | 0.81 | 0.87 | 1.00 |
-| `pbkdf2-sha384/*` | 0.70 |  |  |  | 0.90 |  |  |  | 0.95 |  | 0.94 | 1.00 | 1.00 | 0.88 |
-| `pbkdf2-sha512/*` | 0.68 |  |  |  | 0.88 |  |  |  | 0.92 |  | 0.93 | 1.00 | 1.00 | 0.86 |
-| `quic-header-protection/aes128/*` | 0.68 |  |  |  | 0.74 | 0.54 | 0.98 | 0.85 | 0.99 |  | 1.00 | 0.60 | 2.23 | 0.57 |
-| `quic-header-protection/aes256/*` | 0.58 |  |  |  | 0.65 | 0.39 | 0.99 | 0.84 | 0.85 |  | 1.00 | 0.65 | 2.19 | 0.57 |
-| `quic-header-protection/chacha20/*` | 0.80 |  |  |  | 0.77 | 0.87 | 0.77 | 0.87 | 0.90 |  | 0.85 | 0.71 | 0.63 | 0.75 |
-| `rsa1024-pkcs1-sha1-verify/*` | 0.79 |  |  | 0.82 | 0.81 |  |  |  | 0.86 |  | 0.56 | 0.98 | 0.97 | 0.75 |
-| `rsa2048-key-generation/*` | 0.64 |  |  | 0.84 | 0.81 |  |  |  | 0.43 |  | 0.50 | 1.29 | 1.64 | 1.04 |
-| `rsa2048-load/*` | 0.41 | 0.39 | 0.49 | 0.40 | 0.41 |  |  |  | 0.41 |  | 0.45 | 0.53 | 0.54 | 0.46 |
-| `rsa2048-oaep-sha256-decrypt/*` | 0.93 | 0.88 | 1.05 | 0.97 | 0.98 |  |  |  | 0.55 |  | 0.55 | 0.93 | 0.93 | 0.82 |
-| `rsa2048-oaep-sha256-encrypt/*` | 0.86 |  |  | 0.93 | 0.94 |  |  |  | 0.59 |  | 0.60 | 0.92 | 0.90 | 0.78 |
-| `rsa2048-pkcs1-sha256-sign/*` | 0.94 | 0.89 | 1.05 | 0.97 | 0.98 |  |  |  | 0.85 |  | 0.55 | 0.95 | 0.93 | 0.83 |
-| `rsa2048-pkcs1-sha256-verify-parsed/*` | 0.82 |  |  | 0.91 | 0.91 |  |  |  | 0.56 |  | 0.57 | 0.91 | 0.91 | 0.83 |
-| `rsa2048-pkcs1-sha256-verify/*` | 0.86 |  |  | 0.93 | 0.93 |  |  |  | 0.81 |  | 0.62 | 0.95 | 0.95 | 0.84 |
-| `rsa2048-pss-sha256-sign/*` | 0.94 | 0.89 | 1.05 | 0.97 | 0.99 |  |  |  | 0.85 |  | 0.55 | 0.95 | 0.93 | 0.83 |
-| `rsa2048-pss-sha256-verify/*` | 0.86 |  |  | 0.93 | 0.94 |  |  |  | 0.81 |  | 0.64 | 0.95 | 0.94 | 0.86 |
-| `rsa2056-pkcs1-sha256-sign/*` | 0.98 | 0.95 | 1.00 | 0.96 | 1.04 |  |  |  | 0.97 |  | 0.98 | 0.99 | 0.99 | 0.74 |
-| `rsa2056-pkcs1-sha256-verify/*` | 0.95 |  |  | 0.92 | 0.92 |  |  |  | 0.96 |  | 0.96 | 0.99 | 0.99 | 0.84 |
-| `rsa2560-pkcs1-sha256-sign/*` | 0.91 | 0.91 | 0.97 | 0.97 | 1.03 |  |  |  | 0.96 |  | 0.96 | 0.93 | 0.93 | 0.79 |
-| `rsa3072-key-generation/*` | 0.76 |  |  | 0.76 | 0.94 |  |  |  | 0.42 |  | 0.24 | 1.37 | 0.94 | 0.95 |
-| `rsa3072-pkcs1-sha256-sign/*` | 0.96 | 0.99 | 0.98 | 0.99 | 0.99 |  |  |  | 0.92 |  | 0.51 | 0.95 | 0.93 | 0.83 |
-| `rsa3072-pkcs1-sha256-verify/*` | 0.94 |  |  | 0.97 | 0.97 |  |  |  | 0.80 |  | 0.57 | 0.94 | 0.93 | 0.94 |
-| `rsa4096-key-generation/*` | 0.65 |  |  | 0.80 | 0.85 |  |  |  | 1.00 |  | 0.37 | 1.02 | 1.46 | 0.98 |
-| `rsa4096-pkcs1-sha256-sign/*` | 0.97 | 0.83 | 0.98 | 1.00 | 0.99 |  |  |  | 0.92 |  | 0.60 | 0.96 | 0.93 | 0.83 |
-| `rsa4096-pkcs1-sha256-verify/*` | 0.96 |  |  | 0.98 | 0.98 |  |  |  | 0.79 |  | 0.58 | 0.93 | 0.92 | 0.88 |
-| `rsa6144-pkcs1-sha256-sign/*` | 0.97 | 0.98 | 0.97 | 0.98 | 0.98 |  |  |  | 0.53 |  | 0.53 | 0.87 | 0.87 | 0.88 |
-| `rsa6144-pkcs1-sha256-verify/*` | 0.97 |  |  | 1.00 | 0.99 |  |  |  | 0.78 |  | 0.58 | 0.91 | 0.91 | 0.95 |
-| `rsa8192-load/*` | 0.45 | 0.56 | 0.54 | 0.46 | 0.47 |  |  |  | 0.47 |  | 0.50 | 0.49 | 0.50 | 0.51 |
-| `rsa8192-pkcs1-sha256-sign/*` | 0.95 | 0.95 | 0.95 | 0.98 | 0.98 |  |  |  | 0.53 |  | 0.53 | 0.89 | 0.90 | 0.83 |
-| `rsa8192-pkcs1-sha256-verify/*` | 0.97 |  |  | 0.99 | 0.99 |  |  |  | 0.78 |  | 0.59 | 0.91 | 0.90 | 0.91 |
-| `rustls-bulk/aes128-gcm/*` | 0.94 |  |  |  | 1.01 |  |  |  | 0.81 |  | 1.00 | 0.99 | 3.34 | 1.17 |
-| `rustls-bulk/aes256-gcm/*` | 0.95 |  |  |  | 1.01 |  |  |  | 0.81 |  | 1.00 | 0.99 | 3.39 | 1.20 |
-| `rustls-bulk/chacha20poly1305/*` | 1.00 |  |  |  | 1.00 |  |  |  | 1.00 |  | 1.00 | 0.99 | 0.99 | 0.83 |
-| `rustls-full-handshake-group/secp256r1/*` | 0.84 |  |  |  | 0.90 |  |  |  | 0.90 |  | 0.81 | 0.55 | 0.56 | 0.54 |
-| `rustls-full-handshake-group/secp384r1/*` | 0.84 |  |  |  | 0.89 |  |  |  | 0.80 |  | 0.80 | 0.43 | 0.44 | 0.51 |
-| `rustls-full-handshake-group/x25519/*` | 0.80 |  |  |  | 0.90 |  |  |  | 0.85 |  | 0.83 | 0.57 | 0.58 | 0.58 |
-| `rustls-full-handshake-group/x25519mlkem768/*` | 0.76 |  |  |  | 0.87 |  |  |  | 0.84 |  | 0.83 | 0.56 | 0.58 | 0.59 |
-| `rustls-full-handshake-key/ecdsa-p256/*` | 0.80 |  |  |  | 0.90 |  |  |  | 0.85 |  | 0.83 | 0.57 | 0.58 | 0.58 |
-| `rustls-full-handshake-key/ecdsa-p384/*` | 0.75 |  |  |  | 0.80 |  |  |  | 0.69 |  | 0.69 | 0.44 | 0.44 | 0.56 |
-| `rustls-full-handshake-key/ecdsa-p521/*` | 0.69 |  |  |  | 0.76 |  |  |  | 0.55 |  | 0.56 | 0.84 | 0.84 | 0.90 |
-| `rustls-full-handshake-key/ed25519/*` | 0.77 |  |  |  | 0.88 |  |  |  | 0.76 |  | 0.70 | 0.73 | 0.55 | 0.57 |
-| `rustls-full-handshake-key/rsa-2048/*` | 0.80 |  |  |  | 0.93 |  |  |  | 0.82 |  | 0.57 | 0.89 | 0.84 | 0.77 |
-| `rustls-full-handshake-key/rsa-3072/*` | 0.89 |  |  |  | 0.97 |  |  |  | 0.89 |  | 0.52 | 0.93 | 0.91 | 0.84 |
-| `rustls-full-handshake-key/rsa-4096/*` | 0.93 |  |  |  | 0.98 |  |  |  | 0.90 |  | 0.61 | 0.94 | 0.94 | 0.84 |
-| `rustls-resumed-handshake/secp256r1/*` | 0.73 |  |  |  | 0.77 |  |  |  | 0.84 |  | 0.70 | 0.51 | 0.48 | 0.49 |
-| `rustls-resumed-handshake/secp384r1/*` | 0.78 |  |  |  | 0.84 |  |  |  | 0.74 |  | 0.75 | 0.36 | 0.37 | 0.48 |
-| `rustls-resumed-handshake/x25519/*` | 0.59 |  |  |  | 0.75 |  |  |  | 0.69 |  | 0.70 | 0.62 | 0.45 | 0.56 |
-| `rustls-resumed-handshake/x25519mlkem768/*` | 0.58 |  |  |  | 0.77 |  |  |  | 0.72 |  | 0.75 | 0.45 | 0.48 | 0.60 |
-| `sha1/*/1200B` | 0.97 |  |  |  | 0.96 | 0.98 |  | 0.98 | 0.94 |  | 0.97 | 0.92 | 0.94 | 0.96 |
-| `sha1/*/1350B` | 0.97 |  |  |  | 0.96 | 0.98 |  | 0.99 | 0.95 |  | 0.98 | 0.93 | 0.94 | 0.98 |
-| `sha1/*/16KB` | 1.00 |  |  |  | 0.99 | 1.00 |  | 1.00 | 1.00 |  | 1.00 | 1.00 | 0.97 | 1.12 |
-| `sha1/*/32B` | 0.62 |  |  |  | 0.63 | 0.82 |  | 0.81 | 0.55 |  | 0.67 | 0.58 | 0.69 | 0.72 |
-| `sha1/*/64B` | 0.73 |  |  |  | 0.71 | 0.86 |  | 0.88 | 0.65 |  | 0.79 | 0.66 | 0.76 | 0.78 |
-| `sha1/*/8KB` | 1.00 |  |  |  | 0.99 | 0.99 |  | 0.99 | 1.00 |  | 1.00 | 0.99 | 0.97 | 1.10 |
-| `sha256-updates/*/16B` | 0.80 |  |  |  | 0.95 | 0.94 |  | 0.95 | 0.77 | 0.75 | 0.94 | 0.70 | 0.83 | 1.13 |
-| `sha256-updates/*/1B` | 0.70 |  |  |  | 0.76 | 0.78 |  | 0.77 | 0.56 | 0.54 | 0.64 | 0.45 | 0.54 | 0.83 |
-| `sha256/*/1200B` | 0.94 |  |  |  | 0.99 | 0.99 |  | 0.98 | 0.99 | 0.94 | 0.98 | 0.93 | 0.92 | 1.16 |
-| `sha256/*/1350B` | 0.95 |  |  |  | 1.00 | 0.99 |  | 0.99 | 0.98 | 0.95 | 0.99 | 0.94 | 0.92 | 1.17 |
-| `sha256/*/16KB` | 0.99 |  |  |  | 1.01 | 1.00 |  | 1.00 | 1.00 | 0.99 | 1.00 | 0.99 | 0.93 | 1.17 |
-| `sha256/*/32B` | 0.62 |  |  |  | 0.79 | 0.91 |  | 0.84 | 0.73 | 0.55 | 0.77 | 0.60 | 0.71 | 0.96 |
-| `sha256/*/64B` | 0.85 |  |  |  | 0.86 | 0.91 |  | 0.91 | 0.80 | 0.66 | 0.86 | 0.71 | 0.81 | 1.03 |
-| `sha256/*/8KB` | 0.99 |  |  |  | 1.01 | 1.00 |  | 0.99 | 0.99 | 0.99 | 1.00 | 0.99 | 0.93 | 1.17 |
-| `sha3-256/*/1200B` | 0.99 |  |  |  | 0.98 |  |  |  | 0.99 | 0.86 | 0.86 | 0.63 | 0.62 | 0.93 |
-| `sha3-256/*/1350B` | 0.99 |  |  |  | 0.98 |  |  |  | 0.99 | 0.86 | 0.86 | 0.63 | 0.62 | 0.93 |
-| `sha3-256/*/16KB` | 1.00 |  |  |  | 1.00 |  |  |  | 1.00 | 0.88 | 0.88 | 0.63 | 0.62 | 0.94 |
-| `sha3-256/*/32B` | 0.92 |  |  |  | 0.82 |  |  |  | 0.91 | 0.75 | 0.74 | 0.60 | 0.60 | 0.88 |
-| `sha3-256/*/64B` | 0.92 |  |  |  | 0.84 |  |  |  | 0.91 | 0.75 | 0.75 | 0.60 | 0.60 | 0.88 |
-| `sha3-256/*/8KB` | 1.00 |  |  |  | 1.00 |  |  |  | 1.00 | 0.88 | 0.88 | 0.63 | 0.62 | 0.94 |
-| `sha3-384/*/1200B` | 0.99 |  |  |  | 0.99 |  |  |  | 0.99 | 0.87 | 0.87 | 0.63 | 0.62 | 0.94 |
-| `sha3-384/*/1350B` | 1.00 |  |  |  | 1.00 |  |  |  | 0.99 | 0.87 | 0.87 | 0.63 | 0.62 | 0.94 |
-| `sha3-384/*/16KB` | 1.00 |  |  |  | 1.01 |  |  |  | 1.00 | 0.88 | 0.88 | 0.63 | 0.63 | 0.95 |
-| `sha3-384/*/32B` | 0.93 |  |  |  | 0.83 |  |  |  | 0.91 | 0.75 | 0.75 | 0.60 | 0.60 | 0.90 |
-| `sha3-384/*/64B` | 0.93 |  |  |  | 0.83 |  |  |  | 0.91 | 0.75 | 0.75 | 0.60 | 0.60 | 0.90 |
-| `sha3-384/*/8KB` | 1.00 |  |  |  | 1.00 |  |  |  | 1.00 | 0.88 | 0.88 | 0.63 | 0.62 | 0.94 |
-| `sha3-512/*/1200B` | 0.99 |  |  |  | 0.99 |  |  |  | 0.99 | 0.87 | 0.87 | 0.63 | 0.62 | 0.94 |
-| `sha3-512/*/1350B` | 0.99 |  |  |  | 0.99 |  |  |  | 0.99 | 0.87 | 0.87 | 0.63 | 0.62 | 0.94 |
-| `sha3-512/*/16KB` | 1.00 |  |  |  | 1.00 |  |  |  | 1.00 | 0.88 | 0.88 | 0.63 | 0.63 | 1.01 |
-| `sha3-512/*/32B` | 0.93 |  |  |  | 0.83 |  |  |  | 0.91 | 0.74 | 0.74 | 0.60 | 0.60 | 0.88 |
-| `sha3-512/*/64B` | 0.93 |  |  |  | 0.85 |  |  |  | 0.91 | 0.75 | 0.75 | 0.61 | 0.60 | 0.87 |
-| `sha3-512/*/8KB` | 1.00 |  |  |  | 1.00 |  |  |  | 1.00 | 0.88 | 0.88 | 0.63 | 0.63 | 0.94 |
-| `sha512-256/*/1200B` | 0.70 |  |  |  | 0.97 | 0.98 |  | 0.98 | 0.99 | 0.98 | 0.98 | 1.00 | 0.99 | 1.05 |
-| `sha512-256/*/1350B` | 0.70 |  |  |  | 0.98 | 0.99 |  | 0.98 | 0.99 | 0.98 | 0.98 | 1.00 | 0.99 | 1.05 |
-| `sha512-256/*/16KB` | 0.70 |  |  |  | 1.00 | 1.00 |  | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | 1.21 |
-| `sha512-256/*/32B` | 0.69 |  |  |  | 0.81 | 0.84 |  | 0.83 | 0.87 | 0.82 | 0.82 | 0.99 | 0.92 | 0.84 |
-| `sha512-256/*/64B` | 0.70 |  |  |  | 0.81 | 0.84 |  | 0.83 | 0.89 | 0.82 | 0.82 | 0.99 | 0.92 | 0.84 |
-| `sha512-256/*/8KB` | 0.70 |  |  |  | 1.00 | 1.00 |  | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | 1.18 |
-| `sha512/*/1200B` | 0.70 |  |  |  | 0.97 | 0.98 |  | 0.98 | 0.99 | 0.98 | 0.98 | 1.00 | 0.99 | 1.05 |
-| `sha512/*/1350B` | 0.70 |  |  |  | 0.98 | 0.98 |  | 0.98 | 0.99 | 0.98 | 0.98 | 1.00 | 0.99 | 1.06 |
-| `sha512/*/16KB` | 0.70 |  |  |  | 0.99 | 1.00 |  | 1.01 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | 1.21 |
-| `sha512/*/32B` | 0.68 |  |  |  | 0.79 | 0.80 |  | 0.80 | 0.87 | 0.81 | 0.81 | 0.98 | 0.91 | 0.81 |
-| `sha512/*/64B` | 0.70 |  |  |  | 0.79 | 0.80 |  | 0.80 | 0.90 | 0.81 | 0.81 | 0.98 | 0.91 | 0.81 |
-| `sha512/*/8KB` | 0.70 |  |  |  | 0.99 | 1.00 |  | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | 1.18 |
-| `x25519-ecdh-stored/*` | 1.00 |  |  | 0.99 | 0.99 |  |  |  | 0.82 |  | 0.82 | 0.42 | 0.42 | 0.69 |
-| `x25519-ecdh/*` | 1.00 |  |  | 0.99 | 0.99 |  |  |  | 0.81 |  | 0.80 | 0.79 | 0.49 | 0.64 |
-| `x25519-keygen/*` | 1.02 |  |  | 0.99 | 1.00 |  |  |  | 0.76 |  | 0.73 | 0.69 | 0.68 | 0.53 |
-| `xchacha20poly1305/*/1200B` | 0.99 |  |  |  | 0.98 |  | 1.03 | 1.03 | 0.99 |  | 0.99 | 0.95 | 0.95 | 0.84 |
-| `xchacha20poly1305/*/1350B` | 1.02 |  |  |  | 0.99 |  | 1.05 | 1.04 | 1.00 |  | 1.00 | 0.95 | 0.94 | 0.83 |
-| `xchacha20poly1305/*/16KB` | 1.01 |  |  |  | 0.99 |  | 1.19 | 1.09 | 1.00 |  | 1.00 | 0.99 | 0.99 | 0.82 |
-| `xchacha20poly1305/*/32B` | 0.98 |  |  |  | 0.96 |  | 0.90 | 0.91 | 1.00 |  | 1.00 | 0.89 | 0.88 | 0.85 |
-| `xchacha20poly1305/*/quic-128B` | 0.98 |  |  |  | 0.96 |  | 0.91 | 0.94 | 0.98 |  | 0.99 | 0.87 | 0.86 | 0.81 |
-| `xchacha20poly1305/*/quic-256B` | 1.05 |  |  |  | 0.96 |  | 0.90 | 0.96 | 1.00 |  | 0.99 | 0.90 | 0.89 | 0.80 |
-| `xchacha20poly1305/*/quic-512B` | 1.00 |  |  |  | 0.96 |  | 0.95 | 1.01 | 1.00 |  | 0.99 | 0.91 | 0.92 | 0.81 |
+| `aes128-cbc-decrypt/*/1200B` | 1.08 |  |  |  | 0.92 | 0.93 | 1.01 | 0.84 | 0.88 |  | 0.92 | 0.90 | 0.33 | 1.23 |
+| `aes128-cbc-decrypt/*/1350B` | 1.14 |  |  |  | 0.95 | 0.94 | 1.01 | 0.84 | 0.89 |  | 0.95 | 0.92 | 0.33 | 1.29 |
+| `aes128-cbc-decrypt/*/16KB` | 1.80 |  |  |  | 1.00 | 1.00 | 1.01 | 0.84 | 1.02 |  | 1.00 | 0.99 | 0.29 | 1.30 |
+| `aes128-cbc-decrypt/*/32B` | 0.51 |  |  |  | 0.70 | 0.66 | 0.91 | 0.81 | 0.69 |  | 0.66 | 0.52 | 0.99 | 0.57 |
+| `aes128-cbc-encrypt/*/1200B` | 0.91 |  |  |  | 1.00 | 0.99 | 0.85 | 0.81 | 0.96 |  | 0.96 | 0.92 | 1.07 | 0.67 |
+| `aes128-cbc-encrypt/*/1350B` | 0.92 |  |  |  | 1.00 | 1.00 | 0.85 | 0.81 | 0.96 |  | 0.96 | 0.93 | 1.07 | 0.67 |
+| `aes128-cbc-encrypt/*/16KB` | 1.00 |  |  |  | 1.03 | 1.03 | 0.87 | 0.81 | 0.99 |  | 0.97 | 0.99 | 1.07 | 0.68 |
+| `aes128-cbc-encrypt/*/32B` | 0.47 |  |  |  | 0.46 | 0.46 | 0.73 | 0.82 | 0.35 |  | 0.88 | 0.45 | 0.99 | 0.63 |
+| `aes128-ctr/*/1200B` | 0.98 |  |  |  | 0.87 | 0.87 | 0.99 | 0.84 | 0.87 |  | 0.99 | 0.89 | 0.36 | 1.25 |
+| `aes128-ctr/*/1350B` | 0.98 |  |  |  | 0.89 | 0.89 | 1.00 | 0.85 | 0.83 |  | 0.99 | 0.89 | 0.37 | 1.18 |
+| `aes128-ctr/*/16KB` | 2.04 |  |  |  | 1.03 | 1.01 | 1.00 | 0.91 | 1.05 |  | 1.00 | 0.98 | 0.32 | 1.35 |
+| `aes128-ctr/*/32B` | 0.47 |  |  |  | 0.50 | 0.50 | 0.71 | 0.81 | 0.68 |  | 0.78 | 0.37 | 0.91 | 0.54 |
+| `aes128-gcm-open/*/1200B` | 0.75 |  | 0.80 |  | 0.90 | 0.71 | 1.00 | 0.83 | 0.88 | 0.92 | 0.99 | 0.91 | 0.98 | 1.00 |
+| `aes128-gcm-open/*/1350B` | 0.69 |  | 0.77 |  | 0.88 | 0.71 | 1.00 | 0.84 | 0.87 | 0.90 | 0.99 | 0.93 | 0.99 | 0.98 |
+| `aes128-gcm-open/*/16KB` | 1.03 |  | 1.01 |  | 1.01 | 0.84 | 1.00 | 0.86 | 0.90 | 0.95 | 0.99 | 0.99 | 1.00 | 1.07 |
+| `aes128-gcm-open/*/32B` | 0.63 |  | 0.49 |  | 0.56 | 0.57 | 0.92 | 0.88 | 0.48 | 0.49 | 0.93 | 0.50 | 0.95 | 0.59 |
+| `aes128-gcm-open/*/quic-128B` | 0.82 |  | 0.89 |  | 0.76 | 0.63 | 0.97 | 0.85 | 0.88 | 0.88 | 0.98 | 0.66 | 0.86 | 0.81 |
+| `aes128-gcm-open/*/quic-256B` | 0.56 |  | 0.71 |  | 0.88 | 0.67 | 0.98 | 0.84 | 0.98 | 0.99 | 0.98 | 0.76 | 0.92 | 0.90 |
+| `aes128-gcm-open/*/quic-32B` | 0.64 |  | 0.59 |  | 0.63 | 0.57 | 0.92 | 0.90 | 0.65 | 0.61 | 0.93 | 0.53 | 0.94 | 0.59 |
+| `aes128-gcm-open/*/quic-512B` | 0.67 |  | 0.75 |  | 0.92 | 0.72 | 0.99 | 0.84 | 0.95 | 1.02 | 0.99 | 0.84 | 0.96 | 0.97 |
+| `aes128-gcm-open/*/quic-64B` | 0.74 |  | 0.69 |  | 0.62 | 0.57 | 0.94 | 0.89 | 0.79 | 0.72 | 0.95 | 0.60 | 0.96 | 0.60 |
+| `aes128-gcm/*/1200B` | 0.89 |  | 0.80 |  | 0.89 | 0.72 | 1.00 | 0.84 | 0.83 | 0.91 | 0.99 | 0.90 | 0.98 | 1.01 |
+| `aes128-gcm/*/1350B` | 0.92 |  | 0.83 |  | 0.91 | 0.73 | 1.00 | 0.84 | 0.82 | 0.92 | 0.99 | 0.92 | 0.99 | 0.98 |
+| `aes128-gcm/*/16KB` | 1.04 |  | 1.08 |  | 1.02 | 0.85 | 1.00 | 0.86 | 0.86 | 0.95 | 0.99 | 0.99 | 1.00 | 1.07 |
+| `aes128-gcm/*/32B` | 0.59 |  | 0.40 |  | 0.58 | 0.58 | 0.91 | 0.89 | 0.46 | 0.45 | 0.93 | 0.47 | 0.94 | 0.58 |
+| `aes128-gcm/*/key` | 0.92 |  | 1.14 |  | 1.15 | 1.54 | 0.71 | 0.98 | 1.27 | 1.28 | 0.97 | 0.77 | 1.07 | 0.77 |
+| `aes128-gcm/*/quic-128B` | 0.82 |  | 0.64 |  | 0.57 | 0.57 | 0.98 | 0.84 | 1.00 | 1.00 | 0.98 | 0.64 | 0.86 | 0.81 |
+| `aes128-gcm/*/quic-256B` | 0.59 |  | 0.62 |  | 0.98 | 0.64 | 0.99 | 0.83 | 0.94 | 1.04 | 0.99 | 0.74 | 0.92 | 0.90 |
+| `aes128-gcm/*/quic-32B` | 0.58 |  | 0.42 |  | 0.62 | 0.57 | 0.90 | 0.90 | 0.60 | 0.65 | 0.93 | 0.49 | 0.94 | 0.59 |
+| `aes128-gcm/*/quic-512B` | 0.67 |  | 0.72 |  | 0.88 | 0.69 | 1.00 | 0.83 | 0.91 | 1.01 | 0.99 | 0.82 | 0.96 | 0.97 |
+| `aes128-gcm/*/quic-64B` | 0.63 |  | 0.47 |  | 0.54 | 0.53 | 0.95 | 0.89 | 0.77 | 0.78 | 0.96 | 0.57 | 0.96 | 0.61 |
+| `aes128-kw-unwrap/*/16B` | 0.95 |  |  |  | 1.12 |  | 1.04 | 0.86 | 0.68 |  | 0.95 | 0.90 | 1.02 | 0.58 |
+| `aes128-kw-unwrap/*/32B` | 1.00 |  |  |  | 1.07 |  | 1.02 | 0.86 | 0.69 |  | 0.96 | 0.90 | 1.01 | 0.58 |
+| `aes128-kw-wrap/*/16B` | 0.68 |  |  |  | 0.76 |  | 1.03 | 0.85 | 0.66 |  | 0.96 | 0.96 | 1.06 | 0.56 |
+| `aes128-kw-wrap/*/32B` | 0.72 |  |  |  | 0.80 |  | 1.04 | 0.85 | 0.70 |  | 0.97 | 0.98 | 1.04 | 0.55 |
+| `aes128-kwp-unwrap/*/16B` | 0.88 |  |  |  | 1.08 |  | 1.02 | 0.86 | 0.72 |  | 0.96 | 0.90 | 1.02 | 0.58 |
+| `aes128-kwp-unwrap/*/32B` | 0.92 |  |  |  | 1.05 |  | 1.01 | 0.86 | 0.73 |  | 0.96 | 0.91 | 1.01 | 0.57 |
+| `aes128-kwp-wrap/*/16B` | 0.65 |  |  |  | 0.76 |  | 1.01 | 0.85 | 0.65 |  | 0.95 | 0.83 | 1.04 | 0.56 |
+| `aes128-kwp-wrap/*/32B` | 0.69 |  |  |  | 0.79 |  | 1.03 | 0.85 | 0.69 |  | 0.96 | 0.90 | 1.03 | 0.55 |
+| `aes192-cbc-decrypt/*/1200B` | 1.13 |  |  |  | 0.93 | 0.93 | 1.00 | 0.84 | 0.88 |  | 0.94 | 0.91 | 0.33 | 1.23 |
+| `aes192-cbc-decrypt/*/1350B` | 1.26 |  |  |  | 0.94 | 0.95 | 1.00 | 0.84 | 0.89 |  | 0.96 | 0.92 | 0.33 | 1.29 |
+| `aes192-cbc-decrypt/*/16KB` | 1.83 |  |  |  | 0.99 | 0.99 | 1.00 | 0.85 | 1.02 |  | 1.01 | 0.99 | 0.28 | 1.29 |
+| `aes192-cbc-decrypt/*/32B` | 0.55 |  |  |  | 0.70 | 0.70 | 0.92 | 0.81 | 0.69 |  | 0.66 | 0.52 | 1.00 | 0.57 |
+| `aes192-cbc-encrypt/*/1200B` | 0.91 |  |  |  | 1.00 | 0.99 | 0.87 | 0.82 | 0.97 |  | 0.97 | 0.93 | 1.06 | 0.67 |
+| `aes192-cbc-encrypt/*/1350B` | 0.93 |  |  |  | 1.00 | 1.00 | 0.87 | 0.82 | 0.98 |  | 0.97 | 0.94 | 1.06 | 0.67 |
+| `aes192-cbc-encrypt/*/16KB` | 1.00 |  |  |  | 1.03 | 1.03 | 0.88 | 0.82 | 1.01 |  | 0.97 | 0.99 | 1.07 | 0.67 |
+| `aes192-cbc-encrypt/*/32B` | 0.54 |  |  |  | 0.47 | 0.48 | 0.77 | 0.83 | 0.39 |  | 0.89 | 0.47 | 0.99 | 0.63 |
+| `aes192-ctr/*/1200B` | 1.06 |  |  |  | 0.88 | 0.88 | 0.99 | 0.87 | 0.90 |  | 1.00 | 0.84 | 0.35 | 1.24 |
+| `aes192-ctr/*/1350B` | 1.03 |  |  |  | 0.89 | 0.89 | 0.99 | 0.88 | 0.84 |  | 0.99 | 0.84 | 0.36 | 1.18 |
+| `aes192-ctr/*/16KB` | 2.00 |  |  |  | 0.99 | 0.99 | 0.99 | 0.92 | 1.05 |  | 1.00 | 0.92 | 0.32 | 1.34 |
+| `aes192-ctr/*/32B` | 0.50 |  |  |  | 0.52 | 0.52 | 0.81 | 0.82 | 0.71 |  | 0.81 | 0.40 | 0.92 | 0.54 |
+| `aes192-gcm-open/*/1200B` | 0.77 |  | 0.83 |  | 0.92 | 0.73 | 1.00 | 0.85 | 0.88 | 1.16 | 0.99 | 0.89 | 0.98 | 1.01 |
+| `aes192-gcm-open/*/1350B` | 0.69 |  | 0.83 |  | 0.89 | 0.72 | 1.00 | 0.85 | 0.87 | 1.13 | 0.99 | 0.90 | 0.99 | 1.00 |
+| `aes192-gcm-open/*/16KB` | 1.04 |  | 1.03 |  | 1.02 | 0.87 | 1.00 | 0.87 | 0.89 | 1.17 | 0.99 | 0.96 | 1.00 | 1.09 |
+| `aes192-gcm-open/*/32B` | 0.68 |  | 0.45 |  | 0.60 | 0.59 | 0.94 | 0.89 | 0.49 | 0.49 | 0.94 | 0.51 | 0.95 | 0.58 |
+| `aes192-gcm-open/*/quic-128B` | 1.01 |  | 0.82 |  | 0.74 | 0.65 | 0.97 | 0.85 | 0.91 | 0.91 | 0.98 | 0.67 | 0.86 | 0.81 |
+| `aes192-gcm-open/*/quic-256B` | 0.62 |  | 0.78 |  | 0.88 | 0.70 | 0.98 | 0.84 | 1.01 | 1.01 | 0.99 | 0.75 | 0.92 | 0.90 |
+| `aes192-gcm-open/*/quic-32B` | 0.67 |  | 0.55 |  | 0.69 | 0.60 | 0.91 | 0.90 | 0.64 | 0.63 | 0.94 | 0.53 | 0.95 | 0.58 |
+| `aes192-gcm-open/*/quic-512B` | 0.67 |  | 0.83 |  | 0.92 | 0.73 | 0.99 | 0.84 | 0.97 | 1.15 | 0.99 | 0.83 | 0.96 | 0.99 |
+| `aes192-gcm-open/*/quic-64B` | 0.79 |  | 0.67 |  | 0.65 | 0.58 | 0.93 | 0.90 | 0.80 | 0.75 | 0.96 | 0.60 | 0.97 | 0.60 |
+| `aes192-gcm/*/1200B` | 0.91 |  | 0.84 |  | 0.90 | 0.76 | 1.00 | 0.85 | 0.84 | 1.17 | 0.99 | 0.87 | 0.98 | 1.01 |
+| `aes192-gcm/*/1350B` | 0.93 |  | 0.82 |  | 0.93 | 0.76 | 1.00 | 0.86 | 0.84 | 1.16 | 0.99 | 0.89 | 0.99 | 0.99 |
+| `aes192-gcm/*/16KB` | 1.04 |  | 1.08 |  | 1.04 | 0.90 | 1.00 | 0.87 | 0.86 | 1.23 | 1.00 | 0.95 | 1.00 | 1.09 |
+| `aes192-gcm/*/32B` | 0.61 |  | 0.42 |  | 0.58 | 0.61 | 0.92 | 0.89 | 0.48 | 0.47 | 0.94 | 0.48 | 0.95 | 0.59 |
+| `aes192-gcm/*/key` | 1.15 |  | 1.34 |  | 1.17 | 1.58 | 0.72 | 0.97 | 1.26 | 1.26 | 0.97 | 0.77 | 1.05 | 0.82 |
+| `aes192-gcm/*/quic-128B` | 0.84 |  | 0.66 |  | 0.58 | 0.59 | 0.96 | 0.84 | 1.03 | 1.03 | 0.99 | 0.64 | 0.87 | 0.82 |
+| `aes192-gcm/*/quic-256B` | 0.61 |  | 0.64 |  | 0.74 | 0.67 | 1.00 | 0.83 | 0.98 | 1.09 | 0.99 | 0.73 | 0.92 | 0.91 |
+| `aes192-gcm/*/quic-32B` | 0.60 |  | 0.43 |  | 0.62 | 0.58 | 0.92 | 0.91 | 0.59 | 0.66 | 0.94 | 0.50 | 0.94 | 0.58 |
+| `aes192-gcm/*/quic-512B` | 0.69 |  | 0.74 |  | 0.83 | 0.71 | 1.00 | 0.83 | 0.94 | 1.15 | 0.99 | 0.80 | 0.96 | 0.98 |
+| `aes192-gcm/*/quic-64B` | 0.68 |  | 0.52 |  | 0.57 | 0.57 | 0.94 | 0.90 | 0.78 | 0.78 | 0.96 | 0.57 | 0.96 | 0.61 |
+| `aes256-cbc-decrypt/*/1200B` | 1.16 |  |  |  | 0.93 | 0.97 | 1.00 | 0.85 | 0.88 |  | 0.94 | 0.91 | 0.32 | 1.22 |
+| `aes256-cbc-decrypt/*/1350B` | 1.29 |  |  |  | 0.96 | 0.97 | 1.00 | 0.85 | 0.89 |  | 0.97 | 0.93 | 0.33 | 1.29 |
+| `aes256-cbc-decrypt/*/16KB` | 1.86 |  |  |  | 0.99 | 1.00 | 1.00 | 0.85 | 1.01 |  | 1.02 | 0.99 | 0.28 | 1.29 |
+| `aes256-cbc-decrypt/*/32B` | 0.59 |  |  |  | 0.75 | 0.71 | 0.94 | 0.82 | 0.73 |  | 0.67 | 0.53 | 1.00 | 0.57 |
+| `aes256-cbc-encrypt/*/1200B` | 0.93 |  |  |  | 0.99 | 0.99 | 0.89 | 0.83 | 0.98 |  | 0.97 | 0.94 | 1.05 | 0.67 |
+| `aes256-cbc-encrypt/*/1350B` | 0.94 |  |  |  | 1.00 | 0.99 | 0.89 | 0.83 | 0.98 |  | 0.97 | 0.95 | 1.05 | 0.67 |
+| `aes256-cbc-encrypt/*/16KB` | 1.00 |  |  |  | 1.03 | 1.03 | 0.90 | 0.83 | 1.00 |  | 0.98 | 1.00 | 1.06 | 0.68 |
+| `aes256-cbc-encrypt/*/32B` | 0.50 |  |  |  | 0.49 | 0.49 | 0.80 | 0.83 | 0.40 |  | 0.91 | 0.48 | 0.99 | 0.62 |
+| `aes256-ctr/*/1200B` | 1.06 |  |  |  | 0.89 | 0.89 | 0.99 | 0.86 | 0.91 |  | 1.00 | 0.92 | 0.34 | 1.24 |
+| `aes256-ctr/*/1350B` | 1.04 |  |  |  | 0.89 | 0.90 | 1.00 | 0.87 | 0.86 |  | 0.99 | 0.91 | 0.36 | 1.18 |
+| `aes256-ctr/*/16KB` | 1.99 |  |  |  | 0.99 | 0.99 | 1.00 | 0.93 | 1.04 |  | 1.00 | 0.99 | 0.31 | 1.33 |
+| `aes256-ctr/*/32B` | 0.52 |  |  |  | 0.54 | 0.54 | 0.76 | 0.82 | 0.75 |  | 0.83 | 0.40 | 0.93 | 0.54 |
+| `aes256-gcm-open/*/1200B` | 0.83 |  | 0.81 |  | 0.93 | 0.75 | 1.00 | 0.86 | 0.88 | 0.97 | 0.99 | 0.92 | 0.98 | 1.03 |
+| `aes256-gcm-open/*/1350B` | 0.69 |  | 0.81 |  | 0.87 | 0.74 | 1.00 | 0.86 | 0.86 | 0.91 | 0.99 | 0.93 | 0.99 | 1.01 |
+| `aes256-gcm-open/*/16KB` | 0.97 |  | 1.03 |  | 1.01 | 0.89 | 1.00 | 0.88 | 0.88 | 0.97 | 1.00 | 0.99 | 1.00 | 1.10 |
+| `aes256-gcm-open/*/32B` | 0.70 |  | 0.56 |  | 0.60 | 0.63 | 0.94 | 0.90 | 0.49 | 0.49 | 0.94 | 0.52 | 0.96 | 0.58 |
+| `aes256-gcm-open/*/quic-128B` | 0.90 |  | 0.98 |  | 0.77 | 0.68 | 0.96 | 0.84 | 0.93 | 0.94 | 0.98 | 0.68 | 0.87 | 0.81 |
+| `aes256-gcm-open/*/quic-256B` | 0.62 |  | 0.76 |  | 0.97 | 0.70 | 0.99 | 0.84 | 1.03 | 1.04 | 0.99 | 0.79 | 0.92 | 0.91 |
+| `aes256-gcm-open/*/quic-32B` | 0.70 |  | 0.65 |  | 0.69 | 0.63 | 0.92 | 0.91 | 0.62 | 0.62 | 0.94 | 0.54 | 0.95 | 0.57 |
+| `aes256-gcm-open/*/quic-512B` | 0.75 |  | 0.83 |  | 0.92 | 0.74 | 0.99 | 0.84 | 0.96 | 1.06 | 0.99 | 0.86 | 0.95 | 0.99 |
+| `aes256-gcm-open/*/quic-64B` | 0.80 |  | 0.82 |  | 0.73 | 0.61 | 0.95 | 0.90 | 0.81 | 0.76 | 0.96 | 0.62 | 0.97 | 0.59 |
+| `aes256-gcm/*/1200B` | 0.95 |  | 0.84 |  | 0.91 | 0.78 | 1.00 | 0.86 | 0.84 | 0.92 | 0.99 | 0.92 | 0.98 | 1.03 |
+| `aes256-gcm/*/1350B` | 0.94 |  | 0.84 |  | 0.92 | 0.78 | 1.00 | 0.87 | 0.84 | 0.91 | 0.99 | 0.93 | 0.99 | 1.00 |
+| `aes256-gcm/*/16KB` | 0.97 |  | 1.09 |  | 1.02 | 0.91 | 1.00 | 0.88 | 0.87 | 0.95 | 1.00 | 0.99 | 1.00 | 1.10 |
+| `aes256-gcm/*/32B` | 0.61 |  | 0.43 |  | 0.63 | 0.66 | 0.92 | 0.90 | 0.49 | 0.48 | 0.94 | 0.49 | 0.96 | 0.58 |
+| `aes256-gcm/*/key` | 0.90 |  | 0.94 |  | 1.04 | 1.36 | 0.73 | 0.97 | 1.10 | 1.11 | 0.97 | 0.77 | 1.06 | 0.72 |
+| `aes256-gcm/*/quic-128B` | 0.86 |  | 0.68 |  | 0.61 | 0.62 | 0.99 | 0.84 | 1.08 | 1.09 | 0.99 | 0.65 | 0.86 | 0.81 |
+| `aes256-gcm/*/quic-256B` | 0.65 |  | 0.65 |  | 1.15 | 0.70 | 0.98 | 0.84 | 0.95 | 1.05 | 0.99 | 0.76 | 0.92 | 0.91 |
+| `aes256-gcm/*/quic-32B` | 0.60 |  | 0.44 |  | 0.66 | 0.63 | 0.92 | 0.91 | 0.57 | 0.65 | 0.94 | 0.50 | 0.95 | 0.58 |
+| `aes256-gcm/*/quic-512B` | 0.77 |  | 0.75 |  | 0.92 | 0.73 | 1.00 | 0.84 | 0.92 | 1.02 | 0.99 | 0.83 | 0.96 | 1.00 |
+| `aes256-gcm/*/quic-64B` | 0.70 |  | 0.51 |  | 0.61 | 0.60 | 0.96 | 0.90 | 0.79 | 0.80 | 0.96 | 0.58 | 0.97 | 0.60 |
+| `aes256-kw-unwrap/*/16B` | 0.94 |  |  |  | 1.08 |  | 1.02 | 0.83 | 0.71 |  | 0.97 | 0.90 | 1.01 | 0.58 |
+| `aes256-kw-unwrap/*/32B` | 0.97 |  |  |  | 1.08 |  | 1.03 | 0.84 | 0.73 |  | 0.97 | 0.92 | 1.01 | 0.58 |
+| `aes256-kw-wrap/*/16B` | 0.58 |  |  |  | 0.84 |  | 1.02 | 0.81 | 0.68 |  | 0.97 | 0.96 | 1.05 | 0.55 |
+| `aes256-kw-wrap/*/32B` | 0.66 |  |  |  | 0.90 |  | 1.03 | 0.82 | 0.72 |  | 0.97 | 0.99 | 1.03 | 0.55 |
+| `aes256-kwp-unwrap/*/16B` | 0.87 |  |  |  | 1.05 |  | 1.01 | 0.83 | 0.75 |  | 0.97 | 0.91 | 1.02 | 0.59 |
+| `aes256-kwp-unwrap/*/32B` | 0.93 |  |  |  | 1.07 |  | 1.03 | 0.84 | 0.76 |  | 0.98 | 0.92 | 1.01 | 0.58 |
+| `aes256-kwp-wrap/*/16B` | 0.59 |  |  |  | 0.83 |  | 1.00 | 0.81 | 0.66 |  | 0.96 | 0.85 | 1.03 | 0.55 |
+| `aes256-kwp-wrap/*/32B` | 0.66 |  |  |  | 0.89 |  | 1.02 | 0.82 | 0.70 |  | 0.97 | 0.91 | 1.02 | 0.55 |
+| `chacha20/*/1200B` | 1.09 |  |  |  | 0.74 | 0.74 | 0.74 | 0.96 | 1.00 |  | 1.01 | 0.67 | 0.67 |  |
+| `chacha20/*/1350B` | 1.01 |  |  |  | 0.78 | 0.77 | 0.78 | 0.95 | 1.00 |  | 1.00 | 0.67 | 0.67 |  |
+| `chacha20/*/16KB` | 1.00 |  |  |  | 0.84 | 0.84 | 0.84 | 0.95 | 1.00 |  | 1.00 | 0.64 | 0.64 |  |
+| `chacha20/*/32B` | 1.08 |  |  |  | 1.05 | 1.04 | 1.10 | 1.08 | 0.87 |  | 0.88 | 1.03 | 1.02 |  |
+| `chacha20poly1305-open/*/1200B` | 1.37 |  |  |  | 1.00 |  | 1.07 | 1.07 | 1.01 | 1.09 | 1.09 | 0.96 | 0.96 | 0.76 |
+| `chacha20poly1305-open/*/1350B` | 1.34 |  |  |  | 1.00 |  | 1.08 | 1.08 | 1.00 | 1.04 | 1.04 | 0.95 | 0.95 | 0.77 |
+| `chacha20poly1305-open/*/16KB` | 1.71 |  |  |  | 1.00 |  | 1.18 | 1.11 | 1.00 | 1.11 | 1.11 | 1.00 | 0.99 | 0.78 |
+| `chacha20poly1305-open/*/32B` | 1.16 |  |  |  | 0.95 |  | 1.02 | 1.04 | 1.02 | 0.96 | 0.96 | 1.37 | 1.37 | 0.65 |
+| `chacha20poly1305-open/*/quic-128B` | 1.19 |  |  |  | 0.97 |  | 1.13 | 1.05 | 1.02 | 0.96 | 0.97 | 1.11 | 1.11 | 0.70 |
+| `chacha20poly1305-open/*/quic-256B` | 1.11 |  |  |  | 0.98 |  | 1.01 | 1.05 | 1.01 | 1.36 | 1.36 | 0.90 | 0.90 | 0.73 |
+| `chacha20poly1305-open/*/quic-512B` | 1.19 |  |  |  | 0.99 |  | 1.03 | 1.04 | 1.01 | 1.34 | 1.34 | 0.94 | 0.94 | 0.74 |
+| `chacha20poly1305/*/1200B` | 1.37 |  |  |  | 0.99 |  | 1.10 | 1.06 | 1.00 | 1.00 | 1.00 | 0.96 | 0.95 | 0.77 |
+| `chacha20poly1305/*/1350B` | 1.42 |  |  |  | 0.98 |  | 1.07 | 1.06 | 1.00 | 1.02 | 1.02 | 0.95 | 0.95 | 0.77 |
+| `chacha20poly1305/*/16KB` | 1.73 |  |  |  | 1.00 |  | 1.18 | 1.11 | 1.00 | 1.13 | 1.13 | 0.99 | 0.99 | 0.78 |
+| `chacha20poly1305/*/32B` | 1.16 |  |  |  | 0.93 |  | 1.07 | 1.06 | 1.00 | 0.95 | 0.95 | 1.34 | 1.34 | 0.66 |
+| `chacha20poly1305/*/quic-128B` | 1.13 |  |  |  | 0.94 |  | 1.14 | 1.06 | 1.00 | 0.96 | 0.96 | 1.09 | 1.09 | 0.69 |
+| `chacha20poly1305/*/quic-256B` | 1.03 |  |  |  | 0.97 |  | 1.00 | 1.05 | 1.00 | 1.08 | 1.09 | 0.90 | 0.89 | 0.72 |
+| `chacha20poly1305/*/quic-512B` | 1.15 |  |  |  | 0.98 |  | 1.04 | 1.04 | 1.00 | 1.01 | 1.01 | 0.94 | 0.93 | 0.74 |
+| `ed25519-keygen/*` | 1.05 |  |  | 1.00 | 1.01 |  |  |  | 0.98 |  | 0.98 | 0.96 | 0.96 | 0.62 |
+| `ed25519-sign/*` | 0.98 |  |  | 0.96 | 0.95 |  |  |  | 0.91 |  | 0.91 | 0.93 | 0.93 | 0.65 |
+| `ed25519-verify/*` | 1.00 |  |  | 0.67 | 0.87 |  |  |  | 0.82 |  | 0.79 | 0.82 | 0.59 | 0.58 |
+| `hkdf-sha1/expand-aes-256-gcm-key/*` | 0.61 |  |  |  | 0.58 |  |  |  | 0.61 | 0.61 | 0.70 | 0.55 | 0.72 | 0.69 |
+| `hkdf-sha1/expand/*` | 0.51 |  |  |  | 0.53 |  |  |  | 0.51 | 0.52 | 0.59 | 0.47 | 0.52 | 0.60 |
+| `hkdf-sha1/extract-expand/*` | 0.76 |  |  |  | 0.71 |  |  |  | 0.71 | 0.72 | 0.79 | 0.60 | 0.71 | 0.86 |
+| `hkdf-sha256/expand-aes-256-gcm-key/*` | 0.67 |  |  |  | 0.51 |  |  |  | 0.70 | 0.59 | 0.60 | 0.50 | 0.65 | 0.60 |
+| `hkdf-sha256/expand/*` | 0.58 |  |  |  | 0.45 |  |  |  | 0.62 | 0.49 | 0.46 | 0.35 | 0.44 | 0.43 |
+| `hkdf-sha256/extract-expand/*` | 0.94 |  |  |  | 0.82 |  |  |  | 0.88 | 0.88 | 0.88 | 0.59 | 0.87 | 0.81 |
+| `hkdf-sha384/expand-aes-256-gcm-key/*` | 0.83 |  |  |  | 0.50 |  |  |  | 0.84 | 0.53 | 0.59 | 0.74 | 0.60 | 0.62 |
+| `hkdf-sha384/expand/*` | 0.86 |  |  |  | 0.52 |  |  |  | 0.85 | 0.47 | 0.47 | 0.99 | 0.49 | 0.50 |
+| `hkdf-sha384/extract-expand/*` | 1.19 |  |  |  | 0.99 |  |  |  | 0.98 | 0.89 | 0.89 | 1.00 | 0.95 | 0.94 |
+| `hkdf-sha512/expand-aes-256-gcm-key/*` | 0.81 |  |  |  | 0.49 |  |  |  | 0.82 | 0.53 | 0.59 | 0.73 | 0.60 | 0.61 |
+| `hkdf-sha512/expand/*` | 0.84 |  |  |  | 0.52 |  |  |  | 0.83 | 0.47 | 0.47 | 0.98 | 0.48 | 0.49 |
+| `hkdf-sha512/extract-expand/*` | 1.19 |  |  |  | 1.01 |  |  |  | 0.94 | 0.88 | 0.88 | 1.00 | 0.95 | 0.94 |
+| `hmac-sha1/*/1200B` | 0.93 |  |  |  | 0.84 |  |  |  | 0.93 | 0.93 | 0.91 | 0.62 | 0.79 | 1.06 |
+| `hmac-sha1/*/1350B` | 0.93 |  |  |  | 0.86 |  |  |  | 0.94 | 0.94 | 0.92 | 0.64 | 0.80 | 1.09 |
+| `hmac-sha1/*/16KB` | 0.99 |  |  |  | 0.98 |  |  |  | 1.00 | 1.00 | 0.99 | 0.94 | 0.95 | 1.23 |
+| `hmac-sha1/*/32B` | 0.80 |  |  |  | 0.63 |  |  |  | 0.77 | 0.77 | 0.82 | 0.44 | 0.81 | 0.74 |
+| `hmac-sha1/*/64B` | 0.79 |  |  |  | 0.60 |  |  |  | 0.80 | 0.81 | 0.84 | 0.40 | 0.79 | 0.80 |
+| `hmac-sha1/*/8KB` | 0.98 |  |  |  | 0.97 |  |  |  | 0.99 | 1.00 | 0.98 | 0.89 | 0.93 | 1.22 |
+| `hmac-sha1/*/reused-key/1200B` | 0.91 |  |  |  | 0.88 |  |  |  | 0.94 | 0.94 | 0.93 | 0.66 | 0.82 | 1.11 |
+| `hmac-sha1/*/reused-key/1350B` | 0.91 |  |  |  | 0.89 |  |  |  | 0.95 | 0.95 | 0.94 | 0.69 | 0.84 | 1.13 |
+| `hmac-sha1/*/reused-key/16KB` | 0.99 |  |  |  | 0.99 |  |  |  | 1.00 | 1.00 | 0.99 | 0.96 | 0.96 | 1.24 |
+| `hmac-sha1/*/reused-key/32B` | 0.56 |  |  |  | 0.60 |  |  |  | 0.69 | 0.70 | 0.75 | 0.32 | 0.66 | 0.71 |
+| `hmac-sha1/*/reused-key/64B` | 0.64 |  |  |  | 0.58 |  |  |  | 0.76 | 0.76 | 0.80 | 0.31 | 0.66 | 0.81 |
+| `hmac-sha1/*/reused-key/8KB` | 0.98 |  |  |  | 0.97 |  |  |  | 1.00 | 1.00 | 0.99 | 0.92 | 0.94 | 1.23 |
+| `hmac-sha256/*/1200B` | 0.95 |  |  |  | 0.93 |  |  |  | 0.92 | 0.93 | 0.95 | 0.64 | 0.82 | 0.84 |
+| `hmac-sha256/*/1350B` | 0.95 |  |  |  | 0.94 |  |  |  | 0.93 | 0.93 | 0.95 | 0.66 | 0.82 | 0.83 |
+| `hmac-sha256/*/16KB` | 1.00 |  |  |  | 1.00 |  |  |  | 0.99 | 0.99 | 1.00 | 0.95 | 0.91 | 0.85 |
+| `hmac-sha256/*/32B` | 0.76 |  |  |  | 0.70 |  |  |  | 0.75 | 0.73 | 0.85 | 0.36 | 0.84 | 0.74 |
+| `hmac-sha256/*/64B` | 0.83 |  |  |  | 0.73 |  |  |  | 0.78 | 0.78 | 0.86 | 0.39 | 0.82 | 0.78 |
+| `hmac-sha256/*/8KB` | 0.99 |  |  |  | 1.00 |  |  |  | 0.98 | 0.98 | 0.99 | 0.90 | 0.90 | 0.84 |
+| `hmac-sha256/*/reused-key/1200B` | 0.95 |  |  |  | 0.96 |  |  |  | 0.93 | 0.93 | 0.96 | 0.68 | 0.83 | 0.83 |
+| `hmac-sha256/*/reused-key/1350B` | 0.95 |  |  |  | 0.96 |  |  |  | 0.94 | 0.94 | 0.96 | 0.71 | 0.85 | 0.84 |
+| `hmac-sha256/*/reused-key/16KB` | 1.00 |  |  |  | 1.01 |  |  |  | 0.99 | 0.98 | 1.00 | 0.96 | 0.91 | 0.85 |
+| `hmac-sha256/*/reused-key/32B` | 0.61 |  |  |  | 0.68 |  |  |  | 0.69 | 0.71 | 0.82 | 0.26 | 0.73 | 0.70 |
+| `hmac-sha256/*/reused-key/64B` | 0.76 |  |  |  | 0.75 |  |  |  | 0.77 | 0.78 | 0.84 | 0.31 | 0.73 | 0.75 |
+| `hmac-sha256/*/reused-key/8KB` | 0.99 |  |  |  | 1.00 |  |  |  | 0.98 | 0.98 | 0.99 | 0.93 | 0.91 | 0.85 |
+| `hmac-sha384/*/1200B` | 1.02 |  |  |  | 0.98 |  |  |  | 0.99 | 0.93 | 0.93 | 1.00 | 0.95 | 0.94 |
+| `hmac-sha384/*/1350B` | 1.02 |  |  |  | 0.96 |  |  |  | 0.99 | 0.94 | 0.94 | 1.00 | 0.95 | 0.94 |
+| `hmac-sha384/*/16KB` | 0.99 |  |  |  | 0.99 |  |  |  | 1.03 | 0.99 | 0.99 | 1.00 | 0.99 | 0.99 |
+| `hmac-sha384/*/32B` | 1.17 |  |  |  | 0.98 |  |  |  | 0.90 | 0.85 | 0.85 | 0.99 | 0.86 | 0.80 |
+| `hmac-sha384/*/64B` | 1.18 |  |  |  | 0.98 |  |  |  | 0.90 | 0.85 | 0.85 | 0.99 | 0.86 | 0.80 |
+| `hmac-sha384/*/8KB` | 0.99 |  |  |  | 0.99 |  |  |  | 1.02 | 0.99 | 0.99 | 1.00 | 0.99 | 0.98 |
+| `hmac-sha384/*/reused-key/1200B` | 0.95 |  |  |  | 0.97 |  |  |  | 1.02 | 0.95 | 0.95 | 0.99 | 0.95 | 0.95 |
+| `hmac-sha384/*/reused-key/1350B` | 0.97 |  |  |  | 0.96 |  |  |  | 1.01 | 0.95 | 0.95 | 0.99 | 0.96 | 0.95 |
+| `hmac-sha384/*/reused-key/16KB` | 0.98 |  |  |  | 1.00 |  |  |  | 1.03 | 0.99 | 0.99 | 1.00 | 1.00 | 0.99 |
+| `hmac-sha384/*/reused-key/32B` | 0.96 |  |  |  | 0.96 |  |  |  | 0.90 | 0.84 | 0.84 | 0.94 | 0.79 | 0.76 |
+| `hmac-sha384/*/reused-key/64B` | 0.96 |  |  |  | 0.97 |  |  |  | 0.91 | 0.84 | 0.84 | 0.94 | 0.79 | 0.76 |
+| `hmac-sha384/*/reused-key/8KB` | 0.98 |  |  |  | 0.98 |  |  |  | 1.03 | 0.99 | 0.99 | 1.00 | 0.99 | 0.99 |
+| `hpke-x25519-aes128-gcm-open/*/1350B` | 0.28 |  |  |  | 0.61 |  |  |  | 0.49 |  | 0.94 | 0.59 | 0.90 | 0.88 |
+| `hpke-x25519-aes128-gcm-seal/*/1350B` | 0.39 |  |  |  | 0.55 |  |  |  | 0.52 |  | 0.95 | 0.64 | 0.93 | 0.88 |
+| `hpke-x25519-setup-recipient/*` | 0.52 |  |  |  | 0.75 |  |  |  | 0.61 |  | 0.64 | 0.32 | 0.33 | 0.57 |
+| `hpke-x25519-setup-sender/*` | 0.66 |  |  |  | 0.94 |  |  |  | 0.77 |  | 0.78 | 0.49 | 0.50 | 0.72 |
+| `jwt-eddsa-sign/*/load` | 0.64 |  |  |  | 0.96 |  |  |  | 0.74 |  | 0.74 | 0.70 | 0.69 | 0.66 |
+| `jwt-eddsa-sign/*/token` | 0.64 |  |  |  | 0.95 |  |  |  | 0.73 |  | 0.74 | 0.70 | 0.69 | 0.66 |
+| `jwt-eddsa-verify/*/load` | 69.27 |  |  |  | 78.15 |  |  |  | 52.29 |  | 52.36 | 132.33 | 146.20 | 76.47 |
+| `jwt-eddsa-verify/*/token` | 0.75 |  |  |  | 0.87 |  |  |  | 0.71 |  | 0.71 | 0.64 | 0.63 | 0.63 |
+| `jwt-es256-sign/*/load` | 0.78 |  |  |  | 0.81 |  |  |  | 0.92 |  | 0.92 | 0.33 | 0.36 | 0.50 |
+| `jwt-es256-sign/*/token` | 0.73 |  |  |  | 0.89 |  |  |  | 0.83 |  | 0.93 | 0.37 | 0.40 | 0.56 |
+| `jwt-es256-verify/*/load` | 4.95 |  |  |  | 6.03 |  |  |  | 4.19 |  | 4.20 | 8.71 | 10.44 | 7.30 |
+| `jwt-es256-verify/*/token` | 0.53 |  |  |  | 1.04 |  |  |  | 0.86 |  | 0.85 | 0.63 | 0.64 | 0.73 |
+| `jwt-es384-sign/*/load` | 0.48 |  |  |  | 0.60 |  |  |  | 0.44 |  | 0.44 | 0.30 | 0.32 | 0.55 |
+| `jwt-es384-sign/*/token` | 0.45 |  |  |  | 0.54 |  |  |  | 0.40 |  | 0.41 | 0.35 | 0.36 | 0.57 |
+| `jwt-es384-verify/*/load` | 5.69 |  |  |  | 7.00 |  |  |  | 4.80 |  | 4.82 | 14.81 | 18.43 | 9.15 |
+| `jwt-es384-verify/*/token` | 0.71 |  |  |  | 0.82 |  |  |  | 0.67 |  | 0.68 | 0.45 | 0.44 | 0.64 |
+| `jwt-hs256-sign/*/load` | 0.40 |  |  |  | 0.66 |  |  |  | 0.39 |  | 0.73 | 0.39 | 0.59 | 0.71 |
+| `jwt-hs256-sign/*/token` | 0.55 |  |  |  | 0.75 |  |  |  | 0.47 |  | 0.80 | 0.39 | 0.62 | 0.74 |
+| `jwt-hs256-verify/*/load` | 0.39 |  |  |  | 0.65 |  |  |  | 0.39 |  | 0.72 | 0.39 | 0.59 | 0.69 |
+| `jwt-hs256-verify/*/token` | 0.56 |  |  |  | 0.76 |  |  |  | 0.48 |  | 0.80 | 0.39 | 0.62 | 0.72 |
+| `jwt-rs256-sign/*/load` | 320.87 |  |  |  | 268.62 |  |  |  | 161.71 |  | 159.74 | 388.77 | 671.64 | 515.73 |
+| `jwt-rs256-sign/*/token` | 0.41 |  |  |  | 0.67 |  |  |  | 0.45 |  | 0.44 | 0.71 | 0.71 | 0.64 |
+| `jwt-rs256-verify/*/load` | 19.60 |  |  |  | 19.99 |  |  |  | 16.30 |  | 16.37 | 69.45 | 52.63 | 16.87 |
+| `jwt-rs256-verify/*/token` | 0.53 |  |  |  | 0.92 |  |  |  | 0.62 |  | 0.62 | 0.95 | 0.94 | 0.83 |
+| `md5/*/1200B` | 1.01 |  |  |  | 1.00 |  |  |  | 1.00 |  | 1.01 | 0.87 | 0.87 | 0.88 |
+| `md5/*/1350B` | 1.01 |  |  |  | 0.99 |  |  |  | 1.01 |  | 1.01 | 0.87 | 0.87 | 0.88 |
+| `md5/*/16KB` | 1.01 |  |  |  | 1.01 |  |  |  | 1.02 |  | 1.02 | 0.89 | 0.89 | 0.90 |
+| `md5/*/32B` | 0.97 |  |  |  | 0.95 |  |  |  | 0.94 |  | 0.91 | 0.68 | 0.68 | 0.71 |
+| `md5/*/64B` | 0.99 |  |  |  | 0.93 |  |  |  | 0.96 |  | 0.95 | 0.77 | 0.77 | 0.77 |
+| `md5/*/8KB` | 1.01 |  |  |  | 1.01 |  |  |  | 1.02 |  | 1.02 | 0.89 | 0.89 | 0.90 |
+| `mldsa44-keygen/*` | 0.90 |  |  |  | 1.16 |  |  |  | 0.71 | 0.86 | 0.85 | 0.83 | 0.84 | 1.02 |
+| `mldsa44-load-verify/*` | 0.85 |  |  |  | 0.87 |  |  |  | 0.63 | 0.78 | 0.78 | 0.72 | 0.73 | 0.83 |
+| `mldsa44-sign/*` | 0.75 |  |  |  | 1.03 |  |  |  | 0.51 | 0.58 | 0.58 | 0.59 | 0.63 | 0.61 |
+| `mldsa44-verify/*` | 0.40 |  |  |  | 0.47 |  |  |  | 0.23 | 0.22 | 0.22 | 0.23 | 0.24 | 0.32 |
+| `mldsa65-keygen/*` | 0.92 |  |  |  | 1.13 |  |  |  | 0.72 | 0.84 | 0.84 | 0.77 | 0.79 | 1.01 |
+| `mldsa65-load-verify/*` | 0.83 |  |  |  | 0.90 |  |  |  | 0.63 | 0.79 | 0.79 | 0.72 | 0.72 | 0.84 |
+| `mldsa65-sign/*` | 0.69 |  |  |  | 0.98 |  |  |  | 0.51 | 0.55 | 0.55 | 0.59 | 0.61 | 0.57 |
+| `mldsa65-verify/*` | 0.30 |  |  |  | 0.36 |  |  |  | 0.18 | 0.17 | 0.17 | 0.19 | 0.19 | 0.27 |
+| `mldsa87-keygen/*` | 0.93 |  |  |  | 1.09 |  |  |  | 0.70 | 0.82 | 0.81 | 0.77 | 0.78 | 1.02 |
+| `mldsa87-load-verify/*` | 0.86 |  |  |  | 0.92 |  |  |  | 0.63 | 0.77 | 0.77 | 0.71 | 0.71 | 0.86 |
+| `mldsa87-sign/*` | 0.65 |  |  |  | 0.83 |  |  |  | 0.45 | 0.45 | 0.46 | 0.48 | 0.49 | 0.52 |
+| `mldsa87-verify/*` | 0.26 |  |  |  | 0.30 |  |  |  | 0.14 | 0.13 | 0.13 | 0.15 | 0.15 | 0.23 |
+| `mlkem1024-decaps/*` | 0.49 |  | 0.49 |  | 0.51 |  |  |  | 0.33 | 0.40 | 0.40 | 0.31 | 0.32 | 0.32 |
+| `mlkem1024-encaps/*` | 0.74 |  | 0.95 |  | 0.87 |  |  |  | 0.65 | 0.79 | 0.78 | 0.69 | 0.69 | 0.61 |
+| `mlkem1024-keygen/*` | 0.83 |  | 1.05 |  | 0.95 |  |  |  | 0.70 | 0.86 | 0.84 | 0.71 | 0.69 | 0.72 |
+| `mlkem512-decaps/*` | 0.64 |  | 0.64 |  | 0.62 |  |  |  | 0.46 | 0.56 | 0.56 | 0.39 | 0.40 | 0.39 |
+| `mlkem512-encaps/*` | 0.92 |  | 0.92 |  | 0.82 |  |  |  | 0.67 | 0.81 | 0.78 | 0.59 | 0.59 | 0.53 |
+| `mlkem512-keygen/*` | 0.97 |  | 0.96 |  | 0.91 |  |  |  | 0.68 | 0.86 | 0.81 | 0.64 | 0.63 | 0.64 |
+| `mlkem768-combined/*` | 1.01 |  | 1.02 |  | 1.01 |  |  |  | 0.86 | 0.81 | 0.81 | 0.51 | 0.52 | 0.53 |
+| `mlkem768-decaps/*` | 1.01 |  | 0.88 |  | 0.75 |  |  |  | 0.65 | 0.57 | 0.57 | 0.33 | 0.34 | 0.35 |
+| `mlkem768-encaps/*` | 1.04 |  | 1.01 |  | 1.00 |  |  |  | 1.01 | 0.94 | 0.94 | 0.60 | 0.63 | 0.57 |
+| `mlkem768-keygen/*` | 1.03 |  | 1.24 |  | 1.27 |  |  |  | 0.95 | 0.94 | 0.94 | 0.64 | 0.62 | 0.67 |
+| `p256-ecdh-stored/*` | 1.00 |  |  | 0.96 | 0.95 |  |  |  | 1.00 |  | 1.00 | 0.55 | 0.54 | 0.66 |
+| `p256-ecdh/*` | 1.00 |  |  | 0.96 | 0.95 |  |  |  | 1.00 |  | 1.00 | 0.53 | 0.49 | 0.61 |
+| `p256-ecdsa-keygen/*` | 1.05 |  |  | 0.99 | 1.02 |  |  |  | 1.04 |  | 1.04 | 0.37 | 0.37 | 0.46 |
+| `p256-ecdsa-sign-digest/*` | 1.13 |  |  | 0.89 | 0.94 |  |  |  | 1.02 |  | 1.10 | 0.43 | 0.44 | 0.59 |
+| `p256-ecdsa-sign/*` | 1.13 |  |  | 0.88 | 0.93 |  |  |  | 1.02 |  | 1.09 | 0.43 | 0.44 | 0.60 |
+| `p256-ecdsa-verify-digest/*` | 0.99 |  |  | 1.05 | 0.98 |  |  |  | 1.00 |  | 1.00 | 0.59 | 0.58 | 0.64 |
+| `p256-ecdsa-verify-parsed/*` | 0.54 |  |  | 1.05 | 0.97 |  |  |  | 0.87 |  | 0.87 | 0.59 | 0.58 | 0.64 |
+| `p256-ecdsa-verify/*` | 1.01 |  |  | 1.15 | 1.06 |  |  |  | 1.01 |  | 1.00 | 0.65 | 0.64 | 0.73 |
+| `p256-keygen/*` | 1.01 |  |  | 0.97 | 0.98 |  |  |  | 1.00 |  | 1.00 | 0.37 | 0.37 | 0.45 |
+| `p384-ecdh-stored/*` | 1.01 |  |  | 0.99 | 0.98 |  |  |  | 0.93 |  | 0.93 | 0.38 | 0.38 | 0.57 |
+| `p384-ecdh/*` | 1.01 |  |  | 0.93 | 0.90 |  |  |  | 0.94 |  | 0.94 | 0.36 | 0.37 | 0.55 |
+| `p384-ecdsa-sign-digest/*` | 1.12 |  |  | 1.10 | 1.10 |  |  |  | 1.04 |  | 1.06 | 0.42 | 0.42 | 0.58 |
+| `p384-ecdsa-sign/*` | 1.12 |  |  | 1.10 | 1.09 |  |  |  | 1.04 |  | 1.06 | 0.42 | 0.42 | 0.58 |
+| `p384-ecdsa-verify-digest/*` | 1.00 |  |  | 1.00 | 0.92 |  |  |  | 0.96 |  | 0.96 | 0.41 | 0.41 | 0.57 |
+| `p384-ecdsa-verify-parsed/*` | 0.72 |  |  | 0.82 | 0.78 |  |  |  | 0.66 |  | 0.66 | 0.41 | 0.41 | 0.57 |
+| `p384-ecdsa-verify/*` | 1.00 |  |  | 1.08 | 1.00 |  |  |  | 1.00 |  | 1.00 | 0.45 | 0.45 | 0.63 |
+| `p384-keygen/*` | 1.01 |  |  | 1.01 | 1.01 |  |  |  | 1.00 |  | 1.00 | 0.38 | 0.38 | 0.52 |
+| `p521-ecdh-stored/*` | 0.99 |  |  | 0.99 | 0.99 |  |  |  | 0.99 |  | 1.00 | 0.82 | 0.84 | 0.99 |
+| `p521-ecdh/*` | 0.98 |  |  | 0.94 | 0.94 |  |  |  | 0.91 |  | 0.91 | 0.85 | 0.83 | 0.98 |
+| `p521-ecdsa-sign-digest/*` | 1.00 |  |  | 0.90 | 0.78 |  |  |  | 0.76 |  | 0.77 | 0.86 | 0.81 | 0.86 |
+| `p521-ecdsa-sign/*` | 1.00 |  |  | 0.90 | 0.77 |  |  |  | 0.76 |  | 0.77 | 0.86 | 0.81 | 0.86 |
+| `p521-ecdsa-verify-digest/*` | 0.80 |  |  | 0.76 | 0.75 |  |  |  | 0.78 |  | 0.78 | 0.82 | 0.83 | 0.88 |
+| `p521-ecdsa-verify-parsed/*` | 0.72 |  |  | 0.75 | 0.75 |  |  |  | 0.52 |  | 0.52 | 0.82 | 0.83 | 0.88 |
+| `p521-ecdsa-verify/*` | 0.86 |  |  | 0.80 | 0.79 |  |  |  | 0.83 |  | 0.83 | 0.90 | 0.91 | 0.96 |
+| `p521-keygen/*` | 0.93 |  |  | 0.84 | 0.80 |  |  |  | 0.72 |  | 0.73 | 0.91 | 0.81 | 0.97 |
+| `pbkdf2-sha1/*` | 0.99 |  |  |  | 0.84 |  |  |  | 0.99 |  | 1.00 | 0.80 | 0.93 | 1.00 |
+| `pbkdf2-sha256/*` | 0.99 |  |  |  | 0.91 |  |  |  | 1.02 |  | 0.95 | 0.81 | 0.92 | 0.75 |
+| `pbkdf2-sha384/*` | 1.05 |  |  |  | 1.01 |  |  |  | 1.01 |  | 0.96 | 1.00 | 1.00 | 0.89 |
+| `pbkdf2-sha512/*` | 1.02 |  |  |  | 1.02 |  |  |  | 1.00 |  | 0.95 | 1.00 | 0.99 | 0.86 |
+| `quic-header-protection/aes128/*` | 0.87 |  |  |  | 0.80 | 0.79 | 0.98 | 0.85 | 0.91 |  | 1.00 | 0.60 | 0.99 | 0.53 |
+| `quic-header-protection/aes256/*` | 0.73 |  |  |  | 0.85 | 0.85 | 0.99 | 0.86 | 0.77 |  | 1.00 | 0.65 | 0.99 | 0.54 |
+| `quic-header-protection/chacha20/*` | 0.99 |  |  |  | 0.93 | 0.93 | 0.93 | 0.94 | 0.88 |  | 0.82 | 0.72 | 0.65 | 0.79 |
+| `rsa1024-pkcs1-sha1-verify/*` | 1.13 |  |  | 0.78 | 0.79 |  |  |  | 1.04 |  | 1.03 | 0.97 | 0.96 | 0.74 |
+| `rsa2048-key-generation/*` | 0.69 |  |  | 0.68 | 0.69 |  |  |  | 0.72 |  | 0.71 | 1.24 | 1.08 | 1.04 |
+| `rsa2048-load/*` | 5.26 | 4.65 | 4.50 | 3.95 | 3.45 |  |  |  | 4.76 |  | 4.80 | 4.28 | 4.28 | 0.56 |
+| `rsa2048-oaep-sha256-decrypt/*` | 0.98 | 1.06 | 1.06 | 0.97 | 0.99 |  |  |  | 0.92 |  | 0.92 | 0.94 | 0.93 | 0.82 |
+| `rsa2048-oaep-sha256-encrypt/*` | 1.02 |  |  | 0.91 | 0.94 |  |  |  | 0.96 |  | 0.95 | 0.91 | 0.90 | 0.74 |
+| `rsa2048-pkcs1-sha256-sign/*` | 1.01 | 1.07 | 1.07 | 0.97 | 0.98 |  |  |  | 0.92 |  | 0.92 | 0.95 | 0.93 | 0.82 |
+| `rsa2048-pkcs1-sha256-verify-parsed/*` | 1.08 |  |  | 0.90 | 0.91 |  |  |  | 0.96 |  | 0.96 | 0.91 | 0.91 | 0.81 |
+| `rsa2048-pkcs1-sha256-verify/*` | 1.28 |  |  | 0.92 | 0.93 |  |  |  | 1.05 |  | 1.05 | 0.95 | 0.94 | 0.82 |
+| `rsa2048-pss-sha256-sign/*` | 1.01 | 1.07 | 1.07 | 0.97 | 0.98 |  |  |  | 0.92 |  | 0.92 | 0.95 | 0.93 | 0.83 |
+| `rsa2048-pss-sha256-verify/*` | 1.25 |  |  | 0.93 | 0.93 |  |  |  | 1.03 |  | 1.02 | 0.94 | 0.94 | 0.81 |
+| `rsa2056-pkcs1-sha256-sign/*` | 0.97 | 0.99 | 0.98 | 1.03 | 1.04 |  |  |  | 1.11 |  | 1.09 | 1.45 | 1.45 | 0.74 |
+| `rsa2056-pkcs1-sha256-verify/*` | 0.94 |  |  | 0.94 | 0.92 |  |  |  | 1.19 |  | 1.19 | 0.99 | 0.99 | 0.82 |
+| `rsa2560-pkcs1-sha256-sign/*` | 0.95 | 0.95 | 0.95 | 0.98 | 1.03 |  |  |  | 0.96 |  | 0.96 | 0.94 | 0.93 | 0.78 |
+| `rsa3072-key-generation/*` | 0.75 |  |  | 0.70 | 0.76 |  |  |  | 0.79 |  | 0.74 | 1.02 | 1.05 | 1.36 |
+| `rsa3072-pkcs1-sha256-sign/*` | 1.00 | 0.98 | 0.99 | 0.98 | 0.99 |  |  |  | 0.97 |  | 0.97 | 0.96 | 0.93 | 0.84 |
+| `rsa3072-pkcs1-sha256-verify/*` | 1.33 |  |  | 0.97 | 0.96 |  |  |  | 1.06 |  | 1.06 | 0.93 | 0.93 | 0.90 |
+| `rsa4096-key-generation/*` | 1.18 |  |  | 1.04 | 1.09 |  |  |  | 0.87 |  | 0.74 | 0.74 | 0.78 | 1.25 |
+| `rsa4096-pkcs1-sha256-sign/*` | 1.00 | 0.99 | 0.99 | 0.98 | 0.99 |  |  |  | 0.97 |  | 0.97 | 0.96 | 0.93 | 0.82 |
+| `rsa4096-pkcs1-sha256-verify/*` | 1.33 |  |  | 0.98 | 0.98 |  |  |  | 1.06 |  | 1.06 | 0.92 | 0.92 | 0.86 |
+| `rsa6144-pkcs1-sha256-sign/*` | 0.97 | 1.02 | 1.02 | 0.97 | 0.97 |  |  |  | 1.00 |  | 1.00 | 0.88 | 0.87 | 0.85 |
+| `rsa6144-pkcs1-sha256-verify/*` | 1.16 |  |  | 0.99 | 0.99 |  |  |  | 1.06 |  | 1.06 | 0.91 | 0.91 | 0.89 |
+| `rsa8192-load/*` | 8.51 | 8.50 | 8.55 | 6.56 | 4.56 |  |  |  | 6.46 |  | 6.53 | 4.12 | 4.12 | 0.64 |
+| `rsa8192-pkcs1-sha256-sign/*` | 0.99 | 1.04 | 1.04 | 0.96 | 0.97 |  |  |  | 1.00 |  | 1.00 | 0.90 | 0.90 | 0.81 |
+| `rsa8192-pkcs1-sha256-verify/*` | 1.16 |  |  | 0.99 | 1.00 |  |  |  | 1.06 |  | 1.06 | 0.91 | 0.90 | 0.88 |
+| `rustls-bulk/aes128-gcm/*` | 0.98 |  |  |  | 1.00 |  |  |  | 0.79 |  | 1.00 | 0.99 | 1.00 | 1.06 |
+| `rustls-bulk/aes256-gcm/*` | 0.97 |  |  |  | 1.01 |  |  |  | 0.81 |  | 1.00 | 0.99 | 1.00 | 1.09 |
+| `rustls-bulk/chacha20poly1305/*` | 1.01 |  |  |  | 1.00 |  |  |  | 0.83 |  | 1.00 | 1.00 | 0.99 | 0.76 |
+| `rustls-full-handshake-group/secp256r1/*` | 0.56 |  |  |  | 0.91 |  |  |  | 0.85 |  | 0.76 | 0.55 | 0.56 | 0.64 |
+| `rustls-full-handshake-group/secp384r1/*` | 0.69 |  |  |  | 0.88 |  |  |  | 0.78 |  | 0.78 | 0.43 | 0.44 | 0.59 |
+| `rustls-full-handshake-group/x25519/*` | 0.53 |  |  |  | 0.90 |  |  |  | 0.79 |  | 0.77 | 0.57 | 0.58 | 0.67 |
+| `rustls-full-handshake-group/x25519mlkem768/*` | 0.53 |  |  |  | 0.87 |  |  |  | 0.78 |  | 0.80 | 0.57 | 0.58 | 0.66 |
+| `rustls-full-handshake-key/ecdsa-p256/*` | 0.53 |  |  |  | 0.90 |  |  |  | 0.80 |  | 0.78 | 0.57 | 0.59 | 0.67 |
+| `rustls-full-handshake-key/ecdsa-p384/*` | 0.65 |  |  |  | 0.80 |  |  |  | 0.68 |  | 0.68 | 0.44 | 0.44 | 0.62 |
+| `rustls-full-handshake-key/ecdsa-p521/*` | 0.70 |  |  |  | 0.75 |  |  |  | 0.55 |  | 0.55 | 0.84 | 0.85 | 0.88 |
+| `rustls-full-handshake-key/ed25519/*` | 0.60 |  |  |  | 0.82 |  |  |  | 0.76 |  | 0.70 | 0.73 | 0.55 | 0.62 |
+| `rustls-full-handshake-key/rsa-2048/*` | 0.64 |  |  |  | 0.94 |  |  |  | 0.83 |  | 0.57 | 0.89 | 0.84 | 0.78 |
+| `rustls-full-handshake-key/rsa-3072/*` | 0.79 |  |  |  | 0.97 |  |  |  | 0.89 |  | 0.52 | 0.92 | 0.91 | 0.85 |
+| `rustls-full-handshake-key/rsa-4096/*` | 0.85 |  |  |  | 0.98 |  |  |  | 0.91 |  | 0.61 | 0.94 | 0.94 | 0.84 |
+| `rustls-full-handshake-threads/x25519/*` | 0.49 |  |  |  | 0.91 |  |  |  | 0.81 |  | 0.79 | 0.58 | 0.59 | 0.61 |
+| `rustls-resumed-handshake-threads/x25519/*` | 0.45 |  |  |  | 0.72 |  |  |  | 0.68 |  | 0.70 | 0.61 | 0.46 | 0.58 |
+| `rustls-resumed-handshake/secp256r1/*` | 0.58 |  |  |  | 0.78 |  |  |  | 0.85 |  | 0.70 | 0.52 | 0.48 | 0.58 |
+| `rustls-resumed-handshake/secp384r1/*` | 0.74 |  |  |  | 0.83 |  |  |  | 0.73 |  | 0.73 | 0.36 | 0.37 | 0.55 |
+| `rustls-resumed-handshake/x25519/*` | 0.48 |  |  |  | 0.75 |  |  |  | 0.69 |  | 0.71 | 0.63 | 0.46 | 0.61 |
+| `rustls-resumed-handshake/x25519mlkem768/*` | 0.49 |  |  |  | 0.76 |  |  |  | 0.68 |  | 0.76 | 0.46 | 0.48 | 0.61 |
+| `sha1/*/1200B` | 0.95 |  |  |  | 0.95 | 0.95 |  | 0.98 | 0.99 |  | 0.97 | 0.91 | 0.94 | 1.13 |
+| `sha1/*/1350B` | 0.96 |  |  |  | 0.96 | 0.96 |  | 0.99 | 1.00 |  | 0.98 | 0.92 | 0.94 | 1.14 |
+| `sha1/*/16KB` | 1.00 |  |  |  | 1.00 | 0.99 |  | 0.99 | 1.01 |  | 1.00 | 1.00 | 0.97 | 1.21 |
+| `sha1/*/32B` | 0.53 |  |  |  | 0.61 | 0.63 |  | 0.84 | 0.77 |  | 0.82 | 0.56 | 0.71 | 0.74 |
+| `sha1/*/64B` | 0.63 |  |  |  | 0.70 | 0.72 |  | 0.89 | 0.82 |  | 0.85 | 0.64 | 0.75 | 0.85 |
+| `sha1/*/8KB` | 0.99 |  |  |  | 0.99 | 0.99 |  | 0.99 | 1.00 |  | 1.00 | 0.99 | 0.97 | 1.20 |
+| `sha256-updates/*/16B` | 0.73 |  |  |  | 0.99 | 0.98 |  | 0.98 | 0.84 | 0.87 | 0.96 | 0.73 | 0.85 | 0.97 |
+| `sha256-updates/*/1B` | 0.67 |  |  |  | 0.64 | 0.65 |  | 0.81 | 0.56 | 0.64 | 0.72 | 0.50 | 0.55 | 0.68 |
+| `sha256/*/1200B` | 0.96 |  |  |  | 1.00 | 0.99 |  | 0.98 | 1.00 | 1.00 | 0.98 | 0.92 | 0.90 | 0.85 |
+| `sha256/*/1350B` | 0.97 |  |  |  | 1.00 | 1.00 |  | 0.99 | 1.00 | 1.00 | 0.99 | 0.93 | 0.91 | 0.85 |
+| `sha256/*/16KB` | 1.00 |  |  |  | 1.01 | 1.01 |  | 1.00 | 1.00 | 0.99 | 1.00 | 0.99 | 0.92 | 0.86 |
+| `sha256/*/32B` | 0.54 |  |  |  | 0.80 | 0.80 |  | 0.93 | 0.84 | 0.82 | 0.86 | 0.56 | 0.77 | 0.73 |
+| `sha256/*/64B` | 0.71 |  |  |  | 0.86 | 0.86 |  | 0.93 | 0.89 | 0.89 | 0.88 | 0.68 | 0.78 | 0.83 |
+| `sha256/*/8KB` | 1.00 |  |  |  | 1.01 | 1.01 |  | 0.99 | 0.99 | 0.99 | 1.00 | 0.99 | 0.92 | 0.85 |
+| `sha3-256/*/1200B` | 1.03 |  |  |  | 0.97 |  |  |  | 1.01 | 1.01 | 1.01 | 0.63 | 0.65 | 0.91 |
+| `sha3-256/*/1350B` | 1.03 |  |  |  | 0.97 |  |  |  | 1.01 | 1.01 | 1.01 | 0.63 | 0.65 | 0.91 |
+| `sha3-256/*/16KB` | 1.02 |  |  |  | 0.98 |  |  |  | 1.02 | 1.02 | 1.02 | 0.64 | 0.65 | 0.92 |
+| `sha3-256/*/32B` | 1.09 |  |  |  | 1.03 |  |  |  | 0.96 | 0.96 | 0.96 | 0.69 | 0.69 | 0.83 |
+| `sha3-256/*/64B` | 1.07 |  |  |  | 1.02 |  |  |  | 0.95 | 0.95 | 0.95 | 0.67 | 0.67 | 0.83 |
+| `sha3-256/*/8KB` | 1.02 |  |  |  | 0.98 |  |  |  | 1.02 | 1.02 | 1.02 | 0.64 | 0.65 | 0.92 |
+| `sha3-384/*/1200B` | 1.04 |  |  |  | 0.97 |  |  |  | 1.01 | 1.01 | 1.01 | 0.64 | 0.65 | 0.92 |
+| `sha3-384/*/1350B` | 1.03 |  |  |  | 0.98 |  |  |  | 1.01 | 1.01 | 1.01 | 0.64 | 0.64 | 0.92 |
+| `sha3-384/*/16KB` | 1.02 |  |  |  | 1.00 |  |  |  | 1.02 | 1.02 | 1.02 | 0.64 | 0.65 | 0.91 |
+| `sha3-384/*/32B` | 1.08 |  |  |  | 1.03 |  |  |  | 0.95 | 0.95 | 0.95 | 0.68 | 0.68 | 0.82 |
+| `sha3-384/*/64B` | 1.07 |  |  |  | 1.02 |  |  |  | 0.94 | 0.94 | 0.94 | 0.66 | 0.66 | 0.83 |
+| `sha3-384/*/8KB` | 1.02 |  |  |  | 0.99 |  |  |  | 1.02 | 1.02 | 1.02 | 0.64 | 0.65 | 0.92 |
+| `sha3-512/*/1200B` | 1.03 |  |  |  | 0.98 |  |  |  | 1.01 | 1.01 | 1.01 | 0.66 | 0.66 | 0.91 |
+| `sha3-512/*/1350B` | 1.03 |  |  |  | 0.99 |  |  |  | 1.01 | 1.01 | 1.01 | 0.66 | 0.66 | 0.91 |
+| `sha3-512/*/16KB` | 1.02 |  |  |  | 0.99 |  |  |  | 1.02 | 1.02 | 1.02 | 0.66 | 0.66 | 0.92 |
+| `sha3-512/*/32B` | 1.08 |  |  |  | 1.02 |  |  |  | 0.94 | 0.94 | 0.94 | 0.67 | 0.67 | 0.83 |
+| `sha3-512/*/64B` | 1.07 |  |  |  | 1.03 |  |  |  | 0.93 | 0.93 | 0.93 | 0.65 | 0.65 | 0.83 |
+| `sha3-512/*/8KB` | 1.03 |  |  |  | 0.99 |  |  |  | 1.02 | 1.02 | 1.02 | 0.66 | 0.66 | 0.92 |
+| `sha512-256/*/1200B` | 0.97 |  |  |  | 0.98 | 0.98 |  | 0.98 | 1.03 | 0.98 | 0.98 | 1.00 | 0.99 | 0.96 |
+| `sha512-256/*/1350B` | 0.97 |  |  |  | 0.99 | 0.99 |  | 0.99 | 1.03 | 0.98 | 0.98 | 1.00 | 0.99 | 0.97 |
+| `sha512-256/*/16KB` | 0.98 |  |  |  | 1.00 | 0.99 |  | 1.00 | 1.03 | 1.00 | 1.00 | 1.00 | 1.00 | 1.01 |
+| `sha512-256/*/32B` | 0.97 |  |  |  | 0.93 | 0.92 |  | 0.94 | 0.95 | 0.87 | 0.87 | 0.98 | 0.92 | 0.75 |
+| `sha512-256/*/64B` | 0.98 |  |  |  | 0.91 | 0.91 |  | 0.94 | 0.96 | 0.87 | 0.87 | 0.98 | 0.92 | 0.75 |
+| `sha512-256/*/8KB` | 0.98 |  |  |  | 0.99 | 1.00 |  | 1.00 | 1.03 | 1.00 | 1.00 | 1.00 | 1.00 | 1.01 |
+| `sha512/*/1200B` | 0.97 |  |  |  | 0.98 | 0.98 |  | 0.98 | 1.02 | 0.97 | 0.98 | 1.00 | 0.99 | 0.97 |
+| `sha512/*/1350B` | 0.97 |  |  |  | 0.98 | 0.99 |  | 0.98 | 1.02 | 0.98 | 0.98 | 1.00 | 0.99 | 0.98 |
+| `sha512/*/16KB` | 0.98 |  |  |  | 1.00 | 1.00 |  | 1.02 | 1.03 | 1.00 | 1.00 | 1.00 | 1.00 | 1.02 |
+| `sha512/*/32B` | 0.94 |  |  |  | 0.94 | 0.94 |  | 0.91 | 0.92 | 0.86 | 0.86 | 0.97 | 0.90 | 0.73 |
+| `sha512/*/64B` | 0.95 |  |  |  | 0.94 | 0.94 |  | 0.91 | 0.93 | 0.86 | 0.86 | 0.97 | 0.91 | 0.73 |
+| `sha512/*/8KB` | 0.98 |  |  |  | 0.99 | 1.00 |  | 1.01 | 1.03 | 1.00 | 1.00 | 1.00 | 1.00 | 1.02 |
+| `x25519-ecdh-stored/*` | 1.00 |  |  | 1.01 | 0.99 |  |  |  | 0.99 |  | 0.99 | 0.82 | 0.82 | 0.75 |
+| `x25519-ecdh/*` | 1.00 |  |  | 1.00 | 1.00 |  |  |  | 0.98 |  | 0.98 | 0.86 | 0.86 | 0.71 |
+| `x25519-keygen/*` | 0.99 |  |  | 0.99 | 1.00 |  |  |  | 0.95 |  | 0.95 | 0.94 | 0.94 | 0.60 |
+| `xchacha20poly1305/*/1200B` | 0.98 |  |  |  | 0.98 |  | 1.04 | 1.05 | 0.88 | 1.00 | 1.00 | 0.95 | 0.95 | 0.77 |
+| `xchacha20poly1305/*/1350B` | 0.98 |  |  |  | 0.99 |  | 1.05 | 1.06 | 0.85 | 0.99 | 1.00 | 0.95 | 0.94 | 0.77 |
+| `xchacha20poly1305/*/16KB` | 1.00 |  |  |  | 1.00 |  | 1.18 | 1.11 | 0.81 | 1.00 | 1.00 | 0.99 | 0.99 | 0.76 |
+| `xchacha20poly1305/*/32B` | 0.98 |  |  |  | 0.98 |  | 0.90 | 0.91 | 0.99 | 1.00 | 1.01 | 0.88 | 0.88 | 0.84 |
+| `xchacha20poly1305/*/quic-128B` | 0.97 |  |  |  | 0.97 |  | 0.90 | 0.94 | 0.97 | 0.99 | 1.00 | 0.86 | 0.86 | 0.81 |
+| `xchacha20poly1305/*/quic-256B` | 0.97 |  |  |  | 0.98 |  | 0.89 | 0.98 | 0.89 | 0.99 | 1.00 | 0.90 | 0.90 | 0.79 |
+| `xchacha20poly1305/*/quic-512B` | 0.98 |  |  |  | 0.98 |  | 0.95 | 1.02 | 0.91 | 0.99 | 1.00 | 0.93 | 0.92 | 0.79 |
 
 </details>
 
@@ -1290,31 +1408,25 @@ The CPU tiers rank every weekly benchmark but these, so none of them is a gap, w
 
 - RSA key generation: its time varies too much from run to run to rank.
 - A JWT's `load` rows: aws-lc-rs's provider parses the key only when it signs or verifies, so only `token`, which includes loading, compares.
-- Blind RSA, OPRF, VRF, SPAKE2+, and Argon2id: neither aws-lc-rs nor ring offers the protocol, so there is no baseline, and the report's hosts compare it.
-- SLH-DSA: neither aws-lc-rs nor ring offers it, so there is no baseline.
+- DIT set per call: rind's rows timed again without holding DIT, on aarch64, which only rind is timed in, so they compare with its rows holding it.
 
 | Operation | On | rind's time over the fastest | Decision |
 |---|---|---|---|
-| `chacha20poly1305/*/16KB`, `chacha20poly1305-open/*/16KB`, `xchacha20poly1305/*/16KB` | no AES-NI tier | 1.19× to 1.20× (aws-lc-rs) | Without SSE4.1 rind runs Graviola's scalar Poly1305 rather than port BoringSSL's SSE2 `poly1305_vec.c` for CPUs older than Westmere, as ALGORITHMS.md records. |
-| AES-128 header protection, AES-256 header protection | `kixtop` | 1.18× to 1.28× (aws-lc-rs) | AES header protection on aarch64 reaches the key's cipher through an indirect call, as ALGORITHMS.md notes, which costs 3.5 ns against aws-lc-rs's 2.8 ns for one block. |
-| SHA3-256, 64 B, SHA3-512, 64 B | `kixtop` | 1.23× to 1.30× (RustCrypto + dalek) | Not rind's hashing: `kixtop`'s data is its run on [`0d2e74b4`](https://github.com/kixel-ai/rind/commit/0d2e74b489c1067beeab373f9de75d24574b4bc5), from before rind's rows held DIT, and these rows had no DIT-held time, so they include rind's per-call DIT toggle (about 35 ns of 166 and 170 ns) that the other libraries never pay. `kixtop` was offline for this refresh; its next run times rind holding DIT and rechecks them. |
-| `p521-ecdh-stored/*` | portable tier | 1.12× (aws-lc-rs) | P-521 ECDH with a stored key on the portable backend, fiat-crypto's arithmetic on 64-bit limbs, measured 1.12× aws-lc's C without assembly in [run 43646114817](https://github.com/kixel-ai/rind/actions/runs/43646114817), where [#614](https://github.com/kixel-ai/rind/pull/614)'s measurement on a shared x86_64 host had P-521 ECDH at 0.91 to 1.03×, and the ephemeral-key row is within 10% in the same run. Rare on targets without assembly; the next refresh rechecks it. |
-| `aes*-gcm*`, `rustls-bulk/*`, `aes*-ctr/*`, `aes*-cbc-*` | portable tier | 1.10× to 1.45× (aws-lc-rs) | The portable backend runs aws-lc's `aes_nohw.c` in its 64-bit configuration, four blocks a pass ([#621](https://github.com/kixel-ai/rind/pull/621)), while this row builds aws-lc's C for x86_64, where it bitslices eight blocks into SSE2 registers: the configuration aws-lc itself runs on the other 64-bit targets the backend is for is rind's. In [run 43646114817](https://github.com/kixel-ai/rind/actions/runs/43646114817) AES-GCM measured 1.10 to 1.21× from 1200 B, AES-CTR 1.26 to 1.45×, and CBC decryption 1.14 to 1.24×; shorter messages are within 10%. |
-| `sha1/*`, `hmac-sha1/*` | portable tier | 1.10× to 1.12× (aws-lc-rs) | rind's portable SHA-1 trails aws-lc's C by 1.1 to 1.25× from 1200 B up, as it still did in [run 43282064559](https://github.com/kixel-ai/rind/actions/runs/43282064559) on a later main. SHA-1 survives only for legacy signatures and HMAC-SHA-1, which are rare on targets without assembly, so it stays rather than take aws-lc's integer `sha1_block_data_order_nohw`, which armv7 without NEON already runs, as a speed quest. |
-| `sha256/*`, `sha256-updates/*`, `hmac-sha256/*`, `sha512*`, `hmac-sha384/*` | portable tier | 1.11× to 1.22× (aws-lc-rs) | Closed after this run: [kixel-ai/rind#944](https://github.com/kixel-ai/rind/pull/944), which landed after the run's commit, replaces HACL*'s SHA-2 with aws-lc's C block functions ported to Rust, which measured 0.80 to 0.91× aws-lc-rs's time for SHA-256 and 0.90 to 0.99× for SHA-512 on an Intel core in this row's configuration. The next refresh measures it. |
-| `aes*`, `quic-header-protection/aes*`, `rustls-bulk/aes*`, `hpke-*-aes128-gcm-*` | armv7 NEON tier | 1.10× to 3.44× (aws-lc-rs) | The weekly data predates [kixel-ai/rind#913](https://github.com/kixel-ai/rind/pull/913), which moved these to aws-lc's NEON assembly: on this tier in [run 44702869568](https://github.com/kixel-ai/rind/actions/runs/44702869568), at its head, rind ran them in 0.28 to 1.09× aws-lc-rs's time, CTR and CBC decryption from 1200 B in 0.28 to 0.37× on bitsliced AES, which aws-lc-rs's one-shot cipher keys do not take. The first refresh after it drops this entry. |
-| `aes*-kw-unwrap/*/16B`, `aes*-kwp-unwrap/*/16B` | x86_64 tier, no AVX2 tier | 1.11× to 1.20× (aws-lc-rs) | Unwrapping a 16-byte key takes 35 to 55 ns more than aws-lc-rs's 280 to 400 ns on the EPYC runners of [run 43646114817](https://github.com/kixel-ai/rind/actions/runs/43646114817), 1.11 to 1.20× its time; wrapping, every longer key, and the other x86_64 tiers are within 10%, armv7 NEON's entry above covers that tier, and aarch64 unwraps in 0.68× aws-lc-rs's time. Key wrap is rare and runs once per stored key, so the fixed cost stays without a quest; the next refresh rechecks it. |
-| ML-KEM-768 key generation | `nixos`, `ovh-iad`, `ovh-sea` | 1.14× to 1.25× (verified-garbage) | Decided in [kixel-ai/rind#812](https://github.com/kixel-ai/rind/pull/812): on x86_64 without AVX-512, ML-KEM-768 key generation stays on rind's arithmetic though pyca/verified-garbage's is faster, since a key pair decapsulates on the arithmetic that generated it and VG's decapsulation was 1.17 to 1.25× slower there when it decided (1.09 to 1.22× in these runs), and decapsulation is the hot path. |
-| OPRF ristretto255 blind, OPRF ristretto255 evaluate | `nixos`, `ovh-iad`, `ovh-sea` | 1.18× to 1.30× (RustCrypto + dalek) | [ristretto255's variable-base multiplication runs curve25519-dalek's AVX2 formulas](quest/m2/speed/ristretto255-avx2.md) |
-| P-384 ECDSA sign | `nixos`, `ovh-sea` | 1.24× to 1.32× (verified-garbage) | Closed after this run: [kixel-ai/rind#847](https://github.com/kixel-ai/rind/pull/847), which landed after the run's commit, takes pyca/verified-garbage's `d·G` for each signature's `k·G` on x86_64 and aarch64, which measured faster than rind's comb. The next refresh measures it. |
-| SHA3-512, 16 KB | `ovh-sea` | 1.16× (verified-garbage) | SHA3-512 at 16 KB measured 1.16× pyca/verified-garbage's time (110.7 against 95.7 µs; aws-lc-rs 103.3), while SHA3-256 at 16 KB is level (53.7 µs both). x86_64 runs one Keccak-f on every CPU, and [kixel-ai/rind#851](https://github.com/kixel-ai/rind/pull/851) kept rind's proven one, since VG measured 1.01 to 1.05× rind's time from 1200 B on Zen 3 and Zen 4. The next refresh rechecks it. |
-| P-256 ECDSA verify | `nixos` | 1.25× (verified-garbage) | Closed after this run: pyca/verified-garbage measured 30.6 µs against rind's 38.2 µs (aws-lc-rs 38.0) on `nixos`'s Zen 3, and [kixel-ai/rind#846](https://github.com/kixel-ai/rind/pull/846), which landed after the run's commit, verifies with VG's routine on x86_64 with BMI2 and ADX. The next refresh measures it. |
-| RSA-2048 PKCS#1 sign, 1 MB transfer, ChaCha20-Poly1305, resumed handshake, X25519, SHA3-256, 16 KB, SHA3-512, 16 KB | `nixos` | 1.13× to 1.32× (OpenSSL, aws-lc-rs, graviola, ring) | Noise: CI jobs on `nixos` kept about 4 CPUs busy through this run, and a second run of the same commit right after it, under more load elsewhere, measured each of these within 10% of the fastest: PKCS#1 signing 0.97× graviola's time (PSS signing 0.94× in this run), ChaCha20-Poly1305 bulk 1.03× ring's, the resumed handshake 1.00× graviola's, and SHA3-256 and SHA3-512 at 16 KB 0.96 and 1.04× aws-lc-rs's. The next refresh rechecks them. |
-| `aes*-gcm*` | `fedora` | 1.11× to 1.14× (verified-garbage) | These rows time pyca/verified-garbage's public API. [kixel-ai/rind#955](https://github.com/kixel-ai/rind/pull/955) ran its prepared AVX-512 kernels, `vg_aes_gcm_{seal,open}_prepared_vaes_vpclmul_avx512`, under rind's glue on the Xeon 6975P runners in [run 44984309951](https://github.com/kixel-ai/rind/actions/runs/44984309951): VG took 1.08 to 1.77× rind's time below 8 KB in every direction and key size, 1350 B included, and AES-256 0.99 to 1.09× from 8 KB; only AES-128 and AES-192 from 12 KB came out ahead, at 0.88 to 0.99×. `fedora` ran under a load average of 20 to 40 throughout, and its cells, from 0.46 to 1.59×, could not settle Zen 5. VG's key-power table also took rind's key setup from the fastest of the libraries to 257 to 274 ns, against aws-lc-rs's 95 to 132, so rind keeps its code. The next refresh rechecks it. |
-| `chacha20poly1305/*`, 1 MB transfer, ChaCha20-Poly1305 | `fedora` | 1.11× to 1.76× (OpenSSL, ring, verified-garbage) | `fedora`'s data predates [#953](https://github.com/kixel-ai/rind/pull/953), which runs pyca/verified-garbage's AVX-512 IFMA one pass: with it, `fedora` measured rind's seal within 1.09 of the fastest library at every size, 16 KB in 2.81 µs against OpenSSL's 2.67 (from 4.71), and the 1 MB rustls transfer in 397 µs against OpenSSL's provider's 423 (from 615). Drop this entry once `fedora`'s next run shows the gap within 10%. |
-| RSA-2048 PKCS#1 verify, RSA-2048 PSS verify | `fedora` | 1.18× to 1.22× (verified-garbage) | `fedora`'s data predates [#952](https://github.com/kixel-ai/rind/pull/952), which runs pyca/verified-garbage's `R² mod n` on key load: there these verifications measured 5.30 and 5.67 µs against VG's 4.83 and 5.30 (1.10 and 1.07×), from 6.00 and 6.26. What remains is in key loading around it, as VG's rows start from parsed components: the DER parse and re-encoding, the wipe of the key on drop that AGENTS.md requires, and the modulus's conversion to the routine's big-endian bytes. Drop this entry once `fedora`'s next run shows the gap within 10%. |
-| P-384 ECDSA sign | `fedora` | 1.10× (verified-garbage) | 1.10× pyca/verified-garbage's time in both of `fedora`'s quiet runs (16.7 and 16.8 µs against 15.2; aws-lc-rs 43.6). rind already runs VG's `d·G` for each signature's `k·G` ([#847](https://github.com/kixel-ai/rind/pull/847)), so the difference is in rind's other steps, among them its hedged nonce: fresh randomness for each signature, as aws-lc-rs draws, where VG derives its nonce deterministically by RFC 6979. That behavior is deliberate, so it stays; the next refresh rechecks the margin. |
-| SHA3-256, 64 B | `fedora` | 1.11× (verified-garbage) | SHA3-256 at 64 B measured 1.04 and 1.11× pyca/verified-garbage's time in `fedora`'s two quiet runs (184 and 195 ns against 175 and 176), while rind was faster at 1350 B and 16 KB (1.66 against 1.69 µs, 19.7 against 20.2 µs). x86_64 runs one Keccak-f on every CPU, and [#851](https://github.com/kixel-ai/rind/pull/851) kept rind's proven one, since VG measured 1.01 to 1.05× rind's time from 1200 B on Zen 3 and Zen 4; Zen 5 agrees at the long sizes. AGENTS.md takes a verified source only where it is as fast at every size, so rind's stays. The next refresh rechecks it. |
+| `chacha20poly1305/*/16KB`, `chacha20poly1305-open/*/16KB`, `xchacha20poly1305/*/16KB` | no AES-NI tier, SSE2 tier | 1.11× to 1.18× (aws-lc-rs) | Without SSE4.1 rind runs Graviola's scalar Poly1305 rather than port BoringSSL's SSE2 `poly1305_vec.c` for CPUs older than Westmere, as ALGORITHMS.md records. |
+| AES-128 header protection, AES-256 header protection | `kixtop` | 1.19× to 1.30× (aws-lc-rs) | AES header protection on aarch64 reaches the key's cipher through an indirect call, as ALGORITHMS.md notes, which costs 3.75 ns against aws-lc-rs's 2.89 ns for one AES-128 block, and 3.72 against 3.13 for AES-256. |
+| `aes*-gcm*`, `rustls-bulk/*`, `aes*-ctr/*`, `aes*-cbc-*` | portable tier | 1.10× to 1.35× (aws-lc-rs) | The portable backend runs aws-lc's `aes_nohw.c` in its 64-bit configuration, four blocks a pass ([#621](https://github.com/kixel-ai/rind/pull/621)), while this row builds aws-lc's C for x86_64, where it bitslices eight blocks into SSE2 registers: the configuration aws-lc itself runs on the other 64-bit targets the backend is for is rind's. In [run 44941104585](https://github.com/kixel-ai/rind/actions/runs/44941104585) AES-256-GCM measured 1.10× at 16 KB, AES-CTR 1.18 to 1.35× from 1200 B, and CBC decryption 1.22 to 1.30×; shorter messages and the other AES-GCM rows are within 10%. |
+| `sha1/*`, `hmac-sha1/*` | portable tier | 1.11× to 1.24× (aws-lc-rs) | rind's portable SHA-1 trails aws-lc's C by 1.11 to 1.24× from 1200 B up in [run 44941104585](https://github.com/kixel-ai/rind/actions/runs/44941104585). SHA-1 survives only for legacy signatures and HMAC-SHA-1, which are rare on targets without assembly, so it stays rather than take aws-lc's integer `sha1_block_data_order_nohw`, which armv7 without NEON already runs, as a speed quest. |
+| `aes*-kw-unwrap/*/16B`, `aes*-kwp-unwrap/*/16B` | no AVX2 tier | 1.12× (aws-lc-rs) | Unwrapping a 16-byte AES-128 key takes 39 ns more than aws-lc-rs's 323 ns on the EPYC 7763 runner of [run 44941104585](https://github.com/kixel-ai/rind/actions/runs/44941104585), 1.12× its time, as it took 1.11 to 1.20× on the EPYC runners of the run before; the Xeon 6975P native tier unwraps it in 0.95× aws-lc-rs's time, wrapping, every longer key, and the other tiers are within 10%, and aarch64 unwraps in 0.68×. Key wrap is rare and runs once per stored key, so the fixed cost stays without a quest; the next refresh rechecks it. |
+| ML-KEM-768 key generation | `nixos`, `ovh-iad`, `ovh-sea`, `kixtop` | 1.19× to 1.25× (verified-garbage) | Decided in [kixel-ai/rind#812](https://github.com/kixel-ai/rind/pull/812): on x86_64 without AVX-512, ML-KEM-768 key generation stays on rind's arithmetic though pyca/verified-garbage's is faster, since a key pair decapsulates on the arithmetic that generated it and VG's decapsulation was 1.17 to 1.25× slower there when it decided, and decapsulation is the hot path. aarch64 holds for the same reason: on `kixtop`'s Apple M4 VG generated keys in 5.22 µs against rind's 6.36 but decapsulated in 4.79 against 4.21 (1.14×), and `ovh-iad` and `ovh-sea` decapsulated at 1.16 and 1.21× rind's time. |
+| OPRF ristretto255 blind, OPRF ristretto255 evaluate, `oprf-ristretto255-blind/*`, `oprf-ristretto255-evaluate/*` | `nixos`, `ovh-iad`, `ovh-sea` | 1.26× to 1.39× (RustCrypto + dalek) | [ristretto255's variable-base multiplication runs curve25519-dalek's AVX2 formulas](quest/m2/speed/ristretto255-avx2.md) |
+| `aes*-gcm*` | `fedora` | 1.11× to 1.22× (verified-garbage) | [AES-GCM on Zen 5 runs verified-garbage's AVX-512 kernels where they are faster](quest/m2/speed/zen5-vg-aes-gcm.md) |
+| RSA-2048 PKCS#1 verify, RSA-2048 PSS verify | `fedora` | 1.10× to 1.13× (verified-garbage) | Not like for like: pyca/verified-garbage's rows import the key on each call from components already parsed, while rind's parse the DER public key on each call, as `UnparsedPublicKey` and rustls do. With [#952](https://github.com/kixel-ai/rind/pull/952), which runs VG's `R² mod n` on key load, `fedora`'s first quiet run since measured 5.45 and 5.83 µs against VG's 4.84 and 5.29 (1.13 and 1.10×; aws-lc-rs 10.0 and 10.6): the difference is that per-call DER parse and re-encoding, the wipe of the key on drop that AGENTS.md requires, and the modulus's conversion to the routine's big-endian bytes. The next refresh rechecks it. |
+| P-384 ECDSA sign | `ovh-iad` | 1.11× (verified-garbage) | 1.11× pyca/verified-garbage's time on `ovh-iad` (66.2 against 59.5 µs), and 1.08× in its other quiet run of the same commit, while `ovh-sea` measured 1.06×, `fedora` 1.06× (16.7 against 15.8 µs), and `nixos` within 10%. rind already runs VG's `d·G` for each signature's `k·G` ([#847](https://github.com/kixel-ai/rind/pull/847)), so the difference is in rind's other steps, among them its hedged nonce: fresh randomness for each signature, as aws-lc-rs draws, where VG derives its nonce deterministically by RFC 6979. That behavior is deliberate, so it stays; the next refresh rechecks the margin. |
+| ML-KEM-768 encapsulate, XChaCha20-Poly1305 seal, 16 KB | `ovh-iad` | 1.10× to 1.13× (aws-lc-rs, verified-garbage) | Noise: other tenants share `ovh-iad`'s VPS, whose load the report cannot see. Its first quiet run of the same commit measured both within 10%, ML-KEM-768 encapsulation at 1.01× pyca/verified-garbage's time (rind runs VG's routine there) and XChaCha20-Poly1305 at 16 KB at 0.98× aws-lc-rs's, as `ovh-sea` did (0.99 and 1.03×); that run's own four gaps, 1.12 to 1.24×, were within 10% in this one. The next refresh rechecks them. |
+| `chacha20poly1305/*` | `kixtop` | 1.47× (verified-garbage) | [aarch64 ChaCha20-Poly1305 without SVE2 runs verified-garbage's NEON one pass where it is faster](quest/m2/speed/aarch64-chacha20-poly1305-neon.md) |
+| `sha512/*` | `kixtop` | 1.13× (verified-garbage) | [aarch64 SHA-512 with the SHA-512 instructions runs verified-garbage's block function where it is faster](quest/m2/speed/aarch64-sha512-vg.md) |
+| `p256-ecdsa-verify/*` | no ADX tier | 1.15× (aws-lc-rs) | [P-256 verification with a key used once costs no more than aws-lc-rs's on rind's own arithmetic](quest/m2/speed/p256-one-shot-verify.md) |
+| `aes192-gcm/*/key` | x86_64 tier | 1.15× (aws-lc-rs) | [AES-192 key expansion on x86_64 is as fast as aws-lc-rs's](quest/m2/speed/aes192-key-expansion.md) |
 
 ## Verified code
 
@@ -1325,7 +1437,9 @@ A ✓ means a published, machine-checked proof shows that all the code computing
 | rind | `x25519-ecdh` | x86_64 | [rind's Lean proof, through Aeneas and a hand model of the function-pointer dispatch Aeneas cannot translate, which assumes each key's dispatch table holds its own curve's functions, the only table rind builds, of its agreement API's X25519 down to s2n-bignum's routines, which rind runs on CPUs without AVX-512 IFMA, and pyca/verified-garbage's, which it runs on CPUs with it, composed with s2n-bignum's HOL Light proofs of curve25519_x25519, curve25519_x25519base, their _alt forms without BMI2 and ADX, and bignum_eq, of s2n-bignum's own object code, which rind transliterates, and, with AVX-512 IFMA, pyca/verified-garbage's Lean proofs of vg_x25519_exchange_ifma and vg_x25519_base_ifma against its model of its own machine code, which rind vendors, each stated in that project's RFC 7748 spec rather than HOL Light's](https://github.com/kixel-ai/rind/blob/main/proofs/Rind/X86_64/X25519.lean) |
 | rind | `rsa2048-pkcs1-sha256-verify` | x86_64 with bmi2, adx | [rind's Lean proof, through Aeneas and a hand model of the function-pointer dispatch Aeneas cannot translate, of its signature API's RSASSA-PKCS1-v1_5 SHA-256 verification against RFC 8017, key loading's checks, R^2 mod n, and -n^-1 mod 2^64 included, down to s2n-bignum's and pyca/verified-garbage's routines, composed with s2n-bignum's HOL Light proofs of bignum_kmul_16_32, bignum_kmul_32_64, bignum_ksqr_16_32, bignum_ksqr_32_64, bignum_emontredc_8n, bignum_optsub, bignum_cmp_lt, bignum_bitsize, and bignum_negmodinv, of s2n-bignum's own object code, which rind transliterates, pyca/verified-garbage's Lean proof of vg_rsa_public_precompute_adx and, with AVX-512 IFMA, of vg_rsa_public_precomputed_checked_ifma against its model of its own machine code, which rind vendors](https://github.com/kixel-ai/rind/blob/main/proofs/Rind/X86_64/RsaDispatch.lean) |
 | rind | `rsa2048-pss-sha256-verify` | x86_64 with bmi2, adx, sha, ssse3, sse4.1 | [rind's Lean proof, through Aeneas and a hand model of the function-pointer dispatch Aeneas cannot translate, of its signature API's RSASSA-PSS SHA-256 verification against RFC 8017, MGF1 and H' with SHA-256 and a 32-byte salt, key loading's checks, R^2 mod n, and -n^-1 mod 2^64 included, down to s2n-bignum's and pyca/verified-garbage's routines and its SHA-256 routines, composed with s2n-bignum's HOL Light proofs of bignum_kmul_16_32, bignum_kmul_32_64, bignum_ksqr_16_32, bignum_ksqr_32_64, bignum_emontredc_8n, bignum_optsub, bignum_cmp_lt, bignum_bitsize, and bignum_negmodinv, of s2n-bignum's own object code, which rind transliterates, pyca/verified-garbage's Lean proof of vg_rsa_public_precompute_adx and, with AVX-512 IFMA, of vg_rsa_public_precomputed_checked_ifma against its model of its own machine code, which rind vendors, and rind's HOL Light proofs of ct_compare_16, ct_compare_bytes, and its SHA-256's routines sha256_compress_blocks_shaext and sha256_finish_shaext, which rind runs with the SHA extensions, of the object code rind's build emits, on s2n-bignum's x86 model with the instructions awslabs/s2n-bignum#450, unmerged, adds to it at 7ef212f3, which rind cosimulates against the CPU, against s2n-bignum's FIPS 180-4 spec from awslabs/s2n-bignum#415, unmerged, which rind pins at 79120e64 and proves FIPS 180-4's](https://github.com/kixel-ai/rind/blob/main/proofs/Rind/X86_64/RsaDispatch.lean) |
+| rind | `rsa2048-pss-sha256-verify` | x86_64 with bmi2, adx, avx, avx2, bmi1, popcnt, ssse3 without sha on Linux | [rind's Lean proof, through Aeneas and a hand model of the function-pointer dispatch Aeneas cannot translate, of its signature API's RSASSA-PSS SHA-256 verification against RFC 8017, MGF1 and H' with SHA-256 and a 32-byte salt, key loading's checks, R^2 mod n, and -n^-1 mod 2^64 included, down to s2n-bignum's and pyca/verified-garbage's routines and its SHA-256 routines, composed with s2n-bignum's HOL Light proofs of bignum_kmul_16_32, bignum_kmul_32_64, bignum_ksqr_16_32, bignum_ksqr_32_64, bignum_emontredc_8n, bignum_optsub, bignum_cmp_lt, bignum_bitsize, and bignum_negmodinv, of s2n-bignum's own object code, which rind transliterates, pyca/verified-garbage's Lean proof of vg_rsa_public_precompute_adx and, with AVX-512 IFMA, of vg_rsa_public_precomputed_checked_ifma against its model of its own machine code, which rind vendors, and rind's HOL Light proofs of ct_compare_16, ct_compare_bytes, and of OpenSSL's sha256_block_data_order_avx2, its SHA-256 routine on CPUs with AVX2, BMI1, BMI2, POPCNT, and SSSE3 but not the SHA extensions, padding proven in Lean, of the object code rind's Linux build emits, on s2n-bignum's x86 model with the instructions rind adds to it, which rind cosimulates against the CPU, against s2n-bignum's FIPS 180-4 spec from awslabs/s2n-bignum#415, unmerged, which rind pins at 79120e64 and proves FIPS 180-4's](https://github.com/kixel-ai/rind/blob/main/proofs/Rind/X86_64/RsaDispatch.lean) |
 | rind | `sha256/*`, `hmac-sha256/*`, `hkdf-sha256/*` | x86_64 with sha, ssse3, sse4.1 | [rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch and of HKDF-Expand's loop over its info slices, which Aeneas cannot translate, of its digest, HMAC, and HKDF APIs' SHA-256, down to sha256_compress_blocks_shaext and sha256_finish_shaext, which rind runs with the SHA extensions, the finish's padding proven in Lean, composed with rind's HOL Light proofs of those routines, of the object code rind's build emits, on s2n-bignum's x86 model with the instructions awslabs/s2n-bignum#450, unmerged, adds to it at 7ef212f3, which rind cosimulates against the CPU, against s2n-bignum's FIPS 180-4 spec from awslabs/s2n-bignum#415, unmerged, which rind pins at 79120e64 and proves FIPS 180-4's](https://github.com/kixel-ai/rind/blob/main/proofs/Rind/X86_64/Sha256Shaext.lean) |
+| rind | `sha256/*`, `hmac-sha256/*`, `hkdf-sha256/*` | x86_64 with avx, avx2, bmi1, bmi2, popcnt, ssse3 without sha on Linux | [rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch and of HKDF-Expand's loop over its info slices, which Aeneas cannot translate, of its digest, HMAC, and HKDF APIs' SHA-256, padding included, down to OpenSSL's sha256_block_data_order_avx2, which rind runs on CPUs with AVX2, BMI1, BMI2, POPCNT, and SSSE3 but not the SHA extensions, composed with rind's HOL Light proof of that routine, of the object code rind's Linux build emits, on s2n-bignum's x86 model with the instructions rind adds to it, which rind cosimulates against the CPU, against s2n-bignum's FIPS 180-4 spec from awslabs/s2n-bignum#415, unmerged, which rind pins at 79120e64 and proves FIPS 180-4's](https://github.com/kixel-ai/rind/blob/main/proofs/Rind/X86_64/ShaBlocks.lean) |
 | rind | `x25519-ecdh` | aarch64 with wide_mul | [rind's Lean proof, through Aeneas and a hand model of the function-pointer dispatch Aeneas cannot translate, which assumes each key's dispatch table holds its own curve's functions, the only table rind builds, of its agreement API's X25519 down to s2n-bignum's routines, composed with s2n-bignum's HOL Light proofs of curve25519_x25519_byte_alt and curve25519_x25519base_byte_alt, which rind runs on a wide multiplier, of s2n-bignum's own object code, which rind transliterates, and rind's HOL Light proof of bignum_eq, of the object code rind's build emits](https://github.com/kixel-ai/rind/blob/main/proofs/Rind/X86_64/X25519.lean) |
 | rind | `sha512/*` | x86_64 with intel, avx, ssse3 without avx2 | [rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch Aeneas cannot translate, of its digest API's SHA-512, padding included, down to aws-lc's sha512_block_data_order_avx, which rind runs only on Intel's CPUs without AVX2, composed with aws-lc-verification's SAW proof of that routine, of aws-lc c21d40da, whose SHA-512 code rind's copy from 5ed12cce keeps](https://github.com/kixel-ai/rind/blob/main/proofs/Rind/X86_64/Sha512.lean) |
 | rind | `sha512/*` | x86_64 with avx, avx2, bmi1, bmi2, popcnt, ssse3 | [rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch Aeneas cannot translate, of its digest API's SHA-512, padding included, down to OpenSSL's sha512_block_data_order_avx2, which rind runs on CPUs with AVX2, BMI1, BMI2, POPCNT, and SSSE3, composed with rind's HOL Light proof of that routine, of the object code rind's build emits, on s2n-bignum's x86 model with the instructions rind adds to it, which rind cosimulates against the CPU, against s2n-bignum's FIPS 180-4 spec from awslabs/s2n-bignum#420, unmerged, which rind pins at 7ef7ba7c and proves FIPS 180-4's](https://github.com/kixel-ai/rind/blob/main/proofs/Rind/X86_64/Sha512.lean) |

@@ -1,3 +1,5 @@
+use alloc::boxed::Box;
+
 use rind::aead::{self, quic::SAMPLE_LEN};
 use rustls::Error;
 use rustls::crypto::cipher::{AeadKey, Iv, Nonce};
@@ -176,6 +178,8 @@ mod tests {
     use rustls::Side;
     use rustls::SupportedCipherSuite;
     use rustls::quic::{Algorithm as _, DirectionalKeys, Keys, Version};
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    use wasm_bindgen_test::wasm_bindgen_test as test;
 
     use super::*;
     use crate::cipher_suite;

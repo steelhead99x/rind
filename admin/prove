@@ -40,19 +40,24 @@
 # `prove` dev shell: `nix develop .#prove --command admin/prove`, or for the
 # HOL Light proofs, the cosimulation, the bytes alone, or a session, `nix
 # develop .#hol-light --command admin/prove hol-light`. `key`, given
-# `hol-light <arch>` or `cosim`, checks nothing either: it prints the key that
-# check's result is cached under, which `result_key` below describes.
+# `hol-light <arch>`, `cosim`, or `lean`, checks nothing either: it prints the
+# key that check's result is cached under, which `result_key` below
+# describes, running only what the key hashes; `lean`'s runs in the `prove`
+# dev shell, the others' in `hol-light`.
 set -euo pipefail
 
-usage="usage: admin/prove [bytes | hol-light [x86_64 | aarch64 | armv7] | cosim | vg | lean | spec-tests | session <x86_64 | aarch64> [<file>] | key <hol-light <x86_64 | aarch64 | armv7> | cosim>]"
+usage="usage: admin/prove [bytes | hol-light [x86_64 | aarch64 | armv7] | cosim | vg | lean | spec-tests | session <x86_64 | aarch64> [<file>] | key <hol-light <x86_64 | aarch64 | armv7> | cosim | lean>]"
 key_only=
 if [[ ${1:-} == key ]]; then
-    if [[ ! (($# -eq 3 && $2 == hol-light && $3 != '') || ($# -eq 2 && $2 == cosim)) ]]; then
+    if [[ ! (($# -eq 3 && $2 == hol-light && $3 != '') || ($# -eq 2 && ($2 == cosim || $2 == lean))) ]]; then
         echo "$usage" >&2
         exit 2
     fi
     key_only=1
     shift
+    # The key alone on stdout, which callers capture: what the checks print
+    # goes to stderr.
+    exec 3>&1 1>&2
 fi
 case "${1:-}" in
 '' | bytes | cosim | vg | lean) only=${1:-} ;;
@@ -303,15 +308,30 @@ asm_function() {
     target=$(relocations "$obj" "$section" | awk '{ sub(/[-+].*/, "", $3); print $3 }' | sort -u)
     if [[ -z $target ]]; then
         "$tools/llvm-objcopy" --only-section="$section" --rename-section="$section=.text" "$obj" "$dest"
-        return
-    fi
-    if [[ $(wc -l <<<"$target") != 1 || $target != .rodata.* ]]; then
+    elif [[ $(wc -l <<<"$target") != 1 || $target != .rodata.* ]]; then
         echo "admin/prove: $path's relocations refer to other than one .rodata section:" $target >&2
         return 1
+    else
+        "$tools/llvm-objcopy" --only-section="$section" --only-section=".rela$section" \
+            --only-section="$target" --rename-section="$section=.text" --rename-section="$target=.rodata" \
+            "$obj" "$dest"
     fi
-    "$tools/llvm-objcopy" --only-section="$section" --only-section=".rela$section" \
-        --only-section="$target" --rename-section="$section=.text" --rename-section="$target=.rodata" \
-        "$obj" "$dest"
+    # The codegen unit's file symbol names nothing a proof reads.
+    "$tools/llvm-nm" --just-symbol-name "$dest" >"$dest.names"
+    paste -d ' ' "$dest.names" <(stable_name <"$dest.names") >"$dest.renames"
+    "$tools/llvm-objcopy" --regex --strip-symbol='^rind\.[0-9a-f]+-cgu\.[0-9]+$' \
+        --redefine-syms="$dest.renames" "$dest"
+    rm "$dest.names" "$dest.renames"
+}
+
+# Prints each symbol name on stdin without what a version bump, a lockfile
+# change, or an edit elsewhere in rind changes, so `asm_function`'s objects,
+# and with them the HOL Light cache keys, change only with the code: the crate
+# disambiguator in each crate root of a v0-mangled (`_R`) name, `Cs<base62>_`
+# before the crate name's length, and the `.llvm.<hash>` suffix of a local
+# another codegen unit uses.
+stable_name() {
+    sed -E -e '/^_R/ s/Cs[0-9A-Za-z]*_([0-9u])/C\1/g' -e 's/\.llvm\.[0-9]+$//'
 }
 
 # Takes `$out/<name>.lock`, waiting while another run in this worktree holds
@@ -334,40 +354,61 @@ release() {
 }
 
 # Prints a hash of each file in `paths`, files or directories, one line each,
-# in an order that depends on nothing but the paths.
+# in an order that depends on nothing but the paths. Lake's build directories
+# are left out.
 files_hash() {
-    find "$@" -type f -print0 | LC_ALL=C sort -z | xargs -0r sha256sum
+    find "$@" -name .lake -prune -o -type f -print0 | LC_ALL=C sort -z | xargs -0r sha256sum
+}
+
+# Like `files_hash`, but of each file with the checkout's path and Cargo's home
+# replaced by placeholders, for files this script generates, which can name
+# them, such as a HOL Light program with its loads inlined. So a key is the
+# same wherever a runner checks the repository out, hosted or self-hosted, and
+# a run on one finds the results another saved. It also
+# leaves out the line of each Aeneas doc comment that cites the Rust's source
+# lines, which no proof reads, so an edit that only moves translated code
+# keeps the key.
+rooted_hash() {
+    local root cargo file
+    # Each path as a literal in sed's extended regex, `|` delimiter included.
+    root=$(sed -e 's/[][\.$*+?(){}^]/\\&/g' -e 's/|/[|]/g' <<<"$PWD")
+    cargo=$(sed -e 's/[][\.$*+?(){}^]/\\&/g' -e 's/|/[|]/g' <<<"${CARGO_HOME:-$HOME/.cargo}")
+    find "$@" -name .lake -prune -o -type f -print0 | LC_ALL=C sort -z |
+        while IFS= read -r -d '' file; do
+            printf '%s  %s\n' "$(sed -E -e "s|$root|@ROOT@|g" -e "s|$cargo|@CARGO@|g" \
+                -e "/^ *Source: '[^']*', lines [0-9]+:[0-9]+-[0-9]+:[0-9]+/d" "$file" | sha256sum | cut -d' ' -f1)" "$file"
+        done
 }
 
 # Writes to `$out/keys/<name>`, and with `key` prints, the key the prove
 # workflow caches the result of the check `name` under, `<name>-<hash>`. The
-# workflow saves it only from main's nightly and dispatched runs, which read
-# no cached result, once the check passes, and a pull request skips a check
-# whose key main saved. So the hash covers everything the check's result can
+# workflow saves it once the check passes on main; main's nightly and
+# dispatched runs read no cached result. A push to main skips a check whose
+# key main saved, and a release publishes only once that push's run passed
+# (sh/release-proved.sh). So the hash covers everything the check's result can
 # depend on: `paths`, which hold the program it compiles, with every file that
 # program loads inlined, and each file it reads as it runs; every file of the
 # fork of s2n-bignum, which a program may read too; the functions, lists, and
-# shell options this script runs the check with, which leave out the Lean
-# functions, defined only once every other check has exited; the `hol-light`
-# dev shell, by its derivation, which names every package in it; and the
-# workflow and actions that run it. The inlined program names each file by
-# its path, so a key also depends on where the checkout is, the same on every
-# GitHub runner. A key that misses an input reports a pass for a result never
-# rerun, so where in doubt, this hashes more.
+# shell options this script runs the check with; the dev shell `result_shell`
+# names, `hol-light` unless set, by its derivation, which names every package
+# in it; and the workflow and actions that run it. A key that misses an input
+# reports a pass for a result never rerun, so where in doubt, this hashes
+# more.
 result_key() {
     local name=$1 system shell
     shift
     system=$(nix eval --impure --raw --expr builtins.currentSystem)
-    shell=$(nix eval --raw ".#devShells.$system.hol-light.drvPath")
+    shell=$(nix eval --raw ".#devShells.$system.${result_shell:-hol-light}.drvPath")
     mkdir -p "$out/keys"
     {
         echo "$shell"
         declare -f
         declare -p hol_light_proofs hol_light_data hol_light_specs
         set +o
-        files_hash thirdparty/s2n-bignum .github/workflows/prove.yml .github/actions/nix .github/actions/prove "$@"
+        files_hash thirdparty/s2n-bignum .github/workflows/prove.yml .github/actions/nix .github/actions/prove
+        rooted_hash "$@"
     } | sha256sum | sed "s/^\([0-9a-f]*\) .*/$name-\1/" >"$out/keys/$name"
-    [[ -z $key_only ]] || cat "$out/keys/$name"
+    [[ -z $key_only ]] || cat "$out/keys/$name" >&3
 }
 
 # rind's own HOL Light proofs, each of the `asm!` block in a Rust function or
@@ -390,6 +431,7 @@ hol_light_proofs=(
     "armv7 ct_compare_bytes.bin rind::low::arm::cpu::ct_compare_bytes"
     "armv7 ct_compare_16.bin rind::low::arm::cpu::ct_compare_16"
     "x86_64 sha512_block_data_order_avx2.o rind::low::x86_64::sha512::sha512_block_data_order_avx2"
+    "x86_64 sha256_block_data_order_avx2.o rind::low::x86_64::sha256::sha256_block_data_order_avx2"
     "x86_64 bn_mul_mont_nohw.o rind::low::x86_64::mont::bn_mul_mont_nohw"
     "x86_64 aes_hw_cbc_encrypt.o rind::low::x86_64::aes_cbc::aes_hw_cbc_encrypt"
     "x86_64 sha256_compress_blocks_shaext.bin rind::low::x86_64::sha256::sha256_compress_blocks_shaext"
@@ -672,7 +714,7 @@ rind_isa() {
     while read -r kind a b _; do
         if [[ $kind == static ]]; then
             read -r _ sym <<<"$(rind_symbol aarch64 "$b")"
-            statics[$sym]=$a
+            statics[$(stable_name <<<"$sym")]=$a
         fi
     done <"$dir/want"
     while read -r kind a b c; do
@@ -1349,11 +1391,12 @@ to_lean() {
     cp "$out/lean/Rind/$dir/Types.lean" "$out/lean/Rind/$dir/Funs.lean" "proofs/Rind/$dir/"
 }
 
-# armv7's translation reaches only the header-protection API, ChaCha20's the
-# one armv7 path that is Rust down to code a proof covers: the rest of armv7's
-# operations run assembly, which no instruction model covers yet, or Rust its
-# own proof quests translate. `Rind/Armv7/{Types,Funs}External.lean` define
-# what it leaves opaque.
+# armv7's translation reaches the header-protection API, ChaCha20's the one
+# armv7 path that is Rust down to code a proof covers, and the AES-GCM API,
+# down to the bitsliced AES and integer GHASH a CPU with neither NEON nor the
+# crypto extension runs: the rest of armv7's operations run assembly, which no
+# instruction model covers yet, or Rust its own proof quests translate.
+# `Rind/Armv7/{Types,Funs}External.lean` define what it leaves opaque.
 extract_armv7() {
     (cd rind && charon cargo --preset=aeneas \
         --start-from '{impl crate::aead::quic::Mask for crate::mid::chacha20::ChaCha20}' \
@@ -1362,11 +1405,23 @@ extract_armv7() {
         --start-from crate::aead::quic::AlgorithmId \
         --start-from crate::mid::chacha20::ChaCha20::new \
         --start-from crate::error::Error \
+        --start-from crate::mid::aes_gcm::AesGcm::new \
+        --start-from crate::mid::aes_gcm::AesGcm::encrypt \
+        --start-from crate::mid::aes_gcm::AesGcm::decrypt \
+        --start-from crate::mid::aes_gcm::AesGcm::encrypt_any \
+        --start-from crate::mid::aes_gcm::AesGcm::decrypt_any \
         --opaque crate::aead::quic::Masker \
         --opaque crate::mid::aes \
+        --include crate::mid::aes::check_gcm_lengths \
+        --include crate::mid::aes::check_gcm_iv \
+        --include crate::mid::aes::check_counter \
         --opaque crate::low \
         --include crate::low::ct \
         --include crate::low::generic::chacha20 \
+        --include crate::low::generic::ct_equal \
+        --include crate::low::portable::aes \
+        --include crate::low::portable::aes_nohw \
+        --include crate::low::portable::ghash_nohw \
         --dest-file "$PWD/../$out/armv7.llbc" \
         -- -p rind --lib --target armv7-unknown-linux-gnueabihf)
     to_lean Armv7
@@ -1789,6 +1844,16 @@ if [[ -n $untested ]]; then
 fi
 
 rind_isa
+
+# Every input the Lean proofs take from rind's source is now in `proofs/`, as
+# a translation or a quote the checks above found unchanged, or in
+# `SimdVectors.lean` and `rind_isa`'s listing. So `lean`'s key hashes those,
+# this whole script, whose top-level code runs the check, and its vector
+# programs, with the `prove` dev shell, which holds the Lean toolchain's
+# installer and Aeneas; `proofs/` pins the toolchain and Mathlib.
+result_shell=prove result_key lean admin/prove admin/simd-vectors.rs admin/avx512-vectors.rs \
+    proofs "$out/SimdVectors.lean" "$out/rind-isa/got"
+[[ -z $key_only ]] || exit 0
 
 cd proofs
 lean_deps

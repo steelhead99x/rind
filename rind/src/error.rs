@@ -64,7 +64,9 @@ pub(crate) enum KeyFormatError {
     RsaPrimes,
     MultiPrimeRsa,
     MlKemModulus,
+    #[cfg(feature = "ml-dsa")]
     MlDsaSecretKey,
+    #[cfg(feature = "ml-dsa")]
     MismatchedMlDsaSeed,
     UnsupportedPkcs8Version,
     MismatchedPkcs8Algorithm,
@@ -81,6 +83,9 @@ pub(crate) enum KeyFormatError {
     UnknownPkcs8Algorithm,
     UnsupportedCurve,
     X25519CannotSign,
+    /// A key of an algorithm that the Cargo feature it names builds in.
+    #[cfg(not(all(feature = "ml-dsa", feature = "slh-dsa")))]
+    FeatureDisabled(&'static str),
 }
 
 impl From<KeyFormatError> for Error {
@@ -119,9 +124,11 @@ impl core::fmt::Display for KeyRejected {
             KeyFormatError::RsaPrimes => write!(f, "unsupported RSA primes"),
             KeyFormatError::MultiPrimeRsa => write!(f, "a multi-prime RSA key"),
             KeyFormatError::MlKemModulus => write!(f, "an ML-KEM key failing the modulus check"),
+            #[cfg(feature = "ml-dsa")]
             KeyFormatError::MlDsaSecretKey => {
                 write!(f, "an ML-DSA private key failing its consistency check")
             }
+            #[cfg(feature = "ml-dsa")]
             KeyFormatError::MismatchedMlDsaSeed => {
                 write!(f, "an ML-DSA seed and expanded private key that disagree")
             }
@@ -159,6 +166,13 @@ impl core::fmt::Display for KeyRejected {
                 write!(f, "an EC key on a curve rind does not support")
             }
             KeyFormatError::X25519CannotSign => write!(f, "an X25519 key, which cannot sign"),
+            #[cfg(not(all(feature = "ml-dsa", feature = "slh-dsa")))]
+            KeyFormatError::FeatureDisabled(feature) => {
+                write!(
+                    f,
+                    "a key of an algorithm this build leaves out, rind's `{feature}` feature"
+                )
+            }
         }
     }
 }

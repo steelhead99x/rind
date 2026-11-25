@@ -2,9 +2,11 @@
 
 ## Goal
 
-A change that breaks a check fails on its own pull request, not first in the merge queue or on main's nightly, and main's nightly runs green, so a red result names the PR that caused it.
+A change that breaks a check that gates the merge and runs on pull requests fails on its own pull request, not first in the merge queue, so a red result names the PR that caused it. The checks that run only in the queue's build (`CHECK_QUEUE` in `sh/dispatch.sh`: `regenerate`, `vg`, and the Intel SDE models) fail there first. A check that gates nothing runs only on its schedule, and its alert reports a failure there.
 
 ## Plan
+
+✅ Narrowed to the checks that gate on 2026-11-22, once those that gate nothing left pull requests for their schedules (maintainer, on [kixel-ai/rind#958](https://github.com/kixel-ai/rind/pull/958); rejected: keeping it over every check and main's nightly).
 
 Planned with the maintainer on 2026-11-15 from the `/quest-run` of 2026-11-14 and 2026-11-15, in which kixel-ai/rind#748 and kixel-ai/rind#758 passed every PR check and then failed only in the queue, and main's mutants check broke twice on stale line pins.
 

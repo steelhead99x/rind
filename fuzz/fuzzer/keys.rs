@@ -1,7 +1,8 @@
 #![no_main]
 
-//! Every public key loader against aws-lc-rs's, or RustCrypto's for SLH-DSA,
-//! which aws-lc lacks: the first byte picks the loader and the rest is its
+//! Every public key loader against aws-lc-rs's, aws-lc's own for X25519
+//! PKCS#8, which aws-lc-rs does not expose, or RustCrypto's for all twelve
+//! SLH-DSA sets, which aws-lc lacks: the first byte picks the loader and the rest is its
 //! input. Both must accept and refuse alike, except where an [`Expect`] names
 //! a difference by design, and every key rind loads must re-encode to input
 //! both load again as the same key. `rind::KeyPair::from_pkcs8`, which no
@@ -27,7 +28,11 @@ use libfuzzer_sys::fuzz_target;
 use rind::agreement as ours_ecdh;
 use rind::kem as our_kem;
 use rind::ml_dsa::{MlDsa44, MlDsa65, MlDsa87, ParameterSet};
-use rind::slh_dsa::{self as our_slh_dsa, SlhDsaSha2_128s, SlhDsaShake128f};
+use rind::slh_dsa::{
+    self as our_slh_dsa, SlhDsaSha2_128f, SlhDsaSha2_128s, SlhDsaSha2_192f, SlhDsaSha2_192s,
+    SlhDsaSha2_256f, SlhDsaSha2_256s, SlhDsaShake128f, SlhDsaShake128s, SlhDsaShake192f,
+    SlhDsaShake192s, SlhDsaShake256f, SlhDsaShake256s,
+};
 use rind::{ecdsa, ed25519, ml_dsa, rsa as our_rsa};
 
 mod der;
@@ -107,8 +112,6 @@ fuzz_target!(|data: &[u8]| {
         52 => ml_dsa_spki::<MlDsa44>(&MLDSA_44, input),
         53 => ml_dsa_spki::<MlDsa65>(&MLDSA_65, input),
         54 => ml_dsa_spki::<MlDsa87>(&MLDSA_87, input),
-        // The SLH-DSA sets of n = 16, the one whose loading costs least
-        // and the one RFC 9909's examples use.
         55 => slh_dsa_pkcs8::<SlhDsaSha2_128s, slh_dsa::Sha2_128s>(input),
         56 => slh_dsa_pkcs8::<SlhDsaShake128f, slh_dsa::Shake128f>(input),
         57 => slh_dsa_public::<SlhDsaSha2_128s, slh_dsa::Sha2_128s>(input),
@@ -116,9 +119,39 @@ fuzz_target!(|data: &[u8]| {
         59 => slh_dsa_spki::<SlhDsaSha2_128s, slh_dsa::Sha2_128s>(input),
         60 => slh_dsa_spki::<SlhDsaShake128f, slh_dsa::Shake128f>(input),
         61 => any_pkcs8(input),
+        // The other ten SLH-DSA sets, after the loaders above, so the
+        // corpus keeps their numbers.
+        62..=91 => slh_dsa_rest(loader - 62, input),
         _ => {}
     }
 });
+
+/// The `index`th loader of the SLH-DSA sets 55 to 60 leave out, three per
+/// set: PKCS#8, the bare public key, and `SubjectPublicKeyInfo`.
+fn slh_dsa_rest(index: u8, input: &[u8]) {
+    macro_rules! sets {
+        ($(($ours:ident, $theirs:ident)),*) => {{
+            let loaders: &[[fn(&[u8]); 3]] = &[$([
+                slh_dsa_pkcs8::<$ours, slh_dsa::$theirs>,
+                slh_dsa_public::<$ours, slh_dsa::$theirs>,
+                slh_dsa_spki::<$ours, slh_dsa::$theirs>,
+            ]),*];
+            loaders[usize::from(index / 3)][usize::from(index % 3)](input)
+        }};
+    }
+    sets!(
+        (SlhDsaSha2_128f, Sha2_128f),
+        (SlhDsaSha2_192s, Sha2_192s),
+        (SlhDsaSha2_192f, Sha2_192f),
+        (SlhDsaSha2_256s, Sha2_256s),
+        (SlhDsaSha2_256f, Sha2_256f),
+        (SlhDsaShake128s, Shake128s),
+        (SlhDsaShake192s, Shake192s),
+        (SlhDsaShake192f, Shake192f),
+        (SlhDsaShake256s, Shake256s),
+        (SlhDsaShake256f, Shake256f)
+    )
+}
 
 /// One curve's algorithms on each side, and its scalar's length.
 struct Curve {
@@ -513,15 +546,24 @@ fn ecdh_scalar(ecdh: &Ecdh, input: &[u8]) {
     }
 }
 
-/// aws-lc-rs's agreement API takes no X25519 PKCS#8, so this checks that a
-/// key rind loads re-encodes to input it loads again as the same key, and
-/// to the input itself for a v1 document of only its three required fields,
-/// with nothing after it: attributes, which the loader skips, are not
-/// written back.
+/// aws-lc-rs's agreement API takes no X25519 PKCS#8, so this checks rind
+/// against aws-lc's own PKCS#8 parser: both take and refuse alike, but for
+/// bytes after the document, which aws-lc leaves to its caller, and both
+/// read the same scalar. A key rind loads re-encodes to input it loads
+/// again as the same key, and to the input itself for a v1 document of only
+/// its three required fields, with nothing after it: attributes, which the
+/// loader skips, are not written back.
 fn x25519_pkcs8(input: &[u8]) {
-    let Ok(ours) = ours_ecdh::PrivateKey::from_pkcs8(&ours_ecdh::X25519, input) else {
+    let ours = ours_ecdh::PrivateKey::from_pkcs8(&ours_ecdh::X25519, input);
+    let theirs = aws_lc_x25519_pkcs8(input);
+    agree(&ours, &theirs, trailing(input).into());
+    let Ok(ours) = ours else {
         return;
     };
+    assert_eq!(
+        Ok(ours.to_scalar().as_ref()),
+        theirs.as_ref().map(|s| &s[..])
+    );
     let pkcs8 = ours.to_pkcs8();
     let again = ours_ecdh::PrivateKey::from_pkcs8(&ours_ecdh::X25519, pkcs8.as_ref()).unwrap();
     assert_eq!(again.public_key().as_ref(), ours.public_key().as_ref());
@@ -537,6 +579,28 @@ fn x25519_pkcs8(input: &[u8]) {
     let fields: Vec<_> = elements(sequence(input).unwrap()).collect();
     if fields.len() == 3 && fields[0] == (0x02, &[0][..]) && !trailing(input) {
         assert_eq!(pkcs8.as_ref(), input);
+    }
+}
+
+/// The scalar of the X25519 PKCS#8 document starting `der`, as aws-lc's
+/// `EVP_parse_private_key` reads it.
+fn aws_lc_x25519_pkcs8(der: &[u8]) -> Result<[u8; 32], &'static str> {
+    // SAFETY: `cbs` borrows `der` only for the parse, and the key it
+    // returns is freed once read.
+    unsafe {
+        let mut cbs = std::mem::MaybeUninit::<aws_lc_sys::CBS>::uninit();
+        aws_lc_sys::CBS_init(cbs.as_mut_ptr(), der.as_ptr(), der.len());
+        let key = aws_lc_sys::EVP_parse_private_key(cbs.as_mut_ptr());
+        if key.is_null() {
+            return Err("refused");
+        }
+        let mut scalar = [0u8; 32];
+        let mut len = scalar.len();
+        let read = aws_lc_sys::EVP_PKEY_id(key) == aws_lc_sys::NID_X25519
+            && aws_lc_sys::EVP_PKEY_get_raw_private_key(key, scalar.as_mut_ptr(), &mut len) == 1
+            && len == scalar.len();
+        aws_lc_sys::EVP_PKEY_free(key);
+        read.then_some(scalar).ok_or("not an X25519 key")
     }
 }
 

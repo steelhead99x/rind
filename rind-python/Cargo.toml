@@ -3,7 +3,7 @@ name = "rind-python"
 version = "0.2.0"
 edition = "2024"
 repository = "https://github.com/kixel-ai/rind"
-license = "(Apache-2.0 OR ISC OR MIT-0) AND (Apache-2.0 OR ISC OR MIT) AND Apache-2.0 AND ISC AND BSD-3-Clause"
+license = "(Apache-2.0 OR ISC OR MIT-0) AND (Apache-2.0 OR ISC OR MIT) AND Apache-2.0 AND ISC AND BSD-3-Clause AND MIT"
 description = "pyrind, rind's API for Python"
 rust-version.workspace = true
 readme = "README.md"
@@ -13,7 +13,9 @@ publish = false
 
 [lib]
 name = "_rind"
-crate-type = ["cdylib"]
+# The rlib is for `fuzz/fuzzer/python.rs`, which embeds CPython to call the
+# module in process.
+crate-type = ["cdylib", "rlib"]
 # The tests are Python's, under tests/, run against the built extension
 # (sh/python.sh). A Rust test binary would link libpython, which the hosts
 # that run `cargo test` need not have.

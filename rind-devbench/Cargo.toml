@@ -1,0 +1,95 @@
+# rind-devbench: rind-bench's benches, every library, run inside a phone or
+# tablet app. The bench files are compiled as modules from ../rind-bench/benches
+# unchanged; `criterion` is a small shim (criterion-shim) that lists or times
+# each row by its criterion ID, so row IDs are exactly bench-report's.
+# Local scratch crate, outside rind's workspace.
+[package]
+name = "rind-devbench"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[lib]
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[dependencies]
+rind = { path = "../rind" }
+criterion = { package = "rind-devbench-criterion", path = "criterion-shim" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+libc = "0.2"
+
+# rind-bench's dev-dependencies, as normal dependencies (same versions).
+aes-gcm = "0.11"
+argon2 = { version = "0.6", default-features = false, features = ["alloc"] }
+blind-rsa-signatures = "0.18"
+chacha20poly1305 = "0.11"
+ed25519-dalek = { version = "3", features = ["alloc", "pkcs8", "rand_core"] }
+fips205 = "0.5"
+getrandom = { version = "0.4", features = ["sys_rng"] }
+hkdf = "0.13"
+hex = { version = "0.4", features = ["serde"] }
+hmac = "0.13"
+hpke = { version = "0.15", features = ["aes", "hkdfsha2"] }
+hpke-rs = { version = "0.8", features = ["libcrux"] }
+jsonwebtoken = { version = "11.1", default-features = false, features = ["aws_lc_rs"] }
+libcrux-aes = "0.0.10"
+libcrux-chacha20poly1305 = "0.0.10"
+libcrux-ecdh = "0.0.9"
+libcrux-ecdsa = "0.0.9"
+libcrux-ed25519 = { version = "0.0.10", features = ["rand"] }
+libcrux-hkdf = "0.0.9"
+libcrux-hmac = "0.0.9"
+libcrux-ml-dsa = "0.0.11"
+libcrux-ml-kem = { version = "0.0.11", default-features = false, features = ["mlkem512", "mlkem768", "mlkem1024", "alloc"] }
+libcrux-rsa = "0.0.9"
+libcrux-sha2 = "0.0.9"
+libcrux-sha3 = "0.0.11"
+md5 = { package = "md-5", version = "0.11" }
+ml-dsa = "0.1"
+ml-kem = { version = "0.3", features = ["getrandom"] }
+p256 = { version = "0.14", features = ["ecdh", "getrandom"] }
+p384 = { version = "0.14", features = ["ecdh", "getrandom", "oprf"] }
+p521 = { version = "0.14", features = ["ecdh", "getrandom"] }
+rind-jsonwebtoken = { path = "../rind-jsonwebtoken" }
+rind-rustls = { path = "../rind-rustls" }
+rsa = { version = "0.10", features = ["pkcs1v15"] }
+sha1 = "0.11"
+sha2 = "0.11"
+sha3 = "0.12"
+slh-dsa = "=0.2.0-rc.5"
+spake2plus = "0.1"
+voprf = { version = "=0.6.0-pre.2", default-features = false, features = ["ristretto255-ciphersuite"] }
+vrf-rfc9381 = { version = "0.0.7", features = ["edwards25519", "p256"] }
+verified-garbage = { git = "https://github.com/pyca/verified-garbage", rev = "0aa40d6c21fd02943fe5b38a5b69b6213d07764d", features = ["cpu-features-env"] }
+x25519-dalek = { version = "3", features = ["getrandom"] }
+ring = "0.17"
+rustls = { version = "0.23.36", default-features = false, features = ["ring", "std", "aws-lc-rs"] }
+aws-lc-rs = { version = "1.19", features = ["non-fips"], default-features = false }
+aws-lc-sys = { version = "0.47", default-features = false }
+graviola = "0.4"
+rustls-graviola = "0.4"
+# OpenSSL only with `--features __bench_openssl` (vendored: built from source for the target).
+foreign-types = { version = "0.3", optional = true }
+openssl = { version = "0.10", optional = true, features = ["vendored"] }
+openssl-sys = { version = "0.9", optional = true }
+rustls-openssl = { version = "0.4", default-features = false, optional = true }
+
+[target.'cfg(target_os = "android")'.dependencies]
+jni = { version = "0.21", default-features = false }
+
+[features]
+__bench_openssl = ["dep:foreign-types", "dep:openssl", "dep:openssl-sys", "dep:rustls-openssl"]
+__bench_codspeed = []
+
+[profile.release]
+# As rind's [profile.bench] (thin LTO), with unwinding so a row that panics is
+# recorded as failed instead of killing the app.
+lto = "thin"
+debug = false
+panic = "unwind"
+
+[patch.crates-io]
+blind-rsa-signatures = { path = "../thirdparty/blind-rsa-signatures" }

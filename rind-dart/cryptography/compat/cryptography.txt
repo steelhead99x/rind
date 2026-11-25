@@ -24,17 +24,6 @@ SHA1/2 functions: DartCryptography: sha224: hashSync(_): input1
 # Poly1305 alone.
 SecretBox: checkMac()
 
-# AES-GCM nonces other than 12 bytes.
-AesGcm: DartCryptography: == / hashCode
-AesGcm: DartCryptography: information: 128 bits, nonce length = 8
-AesGcm: DartCryptography: information: 256 bits, nonce length = 8
-AesGcm: DartCryptography: nonceLength: can be set to 8
-AesGcm: DartCryptography: clearText is 0 bytes, secretKey is 16 bytes, nonce is 16 bytes: encrypt(...)
-AesGcm: DartCryptography: clearText is 0 bytes, secretKey is 16 bytes, nonce is 16 bytes: decrypt(...)
-AesGcm: DartCryptography: clearText is 3 bytes, secretKey is 32 bytes, nonce is 16 bytes: encrypt(...)
-AesGcm: DartCryptography: clearText is 3 bytes, secretKey is 32 bytes, nonce is 16 bytes: decrypt(...)
-AesGcm: DartCryptography: clearText is 3 bytes, secretKey is 32 bytes, nonce is 16 bytes: decrypt(...) fails if the first byte is changed
-
 # The Dart implementation's class names, which toString() prints.
 Hmac: non-browser: Hmac.sha1().toString()
 Hmac: non-browser: Hmac.sha256().toString()
@@ -44,6 +33,8 @@ Chacha20.poly1305Aead(): toString
 AesGcm: DartCryptography: information: 128 bits
 AesGcm: DartCryptography: information: 192 bits
 AesGcm: DartCryptography: information: 256 bits
+AesGcm: DartCryptography: information: 128 bits, nonce length = 8
+AesGcm: DartCryptography: information: 256 bits, nonce length = 8
 AesCbc: DartCryptography: information: 128 bits
 AesCbc: DartCryptography: information: 192 bits
 AesCbc: DartCryptography: information: 256 bits
@@ -65,9 +56,3 @@ SecretKey: destroy()
 RsaPss: equality / hashCode
 RsaPss: generate key pair, sign, verify (sha1)
 RsaSsaPkcs1v15: generate key pair, sign, verify (sha1)
-
-# RSA-PSS signing with the package's default 16-byte salt: rind salts with as
-# many bytes as the hash.
-RsaPss: generate key pair, sign, verify (sha256)
-RsaPss: generate key pair, sign, verify (sha384)
-RsaPss: generate key pair, sign, verify (sha512)

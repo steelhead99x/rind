@@ -1,7 +1,9 @@
 // Written for Graviola by Joe Birr-Pixton, 2024.
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
-use super::{Encoder, Error, OctetString, Parser, Sequence, SetOf, Tag, Type};
+#[cfg(feature = "ml-dsa")]
+use super::{Encoder, Error, OctetString, Parser, Tag, Type};
+use super::{Sequence, SetOf};
 
 asn1_struct! {
     RSAPublicKey ::= SEQUENCE {
@@ -259,6 +261,7 @@ mod tests {
 }
 
 /// RFC 9881's ML-DSA private key: its seed, its expanded key, or both.
+#[cfg(feature = "ml-dsa")]
 #[derive(Clone, Debug)]
 pub(crate) enum MlDsaPrivateKey<'a> {
     /// `seed [0] IMPLICIT OCTET STRING`, the form rind writes.
@@ -269,6 +272,7 @@ pub(crate) enum MlDsaPrivateKey<'a> {
     Both(MlDsaSeedAndKey<'a>),
 }
 
+#[cfg(feature = "ml-dsa")]
 asn1_struct! {
     MlDsaSeedAndKey ::= SEQUENCE {
         seed         OCTET STRING,
@@ -276,10 +280,12 @@ asn1_struct! {
     }
 }
 
+#[cfg(feature = "ml-dsa")]
 impl MlDsaPrivateKey<'_> {
     const SEED: Tag = Tag::context(0, false);
 }
 
+#[cfg(feature = "ml-dsa")]
 impl<'a> Type<'a> for MlDsaPrivateKey<'a> {
     fn parse_with_tag(p: &mut Parser<'a>, _: Tag) -> Result<Self, Error> {
         match p.peek_tag()?.0 {

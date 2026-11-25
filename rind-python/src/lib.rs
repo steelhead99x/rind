@@ -298,9 +298,10 @@ fn has_aes_hardware() -> bool {
     rind::cpu::has_aes_hardware()
 }
 
+/// The `_rind` extension module.
 #[pymodule]
 #[pyo3(name = "_rind")]
-fn pyrind(m: &Bound<'_, PyModule>) -> PyResult<()> {
+pub fn pyrind(m: &Bound<'_, PyModule>) -> PyResult<()> {
     let py = m.py();
     m.add("Error", py.get_type::<Error>())?;
     m.add("WrongLength", py.get_type::<WrongLength>())?;
