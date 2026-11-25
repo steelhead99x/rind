@@ -20,7 +20,7 @@ which `admin/import-hacl` imports the routines from:
 
 Vale leaves AES's round functions assumed (`assume val`): `sub_bytes`,
 `sub_word`, `shift_rows_LE`, `mix_columns_LE`, and `rot_word_LE`. They are
-FIPS 197's here, `sbox` and `mixColumns` opaque, so they are the functions the
+FIPS 197's here, `sbox` and `mixColumns` irreducible, so they are the functions the
 AES-NI instructions compute in `Rind.X86_64.Simd`.
 
 Vale's GCM bounds the message and AAD below 2^32 bytes, the most its routines
@@ -114,15 +114,38 @@ def fips197MixColumns (q : Quad32) : Quad32 := ofBytes fun i =>
   let a k := byte q (i / 4 * 4 + (i % 4 + k) % 4)
   xtime (a 0) ^^^ xtime (a 1) ^^^ a 1 ^^^ a 2 ^^^ a 3
 
-/-- FIPS 197's S-box, opaque so that no proof looks inside its table; Vale's
-spec assumes it. `fips197Sbox` is what Lean runs, so `admin/prove` can test
-the AES instruction models that call it. -/
-opaque sbox : BitVec 8 → BitVec 8 := fips197Sbox
+/-- `fips197Sbox`'s 256 values, which compiled code computes once. -/
+def sboxTable : Array (BitVec 8) := (Array.range 256).map fun i => fips197Sbox (BitVec.ofNat 8 i)
+
+/-- `fips197Sbox`, looked up in `sboxTable`: `fips197Sbox` computes each
+byte's inverse by 254 field products, which would make the compiled specs
+`admin/spec-tests` runs cipher a block in tens of milliseconds. -/
+def sboxFast (b : BitVec 8) : BitVec 8 := sboxTable[b.toNat]!
+
+theorem sboxFast_eq : sboxFast = fips197Sbox := by
+  funext b
+  simp [sboxFast, sboxTable, b.isLt]
+
+/-- FIPS 197's S-box, which Vale's spec assumes. It is irreducible, so that
+only a proof of an S-box computed some other way than by the AES instructions,
+such as a bitsliced circuit, looks inside it, through `sbox_eq`. `fips197Sbox`
+is what Lean runs, through `sboxFast`, which `sboxFast_eq` proves equal to it,
+so `admin/prove` can test the AES instruction models that call it. -/
+@[implemented_by sboxFast]
+def sbox : BitVec 8 → BitVec 8 := fips197Sbox
+
+theorem sbox_eq : sbox = fips197Sbox := rfl
+
+attribute [irreducible] sbox
 
 /-- FIPS 197's `MixColumns` on a state laid out as a `quad32`'s bytes, least
-significant first, column by column: Vale's `mix_columns_LE`, opaque as its
-spec assumes it. `fips197MixColumns` is what Lean runs. -/
-opaque mixColumns : Quad32 → Quad32 := fips197MixColumns
+significant first, column by column: Vale's `mix_columns_LE`, which its spec
+assumes, irreducible as `sbox` is. `fips197MixColumns` is what Lean runs. -/
+def mixColumns : Quad32 → Quad32 := fips197MixColumns
+
+theorem mixColumns_eq : mixColumns = fips197MixColumns := rfl
+
+attribute [irreducible] mixColumns
 
 /-- `sub_bytes`: the S-box on each byte. -/
 def subBytes (q : Quad32) : Quad32 := ofBytes fun i => sbox (byte q i)

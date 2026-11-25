@@ -5,7 +5,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 use rind::rsa;
 
-use crate::{Bytes, PublicKeyCell, algorithm, bytes, constants, error, submodule};
+use crate::{Bytes, PublicKeyCell, Secret, algorithm, bytes, constants, error, submodule};
 
 /// An RSA modulus size for key generation, equal only to itself, never to
 /// an int, so its hash agrees with its equality.
@@ -141,13 +141,13 @@ impl KeyPair {
 
     /// Loads a PKCS#8 RSA private key.
     #[staticmethod]
-    fn from_pkcs8(der: Bytes<'_>) -> PyResult<Self> {
+    fn from_pkcs8(der: Secret<'_>) -> PyResult<Self> {
         Self::wrap(rsa::KeyPair::from_pkcs8(&der))
     }
 
     /// Loads a PKCS#1 `RSAPrivateKey`.
     #[staticmethod]
-    fn from_pkcs1(der: Bytes<'_>) -> PyResult<Self> {
+    fn from_pkcs1(der: Secret<'_>) -> PyResult<Self> {
         Self::wrap(rsa::KeyPair::from_pkcs1(&der))
     }
 
@@ -217,13 +217,13 @@ impl DecryptingKey {
 
     /// Loads a PKCS#8 RSA private key for `algorithm`.
     #[staticmethod]
-    fn from_pkcs8(algorithm: &Bound<'_, OaepAlgorithm>, der: Bytes<'_>) -> PyResult<Self> {
+    fn from_pkcs8(algorithm: &Bound<'_, OaepAlgorithm>, der: Secret<'_>) -> PyResult<Self> {
         Self::wrap(rsa::DecryptingKey::from_pkcs8(algorithm.get().inner, &der))
     }
 
     /// Loads a PKCS#1 `RSAPrivateKey` for `algorithm`.
     #[staticmethod]
-    fn from_pkcs1(algorithm: &Bound<'_, OaepAlgorithm>, der: Bytes<'_>) -> PyResult<Self> {
+    fn from_pkcs1(algorithm: &Bound<'_, OaepAlgorithm>, der: Secret<'_>) -> PyResult<Self> {
         Self::wrap(rsa::DecryptingKey::from_pkcs1(algorithm.get().inner, &der))
     }
 

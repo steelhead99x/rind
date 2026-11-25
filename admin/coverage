@@ -1,18 +1,73 @@
 #!/usr/bin/env bash
-# Measures how much of the published code its tests run: the rind crate and
-# its adapters under `cargo test`, rind-dart under `dart test`, and pyrind
-# (rind-python) under `sh/python.sh test`. The tools, rind-bench, rind-cpuid,
-# rind-timing, and the fuzzer, are left out. Runs in the `coverage` dev shell.
+# Measures how much of the published code its tests run on one tier: the
+# rind crate and its adapters under `cargo test`, and natively also rind-dart
+# under `dart test` and pyrind (rind-python) under `sh/python.sh test`. The
+# tools, rind-bench, rind-cpuid, rind-timing, and the fuzzer, are left out.
+# Runs in the `coverage` dev shell.
 #
-# Usage: admin/coverage [REPORT-ARGS...], which go to `cargo llvm-cov report`.
+# Usage: admin/coverage [TIER], where TIER is
+#   native    this host's backend, with each CPU tier build.yml tests (default)
+#   portable  the portable backend, forced on x86_64 Linux
+#   armv7     the armv7 backend's three tiers, on Linux, best on an aarch64
+#             host that runs AArch32 code, as sh/armv7.sh explains
+#
+# It prints llvm-cov's table and the functions it saw no test run, and writes
+# target/coverage/<host>-<tier>.json, which `admin/coverage-gate` merges with
+# the other tiers' to fail on what no tier runs.
 
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
 
+tier=${1:-native}
+host=$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m)
+case $tier in
+    native) ;;
+    portable)
+        if [[ "$(uname -sm)" != "Linux x86_64" ]]; then
+            echo "error: the portable tier is forced on x86_64 Linux" >&2
+            exit 1
+        fi
+        ;;
+    armv7)
+        if [[ -z "${CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_RUNNER:-}" ]]; then
+            echo "error: the armv7 tier needs the coverage dev shell on Linux" >&2
+            exit 1
+        fi
+        ;;
+    *)
+        echo "error: unknown tier '$tier'; see the usage at the top of $0" >&2
+        exit 1
+        ;;
+esac
+
+# admin/coverage-gate demangles through cargo-llvm-cov's internal demangler,
+# which a cargo-llvm-cov bump could drop: fail now, not after hours of tests.
+if [[ $(__CARGO_LLVM_COV_DEMANGLER=1 cargo-llvm-cov <<<_RNvC4rind5probe) != rind::probe ]]; then
+    echo "error: cargo-llvm-cov no longer demangles as admin/coverage-gate needs" >&2
+    exit 1
+fi
+
 # for branch coverage support, which is unstable
 export RUSTC_BOOTSTRAP=1
-OPTIONS=--branch
+OPTIONS=(--branch)
+cross=()
+if [[ $tier == portable ]]; then
+    # dalek's serial backend is the one the architectures that need the
+    # portable backend run, rather than the AVX2 one dalek picks here.
+    export RUSTFLAGS='--cfg rind_portable --cfg curve25519_dalek_backend="serial"'
+elif [[ $tier == armv7 ]]; then
+    cross=(--target armv7-unknown-linux-gnueabihf)
+fi
+cargo_args=("${cross[@]}")
+if [[ $tier != native ]]; then
+    # Optimised, as sh/portable.sh and sh/armv7.sh test these backends, but
+    # keeping the checks a debug build has: the portable backend's slow
+    # vectors and qemu's Cortex-A15 take hours unoptimised.
+    cargo_args+=(--release)
+    export CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS=true
+    export CARGO_PROFILE_RELEASE_OVERFLOW_CHECKS=true
+fi
 
 # show-env shares the workspace's target directory, where sh/python.sh also
 # builds.
@@ -23,45 +78,80 @@ out=$target/coverage
 objects=$target/debug/coverage
 rm -rf "$out" "$objects"
 mkdir -p "$out/bin" "$objects"
-cargo llvm-cov show-env --sh $OPTIONS > "$out/env.sh"
+cargo llvm-cov show-env --sh "${OPTIONS[@]}" "${cross[@]}" > "$out/env.sh"
 # shellcheck source=/dev/null
 source "$out/env.sh"
 cargo llvm-cov clean --workspace
 
 tests=(--workspace --exclude rind-bench --exclude rind-cpuid --exclude rind-fuzz --exclude rind-timing)
-env SLOW_TESTS=1 cargo test --locked "${tests[@]}"
+# rind-fips's module refuses a CPU masked below its baseline.
+denied=("${tests[@]}" --exclude rind-fips)
+# The adapters sh/portable.sh and sh/armv7.sh test on those backends.
+portable=(-p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-rand-core -p rind-ring -p rind-dimpl -p rind-openmls)
+armv7=("${portable[@]}" -p rind-aws-lc-rs -p rind-str0m)
 
-case $(uname -m) in
-    x86_64)
-        env RIND_CPU_DISABLE_sha=1 RIND_CPU_DISABLE_intel=1 RIND_CPU_DISABLE_avx512bw=1 RIND_CPU_DISABLE_avx512f=1 RIND_CPU_DISABLE_vaes=1 cargo test --locked "${tests[@]}"
-        env CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER="sde -dmr --" cargo test --locked "${tests[@]}"
+case $tier in
+    native)
+        env SLOW_TESTS=1 cargo test --locked "${tests[@]}"
+        # The tiers build.yml tests, each of which reaches a fallback only a
+        # CPU without the denied features runs. SDE without AVX-512 reaches
+        # the VAES kernels, which some hosted runners lack.
+        case $(uname -m) in
+            x86_64)
+                env RIND_CPU_DISABLE_sha=1 RIND_CPU_DISABLE_intel=1 cargo test --locked "${denied[@]}"
+                env RIND_CPU_DISABLE_avx512bw=1 RIND_CPU_DISABLE_avx512f=1 RIND_CPU_DISABLE_vaes=1 cargo test --locked "${denied[@]}"
+                env RIND_CPU_DISABLE_adx=1 cargo test --locked "${denied[@]}"
+                env RIND_CPU_DISABLE_avx2=1 RIND_CPU_DISABLE_sha=1 RIND_CPU_DISABLE_intel=1 cargo test --locked "${denied[@]}"
+                env RIND_CPU_DISABLE_avx=1 cargo test --locked "${denied[@]}"
+                env RIND_CPU_DISABLE_aes=1 RIND_CPU_DISABLE_pclmulqdq=1 RIND_CPU_DISABLE_avx=1 RIND_CPU_DISABLE_sse41=1 cargo test --locked "${denied[@]}"
+                env RIND_CPU_DISABLE_ssse3=1 cargo test --locked "${denied[@]}"
+                env CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER="sde -dmr --" cargo test --locked "${tests[@]}"
+                env RIND_CPU_DISABLE_avx512f=1 RIND_CPU_DISABLE_avx512bw=1 CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER="sde -dmr --" cargo test --locked -p rind --lib
+                ;;
+            arm|arm64|aarch64)
+                env RIND_CPU_DISABLE_sha3=1 RIND_CPU_DISABLE_sve2=1 RIND_CPU_DISABLE_sb=1 cargo test --locked "${denied[@]}"
+                env RIND_CPU_DISABLE_aes=1 RIND_CPU_DISABLE_pmull=1 RIND_CPU_DISABLE_sha2=1 cargo test --locked "${denied[@]}"
+                ;;
+        esac
         ;;
-    arm|arm64|aarch64)
-        env RIND_CPU_DISABLE_sha3=1 cargo test --locked "${tests[@]}"
+    portable)
+        env SLOW_TESTS=1 cargo test --locked "${cargo_args[@]}" "${portable[@]}"
+        ;;
+    armv7)
+        # shellcheck source=sh/armv7-tiers.sh
+        source sh/armv7-tiers.sh
+        "${crypto[@]}" cargo test --locked "${cargo_args[@]}" "${armv7[@]}"
+        "${cortex_a15[@]}" cargo test --locked "${cargo_args[@]}" "${armv7[@]}"
+        "${no_neon[@]}" RIND_CPU_DISABLE_neon=1 cargo test --locked "${cargo_args[@]}" "${armv7[@]}"
         ;;
 esac
 
-# rind-dart's build hook runs cargo with only the environment Dart lets
-# through, which keeps PATH but drops show-env's wrapper variables, so a cargo
-# ahead of the real one on PATH restores them.
-cat > "$out/bin/cargo" <<EOF
+if [[ $tier == native ]]; then
+    # rind-dart's build hook runs cargo with only the environment Dart lets
+    # through, which keeps PATH but drops show-env's wrapper variables, so a
+    # cargo ahead of the real one on PATH restores them.
+    cat > "$out/bin/cargo" <<EOF
 #!/bin/sh
 export RUSTC_BOOTSTRAP=1
 . "$out/env.sh"
 exec "$(command -v cargo)" "\$@"
 EOF
-chmod +x "$out/bin/cargo"
-# The hook caches its build, which must be this instrumented one, and no
-# later `dart test` may reuse it.
-dart_build() {
-    rm -rf rind-dart/.dart_tool/hooks_runner rind-dart/.dart_tool/lib
-}
-dart_build
-trap dart_build EXIT
-(cd rind-dart && dart pub get && PATH="$out/bin:$PATH" dart test)
-install -m 755 rind-dart/.dart_tool/lib/librind_dart.* "$objects/"
+    chmod +x "$out/bin/cargo"
+    # The hook caches its build, which must be this instrumented one, and no
+    # later `dart test` may reuse it.
+    dart_build() {
+        rm -rf rind-dart/.dart_tool/hooks_runner rind-dart/.dart_tool/lib
+    }
+    dart_build
+    trap dart_build EXIT
+    (cd rind-dart && dart pub get && PATH="$out/bin:$PATH" dart test)
+    install -m 755 rind-dart/.dart_tool/lib/librind_dart.* "$objects/"
 
-sh/python.sh test
-install -m 755 "$target"/pyrind/site/pyrind/_rind.*.so "$objects/"
+    sh/python.sh test
+    install -m 755 "$target"/pyrind/site/pyrind/_rind.*.so "$objects/"
+fi
 
-cargo llvm-cov report $OPTIONS "$@"
+cargo llvm-cov report "${OPTIONS[@]}" "${cargo_args[@]}"
+cargo llvm-cov report "${OPTIONS[@]}" "${cargo_args[@]}" --json --output-path "$out/report.json"
+admin/coverage-gate export "$out/report.json" "$out/$host-$tier.json"
+admin/coverage-gate list "$out/$host-$tier.json"

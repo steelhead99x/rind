@@ -1,4 +1,5 @@
 import Rind.Aarch64.Blockwise
+import Rind.Aarch64.Sha256HwAsm
 import Rind.S2nSha256
 import Rind.Sha2Lemmas
 open Aeneas Aeneas.Std Result rind.spec
@@ -6,22 +7,28 @@ open Aeneas Aeneas.Std Result rind.spec
 /-!
 # SHA-256's block function with the crypto extension on aarch64
 
-rind's HOL Light proof `SHA256_HW_SUBROUTINE_CORRECT`, in
-`proofs/hol-light/aarch64/sha256_block_data_order_hw.ml` at rind's commit,
-that rind's naked function `sha256_block_data_order_hw`, as rind's build
-emits it, computes s2n-bignum's `sha256_hash_blocks`, restated as an axiom
-about the Rust wrapper `compress_hw` around it. `admin/prove` checks the HOL
-Light proof against the object code rind's release build emits, its
-instructions, relocations, and the `K256` table they read.
+rind's Lean theorem
+`rind.aarch64.sha256hw.sha256_block_data_order_hw_correct`, in
+`Rind/Aarch64/Sha256HwAsm.lean`, which the same build checks, that rind's
+naked function `sha256_block_data_order_hw`, as rind's Linux build emits it, run in
+rind's extension of pyca/verified-garbage's AArch64 model, computes
+s2n-bignum's `sha256_hash_blocks`, restated as an axiom about the Rust
+wrapper `compress_hw` around it. `admin/prove lean` checks that the program
+the theorem is about is the object code rind's Linux release build emits,
+its instructions, relocations, and the `K256` table they read; Apple's build
+assembles its own copy of the routine, `sha256_block_data_order_hw.apple.s`,
+which no check compares. `admin/prove vg` cosimulates each distinct
+instruction and branch condition against the CPU, or qemu where the CPU lacks
+the extension, but for the `adrp` and `add` the linker fills and the final
+`ret`, as it does VG's.
 
-The theorem's hypotheses hold for every call `compress_hw`'s safety contract
-allows: `state` and `blocks` are distinct allocations, neither overlapping the
-code, the table, or the 16 bytes below the stack pointer the routine saves its
-frame to; `blocks` is a whole number of blocks, at least one and, as a slice,
-fewer than 2^64; the linker places the table within the reach of the `adrp`
-that addresses it; and the ABI keeps the stack pointer 16-byte aligned. The
-restatement, and that the wrapper passes the pointers and block count the
-theorem names, are trusted.
+The theorem's precondition holds for every call `compress_hw`'s safety
+contract allows: the routine may read `blocks` and the table and read and
+write `state` and the 16 bytes below the stack pointer it saves its frame to, which
+overlap none of the others; `blocks` is a whole number of blocks, at least
+one and, as a slice, fewer than 2^64; and the ABI keeps the stack pointer
+16-byte aligned. The restatement, and that the wrapper passes the pointers
+and block count the theorem names, are trusted.
 
 `S2nSha256` proves s2n-bignum's spec FIPS 180-4's, as `Rind.HashSpec` states
 it, so the dispatch meets `Compresses` wherever the CPU has the extension.
@@ -29,9 +36,9 @@ it, so the dispatch meets `Compresses` wherever the CPU has the extension.
 
 namespace rind.aarch64
 
-/-- `SHA256_HW_SUBROUTINE_CORRECT`: for `n` blocks, at least one, whose `i`th
-block's `j`th word, read big-endian, is the `j`th word of `m i`, the state's
-eight words, read little-endian, become `sha256_hash_blocks m state n`. -/
+/-- `sha256_block_data_order_hw_correct`: for `n` blocks, at least one, the
+state's eight words, read little-endian, become `sha256_hash_blocks` of the
+blocks, each's words read big-endian, from them. -/
 @[step]
 axiom sha256_block_data_order_hw_spec (c : low.aarch64.cpu.HaveCryptoExt)
     (state : Std.Array U32 8#usize) (blocks : Slice U8)

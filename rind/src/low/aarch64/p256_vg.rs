@@ -99,7 +99,7 @@ impl P256 {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
-    use crate::test::p256_vg::{check_ecdh, check_verify};
+    use crate::test::vg_ec::{check_ecdh, check_verify};
 
     #[test]
     fn matches_wycheproof() {

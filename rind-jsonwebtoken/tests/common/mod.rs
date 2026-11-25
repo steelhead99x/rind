@@ -56,8 +56,8 @@ pub fn all() -> Vec<Key> {
         keys.push(Key::new(
             algorithm,
             "a secret",
-            EncodingKey::from_secret(secret),
-            DecodingKey::from_secret(secret),
+            EncodingKey::from_secret(secret).unwrap(),
+            DecodingKey::from_secret(secret).unwrap(),
         ));
     }
 

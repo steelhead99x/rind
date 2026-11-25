@@ -70,11 +70,11 @@ Each upstream rind changes, with where its fork is vendored and where the list o
 
 ### Cargo runs $CARGO_HOME/bin's subcommands before PATH's
 
-- **Breaks:** Cargo looks up an external subcommand such as `cargo-fmt` or `cargo-clippy` in `$CARGO_HOME/bin` before `PATH`, unless that directory is itself on `PATH` ([the Cargo book](https://doc.rust-lang.org/cargo/reference/external-tools.html#custom-subcommands)). On a host with rustup there, `cargo fmt` and `cargo clippy` inside the dev shell run rustup's default toolchain, not the flake's, while `which cargo-fmt` names the flake's. A newer rustfmt then reformats files CI's accepts, and a toolchain without a cross target's standard library fails `check cross` with `can't find crate for core`.
-- **Reproduce:** `nix develop --command cargo fmt --version` on a host whose `$CARGO_HOME/bin/cargo-fmt` is rustup's, with `$CARGO_HOME/bin` not on `PATH`, reports rustup's rustfmt; found on [#140](https://github.com/steelhead99x/rind/pull/140).
-- **Workaround:** `sh/toolchain.sh`, which `sh/dispatch.sh` runs inside the dev shell before any check, stops unless `cargo fmt --version` and `cargo clippy --version` name the build `rustc --version` does.
+- **Breaks:** Cargo looks up an external subcommand such as `cargo-fmt` or `cargo-clippy` in `$CARGO_HOME/bin` before `PATH`, unless that directory is itself on `PATH`. On a host with rustup there, `cargo fmt` and `cargo clippy` inside a dev shell run rustup's default toolchain, not the flake's, while `command -v cargo-fmt` names the flake's. A newer rustfmt then reformats files CI accepts, and a toolchain without a cross target's standard library fails clippy with `can't find crate for core`.
+- **Reproduce:** `nix develop --command cargo fmt --version` on a host whose `$CARGO_HOME/bin/cargo-fmt` is a rustup shim and whose `$CARGO_HOME/bin` is not on `PATH` reports rustup's rustfmt. GitHub's ubuntu-24.04 image puts `$HOME/.cargo/bin` on `PATH`, so CI does not hit this.
+- **Workaround:** every dev shell's hook appends `$CARGO_HOME/bin` to `PATH` when it is missing, which turns off Cargo's lookup there first and leaves the flake's tools ahead of it.
 - **Reported:** no.
-- **Goes when:** Cargo prefers `PATH`'s subcommands, or the flake's shells put an empty `$CARGO_HOME/bin` ahead of a host's.
+- **Goes when:** Cargo prefers `PATH`'s subcommands.
 
 ## Constant-time analysis
 
@@ -104,9 +104,9 @@ Each upstream rind changes, with where its fork is vendored and where the list o
 
 ### Valgrind hides the ARM crypto extension and SHA3
 
-- **Breaks:** valgrind passes `AT_HWCAP2` only to ppc64 programs (3.22 through 3.28), so the armv7 build never sees its ARMv8 crypto extension; on aarch64 it hides SHA3 and the SHA-512 instructions. ctgrind never reaches the code that uses them.
+- **Breaks:** valgrind passes `AT_HWCAP2` only to ppc64 programs (3.22 through 3.28), so the armv7 build never sees its ARMv8 crypto extension; on aarch64 it hides SHA3, the SHA-512 instructions, and DIT. ctgrind never reaches the code that uses them, and so checks aarch64 with DIT clear.
 - **Reproduce:** `getauxval(AT_HWCAP2)` is nonzero natively and zero under an armhf valgrind on an arm64 host.
-- **Workaround:** `admin/ct-qemu` and `admin/ct-qemu-plugin.c` compare qemu traces of those paths for two secrets, through the `ct_qemu` tests (`rind/src/low/arm/ct_qemu.rs`), in `ctgrind.yml`'s `armv7-qemu` and `aarch64-qemu` jobs.
+- **Workaround:** `admin/ct-qemu` and `admin/ct-qemu-plugin.c` compare qemu traces of those paths for two secrets, through the `ct_qemu` tests (`rind/src/low/arm/ct_qemu.rs`), in `ctgrind.yml`'s `armv7-qemu` and `aarch64-qemu` jobs; `enables_dit_whenever_the_os_reports_it`, whose child process runs natively and finds the DIT valgrind hides, is ignored under ctgrind.
 - **Reported:** no.
 - **Goes when:** valgrind passes `AT_HWCAP2` on ARM and runs SHA3 on aarch64.
 
@@ -151,15 +151,15 @@ Each upstream rind changes, with where its fork is vendored and where the list o
 
 ### BINSEC cannot decode much of what rind runs
 
-- **Breaks:** BINSEC 0.11.3 stops at instructions it cannot decode: on x86_64, AES-NI, VAES, and every EVEX encoding; on aarch64, the crypto extension's AES, PMULL, and SHA instructions, SHA3's, every SVE encoding, such as SVE2's `xar`, and the `msr` that sets DIT; on armv7, the NEON table lookups and the crypto extension.
+- **Breaks:** BINSEC 0.11.3 stops at instructions it cannot decode: on x86_64, AES-NI, VAES, and every EVEX encoding; on aarch64, the crypto extension's AES, PMULL, and SHA instructions, SHA3's, every SVE encoding, such as SVE2's `xar`, and the `msr` that sets DIT; on armv7, the NEON table lookups and the crypto extension. It also cannot decode x86_64's `VSHA512` instructions, which rind does not run.
 - **Workaround:** `admin/ct-binsec`'s `UNDECODED` denies those features, leaving their paths to `admin/ctgrind`, `admin/ct-sde`, and `admin/ct-qemu`, and armv7 has no `binsec` row in `ctgrind.yml`.
 - **Reported:** no.
 - **Goes when:** a BINSEC release decodes each, feature by feature.
 
 ### BINSEC cannot decode instructions `admin/ct-binsec` stubs
 
-- **Breaks:** BINSEC 0.11.3 stops with `uninterpreted` at these instructions rind's code or glibc runs: on x86_64, `stc` (`f9`), `clc` (`f8`), `movmskps` and VEX `vmovmskps`, `vinsertf128` (VEX.256 0F3A 18), `vpermpd` (VEX.256.W1 0F3A 01), `vmovshdup` (VEX F3 0F 16), `stmxcsr` and `ldmxcsr` (0F AE /3 and /2, which Intel's MXCSR mitigation runs on a CPU that needs it), and the `syscall` in glibc's `mprotect`; on aarch64, `mrs xN, tpidr_el0` (glibc's `malloc`), `tbl` with one to four table registers (8B and 16B), `cnt` (8B and 16B), and `fcsel` (s2n-bignum's narrow X25519).
-- **Reproduce:** `admin/ct-binsec` with `STUBS` emptied stops at the first one its harnesses reach, such as `stc` in `ct_binsec_ecdh_p521` on x86_64 or `tbl` in `ct_binsec_aes` on aarch64.
+- **Breaks:** BINSEC 0.11.3 stops with `uninterpreted` at these instructions rind's code or glibc runs: on x86_64, `stc` (`f9`), `clc` (`f8`), `movmskps` and VEX `vmovmskps`, `vinsertf128` (VEX.256 0F3A 18), `vpermpd` (VEX.256.W1 0F3A 01), from a register or memory, `vmovshdup` (VEX F3 0F 16), and at `opt-level = "z"` `vbroadcastf128` (VEX.256 0F38 1A) and `vextractps` to memory (VEX.128 0F3A 17), `stmxcsr` and `ldmxcsr` (0F AE /3 and /2, which Intel's MXCSR mitigation runs on a CPU that needs it), and the `syscall` in glibc's `mprotect`; on aarch64, `mrs xN, tpidr_el0` (glibc's `malloc`), `tbl` with one to four table registers (8B and 16B), `cnt` (8B and 16B), and `fcsel` (s2n-bignum's narrow X25519).
+- **Reproduce:** `admin/ct-binsec` with `STUBS` emptied stops at the first one its harnesses reach, such as `stc` in `ct_binsec_ecdh_p521` on x86_64 or `tbl` in `ct_binsec_aes` on aarch64; with `CARGO_PROFILE_RELEASE_OPT_LEVEL=z`, `vpermpd` from memory in `ct_binsec_argon2` and `vbroadcastf128` in `ct_binsec_chacha20`.
 - **Workaround:** `admin/ct-binsec`'s `STUBS` gives each its effect in BINSEC's script language, generated per encoding from objdump's disassembly of the test binary and glibc, since `replace opcode` matches exact bytes; `tbl`, a constant-time table lookup, becomes a shift of the whole table, which needs no branch, and `fcsel` becomes a flag mux into the scalar lane with the rest of the Q register zero; `stmxcsr` stores MXCSR's default, and `ldmxcsr` does nothing, since BINSEC models no floating-point state. Its script makes `mprotect` succeed without its system call.
 - **Reported:** no.
 - **Goes when:** a BINSEC release decodes them, or `replace opcode` matches an encoding by mask, so one stub covers every encoding of an instruction.
@@ -178,6 +178,14 @@ Each upstream rind changes, with where its fork is vendored and where the list o
 - **Workaround:** `admin/ct-binsec` calls `madvise(MADV_GUARD_REMOVE)` on the stack's mapping before dumping.
 - **Reported:** no.
 - **Goes when:** gdb's core dumps skip or read through guard regions.
+
+### BINSEC stalls on s2n-bignum's P-384 arithmetic of a hashed value
+
+- **Breaks:** BINSEC 0.11.3 visits under 20,000 instructions in 480 s once s2n-bignum's x86_64 `bignum_tomont_p384` takes a field element hashed from a secret, as the VOPRF client's hash to the curve does, and likewise `bignum_modsub` on a scalar hashed from secret points. It sends the solver no query: the hash's term is too large to build on.
+- **Reproduce:** `admin/ct-binsec --timeout 60 ct_binsec_voprf_client` on x86_64 with the harness's `cfg` removed.
+- **Workaround:** the VOPRF server declassifies its proof's challenge, which the proof publishes anyway, before it computes `s`; `ct_binsec_voprf_client` runs only on the portable backend, whose hash to the curve is the same code over fiat-crypto's arithmetic.
+- **Reported:** no.
+- **Goes when:** BINSEC builds those terms without the stall; the client harness may then run on every backend.
 
 ### BINSEC stalls on some ML-KEM ciphertexts
 
@@ -203,14 +211,6 @@ Each upstream rind changes, with where its fork is vendored and where the list o
 - **Workaround:** `admin/prove` renames the second to `markerCopyInst1` with `sed`.
 - **Reported:** no.
 - **Goes when:** Aeneas names the clauses apart.
-
-### Charon panics on HACL*'s unrolled SHA-2
-
-- **Breaks:** libcrux-macros' `unroll_for!` unrolls the 64 or 80 rounds of libcrux-sha2's `sha256_update_nblocks` and `sha512_update_nblocks` into one body whose blocks nest past Charon's fixed `MAX_STACK_DEPTH` of 1024, and Charon panics rebuilding its control flow.
-- **Reproduce:** add `--include 'libcrux_sha2::hacl::sha256_update_nblocks' --extract-opaque-bodies` to `admin/prove`'s portable pass and run `admin/prove lean`: Charon panics with "stack depth limit exceeded" in `transform/control_flow/ullbc_to_llbc.rs` translating `sha256_update`.
-- **Workaround:** the portable pass leaves both functions opaque, as Charon leaves other crates' bodies, and `proofs/Rind/Portable/Hacl.lean` states each as an axiom restating HACL*'s F* theorem about it. Found in [kixel-ai/rind#649](https://github.com/kixel-ai/rind/pull/649).
-- **Reported:** not yet; filing is approved, and [its quest](/quest/m4/verified/hacl-sha2-lean.md) holds the draft issue awaiting the maintainer's approval of its text.
-- **Goes when:** Charon translates both, and that quest proves them in Lean.
 
 ### Lean cannot compile P-384's comb as one literal
 

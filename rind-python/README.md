@@ -122,7 +122,9 @@ the GIL while they run.
 
 pyrind wipes keys and keyed state when Python frees them, as rind does.
 Nothing wipes the `bytes` a key was loaded from or exported to;
-Python owns those.
+Python owns those. A key, seed, or password passed as another buffer, such
+as a `bytearray` you wipe yourself, is copied for the call, and pyrind wipes
+that copy before the call returns.
 
 ## Platforms
 
@@ -130,8 +132,10 @@ Wheels cover CPython 3.11 and later through the stable ABI, on Linux (glibc
 2.17 and later on x86_64, aarch64, and armv7; musl on x86_64 and aarch64),
 macOS on x86_64 and Apple silicon, and Windows on x86_64 and aarch64. PyPy,
 free-threaded CPython, and other platforms build the sdist, which needs a
-Rust toolchain. rind runs only on x86_64, aarch64, and 32-bit arm, so other
-architectures fail to build; there is no pure-Python fallback.
+Rust toolchain. On an architecture rind has no assembly for, such as
+riscv64 or s390x, that build runs rind's portable Rust backend
+([PLATFORMS.md](https://github.com/kixel-ai/rind/blob/main/PLATFORMS.md));
+there is no pure-Python fallback.
 
 ## License
 

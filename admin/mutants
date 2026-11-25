@@ -22,8 +22,9 @@
 #
 # No campaign runs armv7's own code or the AVX-512 paths: no runner takes
 # them natively, and under qemu or Intel SDE a campaign took too long for
-# what it found. Nor does one run the DIT code only Apple's cores run, which
-# .cargo/mutants.toml excludes. The x86_64 campaign skips the files only
+# what it found. Nor does one run the DIT code, since the aarch64 runner's
+# hypervisor hides DIT; .cargo/mutants.toml excludes it. The x86_64 campaign
+# skips the files only
 # AVX-512 runs, and .cargo/mutants.toml excludes the rest of both.
 #
 # cargo-mutants mutates code whatever its `cfg`, so a function only another
@@ -551,7 +552,6 @@ case $campaign in
             rind/src/low/generic/mlkem_sample.rs
             rind/src/low/x86_64/mlkem_sample_poly_ntt_8x.rs
             rind/src/low/x86_64/mlkem_shake256_8x.rs
-            rind/src/low/x86_64/poly1305_ifma.rs
             rind/src/low/x86_64/rsaz_avx512.rs
         )
         rows=(
@@ -579,12 +579,11 @@ case $campaign in
         # RUSTFLAGS from its build scripts.
         export CARGO_BUILD_TARGET=x86_64-unknown-linux-gnu
         export RUSTFLAGS='--cfg rind_portable --cfg curve25519_dalek_backend="serial"'
-        # The assembly backends, SHA-256 that only armv7 and x86_64's tests
-        # compile, and the 32-bit limbs a 64-bit target doesn't, which the
-        # x86_64 campaign's tests reach.
+        # The assembly backends, and the 32-bit limbs a 64-bit target
+        # doesn't, which the x86_64 campaign's tests reach.
         skip=(
             'rind/src/low/x86_64/**' 'rind/src/low/aarch64/**' 'rind/src/low/arm/**'
-            rind/src/low/generic/sha256.rs rind/src/low/generic/limb32.rs
+            rind/src/low/generic/limb32.rs
             rind/src/low/generic/p256_mul32.rs rind/src/low/generic/p384_mul32.rs
         )
         rows=()

@@ -12,12 +12,9 @@ set -euo pipefail
 AWS_LC=5ed12cce0fd4453f2f63300d44325ed14f845d6f
 BORINGSSL=8f2554dc344d403fd6d628773d39637c323eb801
 # RFC 9180's repository. hpkewg/hpke's revision of it repeats these vectors
-# unchanged.
+# unchanged; its edge-case appendix, Markdown only, is copied by hand into
+# rind/src/high/hpke.rs's tests.
 HPKE=b1f7cb0cdeab6906c61b3d6574e8bdfdbe1cd3fb
-# hpkewg/hpke, the IETF revision of RFC 9180, whose draft adds an appendix of
-# edge-case vectors in Markdown only: "Fix #65: add edge-case test vectors
-# (#70)", 2026-06-29.
-HPKE_DRAFT=e298f94876da71ea0fe607f365c801061bee1a30
 # RFC 9380's repository, whose `poc/vectors` are its Appendix J and K.
 HASH_TO_CURVE=664b13592116cecc9e52fb192dcde0ade36f904e
 # blind-rsa-signatures 0.18.0, whose JSON holds all four of RFC 9474's
@@ -48,6 +45,7 @@ aws_lc_files=(
     crypto/fipsmodule/bn/test/miller_rabin_tests.txt
     crypto/fipsmodule/bn/test/mod_exp_tests.txt
     crypto/fipsmodule/bn/test/mod_exp_x2_tests.txt
+    crypto/fipsmodule/bn/test/mod_inv_tests.txt
     crypto/fipsmodule/bn/test/mod_mul_tests.txt
     crypto/fipsmodule/curve25519/ed25519_tests.txt
     crypto/fipsmodule/ec/ec_scalar_base_mult_tests.txt
@@ -294,11 +292,6 @@ stage rfc9180
 curl --fail --silent --show-error --location \
     "https://raw.githubusercontent.com/cfrg/draft-irtf-cfrg-hpke/$HPKE/test-vectors.json" |
     jq -c '.[] | select(.mode == 0 and .kem_id != 33)' >rfc9180.new/test-vectors.json
-# The edge-case appendix, the draft's last section, as published.
-curl --fail --silent --show-error --location \
-    "https://raw.githubusercontent.com/hpkewg/hpke/$HPKE_DRAFT/draft-ietf-hpke-hpke.md" |
-    sed -n '/^# Edge-Case Test Vectors$/,$p' >rfc9180.new/edge-cases.md
-test -s rfc9180.new/edge-cases.md
 swap rfc9180
 
 # The suites rind offers and the expand_message_xmd vectors, renamed without

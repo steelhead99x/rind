@@ -28,6 +28,7 @@ use crate::mid::rng::{RandomSource, SystemRandom};
 use crate::mid::sha3::{
     SHAKE_128_R_BYTES, SHAKE_256_R_BYTES, Shake128x4, Shake256, Shake256Sponge, Shake256x4,
 };
+use crate::mid::util::Array;
 
 const N: usize = 256;
 const Q: i32 = 8380417;
@@ -144,30 +145,6 @@ pub trait Params: fmt::Debug + Send + Sync + Unpin + UnwindSafe + RefUnwindSafe 
 #[derive(Clone, Copy)]
 pub struct Internal(());
 
-/// A byte array of a parameter set's length.
-pub trait Array:
-    Clone
-    + fmt::Debug
-    + AsRef<[u8]>
-    + AsMut<[u8]>
-    + Send
-    + Sync
-    + Unpin
-    + UnwindSafe
-    + RefUnwindSafe
-    + 'static
-{
-    /// Every byte zero.
-    #[doc(hidden)]
-    fn zeroed() -> Self;
-}
-
-impl<const LEN: usize> Array for [u8; LEN] {
-    fn zeroed() -> Self {
-        [0; LEN]
-    }
-}
-
 macro_rules! params {
     ($(
         $set:ident: K = $k:literal, L = $l:literal, ETA = $eta:literal, TAU = $tau:literal,
@@ -269,9 +246,8 @@ pub(crate) struct KeyPair<P: Params> {
     seed: Option<[u8; SEED_LEN]>,
     secret_key: P::SecretKey,
     /// `A`, then `s1`, `s2`, and `t0`, all in the NTT domain. The drop
-    /// frees it before the wipe, and no drop glue runs after: `Polys`'s
-    /// own drop would write `None` over the wiped value, whose other word
-    /// the compiler may fill with the freed pointer.
+    /// frees it before wiping the whole value, and `ManuallyDrop` keeps
+    /// drop glue from running after, so the wipe is the last write.
     expanded: ManuallyDrop<Polys>,
 }
 
@@ -599,8 +575,13 @@ impl Polys {
 }
 
 impl Drop for Polys {
+    /// Wipes in place and lets the `Box`'s drop glue free, which only reads
+    /// `self`: writing `None` back could put a non-zero word over a value
+    /// its owner has already wiped.
     fn drop(&mut self) {
-        self.free();
+        if let Some(polys) = self.0.as_deref_mut() {
+            low::zeroise(polys);
+        }
     }
 }
 
@@ -1401,6 +1382,7 @@ fn pack_w1<P: Params>(r: &mut [u8], a: &Poly) {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
     use crate::test::{Acvp, Expected, acvp, wycheproof_groups};

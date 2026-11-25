@@ -1,5 +1,8 @@
-//! The one serialization type aws-lc-rs's API returns: a positive integer,
-//! as an RSA public key's modulus and exponent are given.
+//! aws-lc-rs's DER reader and the positive integer it reads, as an RSA
+//! public key's modulus and exponent are given too.
+
+#[doc(hidden)]
+pub mod der;
 
 /// A big-endian positive integer, without leading zero bytes.
 #[derive(Copy, Clone)]

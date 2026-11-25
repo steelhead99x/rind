@@ -1271,9 +1271,17 @@ fn sample_poly_cbd2<'a>(
         // `sample_ntt`. Where that would run, ML-KEM-768 runs
         // pyca/verified-garbage's routines instead.
         let mut samples = [[0; 128]; 8];
+        // Only x86_64 has an eight-way PRF, so elsewhere the fours run all
+        // of it.
+        #[cfg(rind_backend = "x86_64")]
         match (k, count) {
             (3, _) | (_, 1..=4) => shake256_fours(&bufs, &mut samples, count),
             _ => low::mlkem_shake256_8x(&bufs, &mut samples, count, shake256_fours),
+        }
+        #[cfg(not(rind_backend = "x86_64"))]
+        {
+            let _ = k;
+            shake256_fours(&bufs, &mut samples, count);
         }
 
         for (sample, poly) in samples.iter().zip(batch.into_iter().flatten()) {
@@ -1372,6 +1380,7 @@ const Q_HALF: i16 = (Q + 1) / 2;
 const N: usize = 256;
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
     use crate::test::{Acvp, acvp};

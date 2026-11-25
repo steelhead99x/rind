@@ -344,6 +344,8 @@ static STATE: Shared = Shared(UnsafeCell::new(State::CANARIES));
 
 /// Holds the lock every checked call runs under, so a test can fork with no
 /// other thread inside one: the child would inherit the lock held forever.
+/// Only `fips_rng`'s test forks, which builds with every algorithm.
+#[cfg(all(feature = "ml-dsa", feature = "slh-dsa"))]
 pub(crate) fn hold() -> std::sync::MutexGuard<'static, ()> {
     LOCK.lock().unwrap_or_else(PoisonError::into_inner)
 }
@@ -361,7 +363,7 @@ fn run(conv: Convention, f: Word, words: &Words, name: &str) -> Word {
         }
     };
 
-    let mut broken = State::canaries().changed(&after, conv);
+    let mut broken = State::canaries().changed(&after, conv, name);
     if after.sp_after != after.sp_before {
         broken.push(format!(
             "the stack pointer: {:#x} before, {:#x} after",
@@ -478,7 +480,7 @@ mod arch {
             s
         };
 
-        pub(super) fn changed(&self, after: &Self, conv: Convention) -> Vec<String> {
+        pub(super) fn changed(&self, after: &Self, conv: Convention, _: &str) -> Vec<String> {
             let mut broken = Vec::new();
             match conv {
                 Convention::SysV => compare(&mut broken, &GPR[..6], &self.gpr, &after.gpr),
@@ -731,10 +733,10 @@ mod arch {
             s
         };
 
-        pub(super) fn changed(&self, after: &Self, _: Convention) -> Vec<String> {
+        pub(super) fn changed(&self, after: &Self, _: Convention, name: &str) -> Vec<String> {
             let mut broken = Vec::new();
             compare(&mut broken, &X, &self.x, &after.x);
-            if X18_CANARY {
+            if X18_CANARY && !COMPILED.contains(&name) {
                 compare(&mut broken, &["x18"], &[self.x18], &[after.x18]);
             }
             compare(&mut broken, &D, &self.d, &after.d);
@@ -745,6 +747,11 @@ mod arch {
     /// Only Linux lets the trampoline write x18; elsewhere it holds the
     /// thread's TEB, the shadow call stack, or what the kernel puts there.
     const X18_CANARY: bool = cfg!(target_os = "linux");
+
+    /// The harness's own tests' plain Rust functions, whose compiled code
+    /// Linux lets use x18, as rustc's does under AddressSanitizer. The x18
+    /// rule is for rind's assembly, which no compiler checks.
+    const COMPILED: &[&str] = &["c_words", "rust_words"];
 
     pub(super) type Trampoline = unsafe extern "C" fn(Word, *const Word, Word) -> Word;
 
@@ -869,6 +876,7 @@ mod arch {
 mod arch;
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
 
     /// Runs `f` and returns its panic message, failing if it did not panic.

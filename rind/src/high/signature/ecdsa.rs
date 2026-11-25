@@ -314,6 +314,7 @@ impl fmt::Debug for VerificationAlgorithm {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))] // const-evaluated only
 const fn ecdsa_verification(
     curve: CurveId,
     hash: HashId,

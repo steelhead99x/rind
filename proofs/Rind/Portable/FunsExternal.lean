@@ -9,20 +9,20 @@ set_option linter.dupNamespace false
 /-!
 The functions the portable translation leaves opaque, beside the compares
 `Rind.Portable.Compare` models. No proof assumes anything about them beyond
-what `Rind.Portable.Hacl` states for HACL*'s SHA-2 block functions and what
-each theorem takes as a hypothesis.
+what each theorem takes as a hypothesis.
 -/
 
 namespace rind.portable
 
-/-! HACL*'s SHA-2 block functions, as libcrux-sha2 ships them, which Charon
-cannot translate. -/
+/-! The SHA-256 and SHA-512 block functions, whose contracts
+`Rind.Portable.ShaBlocks` and `Rind.Portable.Sha512Entry` state as
+hypotheses. -/
 
-opaque libcrux_sha2.hacl.sha256_update_nblocks
-  : Std.U32 → Slice Std.U8 → Slice Std.U32 → Result (Slice Std.U32)
+opaque low.generic.sha256.sha256_compress_blocks
+  : Array Std.U32 8#usize → Slice Std.U8 → Result (Array Std.U32 8#usize)
 
-opaque libcrux_sha2.hacl.sha512_update_nblocks
-  : Std.U32 → Slice Std.U8 → Slice Std.U64 → Result (Slice Std.U64)
+opaque low.generic.sha512.sha512_compress_blocks
+  : Array Std.U64 8#usize → Slice Std.U8 → Result (Array Std.U64 8#usize)
 
 /-! SHA-1's block function, whose contract `Rind.Portable.ShaBlocks` states as
 a hypothesis. -/

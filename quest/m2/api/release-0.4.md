@@ -24,17 +24,16 @@ Before the release PR merges, check what it proposes:
 - The README's `rind` requirement (`rind = "0.3"`) reads 0.4, since its examples use the 0.4 API from `main`.
 - No breaking version for an adapter from the rind 0.4 requirement alone: its API did not change, so set its patch version by hand if release-plz proposes one.
 - No first version of rind-openmls. It is new ([kixel-ai/rind#645](https://github.com/kixel-ai/rind/pull/645)) and uses `rind::hpke`, which 0.3.2 lacks, so it cannot be published by hand before rind 0.4.0, as `CONTRIBUTING.md`'s Releases section asks of a new crate, and trusted publishing cannot create it: in the release, it would fail after rind publishes. A dry run of `cargo publish -p rind-openmls` from `main` on 2026-11-12 failed on that import.
+- rind-rand-core 0.10.1, requiring rind 0.4.0: its 0.10.0 is on crates.io, built against rind 0.3.2.
 
 Decided 2026-11-12 (maintainer, rust2's /quest-unblock): keep rind-openmls out of the release ✅. Before the release PR merges, a PR sets `release = false` for it in `.release-plz.toml`. Once 0.4.0 is on crates.io, the maintainer publishes rind-openmls by hand from `main` with their own `cargo login`, adds its trusted publisher and turns on "require trusted publishing", and a PR removes the exclusion (rejected: merging the release and publishing rind-openmls by hand after its job fails, which leaves the release partial).
 
+Decided 2026-11-23 (maintainer, /quest-run): ✅ publish rind-rand-core 0.10.0 by hand from main before the release, since it builds against rind 0.3.2, so the release ships it as a patch on rind 0.4 (rejected: release = false like rind-openmls, publishing by hand after 0.4.0). The maintainer published it from `main` at 1072fa4f7 the same day, added its trusted publisher for `release.yml` and the `publish` environment, and turned on "require trusted publishing".
+
 Each change documents its own migration in MIGRATING.md, so this quest adds none. Delete it once 0.4.0 is published.
 
-The benchmark report is refreshed once before each minor release (maintainer, 2026-11-09), so this quest requires that run. Whoever plans the next minor release's quest creates the next run at the same path, from the last one in git history, and requires it.
+The benchmark report is refreshed once before each minor release (maintainer, 2026-11-09), so this quest requires that run. The first ran in [kixel-ai/rind#619](https://github.com/kixel-ai/rind/pull/619); a second, decided 2026-11-21 in [kixel-ai/rind#949](https://github.com/kixel-ai/rind/pull/949), measures what 0.4 ships. Whoever plans the next minor release's quest creates the next run at the same path, from the last one in git history, and requires it.
 
 ## Waiting
 
 - Maintainer: leave the release PR, [kixel-ai/rind#511](https://github.com/kixel-ai/rind/pull/511) or whichever replaces it, unmerged until every quest under `Required` is on `main` and MoQ's PR is ready, then merge it once `just release-check` passes at its head. An agent cannot: a release PR merges on the maintainer's approval (`CONTRIBUTING.md`'s Reviews section), and leaving rind alone out of the release (`release = false`) would not hold it, since every adapter's fix requires rind 0.4, which is why the hold is the unmerged PR. Check: `cargo search rind` shows 0.4.0.
-
-## Required
-
-- [Benchmark report refresh, before rind 0.4](/quest/m2/bench/report-refresh.md) - the report and the README's claims, current for the release

@@ -24,6 +24,7 @@ fn prove(c: &mut Criterion) {
         group.throughput(Throughput::Elements(1));
 
         group.bench_function("rind", |b| {
+            let _dit = criterion::rind_dit();
             use rind::vrf::{ECVRF_EDWARDS25519_SHA512_TAI, KeyPair};
             let key = KeyPair::from_seed(&ECVRF_EDWARDS25519_SHA512_TAI, &SEED).unwrap();
             b.iter(|| black_box(key.prove(ALPHA).unwrap()));
@@ -47,6 +48,7 @@ fn prove(c: &mut Criterion) {
     group.throughput(Throughput::Elements(1));
 
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         use rind::vrf::{ECVRF_P256_SHA256_TAI, KeyPair};
         let key = KeyPair::from_seed(&ECVRF_P256_SHA256_TAI, &SEED).unwrap();
         b.iter(|| black_box(key.prove(ALPHA).unwrap()));
@@ -116,6 +118,7 @@ fn verify(c: &mut Criterion) {
         group.throughput(Throughput::Elements(1));
 
         group.bench_function("rind", |b| {
+            let _dit = criterion::rind_dit();
             use rind::vrf::{ECVRF_EDWARDS25519_SHA512_TAI, KeyPair, PublicKey};
             let key = KeyPair::from_seed(&ECVRF_EDWARDS25519_SHA512_TAI, &SEED).unwrap();
             let (proof, _) = key.prove(ALPHA).unwrap();
@@ -146,6 +149,7 @@ fn verify(c: &mut Criterion) {
     group.throughput(Throughput::Elements(1));
 
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         use rind::vrf::{ECVRF_P256_SHA256_TAI, KeyPair, PublicKey};
         let key = KeyPair::from_seed(&ECVRF_P256_SHA256_TAI, &SEED).unwrap();
         let (proof, _) = key.prove(ALPHA).unwrap();

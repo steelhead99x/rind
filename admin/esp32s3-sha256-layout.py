@@ -22,12 +22,17 @@ K_SECTION = ".dram1.rind_sha256_k"
 BLOCK_SECTION = ".iram1.rind_sha256_compress_block"
 DRIVER_SECTION = ".iram1.rind_sha256_nblocks"
 CALL = re.compile(r"\bcallx?(?:0|4|8|12)\b")
-INSN = re.compile(
-    r"^\s*([0-9a-fA-F]+):\s+[0-9a-fA-F ]+\s+([a-z][a-z0-9.]*)\b(.*)$"
-)
+# GNU objdump separates the address, the bytes, and the mnemonic with tabs.
+# Splitting on them keeps a mnemonic made of hex letters, such as `add`,
+# out of the bytes column.
+INSN = re.compile(r"^\s*([0-9a-fA-F]+):\t[0-9a-fA-F ]+\t([a-z][a-z0-9.]*)\b(.*)$")
 # FIPS 180-4 SHA-256 rotate distances. 8 is the byte swap, not a rotate.
 ROTATE_SAR = {2, 6, 7, 11, 13, 17, 18, 19, 22, 25}
 REG_NAME = re.compile(r"\b[a-zA-Z]+[0-9]+\b")
+# ESP32-S3 internal SRAM on the instruction and data buses (TRM, "System
+# and Memory"). Code and data here stay reachable with the flash cache off.
+IRAM = (0x40370000, 0x403E0000)
+DRAM = (0x3FC88000, 0x3FD00000)
 
 
 class Fail(Exception):
@@ -81,11 +86,18 @@ def symbols(objdump, path):
 
 def pick(syms, needle):
     # Section symbols are named after the section, so `.iram1...compress_block`
-    # contains the function's name. The function or object does not.
-    hits = [item for item in syms.items() if needle in item[0] and not item[0].startswith(".")]
+    # contains the function's name. The function or object does not. Match the
+    # whole identifier: `sha256_compress_blocks`, the portable function, is a
+    # different one and linking may keep both. Legacy (`_ZN...E`) and v0 (`_R...`)
+    # mangling both length-prefix each path component (`21sha256_compress_block`),
+    # so the prefix plus the name pins the identifier, and `22sha256_compress_blocks`
+    # never contains it. Walking the prefixes from the start is wrong for v0: its
+    # base62 crate disambiguator holds digits that read as a length.
+    tag = f"{len(needle)}{needle}"
+    hits = [item for item in syms.items() if (item[0] == needle or tag in item[0]) and not item[0].startswith(".")]
     if len(hits) != 1:
         names = ", ".join(name for name, _ in hits) or "(none)"
-        raise Fail(f"expected one symbol containing {needle}, found {names}")
+        raise Fail(f"expected one symbol named {needle}, found {names}")
     return hits[0]
 
 
@@ -153,10 +165,12 @@ def check_ssai(insns):
     """Every ssai is a FIPS rotate or the big-endian byte swap.
 
     A rotate is `ssai` of 2, 6, 7, 11, 13, 17, 18, 19, 22, or 25, then
-    `src`. The byte swap is `l32i`, `ssai 8`, `srli` or `extui` by 16,
+    `src`. The byte swap is `l32i`, `ssai 8`, `extui` of bits 16..32,
     then three `src`. Pairing alone would accept `ssai 12` or an `src`
-    that consumes an older SAR.
+    that consumes an older SAR, so every `src` must also belong to one of
+    those two sequences.
     """
+    consumed = set()
     i = 0
     while i < len(insns):
         _addr, mnem, rest = insns[i]
@@ -170,24 +184,28 @@ def check_ssai(insns):
         window = insns[i + 1 : i + 5]
         mnems = [item[1] for item in window]
         if n in ROTATE_SAR and mnems[:1] == ["src"]:
+            consumed.add(i + 1)
             i += 2
             continue
-        # The byte swap's `srli` by 16 is the same extract the Xtensa
-        # backend prints as `extui`. Neither reads SAR.
+        # The byte swap's `extui` does not read SAR.
         shift = immediates(window[0][2]) if window else []
         if (
             n == 8
             and i > 0
             and insns[i - 1][1] == "l32i"
             and len(mnems) >= 4
-            and mnems[0] in ("srli", "extui")
-            and 16 in shift
+            and mnems[0] == "extui"
+            and shift == [16, 16]
             and mnems[1:4] == ["src", "src", "src"]
         ):
+            consumed.update((i + 2, i + 3, i + 4))
             i += 5
             continue
         shown = " ".join(f"{item[1]} {item[2]}".strip() for item in insns[max(0, i - 1) : i + 5])
         raise Fail(f"ssai {n} is not a FIPS rotate or the byte swap: {shown}")
+    for index, (addr, mnem, rest) in enumerate(insns):
+        if mnem == "src" and index not in consumed:
+            raise Fail(f"src at {addr:#x} {rest} does not follow its own ssai")
     return None
 
 
@@ -197,11 +215,24 @@ def check_no_calls(insns, what):
             raise Fail(f"{what} contains {mnem} at {addr:#x} {rest}")
 
 
-def l32r_address(insns, call_index):
-    """Address in the comment of the l32r that feeds this call, if printed."""
-    for addr, mnem, rest in reversed(insns[:call_index]):
-        if mnem != "l32r":
+# Mnemonics whose first register operand is read, not written.
+NO_DEST = re.compile(r"^(?:s(?:8|16|32)\w*|b\w*)(?:\.n)?$")
+
+
+def l32r_address(insns, call_index, reg):
+    """Address in the comment of the l32r that defines `reg` for this call.
+
+    The nearest earlier instruction that writes `reg` must be an `l32r`
+    with a printed address; any other writer, or none, is unresolved.
+    """
+    for _addr, mnem, rest in reversed(insns[:call_index]):
+        if NO_DEST.match(mnem):
             continue
+        regs = re.findall(r"\ba\d+\b", rest)
+        if not regs or regs[0] != reg:
+            continue
+        if mnem != "l32r":
+            return None
         # `l32r a6, ADDR <sym>` or `l32r a6, off <lit> (ADDR <sym>)`.
         paren = re.search(r"\(([0-9a-fA-F]+)\b", rest)
         if paren:
@@ -213,8 +244,8 @@ def l32r_address(insns, call_index):
     return None
 
 
-def check_driver_calls(insns, block_addr, block_size, linked):
-    """The driver may call only the block.
+def check_driver_calls(insns, block_addr, linked):
+    """The driver may call only the block, at its entry point.
 
     On an object the call is `callx8` through a literal. The relocation
     check is what proves that literal is the block; the address in the
@@ -228,21 +259,19 @@ def check_driver_calls(insns, block_addr, block_size, linked):
         if mnem.startswith("callx"):
             if not linked:
                 continue
-            target = l32r_address(insns, i)
+            operand = re.findall(r"\ba\d+\b", rest)
+            target = l32r_address(insns, i, operand[0]) if operand else None
             if target is None:
-                raise Fail(f"driver {mnem} at {addr:#x} has no resolved literal")
-            if not covers(block_addr, block_size, target):
-                raise Fail(f"driver calls {target:#x}, outside the block")
+                raise Fail(f"driver {mnem} at {addr:#x} {rest} has no resolved literal")
+            if target != block_addr:
+                raise Fail(f"driver calls {target:#x}, not the block's entry {block_addr:#x}")
             continue
         match = re.search(r"([0-9a-fA-F]{6,})", rest)
-        if match is None or not covers(block_addr, block_size, int(match.group(1), 16)):
+        if match is None or int(match.group(1), 16) != block_addr:
             raise Fail(f"driver {mnem} at {addr:#x} is not the block: {rest}")
     if not saw:
         raise Fail("driver makes no call, so the block is not reached")
 
-
-def covers(start, size, addr):
-    return start <= addr < start + size
 
 
 def expect_placed_object(objdump, readelf, path):
@@ -302,7 +331,7 @@ def expect_placed_object(objdump, readelf, path):
     block_insns = disassemble(objdump, path, baddr, bsize, bsec)
     check_no_calls(block_insns, "block")
     check_ssai(block_insns)
-    check_driver_calls(disassemble(objdump, path, daddr, dsize, dsec), baddr, bsize, linked=False)
+    check_driver_calls(disassemble(objdump, path, daddr, dsize, dsec), baddr, linked=False)
     report_object(secs, len(block_insns))
 
 
@@ -384,6 +413,15 @@ def expect_image(objdump, path, map_path):
     b_out = section_at(outputs, baddr) or bsec
     d_out = section_at(outputs, daddr) or dsec
     k_out = section_at(outputs, kaddr) or ksec
+    # Addresses, not only names: an output named for IRAM could still be
+    # linked at a flash address.
+    for label, addr, size, (lo, hi) in (
+        ("block", baddr, bsize, IRAM),
+        ("driver", daddr, dsize, IRAM),
+        ("K", kaddr, ksize, DRAM),
+    ):
+        if size <= 0 or not (lo <= addr and addr + size <= hi):
+            raise Fail(f"{label} {addr:#x}+{size:#x} is outside internal RAM {lo:#x}..{hi:#x}")
     for label, out in (("block", b_out), ("driver", d_out)):
         if "iram" not in out:
             raise Fail(f"{label} is in {out}, not IRAM")
@@ -409,7 +447,7 @@ def expect_image(objdump, path, map_path):
     block_insns = disassemble(objdump, path, baddr, bsize, b_out)
     check_no_calls(block_insns, "block")
     check_ssai(block_insns)
-    check_driver_calls(disassemble(objdump, path, daddr, dsize, d_out), baddr, bsize, linked=True)
+    check_driver_calls(disassemble(objdump, path, daddr, dsize, d_out), baddr, linked=True)
     # A leftover static relocation into flash text would still name that section.
     text = run([objdump, "-r", path])
     for line in text.splitlines():
@@ -426,9 +464,48 @@ def expect_image(objdump, path, map_path):
     print(f"  block instructions {len(block_insns)}, no calls, ssai paired")
 
 
+# Real symbol names from rustc 1.98.1 (`-C symbol-mangling-version=v0` and
+# `legacy`, crate `rind`, module `low::portable::sha256_iram`, one build per
+# `-C metadata`). The v0 crate hashes with digits are the ones a greedy
+# length-prefix walk misread.
+V0 = "_RNvNtNtNtCs{}_4rind3low8portable11sha256_iram{}"
+LEGACY = "_ZN4rind3low8portable11sha256_iram{}17h{}E"
+V0_HASHES = ["1paxuMSCu6r", "30zkQqDHX6G", "51p7yVGAJlh", "600rUf00GRX", "70sRogeUpn8", "79wRi01wFOF"]
+LEGACY_HASHES = ["07d5edefbe545dc7", "0c48ecaf86fb867b", "131de65c6f72ccff"]
+
+
+def selftest():
+    """Check `pick` on real v0 and legacy names, with the portable `blocks` function beside."""
+    wanted = {BLOCK: "21" + BLOCK, DRIVER: "21" + DRIVER, "sha256_k": "8sha256_k"}
+    for needle, ident in wanted.items():
+        for crate in V0_HASHES:
+            names = [V0.format(crate, ident), V0.format(crate, "22sha256_compress_blocks"), V0.format(crate, "21sha256_update_nblocks")]
+            syms = {n: (0, 0, ".text") for n in names + [".iram1." + needle, "core3fmt5write"]}
+            got = pick(syms, needle)[0]
+            assert got == V0.format(crate, ident), (needle, crate, got)
+        for h in LEGACY_HASHES:
+            syms = {LEGACY.format(ident, h): (0, 0, ".text"), LEGACY.format("22sha256_compress_blocks", h): (0, 0, ".text")}
+            assert pick(syms, needle)[0] == LEGACY.format(ident, h), (needle, h)
+    # The portable `blocks` function alone is not the block, and two builds are ambiguous.
+    for syms in (
+        {V0.format("1paxuMSCu6r", "22sha256_compress_blocks"): (0, 0, ".text")},
+        {V0.format("1paxuMSCu6r", "21" + BLOCK): (0, 0, ".text"), V0.format("30zkQqDHX6G", "21" + BLOCK): (0, 0, ".text")},
+    ):
+        try:
+            pick(syms, BLOCK)
+        except Fail:
+            continue
+        raise AssertionError("pick accepted a missing or ambiguous symbol")
+    print("esp32s3-sha256-layout: selftest ok")
+
+
 def main(argv):
+    if argv == ["selftest"]:
+        selftest()
+        return 0
     if len(argv) < 2 or argv[0] not in ("object", "image"):
         raise SystemExit(
+            "usage: esp32s3-sha256-layout.py selftest\n"
             "usage: esp32s3-sha256-layout.py object OBJDUMP READELF PATH placed|ordinary\n"
             "       esp32s3-sha256-layout.py image OBJDUMP PATH MAP"
         )

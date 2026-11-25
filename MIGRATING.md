@@ -18,7 +18,7 @@ renames [rind-aws-lc-rs](#rind-aws-lc-rs) to `aws-lc-rs` the same way.
 | An allocated `Document`, `Vec`, or `Box` output | an owned value of fixed capacity, such as `encoding::Pkcs8` |
 | `error::Unspecified`, `error::KeyRejected` | `rind::Error`, by kind of call (see [error](#error)) |
 | One `signature` module for every algorithm | a module for each: [ecdsa](#ecdsa), [ed25519](#ed25519), [ml_dsa](#ml_dsa), [rsa](#rsa), and [slh_dsa](#slh_dsa) (see [signature](#signature)) |
-| aws-lc-rs wipes keys and keyed state on drop; ring doesn't | rind wipes them too, always |
+| aws-lc-rs wipes keys and keyed state on drop; ring doesn't | rind wipes them too, always, and its `zeroize` feature marks each such type `zeroize::ZeroizeOnDrop` |
 
 ## digest
 
@@ -43,7 +43,8 @@ renames [rind-aws-lc-rs](#rind-aws-lc-rs) to `aws-lc-rs` the same way.
 | `Key::new(HMAC_SHA256, key)` | `Key::new(&HMAC_SHA256, key)` |
 | `Key::generate(alg, rng)` | `rand::fill` a `tag_len()`-byte key, then `Key::new` |
 | `Key::algorithm()` | the same, as `&'static` |
-| `Context::{with_key, update, sign}`, `sign`, `Tag` | the same |
+| `Context::{with_key, update}`, `sign`, `Tag` | the same |
+| `Context::sign(self)` | `Context::sign(&mut self)`, which leaves the context keyed to sign another message; bind the context `mut` |
 | `verify(key, data, tag)` | the same, failing with `Error::BadSignature` |
 | `HMAC_SHA256`, `HMAC_SHA384`, `HMAC_SHA512` | the same |
 | `HMAC_SHA1_FOR_LEGACY_USE_ONLY` | `legacy::HMAC_SHA1` |
@@ -185,6 +186,8 @@ A key's type names its algorithm, so a key of one cannot reach a call of
 another, and a program links only the algorithms it names. A protocol that
 picks the algorithm at run time, as TLS and JWS do, holds an enum of the
 modules' public keys, as [rind-rustls](rind-rustls/src/verify.rs) does.
+A PKCS#8 private key of unknown type loads in one call, `rind::KeyPair::from_pkcs8`,
+an enum over the modules' key pairs.
 
 | aws-lc-rs | rind |
 |---|---|
@@ -199,6 +202,7 @@ modules' public keys, as [rind-rustls](rind-rustls/src/verify.rs) does.
 | `KeyPair` trait, `KeyPair::public_key()`, ring's `RsaKeyPair::public()` | inherent `public_key()`, a borrowed `PublicKey` of the same module |
 | `Ed25519PublicKey`, `EcdsaPublicKey`, `RsaSubjectPublicKey` | `ed25519::PublicKey`, `ecdsa::PublicKey`, `rsa::PublicKey` |
 | `generate_pkcs8(rng)`, `generate_pkcs8(alg, rng)`, `generate_pkcs8v1` | `generate(..)?.to_pkcs8()` |
+| Each key type's `from_pkcs8` in turn, as rustls's `any_supported_type` does | `rind::KeyPair::from_pkcs8(der)?`, which reads the algorithm identifier once and refuses a key that cannot sign, naming it; an ECDSA key signs with its curve's hash and ASN.1 signatures |
 | `to_pkcs8()`, `to_pkcs8v1()`, `public_key().as_der()`, each an allocated `Document` | `to_pkcs8()`, `to_pkcs8v1()` (Ed25519), `public_key().to_spki()`, each of fixed capacity; `Pkcs8` is wiped on drop |
 | `Signature`, one type for every algorithm | each module's `Signature`, which holds only its algorithm's length |
 
@@ -301,7 +305,7 @@ encryption.
 | OpenSSL's `RSA_PSS_SALTLEN_AUTO`, pyca's `PSS.AUTO` (not in aws-lc-rs) | `rsa::verify::PSS_SHA256_ANY_SALT` and so on |
 | `RsaParameters::{public_modulus_len, min_modulus_len, max_modulus_len}` | none |
 | `RsaKeyPair::from_der` | `rsa::KeyPair::from_pkcs1` |
-| `RsaKeyPair::from_components`, `KeyPairComponents` | none: load the key as PKCS#1 or PKCS#8 |
+| `RsaKeyPair::from_components(&KeyPairComponents { public_key, d, p, q, dP, dQ, qInv })` | `rsa::KeyPair::from_components(&rsa::KeyPairComponents { public_key, d, p, q, dp, dq, qi })`, whose fields take JWK's names |
 | `RsaKeyPair::sign(alg, rng, m, &mut sig)` | `sign(&alg, m)`, which takes no random source and returns an `rsa::Signature` |
 | `verify_digest` and `sign_digest` for RSA | none |
 | `rsa::KeySize`, `RsaKeyPair::generate(size)` | the same; `KeySize` adds `Rsa6144` |
@@ -350,6 +354,11 @@ No rind call takes a random source, so there is nothing to pass one to.
 | `SystemRandom::new().fill(out)`, `rand::fill(out)` | `rand::fill(out)` |
 | `generate::<[u8; N]>(rng)?.expose()` | `rand::fill` into a `[u8; N]` |
 | `SecureRandom`, `RandomlyConstructable`, `Random` | none |
+
+For a crate that takes a `rand_core` RNG, such as RustCrypto's,
+[rind-rand-core](rind-rand-core/README.md)'s `SystemRandom` is a `rand_core`
+`TryCryptoRng` over `rand::fill`; wrap it in `rand_core::UnwrapErr` where the
+crate takes an infallible `CryptoRng`.
 
 ## error
 
@@ -462,11 +471,12 @@ as its cipher suite order.
 
 ### rind-rcgen
 
-`rind_rcgen::KeyPair` offers `rcgen::KeyPair`'s API as rcgen's default `ring`
+`rind_rcgen::KeyPair` offers `rcgen::KeyPair`'s API as rcgen's `aws_lc_rs`
 backend builds it, so code swaps the type in unchanged. It signs with ECDSA
-P-256 and P-384, Ed25519, and RSA with PKCS#1 v1.5, loading only PKCS#8 keys
-and generating no RSA keys. Its [README](rind-rcgen/README.md) lists what it
-leaves out, such as P-521, which rcgen names only with its `aws_lc_rs` feature.
+P-256 and P-384, Ed25519, and RSA with PKCS#1 v1.5, generates RSA keys, and
+loads PKCS#8, SEC1 ECDSA, and PKCS#1 RSA keys. Its
+[README](rind-rcgen/README.md) lists what it leaves out, such as P-521, which
+rcgen names only with its `aws_lc_rs` feature.
 
 Without rcgen's `crypto` feature, rcgen needs each certificate's
 `serial_number` set, and writes key identifiers only when
@@ -580,19 +590,19 @@ install ring's if nothing is installed first.
 | Crate | What ties it | On rind |
 |---|---|---|
 | hickory-proto, hickory-net, hickory-resolver 0.26 | TLS, HTTPS, and QUIC need a `*-ring` or `*-aws-lc-rs` feature; DNSSEC validation calls them internally | **Patch**: the `*-ring` features. Plain DNS is unaffected |
-| domain 0.12 | DNSSEC and TSIG need ring or OpenSSL | **Patch**: `ring`, `tsig`, and `unstable-validator`. `unstable-sign` builds RSA keys from components, which rind-ring leaves out |
+| domain 0.12 | DNSSEC and TSIG need ring or OpenSSL | **Patch**: `ring`, `tsig`, `unstable-validator`, and `unstable-sign` |
 
 ### Certificates, ACME, and tokens
 
 | Crate | What ties it | On rind |
 |---|---|---|
-| rcgen 0.14 | default `ring`, or `aws_lc_rs`, gates `KeyPair` | **rind-rcgen**: ECDSA P-256 and P-384, Ed25519, and loaded RSA keys. Without rcgen's `crypto` feature, set each certificate's serial number, and its `key_identifier_method` or the key identifiers are empty |
+| rcgen 0.14 | default `ring`, or `aws_lc_rs`, gates `KeyPair` | **rind-rcgen**: ECDSA P-256 and P-384, Ed25519, and RSA. Without rcgen's `crypto` feature, set each certificate's serial number, and its `key_identifier_method` or the key identifiers are empty |
 | instant-acme | 0.8 calls aws-lc-rs or ring; the unreleased 0.9 takes a `CryptoProvider` | Unsupported: 0.8 has no provider hook, and 0.9 is unreleased |
 | rustls-acme 0.15, tokio-rustls-acme 0.9 | account keys and CSRs call ring or aws-lc-rs | **Patch**: rustls-acme's `ring` without its default `aws-lc-rs` |
 | x509-parser 0.18 | `verify` is ring, `verify-aws` aws-lc-rs | **Patch**: `verify`, or verify `tbs_certificate` with the key's module, such as `rind::ecdsa::PublicKey::verify` |
 | x509-certificate 0.25, cryptographic-message-syntax 0.28 | ring types in their public API | **Patch** |
 | sigstore 0.14, tough 0.24 | aws-lc-rs, unconditionally | Unsupported |
-| jsonwebtoken 11 | optional `aws_lc_rs` | **rind-jsonwebtoken**, every algorithm. `rust_crypto` is the pure-Rust alternative |
+| jsonwebtoken 12 | optional `aws_lc_rs` | **rind-jsonwebtoken**, every algorithm. `rust_crypto` is the pure-Rust alternative |
 | jwtk 0.5 | default `aws-lc` for RSA verification and JWK conversion | Adapter, for caller-held keys only |
 | biscuit 0.8, rusty_paseto 0.10 | ring, unconditionally | **Patch** |
 | paseto 2 | ring 0.16 and OpenSSL | Unsupported |

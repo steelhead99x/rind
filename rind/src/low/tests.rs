@@ -16,6 +16,26 @@ fn bignum_mux() {
     bignum_mux_equiv(u64::MAX, &[1; 1], &[0; 1]);
 }
 
+// A CPU check folds to true only for features the target enables, and never
+// in a build that can deny one.
+#[cfg(not(any(rind_backend = "portable", rind_backend = "arm")))]
+#[test]
+fn cpu_checks_fold_only_for_enabled_features() {
+    use super::cpu_enabled;
+    for (deniable, enabled, wanted, folds) in [
+        (false, 0b011, 0b000, true),
+        (false, 0b011, 0b001, true),
+        (false, 0b011, 0b011, true),
+        (false, 0b011, 0b101, false),
+        (false, 0b001, 0b011, false),
+        (false, 0b011, !0b011, false),
+        (true, 0b011, 0b001, false),
+        (true, 0b011, 0b101, false),
+    ] {
+        assert_eq!(cpu_enabled(deniable, enabled, wanted), folds);
+    }
+}
+
 // ld64 splits a Mach-O object into atoms at each CFI frame, and can
 // dead-strip one that is reached only by branches with no relocation, such as
 // a routine joined into another's naked function.

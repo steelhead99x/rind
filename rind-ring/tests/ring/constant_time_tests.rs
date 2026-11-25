@@ -20,10 +20,7 @@ use constant_time::verify_slices_are_equal;
 use ring::constant_time;
 use ring::{error, rand};
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
-use wasm_bindgen_test::{wasm_bindgen_test as test, wasm_bindgen_test_configure};
-
-#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
-wasm_bindgen_test_configure!(run_in_browser);
+use wasm_bindgen_test::wasm_bindgen_test as test;
 
 // This logic is loosely based on BoringSSL's `TEST(ConstantTimeTest, MemCmp)`.
 #[allow(deprecated)]

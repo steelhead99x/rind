@@ -20,13 +20,29 @@ pub(crate) mod vg_chacha20_block;
 #[rustfmt::skip]
 pub(crate) mod vg_chacha20_init;
 #[rustfmt::skip]
+pub(crate) mod vg_chacha20_poly1305_open_body_avx512vl;
+#[rustfmt::skip]
+pub(crate) mod vg_chacha20_poly1305_open_body_ifma;
+#[rustfmt::skip]
+pub(crate) mod vg_chacha20_poly1305_open_ifma;
+#[rustfmt::skip]
+pub(crate) mod vg_chacha20_poly1305_seal_body_ifma;
+#[rustfmt::skip]
+pub(crate) mod vg_chacha20_poly1305_seal_ifma;
+#[rustfmt::skip]
 pub(crate) mod vg_chacha20_xor;
 #[rustfmt::skip]
 pub(crate) mod vg_chacha20_xor_avx2;
 #[rustfmt::skip]
+pub(crate) mod vg_chacha20_xor_avx512;
+#[rustfmt::skip]
 pub(crate) mod vg_chacha20_xor_avx512vl;
 #[rustfmt::skip]
 pub(crate) mod vg_ec_p256_public_key_adx;
+#[rustfmt::skip]
+pub(crate) mod vg_ec_p384_public_key;
+#[rustfmt::skip]
+pub(crate) mod vg_ec_p384_public_key_adx;
 #[rustfmt::skip]
 pub(crate) mod vg_ecdh_p256_adx;
 #[rustfmt::skip]
@@ -35,6 +51,8 @@ pub(crate) mod vg_ecdh_p256_ifma;
 pub(crate) mod vg_ecdsa_p256_verify_adx;
 #[rustfmt::skip]
 pub(crate) mod vg_ecdsa_p256_verify_ifma;
+#[rustfmt::skip]
+pub(crate) mod vg_ecdsa_p384_verify_adx;
 #[rustfmt::skip]
 pub(crate) mod vg_ed25519_comb;
 #[rustfmt::skip]
@@ -73,6 +91,8 @@ pub(crate) mod vg_keccak_f1600;
 pub(crate) mod vg_keccak_pad_scratch;
 #[rustfmt::skip]
 pub(crate) mod vg_keccak_squeeze_scratch;
+#[rustfmt::skip]
+pub(crate) mod vg_mcdt_enter;
 #[rustfmt::skip]
 pub(crate) mod vg_mldsa44_sign;
 #[rustfmt::skip]
@@ -203,6 +223,7 @@ pub(crate) mod vg_mlkem_sample_tbl;
 pub(crate) mod vg_mlkem_yconsts;
 #[rustfmt::skip]
 pub(crate) mod vg_p256_check_point_adx;
+#[cfg(test)]
 #[rustfmt::skip]
 pub(crate) mod vg_p256_comb;
 #[rustfmt::skip]
@@ -214,11 +235,49 @@ pub(crate) mod vg_p256_inv_mod_p_adx;
 #[rustfmt::skip]
 pub(crate) mod vg_p256_mul_base_adx;
 #[rustfmt::skip]
+pub(crate) mod vg_p384_check_point_adx;
+#[rustfmt::skip]
+pub(crate) mod vg_p384_comb;
+#[rustfmt::skip]
+pub(crate) mod vg_p384_gtab;
+#[rustfmt::skip]
+pub(crate) mod vg_p384_inv_mod_n_adx;
+#[rustfmt::skip]
+pub(crate) mod vg_p384_inv_mod_p;
+#[rustfmt::skip]
+pub(crate) mod vg_p384_inv_mod_p_adx;
+#[rustfmt::skip]
+pub(crate) mod vg_p384_jac_add_affine_adx;
+#[rustfmt::skip]
+pub(crate) mod vg_p384_jac_add_cached_adx;
+#[rustfmt::skip]
+pub(crate) mod vg_p384_mul_base;
+#[rustfmt::skip]
+pub(crate) mod vg_p384_mul_base_adx;
+#[rustfmt::skip]
+pub(crate) mod vg_p384_mul_mod_n_adx;
+#[rustfmt::skip]
+pub(crate) mod vg_p384_mul_mod_p;
+#[rustfmt::skip]
+pub(crate) mod vg_p384_mul_mod_p_adx;
+#[rustfmt::skip]
+pub(crate) mod vg_poly1305_blocks;
+#[rustfmt::skip]
+pub(crate) mod vg_poly1305_blocks_avx2;
+#[rustfmt::skip]
+pub(crate) mod vg_poly1305_blocks_ifma;
+#[rustfmt::skip]
+pub(crate) mod vg_poly1305_finalize_scratch;
+#[rustfmt::skip]
+pub(crate) mod vg_poly1305_init_core;
+#[rustfmt::skip]
 pub(crate) mod vg_rsa_mont_mul_adx;
 #[rustfmt::skip]
 pub(crate) mod vg_rsa_private_crt_precomputed_ifma;
 #[rustfmt::skip]
 pub(crate) mod vg_rsa_private_crt_precomputed_ifma512;
+#[rustfmt::skip]
+pub(crate) mod vg_rsa_public_precompute_adx;
 #[rustfmt::skip]
 pub(crate) mod vg_rsa_public_precomputed_checked_ifma;
 #[rustfmt::skip]

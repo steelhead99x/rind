@@ -93,7 +93,7 @@ export interface Report {
 	bins: { to: number | null; label: string; color: string }[];
 	// rind's times that are the fastest or within 10%, and of how many.
 	standing: [number, number];
-	libraries: { id: string; name: string; variant_of: string | null }[];
+	libraries: { id: string; name: string }[];
 	sections: { name: string; operations: { id: string; label: string }[] }[];
 	hosts: Host[];
 	unmeasured: string[];
@@ -335,7 +335,7 @@ function markdown(): string {
 
 // The libraries rind is timed against, in prose.
 function others(): string {
-	const names = libraries.filter((l) => l.id !== "rind" && l.variant_of === null).map((l) => l.name);
+	const names = libraries.filter((l) => l.id !== "rind").map((l) => l.name);
 	return `${names.slice(0, -1).join(", ")}, and ${names.at(-1)}`;
 }
 

@@ -39,6 +39,7 @@ pub(super) mod edwards25519;
 pub(super) mod half_size;
 pub(super) mod hash_to_curve;
 pub(super) mod md5;
+#[cfg(feature = "ml-dsa")]
 pub(super) mod mldsa;
 pub(super) mod mlkem;
 pub(super) mod p256;
@@ -46,6 +47,7 @@ pub(super) mod p384;
 pub(super) mod p521;
 pub(super) mod pbkdf2_vg;
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod ristretto255_tests;
 pub(super) mod rng;
 pub(super) mod rsa_key_size;
@@ -54,6 +56,7 @@ pub(super) mod rsa_pub;
 pub(super) mod sha1;
 pub(super) mod sha2;
 pub(super) mod sha3;
+#[cfg(feature = "slh-dsa")]
 pub(super) mod slhdsa;
 pub(super) mod util;
 pub(super) mod x25519;
