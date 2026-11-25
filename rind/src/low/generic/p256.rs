@@ -148,7 +148,7 @@ pub(crate) fn p256_montjscalarmul(res: &mut [u64; 12], scalar: &[u64; 4], point_
 /// the row width gives.  A result at infinity is (0, 0).
 ///
 /// This is s2n-bignum's `p256_scalarmulbase`, whose block size is a
-/// parameter: 6 on most targets, and 4 on 32-bit portable ones, whose table
+/// parameter: 6 on most targets, and 4 on portable riscv32 ones, whose table
 /// is then a third the size, so that a core that streams it from flash
 /// through a small cache reads a third as much per multiplication, for 22
 /// more additions.  Each b-bit window, plus the carry from the one below,

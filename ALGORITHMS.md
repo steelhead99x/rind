@@ -603,14 +603,15 @@ a table of each window's 32 multiples (an 88KB constant table). Variable
 point multiplication is s2n-bignum's `p256_scalarmul` on both, whose proof
 covers the conversion back to affine coordinates.
 
-32-bit portable targets run s2n-bignum's `p256_scalarmulbase` with a block size
-of 4 instead, over a table of each 4-bit window's 8 multiples (33KB), and
+Portable riscv32 targets run s2n-bignum's `p256_scalarmulbase` with a block
+size of 4 instead, over a table of each 4-bit window's 8 multiples (33KB), and
 verification's width-6 NAF over G's first 32 multiples alone (2KB): each
 signature or key generation reads its whole table, and a microcontroller such
 as the ESP32-C6 streams it from flash through a 32KB cache, where it signed
 at 2.3 cycles per instruction against ECDH's 1.14 with the 88KB table. The
 smaller table costs 22 more mixed additions, 12% more instructions per
-signature under qemu-riscv32.
+signature under qemu-riscv32. Other 32-bit targets keep the 6-bit table
+until the smaller one is measured on them.
 
 armv7 runs the aarch64 algorithms for P256 in portable Rust, over
 fiat-crypto's field and scalar arithmetic, except its Montgomery
