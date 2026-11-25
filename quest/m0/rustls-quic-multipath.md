@@ -10,10 +10,14 @@ rustls 0.23.46's `PacketKey` defaults return `EncryptError` and `DecryptError`. 
 
 The fork PR that adds this quest implements both methods on rind-rustls and checks them three ways: rind's own keys reject a wrong path id, packet number, header, or short tag, and an empty plaintext round-trips; path id 0 matches `encrypt_in_place`; a QUIC handshake seals and opens path ids 0, 1, and 7 against rustls's aws-lc-rs and ring providers.
 
-Still to do, on the merged head:
+Done on the PR:
 
-- Re-run `cargo test -p rind-rustls --locked --test quic`.
-- Run moq's noq handshake and first packet against this rind-rustls. That is the path that panics in moq-noq-proto's rustls packet protection when the trait default is left in place. A passing handshake and one sealed packet in each direction is enough.
+- `cargo test -p rind-rustls --locked --all-targets` passes with fork main merged in (a28f9913, plus the `Vec` import main's `no_std` needs).
+- moq-noq 2.0.5, built on rind-rustls alone (no ring or aws-lc-rs, rind's HMAC as the reset key and AES-256-GCM as the token key), completes a handshake and echoes a bidirectional stream with the fix. Against fork main without it, the first packet panics in moq-noq-proto's `crypto/rustls.rs` with `EncryptError`.
+
+Still to do:
+
+- Re-run the noq smoke test above on the head that lands, if anything in rind-rustls changes first.
 - Do not open a pull request on kixel-ai/rind until the Waiting item is decided.
 
 ## Waiting
