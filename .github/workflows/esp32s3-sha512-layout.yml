@@ -14,6 +14,7 @@ on:
     types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
     paths:
       - rind/src/low/generic/sha512.rs
+      - rind/src/low/generic/sha512_rolled.rs
       - rind/src/low/portable/sha.rs
       - rind/src/lib.rs
       - rind/Cargo.toml

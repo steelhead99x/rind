@@ -180,8 +180,13 @@ pub(crate) fn hchacha20(key: &[u8; 32], nonce: &[u8; 16]) -> [u8; 32] {
 /// little-endian block counter then the 96-bit nonce (RFC 8439 section 2.3).
 #[inline]
 pub(crate) fn chacha20_block(key: &[u8; 32], counter_nonce: &[u8; 16]) -> [u8; 64] {
-    let input = state(key, counter_nonce);
-    let mut st = input;
+    keystream(&state(key, counter_nonce))
+}
+
+/// The keystream block for the state `input`.
+#[inline]
+fn keystream(input: &[u32; 16]) -> [u8; 64] {
+    let mut st = *input;
     rounds(&mut st);
     let mut out = [0u8; 64];
     for i in 0..16 {
@@ -192,31 +197,35 @@ pub(crate) fn chacha20_block(key: &[u8; 32], counter_nonce: &[u8; 16]) -> [u8; 6
 
 /// XORs the ChaCha20 keystream for `key` and `counter_nonce`, the block
 /// counter then the 96-bit nonce, into `buffer`, one block at a time.
-#[cfg(any(rind_backend = "x86_64", rind_backend = "portable"))]
+/// aarch64 tests check its routines against it.
+//
+// Indexes, as `state` does, so `proofs/` can prove it.
+#[cfg(any(
+    rind_backend = "x86_64",
+    rind_backend = "portable",
+    all(test, rind_backend = "aarch64")
+))]
 pub(crate) fn cipher(key: &[u32; 8], counter_nonce: &[u32; 4], buffer: &mut [u8]) {
     let mut input = [0u32; 16];
-    for (i, b) in input.iter_mut().zip(b"expand 32-byte k".as_chunks::<4>().0) {
-        *i = u32::from_le_bytes(*b);
-    }
+    input[..4].copy_from_slice(&SIGMA);
     input[4..12].copy_from_slice(key);
     input[12..].copy_from_slice(counter_nonce);
 
-    for block in buffer.chunks_mut(64) {
-        let mut st = input;
-        rounds(&mut st);
-        for (s, i) in st.iter_mut().zip(input) {
-            *s = s.wrapping_add(i);
-        }
-        let (words, tail) = block.as_chunks_mut::<4>();
-        for (w, k) in words.iter_mut().zip(st) {
-            *w = (u32::from_le_bytes(*w) ^ k).to_le_bytes();
-        }
-        if let Some(k) = st.get(words.len()) {
-            for (b, k) in tail.iter_mut().zip(k.to_le_bytes()) {
-                *b ^= k;
-            }
+    let mut done = 0;
+    while done < buffer.len() {
+        let ks = keystream(&input);
+        let n = if buffer.len() - done < 64 {
+            buffer.len() - done
+        } else {
+            64
+        };
+        let block = &mut buffer[done..done + n];
+        let ks = &ks[..n];
+        for i in 0..ks.len() {
+            block[i] ^= ks[i];
         }
         input[12] = input[12].wrapping_add(1);
+        done += n;
     }
 }
 

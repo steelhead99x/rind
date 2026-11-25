@@ -13,10 +13,13 @@ rust-version.workspace = true
 # One target per backend: x86_64, aarch64, and i686 for the portable one.
 [package.metadata.docs.rs]
 targets = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu", "i686-unknown-linux-gnu"]
+features = ["zeroize"]
 
 [features]
+# zeroize's `ZeroizeOnDrop` on every type that wipes itself on drop.
+zeroize = ["dep:zeroize"]
 # Runs the unrolled SHA-512 body on the ESP32-S3 instead of the rolled loop
-# every 32-bit target runs by default. The unrolled body is about 18 KiB of
+# every 32-bit microcontroller runs by default. The unrolled body is about 18 KiB of
 # code against the rolled loop's 1.4 KiB. On `xtensa-esp32s3-espidf` it is
 # placed in IRAM (and `K` in internal DRAM); it was 0.911 to 0.918 of the
 # rolled loop's cycles at 240 MHz and about 8.7% faster than it at 80 MHz
@@ -35,20 +38,19 @@ __ctgrind = ["dep:crabgrind"]
 cfg-if = "1"
 getrandom = "0.4"
 crabgrind = { version = "0.4", optional = true }
+zeroize = { version = "1.9", default-features = false, optional = true }
 
 # The portable backend, which armv7 builds on: libcrux's portable Rust, with
 # no C or intrinsics features enabled, fiat-crypto's for the NIST curves, and
 # curve25519-dalek's for X25519 and Ed25519. The cfg is build.rs's choice of
 # the arm or portable backend (or portable for aarch64 without NEON), which a
-# manifest cannot read, so armv7 builds libcrux-sha2 too, though it runs
-# aws-lc's assembly for SHA-512.
+# manifest cannot read.
 [target.'cfg(any(rind_portable, target_endian = "big", all(target_arch = "aarch64", not(target_feature = "neon")), all(target_arch = "x86_64", not(target_feature = "sse2")), not(any(target_arch = "x86_64", target_arch = "aarch64"))))'.dependencies]
 curve25519-dalek = { version = "5", default-features = false, features = ["precomputed-tables"] }
 fiat-crypto = { version = "0.3", default-features = false }
 libcrux-hacl-rs = { version = "0.0.6", features = ["alloc"] }
 libcrux-macros = "0.0.4"
 libcrux-poly1305 = { version = "0.0.7", features = ["expose-hacl"] }
-libcrux-sha2 = { version = "0.0.9", features = ["expose-hacl"] }
 
 # Reads the AArch32 crypto extension's HWCAP2 bits.
 [target.'cfg(all(target_arch = "arm", target_endian = "little", not(rind_portable), any(target_os = "linux", target_os = "android")))'.dependencies]
@@ -72,11 +74,15 @@ fiat-crypto = { version = "0.3", default-features = false }
 # CCTV gzips its ML-KEM modulus vectors.
 flate2 = { version = "1.1.11", default-features = false, features = ["rust_backend"] }
 hex = { version = "0.4", features = ["serde"] }
+# The textbook curve arithmetic in `src/test/reference.rs`, the independent
+# oracle where every crate covering a curve shares code with rind's path.
+num-bigint = "0.5"
 # The reference for P-521's hash-to-curve, which aws-lc lacks, and for each
-# curve's hash to a scalar, which aws-lc does not export.
-p256 = { version = "0.14", default-features = false, features = ["group-digest"] }
-p384 = { version = "0.14", default-features = false, features = ["group-digest"] }
-p521 = { version = "0.14", default-features = false, features = ["group-digest"] }
+# curve's hash to a scalar, which aws-lc does not export, and the curves'
+# independent oracle on x86_64 and aarch64.
+p256 = { version = "0.14", default-features = false, features = ["ecdh", "ecdsa", "group-digest", "pkcs8"] }
+p384 = { version = "0.14", default-features = false, features = ["ecdh", "ecdsa", "group-digest", "pkcs8"] }
+p521 = { version = "0.14", default-features = false, features = ["ecdh", "ecdsa", "group-digest", "pkcs8"] }
 # Without `fork` and `timeout`, which spawn processes wasm cannot.
 proptest = { version = "1.5.0", default-features = false, features = ["std", "bit-set"] }
 serde = { version = "1", features = ["derive"] }
@@ -93,6 +99,37 @@ libc = { version = "0.2", default-features = false }
 aws-lc-rs = { version = "1.19", default-features = false, features = ["alloc", "prebuilt-nasm", "non-fips"] }
 # aws-lc's XChaCha20-Poly1305, which aws-lc-rs does not expose.
 aws-lc-sys = { version = "0.47", default-features = false }
+# The differential tests' second oracle beside aws-lc-rs, which shares no
+# code with rind: RustCrypto's symmetric primitives.
+aes = "0.9"
+aes-gcm = { version = "0.11", default-features = false, features = ["aes"] }
+aes-kw = "0.3"
+cbc = { version = "0.2", features = ["alloc"] }
+chacha20 = "0.10"
+chacha20poly1305 = { version = "0.11", default-features = false }
+ctr = "0.10"
+ghash = "0.6"
+hkdf = "0.13"
+hmac = "0.13"
+md-5 = { version = "0.11", default-features = false }
+pbkdf2 = { version = "0.13", default-features = false, features = ["hmac"] }
+sha1 = { version = "0.11", default-features = false, features = ["oid"] }
+sha2 = { version = "0.11", default-features = false }
+sha3 = { version = "0.12", default-features = false }
+# ML-KEM's and ML-DSA's: `hazmat` encapsulates with a given message.
+ml-dsa = { version = "0.1", default-features = false }
+ml-kem = { version = "0.3", default-features = false, features = ["hazmat"] }
+# RSA's, over crypto-bigint, with its PKCS#1 v1.5 signatures; `getrandom`'s
+# `SysRng` draws its OAEP seeds.
+getrandom = { version = "0.4", features = ["sys_rng"] }
+rsa = { version = "0.10", features = ["pkcs1v15"] }
+# HACL*'s curves, which rind runs nowhere: the X25519 oracle on every tier,
+# Ed25519's except on the portable backend, where rind runs HACL*'s
+# SHA-512, and P-256's on armv7 and the portable backend, where rind and
+# aws-lc-rs both run fiat-crypto's field arithmetic.
+libcrux-curve25519 = "0.0.10"
+libcrux-ed25519 = "0.0.11"
+libcrux-p256 = { version = "0.0.10", features = ["expose-hacl"] }
 # HPKE, which aws-lc-rs does not expose either; `hazmat` reads its private keys.
 hpke-rs = { version = "0.8", default-features = false, features = ["hazmat", "rustcrypto", "std"] }
 # SPAKE2+ differential tests. aws-lc-rs has no SPAKE2+.

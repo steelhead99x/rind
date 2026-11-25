@@ -1,0 +1,19 @@
+[package]
+name = "rind-rand-core"
+version = "0.10.0"
+edition = "2024"
+repository = "https://github.com/kixel-ai/rind"
+homepage = "https://rind.kixel.ai"
+license = "Apache-2.0 OR ISC OR MIT-0"
+description = "rand_core RNG drawing from rind's random source"
+categories = ["cryptography", "no-std"]
+rust-version.workspace = true
+readme = "README.md"
+
+[dependencies]
+rand_core = "0.10"
+rind = { version = "0.3.2", path = "../rind" }
+
+[dev-dependencies]
+# RustCrypto's key generation, the caller this crate is for.
+p256 = { version = "0.14", default-features = false, features = ["arithmetic"] }

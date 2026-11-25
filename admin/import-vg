@@ -42,6 +42,9 @@ ROOTS = {
         "vg_chacha20_init",
         "vg_chacha20_apply_avx2",
         "vg_chacha20_apply_avx512vl",
+        # ChaCha20-Poly1305 with AVX512_IFMA.
+        "vg_chacha20_poly1305_seal_ifma",
+        "vg_chacha20_poly1305_open_ifma",
         # ML-KEM-768's encapsulation key check and encapsulation, by key or
         # with its hash, on every CPU; key generation and decapsulation
         # with AVX-512.
@@ -78,8 +81,19 @@ ROOTS = {
         # keys, and its twin for CPUs with two 512-bit multipliers.
         "vg_rsa_private_crt_precomputed_ifma",
         "vg_rsa_private_crt_precomputed_ifma512",
+        # P-384's k·G, for ECDSA's keys and nonces, with BMI2 and ADX and
+        # without, and its ECDSA verification with them.
+        "vg_ec_p384_public_key",
+        "vg_ec_p384_public_key_adx",
+        "vg_ecdsa_p384_verify_adx",
+        # RSA's R² mod n for a public modulus, with BMI2 and ADX.
+        "vg_rsa_public_precompute_adx",
     ],
     "aarch64": [
+        # cipher::ChaCha20 with NEON, and with SVE2.
+        "vg_chacha20_init",
+        "vg_chacha20_apply_neon",
+        "vg_chacha20_apply_sve2",
         # ChaCha20-Poly1305 with SVE2.
         "vg_chacha20_poly1305_seal_sve2",
         "vg_chacha20_poly1305_open_sve2",
@@ -101,6 +115,12 @@ ROOTS = {
         "vg_pbkdf2_hmac_sha256_sha2",
         "vg_pbkdf2_hmac_sha384_sha512",
         "vg_pbkdf2_hmac_sha512_sha512",
+        # P-384's k·G, for ECDSA's keys and nonces, and its ECDSA
+        # verification.
+        "vg_ec_p384_public_key",
+        "vg_ecdsa_p384_verify",
+        # RSA's R² mod n for a public modulus.
+        "vg_rsa_public_precompute",
     ],
 }
 

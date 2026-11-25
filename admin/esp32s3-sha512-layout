@@ -125,8 +125,15 @@ done
 # The real compressor, plus an entry so the block is live. The whole file
 # is copied: its `tests` module compiles only its probe exports here,
 # under cfg(rind_sha512_load_probe), and nothing in the other builds.
-# The feature name matches rind's, so the cfg in the source applies.
-cp "$root/rind/src/low/generic/sha512.rs" "$work/body.rs"
+# The feature name matches rind's, so the cfg in the source applies. Its
+# `K` is `generic::sha512`'s, whose item, placement attribute included, is
+# copied into a `sha512` module beside it.
+cp "$root/rind/src/low/generic/sha512_rolled.rs" "$work/body.rs"
+sed -n '/^\/\/ FIPS 180-4 §4\.2\.3\./,/^];$/p' "$root/rind/src/low/generic/sha512.rs" >"$work/k.rs"
+grep -q '^pub(super) static K: \[u64; 80\] = \[$' "$work/k.rs" || {
+  printf 'esp32s3-sha512-layout: no K in rind/src/low/generic/sha512.rs\n' >&2
+  exit 1
+}
 
 # The probe sets `asm_experimental_arch` in its own crate, so it cannot
 # notice rind dropping the gate. Without it the none-elf S3 build fails on
@@ -143,12 +150,16 @@ mkdir -p "$work/probe/src"
   # rind/src/lib.rs enables asm_experimental_arch on Xtensa; the probe
   # needs the same gate for the message-load asm.
   printf '%s\n' '#![no_std]' '#![feature(asm_experimental_arch)]' '#![allow(dead_code, rustdoc::broken_intra_doc_links)]'
+  printf '%s\n' 'mod sha512 {'
+  cat "$work/k.rs"
+  printf '%s\n' '}' 'mod sha512_rolled {'
   cat "$work/body.rs"
+  printf '%s\n' '}'
   cat << 'EOF'
 
 #[unsafe(no_mangle)]
 pub fn sha512_entry(state: &mut [u64; 8], blocks: &[u8]) {
-    sha512_compress_blocks(state, blocks);
+    sha512_rolled::sha512_compress_blocks(state, blocks);
 }
 EOF
 } > "$work/probe/src/lib.rs"

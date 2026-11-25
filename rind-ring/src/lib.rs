@@ -11,7 +11,9 @@
 //! ```
 //!
 //! Every ring feature is accepted. As in ring, `alloc` gates RSA and `std` the
-//! errors' `std::error::Error` impls; the rest change nothing.
+//! errors' `std::error::Error` impls; the rest change nothing. Like ring, it
+//! builds without `std`, but always needs a global allocator, as rind does,
+//! even without `alloc`.
 //!
 //! The rename reaches only the crate that makes it. A binary moves every crate
 //! in its tree on ring 0.17 to rind, including dependencies that name ring such
@@ -65,6 +67,14 @@
 // ring's API has these shapes, which a drop-in keeps.
 #![allow(clippy::len_without_is_empty, clippy::new_without_default)]
 #![warn(missing_docs, unreachable_pub)]
+// Unit tests keep std's prelude; `sh/dispatch.sh`'s nostd module builds the
+// library on a target without std.
+#![cfg_attr(not(test), no_std)]
+
+// rind itself needs an allocator, so rind-ring always has one.
+extern crate alloc;
+#[cfg(all(feature = "std", not(test)))]
+extern crate std;
 
 use core::fmt;
 

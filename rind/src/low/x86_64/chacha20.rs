@@ -17,12 +17,15 @@
 //! verified-garbage proves its routines correct and constant time in Lean,
 //! over its own models of the instructions, which `admin/prove vg`
 //! cosimulates. `proofs/Rind/X86_64/VgChaCha20.lean` restates VG's theorems
-//! as axioms and proves the glue around them for requests from 256 bytes,
-//! assuming the kernel's contract (`Kernel`) and that the CPU-feature checks
-//! find AVX2 or AVX-512 VL (`RunsVg`). The kernel and the aws-lc assembly
-//! are not formally verified: their correctness rests on rind's tests of them
-//! against RFC 8439, Wycheproof, aws-lc-rs, and HACL*'s rounds, and aws-lc's
-//! on its use in OpenSSL, BoringSSL, and aws-lc.
+//! as axioms and proves the glue around them, `proofs/Rind/X86_64/ChaCha20Avx2.lean`
+//! proves the kernel against RFC 8439 over Lean models of its intrinsics,
+//! which `admin/prove` tests against the CPU, and
+//! `proofs/Rind/X86_64/ChaCha20Cipher.lean` proves the bytes `cipher` writes
+//! at every length the block counter covers on those and HACL*'s rounds, taking the aws-lc SSSE3
+//! routine's contract as the hypothesis `Ssse3`. That assembly is not formally
+//! verified: its correctness rests on rind's tests of it against HACL*'s
+//! rounds at each length from 129 to 1700 bytes, and on its use in OpenSSL,
+//! BoringSSL, and aws-lc.
 
 use core::arch::x86_64::*;
 use core::mem::MaybeUninit;
@@ -313,139 +316,157 @@ macro_rules! rotate_left {
 
 /// The kernel, two blocks at a time, for the lengths below verified-garbage's
 /// routines and their short tails.
-#[target_feature(enable = "ssse3,avx2")]
-fn cipher_avx2(key: &[u32; 8], counter_nonce: &[u32; 4], buffer: &mut [u8]) {
-    // SAFETY: `SIGMA`, `key`, and `counter_nonce` are all readable
-    let (z07, mut z8f) = unsafe {
-        (
-            _mm256_set_m128i(
-                _mm_lddqu_si128(SIGMA.as_ptr().cast()),
-                _mm_lddqu_si128(key[0..4].as_ptr().cast()),
-            ),
-            _mm256_set_m128i(
-                _mm_lddqu_si128(key[4..8].as_ptr().cast()),
-                _mm_lddqu_si128(counter_nonce.as_ptr().cast()),
-            ),
-        )
-    };
-
-    for block in buffer.chunks_mut(128) {
-        core_2x(z07, &mut z8f, block);
-    }
-}
-
-/// Computes 2 blocks, but also handles ragged output (ie, xor_out may
-/// be 0..64 bytes).
+//
+// Indexes and loads values rather than splitting into chunks and loading
+// through pointers, which Aeneas cannot translate, so `proofs/` can prove it.
 #[target_feature(enable = "avx2")]
-fn core_2x(t07: __m256i, z8f: &mut __m256i, xor_out: &mut [u8]) {
-    let t8f = *z8f;
-    let blocks_used = if xor_out.len() > 32 { 2 } else { 1 };
-    *z8f = _mm256_add_epi32(*z8f, _mm256_set_epi32(0, 0, 0, 0, 0, 0, 0, blocks_used));
-
-    let mut z03_z03 = _mm256_broadcastsi128_si256(_mm256_extracti128_si256(t07, 1));
-    let mut z47_z47 = _mm256_broadcastsi128_si256(_mm256_extracti128_si256(t07, 0));
-    let mut z8b_z8b = _mm256_broadcastsi128_si256(_mm256_extracti128_si256(t8f, 1));
-    let mut zcf_zcf = _mm256_broadcastsi128_si256(_mm256_extracti128_si256(t8f, 0));
-
-    // we will calculate two blocks, so increment the counter of the second block
-    zcf_zcf = _mm256_add_epi32(zcf_zcf, _mm256_set_epi32(0, 0, 0, 0, 0, 0, 0, 1));
-    let save_z03 = z03_z03;
-    let save_z47 = z47_z47;
-    let save_z8b = z8b_z8b;
-    let save_zcf = zcf_zcf;
-
-    for _ in 0..10 {
-        z03_z03 = _mm256_add_epi32(z03_z03, z47_z47);
-        zcf_zcf = _mm256_xor_si256(zcf_zcf, z03_z03);
-        zcf_zcf = rotate_left!(zcf_zcf, 16);
-
-        z8b_z8b = _mm256_add_epi32(z8b_z8b, zcf_zcf);
-        z47_z47 = _mm256_xor_si256(z47_z47, z8b_z8b);
-        z47_z47 = rotate_left!(z47_z47, 12);
-
-        z03_z03 = _mm256_add_epi32(z03_z03, z47_z47);
-        zcf_zcf = _mm256_xor_si256(zcf_zcf, z03_z03);
-        zcf_zcf = rotate_left!(zcf_zcf, 8);
-
-        z8b_z8b = _mm256_add_epi32(z8b_z8b, zcf_zcf);
-        z47_z47 = _mm256_xor_si256(z47_z47, z8b_z8b);
-        z47_z47 = rotate_left!(z47_z47, 7);
-
-        z47_z47 = _mm256_shuffle_epi32(z47_z47, 0b00_11_10_01);
-        z8b_z8b = _mm256_shuffle_epi32(z8b_z8b, 0b01_00_11_10);
-        zcf_zcf = _mm256_shuffle_epi32(zcf_zcf, 0b10_01_00_11);
-
-        z03_z03 = _mm256_add_epi32(z03_z03, z47_z47);
-        zcf_zcf = _mm256_xor_si256(zcf_zcf, z03_z03);
-        zcf_zcf = rotate_left!(zcf_zcf, 16);
-
-        z8b_z8b = _mm256_add_epi32(z8b_z8b, zcf_zcf);
-        z47_z47 = _mm256_xor_si256(z47_z47, z8b_z8b);
-        z47_z47 = rotate_left!(z47_z47, 12);
-
-        z03_z03 = _mm256_add_epi32(z03_z03, z47_z47);
-        zcf_zcf = _mm256_xor_si256(zcf_zcf, z03_z03);
-        zcf_zcf = rotate_left!(zcf_zcf, 8);
-
-        z8b_z8b = _mm256_add_epi32(z8b_z8b, zcf_zcf);
-        z47_z47 = _mm256_xor_si256(z47_z47, z8b_z8b);
-        z47_z47 = rotate_left!(z47_z47, 7);
-
-        z47_z47 = _mm256_shuffle_epi32(z47_z47, 0b10_01_00_11);
-        z8b_z8b = _mm256_shuffle_epi32(z8b_z8b, 0b01_00_11_10);
-        zcf_zcf = _mm256_shuffle_epi32(zcf_zcf, 0b00_11_10_01);
-    }
-
-    let z03_z03 = _mm256_add_epi32(z03_z03, save_z03);
-    let z47_z47 = _mm256_add_epi32(z47_z47, save_z47);
-    let z8b_z8b = _mm256_add_epi32(z8b_z8b, save_z8b);
-    let zcf_zcf = _mm256_add_epi32(zcf_zcf, save_zcf);
-
-    let a0 = _mm256_permute2x128_si256(z03_z03, z47_z47, 0b0011_0001);
-    let a1 = _mm256_permute2x128_si256(z8b_z8b, zcf_zcf, 0b0011_0001);
-    let b0 = _mm256_permute2x128_si256(z03_z03, z47_z47, 0b0010_0000);
-    let b1 = _mm256_permute2x128_si256(z8b_z8b, zcf_zcf, 0b0010_0000);
-
-    let ptr: *mut __m256i = xor_out.as_mut_ptr().cast();
-
-    if xor_out.len() == 128 {
-        // SAFETY: `ptr` is 128 bytes, ie 4 x 256-bit ymm registers
-        unsafe {
-            let ia0 = _mm256_loadu_si256(ptr.add(0));
-            let ia1 = _mm256_loadu_si256(ptr.add(1));
-            let ib0 = _mm256_loadu_si256(ptr.add(2));
-            let ib1 = _mm256_loadu_si256(ptr.add(3));
-
-            _mm256_storeu_si256(ptr.add(0), _mm256_xor_si256(a0, ia0));
-            _mm256_storeu_si256(ptr.add(1), _mm256_xor_si256(a1, ia1));
-            _mm256_storeu_si256(ptr.add(2), _mm256_xor_si256(b0, ib0));
-            _mm256_storeu_si256(ptr.add(3), _mm256_xor_si256(b1, ib1));
-        }
-    } else if xor_out.len() == 32 {
-        // SAFETY: `ptr` is 32 bytes, ie one 256-bit ymm register
-        unsafe {
-            let ia0 = _mm256_loadu_si256(ptr.add(0));
-            _mm256_storeu_si256(ptr.add(0), _mm256_xor_si256(a0, ia0));
-        }
-    } else {
-        // slow path
-        let mut ks = [0u8; 128];
-
-        // SAFETY: `ks` is 128 bytes and writable.
-        unsafe {
-            _mm256_storeu_si256(ks[0..32].as_mut_ptr().cast(), a0);
-            _mm256_storeu_si256(ks[32..64].as_mut_ptr().cast(), a1);
-            _mm256_storeu_si256(ks[64..96].as_mut_ptr().cast(), b0);
-            _mm256_storeu_si256(ks[96..128].as_mut_ptr().cast(), b1);
-        }
-
-        for (o, k) in xor_out.iter_mut().zip(ks.iter()) {
-            *o ^= *k;
-        }
+fn cipher_avx2(key: &[u32; 8], counter_nonce: &[u32; 4], buffer: &mut [u8]) {
+    let mut counter = counter_nonce[0];
+    let mut done = 0;
+    while done < buffer.len() {
+        let n = if buffer.len() - done < 128 {
+            buffer.len() - done
+        } else {
+            128
+        };
+        core_2x(key, counter_nonce, counter, &mut buffer[done..done + n]);
+        counter = counter.wrapping_add(2);
+        done += n;
     }
 }
 
-const SIGMA: [u8; 16] = *b"expand 32-byte k";
+/// XORs the two keystream blocks from block `counter` into `xor_out`, of up
+/// to 128 bytes: the first block's state in each vector's low 128-bit lane,
+/// the second's in its high lane, a row of the state each.
+#[target_feature(enable = "avx2")]
+#[inline]
+fn core_2x(key: &[u32; 8], counter_nonce: &[u32; 4], counter: u32, xor_out: &mut [u8]) {
+    let save_a = _mm256_setr_epi32(
+        0x6170_7865,
+        0x3320_646e,
+        0x7962_2d32,
+        0x6b20_6574,
+        0x6170_7865,
+        0x3320_646e,
+        0x7962_2d32,
+        0x6b20_6574,
+    );
+    let save_b = _mm256_setr_epi32(
+        key[0] as i32,
+        key[1] as i32,
+        key[2] as i32,
+        key[3] as i32,
+        key[0] as i32,
+        key[1] as i32,
+        key[2] as i32,
+        key[3] as i32,
+    );
+    let save_c = _mm256_setr_epi32(
+        key[4] as i32,
+        key[5] as i32,
+        key[6] as i32,
+        key[7] as i32,
+        key[4] as i32,
+        key[5] as i32,
+        key[6] as i32,
+        key[7] as i32,
+    );
+    let save_d = _mm256_setr_epi32(
+        counter as i32,
+        counter_nonce[1] as i32,
+        counter_nonce[2] as i32,
+        counter_nonce[3] as i32,
+        counter.wrapping_add(1) as i32,
+        counter_nonce[1] as i32,
+        counter_nonce[2] as i32,
+        counter_nonce[3] as i32,
+    );
+    let mut a = save_a;
+    let mut b = save_b;
+    let mut c = save_c;
+    let mut d = save_d;
+
+    for _ in 0..10usize {
+        a = _mm256_add_epi32(a, b);
+        d = _mm256_xor_si256(d, a);
+        d = rotate_left!(d, 16);
+
+        c = _mm256_add_epi32(c, d);
+        b = _mm256_xor_si256(b, c);
+        b = rotate_left!(b, 12);
+
+        a = _mm256_add_epi32(a, b);
+        d = _mm256_xor_si256(d, a);
+        d = rotate_left!(d, 8);
+
+        c = _mm256_add_epi32(c, d);
+        b = _mm256_xor_si256(b, c);
+        b = rotate_left!(b, 7);
+
+        // Turn the diagonals into columns.
+        b = _mm256_shuffle_epi32(b, 0b00_11_10_01);
+        c = _mm256_shuffle_epi32(c, 0b01_00_11_10);
+        d = _mm256_shuffle_epi32(d, 0b10_01_00_11);
+
+        a = _mm256_add_epi32(a, b);
+        d = _mm256_xor_si256(d, a);
+        d = rotate_left!(d, 16);
+
+        c = _mm256_add_epi32(c, d);
+        b = _mm256_xor_si256(b, c);
+        b = rotate_left!(b, 12);
+
+        a = _mm256_add_epi32(a, b);
+        d = _mm256_xor_si256(d, a);
+        d = rotate_left!(d, 8);
+
+        c = _mm256_add_epi32(c, d);
+        b = _mm256_xor_si256(b, c);
+        b = rotate_left!(b, 7);
+
+        // And back.
+        b = _mm256_shuffle_epi32(b, 0b10_01_00_11);
+        c = _mm256_shuffle_epi32(c, 0b01_00_11_10);
+        d = _mm256_shuffle_epi32(d, 0b00_11_10_01);
+    }
+
+    let a = _mm256_add_epi32(a, save_a);
+    let b = _mm256_add_epi32(b, save_b);
+    let c = _mm256_add_epi32(c, save_c);
+    let d = _mm256_add_epi32(d, save_d);
+
+    // The keystream in order: the first block's rows, then the second's.
+    let k0 = _mm256_permute2x128_si256(a, b, 0x20);
+    let k1 = _mm256_permute2x128_si256(c, d, 0x20);
+    let k2 = _mm256_permute2x128_si256(a, b, 0x31);
+    let k3 = _mm256_permute2x128_si256(c, d, 0x31);
+
+    let mut ks = [0u8; 128];
+    ks[0..32].copy_from_slice(&store_256(k0));
+    ks[32..64].copy_from_slice(&store_256(k1));
+    ks[64..96].copy_from_slice(&store_256(k2));
+    ks[96..128].copy_from_slice(&store_256(k3));
+    let ks = &ks[..xor_out.len()];
+    for i in 0..ks.len() {
+        xor_out[i] ^= ks[i];
+    }
+}
+
+/// `v`'s bytes, the lowest first, as `_mm256_storeu_si256` stores them.
+#[target_feature(enable = "avx2")]
+#[inline]
+fn store_256(v: __m256i) -> [u8; 32] {
+    let mut bytes = [0u8; 32];
+    bytes[0..4].copy_from_slice(&(_mm256_extract_epi32(v, 0) as u32).to_le_bytes());
+    bytes[4..8].copy_from_slice(&(_mm256_extract_epi32(v, 1) as u32).to_le_bytes());
+    bytes[8..12].copy_from_slice(&(_mm256_extract_epi32(v, 2) as u32).to_le_bytes());
+    bytes[12..16].copy_from_slice(&(_mm256_extract_epi32(v, 3) as u32).to_le_bytes());
+    bytes[16..20].copy_from_slice(&(_mm256_extract_epi32(v, 4) as u32).to_le_bytes());
+    bytes[20..24].copy_from_slice(&(_mm256_extract_epi32(v, 5) as u32).to_le_bytes());
+    bytes[24..28].copy_from_slice(&(_mm256_extract_epi32(v, 6) as u32).to_le_bytes());
+    bytes[28..32].copy_from_slice(&(_mm256_extract_epi32(v, 7) as u32).to_le_bytes());
+    bytes
+}
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]

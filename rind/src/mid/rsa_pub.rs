@@ -31,8 +31,7 @@ impl RsaPublicKey {
             return Err(KeyFormatError::RsaExponent.into());
         }
 
-        // determine M^2 mod n
-        let montifier = n.pub_montifier();
+        let montifier = Self::montifier_of(&n)?;
 
         // and its inverse such that n * n0 == -1 (mod 2^64)
         let n0 = n.mont_neg_inverse();
@@ -43,6 +42,33 @@ impl RsaPublicKey {
             montifier,
             n0,
         })
+    }
+
+    /// `R^2 mod n`, `R = 2^(64w)` for `n`'s `w` words: by
+    /// pyca/verified-garbage's routine where it is faster, and otherwise by
+    /// `PosInt::pub_montifier`, for an odd `n` of 1024 to 8192 bits.
+    fn montifier_of(n: &RsaPosInt) -> Result<RsaPosInt, Error> {
+        let Some(vg) = low::rsa_vg::Precompute::check(n.as_words()) else {
+            return Ok(n.pub_montifier());
+        };
+        let k = n.len_bytes();
+        let w = n.as_words().len();
+        let mut bytes = [0u8; MAX_PUBLIC_MODULUS_BYTES];
+        n.to_bytes_fixed(&mut bytes[..k]);
+        // pyca/verified-garbage's precomputed values of `n`: `n` and then
+        // `R^2 mod n`.
+        let mut pre = [0u64; 2 * MAX_PUBLIC_MODULUS_WORDS];
+        // The routine refuses only moduli `new` already has.
+        if !vg.precompute(&mut pre[..2 * w], &bytes[..k]) {
+            return Err(KeyFormatError::RsaModulus.into());
+        }
+        RsaPosInt::from_words(&pre[w..2 * w])
+    }
+
+    /// `R^2 mod n`, which the CRT of a private key of this modulus takes.
+    #[cfg(rind_backend = "x86_64")]
+    pub(crate) fn montifier_words(&self) -> &[u64] {
+        self.montifier.as_words_with_len_of(&self.n)
     }
 
     pub(crate) fn modulus_len_bytes(&self) -> usize {

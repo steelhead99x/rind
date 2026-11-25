@@ -114,9 +114,23 @@ def fips197MixColumns (q : Quad32) : Quad32 := ofBytes fun i =>
   let a k := byte q (i / 4 * 4 + (i % 4 + k) % 4)
   xtime (a 0) ^^^ xtime (a 1) ^^^ a 1 ^^^ a 2 ^^^ a 3
 
+/-- `fips197Sbox`'s 256 values, which compiled code computes once. -/
+def sboxTable : Array (BitVec 8) := (Array.range 256).map fun i => fips197Sbox (BitVec.ofNat 8 i)
+
+/-- `fips197Sbox`, looked up in `sboxTable`: `fips197Sbox` computes each
+byte's inverse by 254 field products, which would make the compiled specs
+`admin/spec-tests` runs cipher a block in tens of milliseconds. -/
+def sboxFast (b : BitVec 8) : BitVec 8 := sboxTable[b.toNat]!
+
+theorem sboxFast_eq : sboxFast = fips197Sbox := by
+  funext b
+  simp [sboxFast, sboxTable, b.isLt]
+
 /-- FIPS 197's S-box, opaque so that no proof looks inside its table; Vale's
-spec assumes it. `fips197Sbox` is what Lean runs, so `admin/prove` can test
-the AES instruction models that call it. -/
+spec assumes it. `fips197Sbox` is what Lean runs, through `sboxFast`, which
+`sboxFast_eq` proves equal to it, so `admin/prove` can test the AES
+instruction models that call it. -/
+@[implemented_by sboxFast]
 opaque sbox : BitVec 8 → BitVec 8 := fips197Sbox
 
 /-- FIPS 197's `MixColumns` on a state laid out as a `quad32`'s bytes, least

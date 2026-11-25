@@ -23,6 +23,7 @@ pub(crate) fn ct_select_i16(bit: u8, if_set: i16, if_unset: i16) -> i16 {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 

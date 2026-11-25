@@ -58,3 +58,48 @@ pub fn spki_parameters(input: &[u8]) -> bool {
         .and_then(element)
         .is_some_and(|(_, _, parameters)| !matches!(parameters, [] | [0x05, 0x00]))
 }
+
+/// An ECDSA signature as `r || s`, each `len` bytes, from its algorithm's
+/// encoding: a DER one's two integers when `der`, else a fixed-width one as
+/// it is, or `None` if it is malformed. A DER signature can be `2 * len`
+/// bytes too, so the length cannot tell them apart.
+pub fn fixed_width(signature: &[u8], len: usize, der: bool) -> Option<Vec<u8>> {
+    if !der {
+        return (signature.len() == 2 * len).then(|| signature.to_vec());
+    }
+    let (0x30, body, []) = element(signature)? else {
+        return None;
+    };
+    // Exactly two non-negative INTEGERs fill the body.
+    let mut fixed = Vec::with_capacity(2 * len);
+    let mut rest = body;
+    for _ in 0..2 {
+        let (0x02, int @ [first, ..], after) = element(rest)? else {
+            return None;
+        };
+        if first & 0x80 != 0 {
+            return None;
+        }
+        let int = &int[int.iter().take_while(|&&b| b == 0).count()..];
+        if int.len() > len {
+            return None;
+        }
+        fixed.extend(std::iter::repeat_n(0, len - int.len()));
+        fixed.extend_from_slice(int);
+        rest = after;
+    }
+    rest.is_empty().then_some(fixed)
+}
+
+/// The `subjectPublicKey` of a `SubjectPublicKeyInfo`, the BIT STRING's
+/// bytes, whatever its algorithm identifier's parameters.
+pub fn spki_key(input: &[u8]) -> Option<&[u8]> {
+    let mut elements = elements(sequence(input)?);
+    let (0x30, _) = elements.next()? else {
+        return None;
+    };
+    let (0x03, [0, key @ ..]) = elements.next()? else {
+        return None;
+    };
+    Some(key)
+}

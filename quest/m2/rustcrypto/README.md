@@ -14,3 +14,5 @@ Why this one: much of the Rust ecosystem's crypto goes through RustCrypto (crate
 - The `[patch]` shims are a spike, because whether they work is not knowable from here. `[patch]` swaps a crate for another of the same name, so a shim has to be named `sha2` and offer `sha2`'s whole API at its version, and RustCrypto's concrete crates expose more than their traits. The spike reports how much of real trees builds and passes; the maintainer decides from that whether shims are a product.
 - Both follow AGENTS.md's adapter rule: their own crates, upstream's API and nothing added, a README listing what rind cannot back.
 - rind files no upstream PRs to get itself adopted (maintainer, 2026-11-11), and nothing here does.
+- Decided 2026-11-21 (maintainer, /quest-plan): ✅ support the previous major RustCrypto traits (`rind-digest 0.10.x`, `rind-aead 0.5.x`, `rind-signature 2.x`) from a maintenance branch after `traits.md` lands on `main` (rejected: workspace-excluded directories on `main`; waiting on `patch-shims`), matching [rind-rustls-0.24](/quest/m2/adoption/rind-rustls-0.24.md).
+

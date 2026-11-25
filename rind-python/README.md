@@ -122,7 +122,9 @@ the GIL while they run.
 
 pyrind wipes keys and keyed state when Python frees them, as rind does.
 Nothing wipes the `bytes` a key was loaded from or exported to;
-Python owns those.
+Python owns those. A key, seed, or password passed as another buffer, such
+as a `bytearray` you wipe yourself, is copied for the call, and pyrind wipes
+that copy before the call returns.
 
 ## Platforms
 

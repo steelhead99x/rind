@@ -4,10 +4,21 @@ name: ctgrind
 on:
   schedule:
     - cron: "23 7 * * 6"
+  # A dispatch runs every job the schedule runs, unless `jobs` names some,
+  # such as `-f jobs='x86_64-sde:rsa4096 armv7:no-neon'`: see
+  # sh/select-jobs.sh.
   workflow_dispatch:
+    inputs:
+      jobs:
+        description: Job IDs to run, space-separated, in workflow order, each optionally narrowed to rows as `job:value,...`; empty runs all
+        type: string
+        default: ""
   # A pull request runs only the x86_64 release row of `build`, the one that
   # fails fastest, and `binsec`; the weekly run runs the rest.
   pull_request:
+    # A draft skips every job until it is marked ready, and turning a PR back
+    # into a draft cancels its ready run: see CONTRIBUTING.md.
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
     branches: [main]
     paths:
       - rind/src/**
@@ -25,8 +36,9 @@ on:
 permissions:
   contents: read
 
+# Dispatches naming different jobs run side by side.
 concurrency:
-  group: ctgrind-${{ github.ref }}
+  group: ctgrind-${{ github.ref }}-${{ inputs.jobs }}
   cancel-in-progress: true
 
 env:
@@ -34,6 +46,31 @@ env:
   VALGRIND_BUG_494162: 1
 
 jobs:
+  # Checks a dispatch's `jobs` and hands each job its part, which its `if:`
+  # and its matrix's `exclude` read; every other job needs it, so a run
+  # without `jobs` skips it and runs them all.
+  select:
+    if: inputs.jobs
+    runs-on: ubuntu-latest
+    outputs:
+      jobs: ${{ steps.select.outputs.jobs }}
+      exclude: ${{ steps.select.outputs.exclude }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            .github/workflows/ctgrind.yml
+            sh/select-jobs.sh
+          sparse-checkout-cone-mode: false
+
+      - id: select
+        run: |
+          selected=$(sh/select-jobs.sh .github/workflows/ctgrind.yml "$JOBS")
+          tee -a "$GITHUB_OUTPUT" <<<"$selected"
+        env:
+          JOBS: ${{ inputs.jobs }}
+
   # Valgrind hides SHA3 and SVE2 from aarch64 programs, so the arm64 rows
   # check the code for cores with the crypto extension but without either,
   # and say so; `aarch64-qemu` checks the SHA3 and SVE2 paths. x86_64
@@ -42,12 +79,13 @@ jobs:
   # neither this nor `binsec`: a `release-plz-` branch that moq-bot,
   # release.yml's app, opened.
   build:
-    if: ${{ !(startsWith(github.head_ref, 'release-plz-') && github.event.pull_request.user.login == 'moq-bot[bot]') }}
+    needs: select
+    if: ${{ !cancelled() && !github.event.pull_request.draft && !(startsWith(github.head_ref, 'release-plz-') && github.event.pull_request.user.login == 'moq-bot[bot]') && (!inputs.jobs || contains(fromJSON(needs.select.outputs.jobs || '[]'), 'build')) }}
     strategy:
       matrix:
-        os: ${{ fromJSON(github.event_name == 'pull_request' && '["ubuntu-latest"]' || '["ubuntu-latest", "ubuntu-24.04-arm"]') }}
-        build: ${{ fromJSON(github.event_name == 'pull_request' && '["--release"]' || '["", "--release"]') }}
-
+        os: [ubuntu-latest, ubuntu-24.04-arm]
+        build: [debug, release]
+        exclude: ${{ github.event_name == 'pull_request' && fromJSON('[{"os":"ubuntu-24.04-arm"},{"build":"debug"}]') || fromJSON(needs.select.outputs.exclude || '{}').build || fromJSON('[]') }}
     runs-on: ${{ matrix.os }}
     env:
       RIND_TEST_ARM_CRYPTO_EXT: 1
@@ -65,14 +103,14 @@ jobs:
 
       # Only for the row pull requests run.
       - uses: ./.github/actions/rust-cache
-        if: matrix.os == 'ubuntu-latest' && matrix.build == '--release'
+        if: matrix.os == 'ubuntu-latest' && matrix.build == 'release'
         with:
           shell: .#ctgrind
 
       - name: ctgrind tests
-        run: nix develop .#ctgrind --command admin/ctgrind ${{ matrix.build }}
+        run: nix develop .#ctgrind --command admin/ctgrind ${{ matrix.build == 'release' && '--release' || '' }}
       - name: ctgrind FIPS module tests
-        run: nix develop .#ctgrind --command admin/ctgrind fips ${{ matrix.build }}
+        run: nix develop .#ctgrind --command admin/ctgrind fips ${{ matrix.build == 'release' && '--release' || '' }}
 
   # Valgrind hides ADX, which `admin/ctgrind`'s build switch overrides to
   # check s2n-bignum's ADX routines, so this job denies it to check what
@@ -97,7 +135,8 @@ jobs:
   # stays the code that ships.
   x86_64-portable:
     name: x86_64-portable (${{ matrix.cpu }})
-    if: github.event_name != 'pull_request'
+    needs: select
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && (!inputs.jobs || contains(fromJSON(needs.select.outputs.jobs || '[]'), 'x86_64-portable')) }}
     strategy:
       fail-fast: false
       matrix:
@@ -138,11 +177,13 @@ jobs:
   # the 32-bit limbs 32-bit targets run.
   portable:
     name: portable (${{ matrix.limb }}-bit limbs)
-    if: github.event_name != 'pull_request'
+    needs: select
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && (!inputs.jobs || contains(fromJSON(needs.select.outputs.jobs || '[]'), 'portable')) }}
     strategy:
       fail-fast: false
       matrix:
         limb: ["64", "32"]
+        exclude: ${{ fromJSON(needs.select.outputs.exclude || '{}').portable || fromJSON('[]') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -162,11 +203,13 @@ jobs:
   # hour.
   x86_64-sde:
     name: x86_64-sde (${{ matrix.test }})
-    if: github.event_name != 'pull_request'
+    needs: select
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && (!inputs.jobs || contains(fromJSON(needs.select.outputs.jobs || '[]'), 'x86_64-sde')) }}
     strategy:
       fail-fast: false
       matrix:
         test: [rsa3072, rsa4096, crt_ifma_2048, crt_ifma512_2048, crt_ifma512_3072, crt_ifma_4096, crt_ifma512_4096, public_ifma, aes128_gcm, aes192_gcm, aes256_gcm, aes_gcm_vaes_avx2, hmac, chacha20, mlkem768, mlkem_prf_8x, x25519, ed25519, p256_ifma_ecdh]
+        exclude: ${{ fromJSON(needs.select.outputs.exclude || '{}')['x86_64-sde'] || fromJSON('[]') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -186,7 +229,8 @@ jobs:
   # to check vpaes, NEON GHASH, and the scalar SHA-1 and SHA-256 that cores
   # without it run. The denial takes `--cfg rind_cpu_disable`, as above.
   aarch64-portable:
-    if: github.event_name != 'pull_request'
+    needs: select
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && (!inputs.jobs || contains(fromJSON(needs.select.outputs.jobs || '[]'), 'aarch64-portable')) }}
     runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -212,35 +256,29 @@ jobs:
   # code is checked here and the extension's by `armv7-qemu` (see
   # `admin/ctgrind`).
   #
-  # Release and debug builds, as `build` checks. Valgrind runs every thread on
-  # one core, so the suites run as parallel jobs instead, and
-  # `--no-fail-fast` reports every failing test binary in one run.
+  # Release and debug builds, as `build` checks, each suite its own job.
   #
-  # The `no-neon` row denies NEON to check the code cores without it run, such
-  # as OpenSSL's integer Keccak-f. The denial takes `--cfg rind_cpu_disable`,
-  # as above.
+  # The `no-neon` rows run the unit suite with NEON denied, to check the code
+  # cores without it run, such as OpenSSL's integer Keccak-f. The denial takes
+  # `--cfg rind_cpu_disable`, as above.
+  #
+  # The debug unit rows take about two hours, the rest under one.
   #
   # Ubuntu's armhf valgrind rather than `devShells.ctgrind`: nixpkgs caches no
   # armhf valgrind for an arm64 host, and building it builds its gdb too.
   armv7:
-    name: armv7 (${{ matrix.suite }}${{ matrix.neon == '0' && ', no-neon' || '' }}${{ matrix.build == '' && ', debug' || '' }})
-    if: github.event_name != 'pull_request'
+    name: armv7 (${{ matrix.suite }}, ${{ matrix.build }})
+    needs: select
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && (!inputs.jobs || contains(fromJSON(needs.select.outputs.jobs || '[]'), 'armv7')) }}
     strategy:
       # One suite's failure says nothing about the others.
       fail-fast: false
       matrix:
-        suite: [unit, wycheproof, adapters]
-        neon: ["1"]
-        build: ["", "--release"]
-        include:
-          - suite: unit
-            neon: "0"
-            build: ""
-          - suite: unit
-            neon: "0"
-            build: --release
-
+        suite: [unit, no-neon, wycheproof, adapters]
+        build: [debug, release]
+        exclude: ${{ fromJSON(needs.select.outputs.exclude || '{}').armv7 || fromJSON('[]') }}
     runs-on: ubuntu-24.04-arm
+    timeout-minutes: 240
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -258,26 +296,35 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf libc6:armhf valgrind:armhf
 
-      # A denial set to any value takes effect, so only the `no-neon` row sets
+      # The dev shell's version, as a checksum-verified prebuilt.
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: cargo-nextest@0.9.149
+
+      # A denial set to any value takes effect, so only the `no-neon` rows set
       # one.
       - name: ctgrind tests
         run: |
-          if [ "$RIND_TEST_ARM_NEON" = 0 ]; then
+          suite=$SUITE
+          if [ "$suite" = no-neon ]; then
+            suite=unit
             export RIND_CPU_DISABLE_neon=1 RUSTFLAGS='--cfg rind_cpu_disable'
           fi
-          admin/ctgrind ${{ matrix.suite }} --target armv7-unknown-linux-gnueabihf ${{ matrix.build }} --no-fail-fast
+          admin/ctgrind "$suite" --target armv7-unknown-linux-gnueabihf ${{ matrix.build == 'release' && '--release' || '' }}
         env:
+          SUITE: ${{ matrix.suite }}
           CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER: arm-linux-gnueabihf-gcc
           CC_armv7_unknown_linux_gnueabihf: arm-linux-gnueabihf-gcc
           CXX_armv7_unknown_linux_gnueabihf: arm-linux-gnueabihf-g++
-          RIND_TEST_ARM_NEON: ${{ matrix.neon }}
+          RIND_TEST_ARM_NEON: ${{ matrix.suite == 'no-neon' && '0' || '1' }}
           RIND_TEST_ARM_CRYPTO_EXT: 0
 
   # Valgrind hides armv7's crypto extension, so `admin/ct-qemu` compares
   # qemu-arm traces of its AES, GHASH, SHA-1, and SHA-256 for two secrets
   # instead, as `x86_64-sde` does with SDE.
   armv7-qemu:
-    if: github.event_name != 'pull_request'
+    needs: select
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && (!inputs.jobs || contains(fromJSON(needs.select.outputs.jobs || '[]'), 'armv7-qemu')) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -296,7 +343,8 @@ jobs:
   # traces them under qemu-aarch64 instead, natively built on the arm64
   # runner.
   aarch64-qemu:
-    if: github.event_name != 'pull_request'
+    needs: select
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && (!inputs.jobs || contains(fromJSON(needs.select.outputs.jobs || '[]'), 'aarch64-qemu')) }}
     runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -316,19 +364,14 @@ jobs:
   # table lookups or crypto extension.
   binsec:
     name: binsec (${{ matrix.backend }})
-    if: ${{ !(startsWith(github.head_ref, 'release-plz-') && github.event.pull_request.user.login == 'moq-bot[bot]') }}
+    needs: select
+    if: ${{ !cancelled() && !github.event.pull_request.draft && !(startsWith(github.head_ref, 'release-plz-') && github.event.pull_request.user.login == 'moq-bot[bot]') && (!inputs.jobs || contains(fromJSON(needs.select.outputs.jobs || '[]'), 'binsec')) }}
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - backend: x86_64
-            os: ubuntu-latest
-          - backend: portable
-            os: ubuntu-latest
-            rustflags: --cfg rind_portable --cfg curve25519_dalek_backend="serial"
-          - backend: aarch64
-            os: ubuntu-24.04-arm
-    runs-on: ${{ matrix.os }}
+        backend: [x86_64, portable, aarch64]
+        exclude: ${{ fromJSON(needs.select.outputs.exclude || '{}').binsec || fromJSON('[]') }}
+    runs-on: ${{ matrix.backend == 'aarch64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -339,4 +382,4 @@ jobs:
       - name: ct-binsec
         run: nix develop .#binsec --command admin/ct-binsec --timeout 480
         env:
-          RUSTFLAGS: ${{ matrix.rustflags }}
+          RUSTFLAGS: ${{ matrix.backend == 'portable' && '--cfg rind_portable --cfg curve25519_dalek_backend="serial"' || '' }}

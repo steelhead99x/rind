@@ -36,6 +36,7 @@ mod word {
     pub(super) type Word = __m128i;
     pub(super) const BATCH_SIZE: usize = 8;
 
+    #[cfg_attr(coverage_nightly, coverage(off))] // const-evaluated only
     const fn splat(mask: [u32; 4]) -> Word {
         // SAFETY: `__m128i` is 16 bytes, any bits of which are valid.
         unsafe { core::mem::transmute(mask) }

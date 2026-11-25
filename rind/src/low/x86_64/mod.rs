@@ -85,6 +85,7 @@ pub(crate) mod chacha20;
 pub(crate) mod chacha20poly1305;
 pub(crate) mod cpu;
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) mod ct_sde;
 pub(crate) mod curve25519_ifma;
 pub(crate) mod curve25519_x25519;
@@ -163,6 +164,7 @@ pub(crate) mod p384_montjmixadd;
 pub(crate) mod p384_montjmixadd_alt;
 pub(crate) mod p384_montjscalarmul;
 pub(crate) mod p384_montjscalarmul_alt;
+pub(crate) mod p384_vg;
 pub(crate) mod p521_jadd;
 pub(crate) mod p521_jadd_alt;
 pub(crate) mod p521_jdouble;
@@ -171,8 +173,8 @@ pub(crate) mod p521_jmixadd;
 pub(crate) mod p521_jmixadd_alt;
 pub(crate) mod p521_jscalarmul;
 pub(crate) mod p521_jscalarmul_alt;
-pub(crate) mod poly1305_ifma;
 pub(crate) mod rsa_ifma;
+pub(crate) mod rsa_vg;
 pub(crate) mod rsaz;
 pub(crate) mod rsaz_avx512;
 pub(crate) mod sha1;

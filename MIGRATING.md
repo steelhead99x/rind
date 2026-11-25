@@ -18,7 +18,7 @@ renames [rind-aws-lc-rs](#rind-aws-lc-rs) to `aws-lc-rs` the same way.
 | An allocated `Document`, `Vec`, or `Box` output | an owned value of fixed capacity, such as `encoding::Pkcs8` |
 | `error::Unspecified`, `error::KeyRejected` | `rind::Error`, by kind of call (see [error](#error)) |
 | One `signature` module for every algorithm | a module for each: [ecdsa](#ecdsa), [ed25519](#ed25519), [ml_dsa](#ml_dsa), [rsa](#rsa), and [slh_dsa](#slh_dsa) (see [signature](#signature)) |
-| aws-lc-rs wipes keys and keyed state on drop; ring doesn't | rind wipes them too, always |
+| aws-lc-rs wipes keys and keyed state on drop; ring doesn't | rind wipes them too, always, and its `zeroize` feature marks each such type `zeroize::ZeroizeOnDrop` |
 
 ## digest
 
@@ -43,7 +43,8 @@ renames [rind-aws-lc-rs](#rind-aws-lc-rs) to `aws-lc-rs` the same way.
 | `Key::new(HMAC_SHA256, key)` | `Key::new(&HMAC_SHA256, key)` |
 | `Key::generate(alg, rng)` | `rand::fill` a `tag_len()`-byte key, then `Key::new` |
 | `Key::algorithm()` | the same, as `&'static` |
-| `Context::{with_key, update, sign}`, `sign`, `Tag` | the same |
+| `Context::{with_key, update}`, `sign`, `Tag` | the same |
+| `Context::sign(self)` | `Context::sign(&mut self)`, which leaves the context keyed to sign another message; bind the context `mut` |
 | `verify(key, data, tag)` | the same, failing with `Error::BadSignature` |
 | `HMAC_SHA256`, `HMAC_SHA384`, `HMAC_SHA512` | the same |
 | `HMAC_SHA1_FOR_LEGACY_USE_ONLY` | `legacy::HMAC_SHA1` |
@@ -185,6 +186,8 @@ A key's type names its algorithm, so a key of one cannot reach a call of
 another, and a program links only the algorithms it names. A protocol that
 picks the algorithm at run time, as TLS and JWS do, holds an enum of the
 modules' public keys, as [rind-rustls](rind-rustls/src/verify.rs) does.
+A PKCS#8 private key of unknown type loads in one call, `rind::KeyPair::from_pkcs8`,
+an enum over the modules' key pairs.
 
 | aws-lc-rs | rind |
 |---|---|
@@ -199,6 +202,7 @@ modules' public keys, as [rind-rustls](rind-rustls/src/verify.rs) does.
 | `KeyPair` trait, `KeyPair::public_key()`, ring's `RsaKeyPair::public()` | inherent `public_key()`, a borrowed `PublicKey` of the same module |
 | `Ed25519PublicKey`, `EcdsaPublicKey`, `RsaSubjectPublicKey` | `ed25519::PublicKey`, `ecdsa::PublicKey`, `rsa::PublicKey` |
 | `generate_pkcs8(rng)`, `generate_pkcs8(alg, rng)`, `generate_pkcs8v1` | `generate(..)?.to_pkcs8()` |
+| Each key type's `from_pkcs8` in turn, as rustls's `any_supported_type` does | `rind::KeyPair::from_pkcs8(der)?`, which reads the algorithm identifier once and refuses a key that cannot sign, naming it; an ECDSA key signs with its curve's hash and ASN.1 signatures |
 | `to_pkcs8()`, `to_pkcs8v1()`, `public_key().as_der()`, each an allocated `Document` | `to_pkcs8()`, `to_pkcs8v1()` (Ed25519), `public_key().to_spki()`, each of fixed capacity; `Pkcs8` is wiped on drop |
 | `Signature`, one type for every algorithm | each module's `Signature`, which holds only its algorithm's length |
 
@@ -350,6 +354,11 @@ No rind call takes a random source, so there is nothing to pass one to.
 | `SystemRandom::new().fill(out)`, `rand::fill(out)` | `rand::fill(out)` |
 | `generate::<[u8; N]>(rng)?.expose()` | `rand::fill` into a `[u8; N]` |
 | `SecureRandom`, `RandomlyConstructable`, `Random` | none |
+
+For a crate that takes a `rand_core` RNG, such as RustCrypto's,
+[rind-rand-core](rind-rand-core/README.md)'s `SystemRandom` is a `rand_core`
+`TryCryptoRng` over `rand::fill`; wrap it in `rand_core::UnwrapErr` where the
+crate takes an infallible `CryptoRng`.
 
 ## error
 
@@ -592,7 +601,7 @@ install ring's if nothing is installed first.
 | x509-parser 0.18 | `verify` is ring, `verify-aws` aws-lc-rs | **Patch**: `verify`, or verify `tbs_certificate` with the key's module, such as `rind::ecdsa::PublicKey::verify` |
 | x509-certificate 0.25, cryptographic-message-syntax 0.28 | ring types in their public API | **Patch** |
 | sigstore 0.14, tough 0.24 | aws-lc-rs, unconditionally | Unsupported |
-| jsonwebtoken 11 | optional `aws_lc_rs` | **rind-jsonwebtoken**, every algorithm. `rust_crypto` is the pure-Rust alternative |
+| jsonwebtoken 12 | optional `aws_lc_rs` | **rind-jsonwebtoken**, every algorithm. `rust_crypto` is the pure-Rust alternative |
 | jwtk 0.5 | default `aws-lc` for RSA verification and JWK conversion | Adapter, for caller-held keys only |
 | biscuit 0.8, rusty_paseto 0.10 | ring, unconditionally | **Patch** |
 | paseto 2 | ring 0.16 and OpenSSL | Unsupported |

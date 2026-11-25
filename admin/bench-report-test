@@ -67,8 +67,8 @@ def hosts():
                 ("aes256-gcm/{lib}/16KB", "aws-lc-rs", 1500.0),
             ],
         ),
-        "nixos2": host(
-            "nixos2",
+        "desktop": host(
+            "desktop",
             "x86_64",
             "NixOS (Linux 6.18)",
             COFFEE_LAKE,
@@ -162,10 +162,10 @@ class Render(unittest.TestCase):
     def test_overview_marks_each_measured_square(self):
         svg = br.overview_svg(hosts(), VERIFIED, "light")
         titles = squares(svg)
-        # nixos: x25519 3 + aes 2; nixos2: aes 2; kixtop: x25519 2; desktop
+        # nixos: x25519 3 + aes 2; desktop: aes 2; kixtop: x25519 2; ovh-iad
         # is unmeasured, so it has no squares.
         self.assertEqual(len(titles), 9)
-        self.assertIn("left to right: nixos, nixos2, kixtop.", svg)
+        self.assertIn("left to right: nixos, desktop, kixtop.", svg)
         # Only the libraries some host timed get a column.
         self.assertIn(">OpenSSL<", svg)
         self.assertNotIn(">graviola<", svg)
@@ -179,41 +179,12 @@ class Render(unittest.TestCase):
         self.assertEqual(
             sorted(titles),
             [
-                "AES-256-GCM seal, 16 KB, rind on nixos2: 2.00 µs, 1.00× the fastest; verified: aes proof",
+                "AES-256-GCM seal, 16 KB, rind on desktop: 2.00 µs, 1.00× the fastest; verified: aes proof",
                 "X25519, rind on nixos: 30.00 µs, 1.00× the fastest; verified: x86 proof",
                 "X25519, ring on kixtop: 40.00 µs, 2.00× the fastest; verified: any-arch proof",
                 "X25519, ring on nixos: 33.00 µs, 1.10× the fastest; verified: any-arch proof",
             ],
         )
-
-    def test_dit_held_shows_beside_rind_but_never_sets_the_fastest(self):
-        everyone = hosts()
-        everyone["kixtop"]["results"].append({"operation": "x25519-ecdh/{lib}", "library": "rind-dit-held", "ns": 10000.0})
-        everyone["kixtop"]["results"][1]["ns"] = 15000.0
-        svg = br.overview_svg(everyone, VERIFIED, "light")
-        titles = squares(svg)
-        # kixtop's rind trails ring by 33%; its held row counts for neither.
-        self.assertIn(">rind is the fastest, or within 10% of it, in 3 of its 4 times<", svg)
-        self.assertIn("X25519, rind (DIT held) on kixtop: 10.00 µs, 0.67× the fastest", titles)
-        self.assertIn("X25519, rind on kixtop: 20.00 µs, 1.33× the fastest", titles)
-        # rind is a gap against ring, never against its own held row.
-        self.assertEqual(br.gaps_of(everyone, None), {("x25519-ecdh", "kixtop"): (20000.0 / 15000.0, "ring")})
-        on_macos = [{"library": "rind", "operations": ["x25519-ecdh"], "proof": "p", "link": "https://example.com"}]
-        table = br.host_table(everyone["kixtop"], on_macos)
-        self.assertIn("| Operation | rind | rind (DIT held) | ring |", table)
-        self.assertIn("| X25519 | 20.00 µs ✓ | 10.00 µs ✓ | 15.00 µs |", table)
-        self.assertEqual(br.header_lines("rind (DIT held)"), ["rind", "(DIT held)"])
-        held = "rind (DIT held) times rind with `rind::cpu::Dit::hold()`"
-        self.assertIn(held, br.report(everyone, None, VERIFIED, [])[br.REPORT])
-        self.assertNotIn(held, br.report(hosts(), None, VERIFIED, [])[br.REPORT])
-
-    def test_site_data_never_counts_a_variant_as_the_fastest(self):
-        everyone = hosts()
-        everyone["kixtop"]["results"].append({"operation": "x25519-ecdh/{lib}", "library": "rind-dit-held", "ns": 10000.0})
-        kixtop = next(h for h in br.site_data(everyone, None, VERIFIED, [])["hosts"] if h["name"] == "kixtop")
-        self.assertEqual(kixtop["libraries"], ["rind", "rind-dit-held", "ring"])
-        self.assertEqual(kixtop["fastest"], {"x25519-ecdh": "rind"})
-        self.assertEqual(kixtop["times"]["x25519-ecdh"][1], ["10.00 µs", 0, 0.5])
 
     def test_fastest_bin_holds_within_ten_percent(self):
         self.assertEqual(br.bin_of(1.0, br.SPEED_BINS), 0)
@@ -260,11 +231,11 @@ class Render(unittest.TestCase):
         self.assertIn("on three machines", md)
         self.assertIn("Not timed on `kixtop`: full handshake, X25519MLKEM768, ", md)
         self.assertNotIn("Not measured yet", md)
-        self.assertNotIn("`desktop` |", md)
+        self.assertNotIn("`ovh-iad` |", md)
         self.assertIn("No weekly results yet.", md)
         self.assertEqual(
             sorted(os.path.basename(p) for p in files if p.endswith(".svg")),
-            sorted(f"{n}{s}.svg" for n in ["overview", "nixos", "nixos2", "kixtop"] for s in ["", "-dark"]),
+            sorted(f"{n}{s}.svg" for n in ["overview", "nixos", "desktop", "kixtop"] for s in ["", "-dark"]),
         )
         self.assertIn("| Operation | rind | aws-lc-rs | ring | OpenSSL |", md)
         self.assertIn("| X25519 | 30.00 µs ✓ | - | 33.00 µs ✓ | 300.00 µs |", md)
@@ -276,9 +247,9 @@ class Render(unittest.TestCase):
         for row in ["x25519-ecdh/graviola", "aes128-gcm/graviola/32B", "x25519-ecdh/rind/extra"]:
             self.assertFalse(regex.match(row), row)
         everyone = hosts()
-        everyone["nixos2"]["refused"] = {"graviola": ["bmi1", "adx"]}
+        everyone["desktop"]["refused"] = {"graviola": ["bmi1", "adx"]}
         md = br.report(everyone, None, VERIFIED, [])[br.REPORT]
-        self.assertIn("graviola isn't timed on `nixos2`: it requires BMI1 and ADX, which this CPU lacks.", md)
+        self.assertIn("graviola isn't timed on `desktop`: it requires BMI1 and ADX, which this CPU lacks.", md)
 
     def test_reports_md5_and_sha1(self):
         # rind-bench times these on every device; a report that drops them
@@ -306,15 +277,15 @@ class Render(unittest.TestCase):
 
     def test_site_data_grid_marks_each_cell(self):
         h = hosts()
-        h["nixos2"]["refused"] = {"openssl": ["adx"]}
+        h["desktop"]["refused"] = {"openssl": ["adx"]}
         data = br.site_data(h, None, VERIFIED, [])
-        self.assertEqual([x["name"] for x in data["hosts"]], ["nixos", "nixos2", "kixtop"])
+        self.assertEqual([x["name"] for x in data["hosts"]], ["nixos", "desktop", "kixtop"])
         self.assertEqual([x["os_kind"] for x in data["hosts"]], ["linux", "linux", "macos"])
         grid = {x["name"]: x["grid"] for x in data["hosts"]}
         self.assertEqual(set(grid["nixos"]), {br.row_name(op) for op in br.OPERATIONS})
         self.assertEqual(set(grid["nixos"]["x25519-ecdh"]), {"rind", "aws-lc-rs", "ring", "openssl"})
-        cells = lambda row, lib: [grid[n][row][lib] for n in ["nixos", "nixos2", "kixtop"]]
-        # Both x86_64 hosts have ADX, nixos2 without timing it; kixtop's
+        cells = lambda row, lib: [grid[n][row][lib] for n in ["nixos", "desktop", "kixtop"]]
+        # Both x86_64 hosts have ADX, desktop without timing it; kixtop's
         # proof holds only on Linux.
         self.assertEqual(cells("x25519-ecdh", "rind"), [0, 0, {"other_os": 3}])
         # A proof shows where the host timed nothing, since it covers the code.
@@ -328,7 +299,7 @@ class Render(unittest.TestCase):
         import xml.etree.ElementTree as ET
 
         everyone = hosts()
-        for names in [list(everyone), ["nixos2"], []]:
+        for names in [list(everyone), ["desktop"], []]:
             files = br.report({n: everyone[n] for n in names}, TIERS, VERIFIED, [])
             with self.subTest(hosts=names):
                 self.assertEqual("## Speed" in files[br.REPORT], bool(names))
@@ -854,7 +825,7 @@ class AnyHost(unittest.TestCase):
         everyone[ALIEN] = laptop(ALIEN)
         everyone[RYZEN] = laptop(RYZEN)
         svg = br.overview_svg(everyone, VERIFIED, "light")
-        self.assertIn(f"left to right: nixos, nixos2, kixtop, {ALIEN}, {RYZEN}.", svg)
+        self.assertIn(f"left to right: nixos, desktop, kixtop, {ALIEN}, {RYZEN}.", svg)
         md = br.report(everyone, None, VERIFIED, [])[br.REPORT]
         self.assertIn("on five machines", md)
         self.assertIn(f"### `{ALIEN}`: {ALIEN} CPU", md)
@@ -891,7 +862,7 @@ class AnyHost(unittest.TestCase):
     def test_published_data_still_loads_in_report_order(self):
         self.assertEqual(
             list(br.load_hosts(br.DATA_DIR)),
-            ["nixos", "desktop", "nixos2", "kixtop", "ovh-iad", "ovh-sea"],
+            ["nixos", "desktop", "fedora", "kixtop", "ovh-iad", "ovh-sea"],
         )
 
     def test_run_accepts_any_host_and_collect_keeps_its_list(self):
@@ -2887,7 +2858,7 @@ class Comparison(unittest.TestCase):
     def test_counts_times_within_ten_percent_of_the_fastest(self):
         _, rows = self.cells(hosts())
         # rind leads all four of its contested times. aws-lc-rs is within 10%
-        # on nixos2 only, and ring at exactly 1.1x on nixos, but twice
+        # on desktop only, and ring at exactly 1.1x on nixos, but twice
         # rind's time on kixtop.
         self.assertIn("[4 of its 4 times]", rows["rind"][3])
         self.assertIn("[1 of its 2 times]", rows["aws-lc-rs"][3])

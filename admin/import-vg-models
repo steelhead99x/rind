@@ -40,6 +40,7 @@ ROOTS = [
     for m in ["Isa", "Print", "Encode", "Target"]
 ] + [
     # The specs whose functions rind's axioms about VG's routines state.
+    "VerifiedGarbage.Spec.ChaCha20Poly1305",
     "VerifiedGarbage.Spec.MlKem",
     "VerifiedGarbage.Spec.Rsa.PrivatePrecompute",
     # ChaCha20's contracts, which proofs/Rind/X86_64/VgChaCha20.lean's
@@ -47,6 +48,24 @@ ROOTS = [
     # contracts shows the change in its diff, against which that re-pin must
     # review the axioms.
     "VerifiedGarbage.Spec.ChaCha20.Contract",
+    # X25519's and Ed25519's specs, which proofs/Rind/X86_64/VgCurve25519.lean
+    # states its axioms in, and the contracts those axioms restate.
+    "VerifiedGarbage.Spec.X25519.Contract",
+    "VerifiedGarbage.Spec.Ed25519.KeyPair",
+    "VerifiedGarbage.Spec.Ed25519.ExpandedSign",
+    # P-256's specs and the contracts of its public key, ECDH, and ECDSA
+    # verification, which proofs/Rind/X86_64/VgP256.lean's axioms restate:
+    # a re-pin that changes them shows the change in its diff.
+    "VerifiedGarbage.Spec.EcKey.P256",
+    "VerifiedGarbage.Spec.Ecdh.P256",
+    "VerifiedGarbage.Spec.Ecdsa.Verify.P256",
+    # P-384's public key and ECDSA verification contracts, which
+    # proofs/Rind/X86_64/VgP384.lean's axioms restate.
+    "VerifiedGarbage.Spec.EcKey.P384",
+    "VerifiedGarbage.Spec.Ecdsa.Verify.P384",
+    # PBKDF2-HMAC's contracts, over VG's SHA-1, SHA-2, and HMAC specs, which
+    # proofs/Rind/VgPbkdf2.lean proves rind's.
+    "VerifiedGarbage.Spec.Pbkdf2.Generic",
 ]
 
 IMPORT = re.compile(r"^(?:public )?(?:meta )?import (VerifiedGarbage\.[A-Za-z0-9_.]+)\b", re.M)

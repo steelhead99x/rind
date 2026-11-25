@@ -70,11 +70,11 @@ Each upstream rind changes, with where its fork is vendored and where the list o
 
 ### Cargo runs $CARGO_HOME/bin's subcommands before PATH's
 
-- **Breaks:** Cargo looks up an external subcommand such as `cargo-fmt` or `cargo-clippy` in `$CARGO_HOME/bin` before `PATH`, unless that directory is itself on `PATH` ([the Cargo book](https://doc.rust-lang.org/cargo/reference/external-tools.html#custom-subcommands)). On a host with rustup there, `cargo fmt` and `cargo clippy` inside the dev shell run rustup's default toolchain, not the flake's, while `which cargo-fmt` names the flake's. A newer rustfmt then reformats files CI's accepts, and a toolchain without a cross target's standard library fails `check cross` with `can't find crate for core`.
-- **Reproduce:** `nix develop --command cargo fmt --version` on a host whose `$CARGO_HOME/bin/cargo-fmt` is rustup's, with `$CARGO_HOME/bin` not on `PATH`, reports rustup's rustfmt; found on [#140](https://github.com/steelhead99x/rind/pull/140).
-- **Workaround:** `sh/toolchain.sh`, which `sh/dispatch.sh` runs inside the dev shell before any check, stops unless `cargo fmt --version` and `cargo clippy --version` name the build `rustc --version` does.
+- **Breaks:** Cargo looks up an external subcommand such as `cargo-fmt` or `cargo-clippy` in `$CARGO_HOME/bin` before `PATH`, unless that directory is itself on `PATH`. On a host with rustup there, `cargo fmt` and `cargo clippy` inside a dev shell run rustup's default toolchain, not the flake's, while `command -v cargo-fmt` names the flake's. A newer rustfmt then reformats files CI accepts, and a toolchain without a cross target's standard library fails clippy with `can't find crate for core`.
+- **Reproduce:** `nix develop --command cargo fmt --version` on a host whose `$CARGO_HOME/bin/cargo-fmt` is a rustup shim and whose `$CARGO_HOME/bin` is not on `PATH` reports rustup's rustfmt. GitHub's ubuntu-24.04 image puts `$HOME/.cargo/bin` on `PATH`, so CI does not hit this.
+- **Workaround:** every dev shell's hook appends `$CARGO_HOME/bin` to `PATH` when it is missing, which turns off Cargo's lookup there first and leaves the flake's tools ahead of it.
 - **Reported:** no.
-- **Goes when:** Cargo prefers `PATH`'s subcommands, or the flake's shells put an empty `$CARGO_HOME/bin` ahead of a host's.
+- **Goes when:** Cargo prefers `PATH`'s subcommands.
 
 ## Constant-time analysis
 
@@ -151,7 +151,7 @@ Each upstream rind changes, with where its fork is vendored and where the list o
 
 ### BINSEC cannot decode much of what rind runs
 
-- **Breaks:** BINSEC 0.11.3 stops at instructions it cannot decode: on x86_64, AES-NI, VAES, and every EVEX encoding; on aarch64, the crypto extension's AES, PMULL, and SHA instructions, SHA3's, every SVE encoding, such as SVE2's `xar`, and the `msr` that sets DIT; on armv7, the NEON table lookups and the crypto extension.
+- **Breaks:** BINSEC 0.11.3 stops at instructions it cannot decode: on x86_64, AES-NI, VAES, and every EVEX encoding; on aarch64, the crypto extension's AES, PMULL, and SHA instructions, SHA3's, every SVE encoding, such as SVE2's `xar`, and the `msr` that sets DIT; on armv7, the NEON table lookups and the crypto extension. It also cannot decode x86_64's `VSHA512` instructions, which rind does not run.
 - **Workaround:** `admin/ct-binsec`'s `UNDECODED` denies those features, leaving their paths to `admin/ctgrind`, `admin/ct-sde`, and `admin/ct-qemu`, and armv7 has no `binsec` row in `ctgrind.yml`.
 - **Reported:** no.
 - **Goes when:** a BINSEC release decodes each, feature by feature.
@@ -203,14 +203,6 @@ Each upstream rind changes, with where its fork is vendored and where the list o
 - **Workaround:** `admin/prove` renames the second to `markerCopyInst1` with `sed`.
 - **Reported:** no.
 - **Goes when:** Aeneas names the clauses apart.
-
-### Charon panics on HACL*'s unrolled SHA-2
-
-- **Breaks:** libcrux-macros' `unroll_for!` unrolls the 64 or 80 rounds of libcrux-sha2's `sha256_update_nblocks` and `sha512_update_nblocks` into one body whose blocks nest past Charon's fixed `MAX_STACK_DEPTH` of 1024, and Charon panics rebuilding its control flow.
-- **Reproduce:** add `--include 'libcrux_sha2::hacl::sha256_update_nblocks' --extract-opaque-bodies` to `admin/prove`'s portable pass and run `admin/prove lean`: Charon panics with "stack depth limit exceeded" in `transform/control_flow/ullbc_to_llbc.rs` translating `sha256_update`.
-- **Workaround:** the portable pass leaves both functions opaque, as Charon leaves other crates' bodies, and `proofs/Rind/Portable/Hacl.lean` states each as an axiom restating HACL*'s F* theorem about it. Found in [kixel-ai/rind#649](https://github.com/kixel-ai/rind/pull/649).
-- **Reported:** not yet; filing is approved, and [its quest](/quest/m4/verified/hacl-sha2-lean.md) holds the draft issue awaiting the maintainer's approval of its text.
-- **Goes when:** Charon translates both, and that quest proves them in Lean.
 
 ### Lean cannot compile P-384's comb as one literal
 

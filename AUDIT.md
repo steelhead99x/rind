@@ -126,7 +126,6 @@ The pins, as `admin/audit` renders them from the files that hold them, so
 | libcrux-hacl-rs | 0.0.6 | `Cargo.lock` | the runtime of the HACL\* ChaCha20 rounds rind copied |
 | libcrux-macros | 0.0.4 | `Cargo.lock` | the same |
 | libcrux-poly1305 | 0.0.7 | `Cargo.lock` | HACL\*'s Poly1305, on 32-bit portable targets |
-| libcrux-sha2 | 0.0.9 | `Cargo.lock` | HACL\*'s SHA-2 block functions, on the portable backend |
 <!-- admin/audit pins: end -->
 
 Code taken once, with no importer to rerun, carries no machine-readable pin:
@@ -170,17 +169,19 @@ establishes, and what it does not:
   [TESTING.md's tier table](TESTING.md#tiers) names. They check only the
   cases published, and each tier only where CI runs it, natively, under
   Intel SDE, or under qemu.
-- **Differential tests** against aws-lc-rs, or a Rust crate where aws-lc-rs
-  lacks the primitive, on the same tiers. Where rind runs aws-lc's own
-  routine, as for ChaCha20-Poly1305 on x86_64 and aarch64 or RSA's RSAZ
-  exponentiation, the test compares that routine with itself, so it
-  checks rind's glue around it, and only vectors check the routine. wasm runs
-  none, since aws-lc does not build for it.
+- **Differential tests** against aws-lc-rs, where it has the primitive, and
+  against the independent oracle [TESTING.md's primitives
+  table](TESTING.md#primitives) names, a Rust implementation that shares no
+  code with the path rind runs, on the same tiers. Where rind runs aws-lc's
+  own routine, as for ChaCha20-Poly1305 on x86_64 and aarch64 or RSA's RSAZ
+  exponentiation, aws-lc-rs compares that routine with itself, so it checks
+  rind's glue around it, and the oracle checks the routine. wasm runs none,
+  since aws-lc does not build for it.
 - **Fuzz targets**, weekly for twenty minutes each against aws-lc-rs,
   replayed on every tier and against the portable backend. The ECVRF, OPRF,
   and blind RSA targets compare rind with itself, so they find panics and
   hangs, not wrong answers. Coverage does not measure what fuzzing reaches.
-  [OSS-Fuzz](/quest/m4/oss-fuzz.md) is not running yet.
+  [OSS-Fuzz](/quest/m2/confidence/oss-fuzz.md) is not running yet.
 - **ctgrind** (`admin/ctgrind`, weekly, in release and debug builds, armv7's
   included) runs the unit tests under valgrind, failing on a branch or address
   that depends on a marked secret. It sees only the paths the tests take,
@@ -207,10 +208,10 @@ establishes, and what it does not:
   [ALGORITHMS.md](ALGORITHMS.md#s2n-bignums-constant-time-theorems) lists
   constant time for every input, variable-time instructions included, but
   not the Rust that calls them.
-- **Timing tests** (`admin/timing`, weekly on GitHub's runners) run dudect
-  over each secret the API lets them set, and the Marvin toolkit against
-  RSA-OAEP decryption. They are statistical, on shared hardware, and cannot
-  time key generation or encapsulation.
+- **The Marvin timing test** (`admin/timing`, weekly on GitHub's runners) runs
+  the Marvin toolkit against RSA-OAEP decryption. It is statistical, on shared
+  hardware, and times nothing else: rind runs no dudect, whose noise on
+  shared runners outweighed what the constant-time checks above leave.
 - **Proofs**: s2n-bignum's, HACL\*'s, Vale's, fiat-crypto's, and
   aws-lc-verification's published proofs, and rind's own HOL Light and Lean
   proofs in [`proofs/`](proofs/README.md), checked nightly by `admin/prove`.
@@ -267,7 +268,8 @@ Hand-written arithmetic no proof covers, by where it came from:
   ✓, such as ChaCha20-Poly1305 on x86_64 and aarch64, RSAZ, Montgomery
   multiplication off ADX, the AVX2 and SHA512-instruction SHA-2, VAES
   AES-GCM, and all of armv7's. Vectors and fuzzing reach each on its tier;
-  the differential test, which runs aws-lc's code too, checks only the glue.
+  aws-lc-rs, which runs that code too, checks only the glue, and the
+  independent oracle checks the routine.
 - **Graviola's** code under AES, GHASH, SHA-256, HMAC, P-256, P-384,
   ML-KEM, and RSA, wherever ALGORITHMS.md names it. Vectors, differential
   tests independent of it, and fuzzing reach each.
@@ -279,13 +281,14 @@ Hand-written arithmetic no proof covers, by where it came from:
   [TESTING.md](TESTING.md#vector-suites) describes.
 - **Ports to Rust**: mlkem-native's and mldsa-native's C, outside their CBMC
   proofs; curve25519-dalek's AVX2 backend, for Ed25519 verification on
-  x86_64 without ADX; and aws-lc's constant-time SSE2 AES and integer GHASH.
+  x86_64 without ADX; aws-lc's constant-time SSE2 AES and integer GHASH; and
+  aws-lc's C SHA-256 and SHA-384/512, the portable backend's.
   `low::generic::mldsa_poly::backend_matches_port` checks the ML-DSA port
   against the AVX2 and Neon routines.
 - **curve25519-dalek's serial backend**, X25519, Ed25519, and ristretto255
   on armv7 and the portable backend. There ristretto255's differential test
-  compares dalek with itself, so only RFC 9496's and RFC 9497's vectors
-  check it.
+  compares dalek with itself, so beside RFC 9496's and RFC 9497's vectors
+  only the textbook reference in `rind/src/test/reference.rs` checks it.
 - **x86_64 P-256's mixed addition on macOS**, aws-lc's: rind's HOL Light
   proofs check the Linux build's object, and Apple's text can place the
   routines' helpers at other offsets.

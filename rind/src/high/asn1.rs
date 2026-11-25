@@ -913,6 +913,7 @@ impl Tag {
         self.0 == offered
     }
 
+    #[cfg_attr(coverage_nightly, coverage(off))] // const-evaluated only
     const fn constructed(&self) -> bool {
         matches!(self.0, Self::SEQUENCE) || self.0 & Self::CONSTRUCTED == Self::CONSTRUCTED
     }

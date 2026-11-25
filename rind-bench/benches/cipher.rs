@@ -37,6 +37,7 @@ fn bench_aes_ctr(c: &mut Criterion) {
                 });
             });
             group.bench_function(BenchmarkId::new("rind", size_name), |b| {
+                let _dit = criterion::rind_dit();
                 let key = rind::cipher::AesCtr::new(rind_aes(key_len), key, 128).unwrap();
                 b.iter(|| key.apply_keystream(&iv, &mut buf).unwrap());
             });
@@ -115,6 +116,7 @@ fn bench_aes_cbc(c: &mut Criterion) {
                     });
                 });
                 group.bench_function(BenchmarkId::new("rind", size_name), |b| {
+                    let _dit = criterion::rind_dit();
                     let enc = AesCbcEncryptingKey::new(algorithm, key).unwrap();
                     let dec = AesCbcDecryptingKey::new(algorithm, key).unwrap();
                     b.iter(|| {
@@ -197,6 +199,7 @@ fn bench_chacha20(c: &mut Criterion) {
         group.throughput(Throughput::Bytes(size as u64));
 
         group.bench_function(BenchmarkId::new("rind", size_name), |b| {
+            let _dit = criterion::rind_dit();
             let key = rind::cipher::ChaCha20::new(&key);
             b.iter(|| key.apply_keystream(&nonce, 0, &mut buf).unwrap());
         });
@@ -249,18 +252,17 @@ fn bench_header_protection(c: &mut Criterion) {
             let key = HeaderProtectionKey::new(algorithm, key).unwrap();
             b.iter(|| key.new_mask(&sample).unwrap());
         });
-        for (lib, _dit) in criterion::rind_rows() {
-            group.bench_function(format!("{name}/{lib}"), |b| {
-                use rind::aead::quic::{AES_128, AES_256, CHACHA20, HeaderProtectionKey};
-                let algorithm = match name {
-                    "aes128" => &AES_128,
-                    "aes256" => &AES_256,
-                    _ => &CHACHA20,
-                };
-                let key = HeaderProtectionKey::new(algorithm, key).unwrap();
-                b.iter(|| key.mask(&sample));
-            });
-        }
+        group.bench_function(format!("{name}/rind"), |b| {
+            let _dit = criterion::rind_dit();
+            use rind::aead::quic::{AES_128, AES_256, CHACHA20, HeaderProtectionKey};
+            let algorithm = match name {
+                "aes128" => &AES_128,
+                "aes256" => &AES_256,
+                _ => &CHACHA20,
+            };
+            let key = HeaderProtectionKey::new(algorithm, key).unwrap();
+            b.iter(|| key.mask(&sample));
+        });
         group.bench_function(format!("{name}/verified-garbage"), |b| {
             use rind::aead::quic::{AES_128, AES_256, CHACHA20, HeaderProtectionKey};
             use verified_garbage::cipher::aes::AesEcb;

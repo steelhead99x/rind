@@ -76,7 +76,7 @@ exclude_re = [
   # `1 << 0` survives.
   'rind/src/low/x86_64/cpu\.rs:446:\d+: replace << with >>$',
   'rind/src/low/x86_64/cpu\.rs:\d+:\d+: replace \| with \^$',
-  'rind/src/low/x86_64/cpu\.rs:\d+:\d+: replace \| with \^ in (HaveAdxForVgP256::check|HaveAesHardware::check|HaveAvx::check|HaveAvx512ForVgMlKem::check|HaveAvxMovbeForAesGcm::check|HaveBmi2Adx::check|HaveIfmaForCurve25519::check|HaveIfmaForVgP256::check|HaveSha1::check|HaveSha256::check|HaveSse41::check|HaveVaesAvx2ForAesGcm::check|detect|detect_once)$',
+  'rind/src/low/x86_64/cpu\.rs:\d+:\d+: replace \| with \^ in (HaveAdxForVg::check|HaveAesHardware::check|HaveAvx::check|HaveAvx512ForVgMlKem::check|HaveAvxMovbeForAesGcm::check|HaveBmi2Adx::check|HaveIfmaForCurve25519::check|HaveIfmaForVgChaCha20Poly1305::check|HaveIfmaForVgP256::check|HaveSha1::check|HaveSha256::check|HaveSse41::check|HaveVaesAvx2ForAesGcm::check|detect|detect_once)$',
   'rind/src/low/x86_64/edwards25519_msm_avx2\.rs:\d+:\d+: replace \| with \^$',
   'rind/src/low/x86_64/edwards25519_msm_avx2\.rs:\d+:\d+: replace \| with \^ in (Fe4::diff_sum|Fe4::split)$',
   'rind/src/low/x86_64/ghash\.rs:\d+:\d+: replace \| with \^ in Ghash<\x27a>::add_lengths$',
@@ -125,6 +125,10 @@ exclude_re = [
   'rind/src/low/generic/edwards25519_msm\.rs:\d+:(18|21): replace < with <= in non_adjacent_form$',
   'rind/src/low/generic/edwards25519_msm\.rs:\d+:(16|20): replace (> with >=|\+ with \*) in non_adjacent_form$',
   'rind/src/mid/half_size\.rs:\d+:18: replace < with <= in split$',
+  # ChaCha20's chunk length: with a whole chunk left, both branches give it.
+  # The loop guard's `<`, at column 16, is caught.
+  'rind/src/low/generic/chacha20\.rs:\d+:40: replace < with <= in cipher$',
+  'rind/src/low/x86_64/chacha20\.rs:\d+:40: replace < with <= in cipher_avx2$',
   'rind/src/high/asn1\.rs:\d+:\d+: replace < with <= in ObjectId::from_path$',
   'rind/src/high/ecdsa\.rs:\d+:\d+: replace > with >= in hash_to_scalar$',
   'rind/src/high/rsa\.rs:\d+:\d+: replace > with >= in public_exponent$',
@@ -140,11 +144,10 @@ exclude_re = [
   'rind/src/low/generic/p521\.rs:\d+:\d+: replace == with != in mont_pow$',
   'rind/src/low/generic/p521\.rs:\d+:27: replace >> with << in mont_mul$',
   'rind/src/low/generic/p521\.rs:\d+:49: replace >> with << in mont_mul$',
-  # `(t - 16) % 16` and `(t + 16) % 16` are the same window slot. Pinned to
-  # its line: `t - 7`'s `-`, at the same column, is caught.
-  'rind/src/low/generic/sha256\.rs:70:\d+: replace - with \+ in sha256_compress_block$',
-  # SHA-512's IRAM block has no `(t - 16) % 16`. Its schedule indexes are
-  # `(SLOT + k) & 15`, so a minus-to-plus mutant there is not equivalent.
+  # `(t - 16) % 16` and `(t + 16) % 16` are the same window slot. The line is
+  # the subtraction: a use above it moves the pin, and pinning the `(t - 7)`
+  # line instead would skip a mutant the tests can kill.
+  'rind/src/low/generic/sha512_rolled\.rs:143:\d+: replace - with \+ in sha512_compress_block$',
   'rind/src/low/posint\.rs:\d+:\d+: delete match arm 0 in PosInt<N>::mont_exp$',
   'rind/src/low/posint\.rs:\d+:21: replace % with / in PosInt<N>::mont_exp$',
   'rind/src/low/posint\.rs:\d+:21: replace % with \+ in PosInt<N>::mont_exp$',
@@ -153,7 +156,6 @@ exclude_re = [
   'rind/src/low/posint\.rs:\d+:\d+: replace > with >= in PosInt<N>::reduce_even$',
   'rind/src/low/posint\.rs:\d+:\d+: replace \* with / in PosInt<N>::reduce_even$',
   'rind/src/low/x86_64/aes\.rs:\d+:19: replace - with / in invert_round_keys$',
-  'rind/src/low/x86_64/chacha20\.rs:\d+:\d+: replace > with >= in core_2x$',
   'rind/src/low/x86_64/edwards25519_msm_avx2\.rs:\d+:\d+: replace > with >= in msm$',
   'rind/src/low/x86_64/ghash\.rs:\d+:41: replace / with % in store_partial$',
   'rind/src/low/x86_64/mldsa\.rs:\d+:\d+: replace < with <= in rej_uniform_table$',
@@ -198,6 +200,7 @@ exclude_re = [
   'rind/src/low/aarch64/aes_gcm\.rs:\d+:\d+: replace <= with > in tagged_from$',
   'rind/src/low/aarch64/aes_gcm\.rs:\d+:\d+: replace \+ with \* in tagged_from$',
   'rind/src/low/aarch64/bignum_copy_row_from_table_mux\.rs:\d+:\d+: replace match guard width\.is_multiple_of\(8\) with false in bignum_copy_row_from_table$',
+  'rind/src/low/aarch64/chacha20\.rs:\d+:\d+: delete match arm .* in ChaCha20::cipher$',
   'rind/src/low/aarch64/cpu\.rs:\d+:\d+: replace prefetch_ro with \(\)$',
   # Invisible to a test: whether the speculation barrier after setting DIT
   # runs, and which one.
@@ -251,6 +254,9 @@ exclude_re = [
   'rind/src/low/x86_64/rsaz\.rs:\d+:61: replace \+ with \* in mod_exp$',
   'rind/src/low/x86_64/sha1_mux\.rs:\d+:\d+: delete match arm Path::Shaext\(token\) in sha1_compress_padded$',
   'rind/src/low/x86_64/sha256_mux\.rs:\d+:\d+: delete match arm Path::Shaext\(token\) in sha256_finish$',
+  # The scalar arm and the four-way kernels give the same states in the lanes
+  # in use, and no caller reads the rest.
+  'rind/src/low/aarch64/sha3_keccak_nof4_f1600\.rs:\d+:\d+: replace (match guard N == 4 with (true|false)|== with !=) in sha3_keccak_nof4_f1600$',
   'rind/src/low/x86_64/sha3_keccak_nof4_f1600\.rs:\d+:\d+: replace > with < in sha3_keccak_nof4_f1600$',
   'rind/src/low/x86_64/sha3_keccak_nof4_f1600\.rs:\d+:\d+: replace > with == in sha3_keccak_nof4_f1600$',
   'rind/src/low/x86_64/sha3_keccak_nof4_f1600\.rs:\d+:\d+: replace > with >= in sha3_keccak_nof4_f1600$',
@@ -259,11 +265,8 @@ exclude_re = [
   # Run only on AVX-512 CPUs, which no campaign's runner is: the x86_64
   # campaign skips the files only they run, and these are the rest.
   # x86-cpu.yml's SDE tiers test them.
-  'rind/src/low/x86_64/(aes|aes_gcm|aes_gcm_vaes|cpu|ghash)\.rs:\d+:\d+: (replace (HwKey::round_keys_512|RoundKeys512::split|_cipher_avx512|Counter512::\w+|VaesKernel::avx512|HaveAvx512(For\w+|Vl|Ifma)::check|GhashTableAvx512::\w+|_mul16|_mul_tail)( -> .*)? with .*|.* in (_cipher_avx512|HaveAvx512(For\w+|Vl|Ifma)::check|_mul_tail))$',
+  'rind/src/low/x86_64/(aes|aes_gcm|aes_gcm_vaes|cpu|ghash)\.rs:\d+:\d+: (replace (HwKey::round_keys_512|RoundKeys512::split|_cipher_avx512|Counter512::\w+|VaesKernel::avx512|HaveAvx512(For\w+|Vl)::check|GhashTableAvx512::\w+|_mul16|_mul_tail)( -> .*)? with .*|.* in (_cipher_avx512|HaveAvx512(For\w+|Vl)::check|_mul_tail))$',
   'rind/src/low/x86_64/aes_gcm\.rs:\d+:45: replace \* with (\+|/)$',
-  # The IFMA passes, and `one_pass`'s choice of them, which only AVX-512
-  # IFMA CPUs take: on any other CPU each of these is the one pass.
-  'rind/src/low/x86_64/chacha20poly1305\.rs:\d+:\d+: (replace ifma_passes -> \[u8; 16\] with .*|replace match guard .* with (true|false) in one_pass|replace >= with < in one_pass)$',
   # Equivalent: each batch of ML-KEM's PRF only adds outputs no polynomial
   # reads, so taking eight at once for four or fewer or for ML-KEM-768, four
   # for one to three, or the second four again, yields the same samples; only
@@ -271,8 +274,8 @@ exclude_re = [
   'rind/src/mid/mlkem\.rs:\d+:\d+: (delete match arm \(3, _\) \|\(_, 1\.\.= 4\) in sample_poly_cbd2|delete match arm [0-3] in shake256_fours|replace \* with / in shake256_fours)$',
   'rind/src/low/posint\.rs:\d+:\d+: (replace PosInt<N>::mod_exp_pair_rsaz -> .*|.* in PosInt<N>::mod_exp_pair_rsaz)$',
   # Compiled only for armv7, which no campaign runs: the portable AES-GCM's
-  # crypto-extension half.
-  'rind/src/mid/portable/aes_gcm\.rs:\d+:\d+: (replace (<impl Ghash for GhashTable>::ghash|<impl Parts for Hw>::\w+)( -> .*)? with .*|.* in <impl Parts for Hw>::\w+)$',
+  # crypto-extension and NEON halves.
+  'rind/src/mid/portable/aes_gcm\.rs:\d+:\d+: (replace (<impl Ghash for (GhashTable|NeonTable)>::ghash|<impl BlocksKey for (AesHwKey|NeonKey)>::\w+|<impl Parts for Arm<K, T>>::\w+)( -> .*)? with .*|.* in <impl Parts for Arm<K, T>>::\w+)$',
   # Whether this CPU needs Intel's MXCSR mitigation: no campaign's runner
   # can know what it should find, since nothing outside `cpuid` reports
   # `MCDT_NO`. x86-cpu.yml's SDE rows check `needed` on every model, and
@@ -305,11 +308,12 @@ exclude_re = [
   'rind/src/low/x86_64/cpu\.rs:\d+:72: replace \| with &$',
   'rind/src/low/x86_64/cpu\.rs:\d+:17: replace \| with & in HaveAvxMovbeForAesGcm::check$',
   'rind/src/low/x86_64/cpu\.rs:\d+:17: replace \| with & in HaveAesHardware::check$',
+  'rind/src/low/x86_64/cpu\.rs:\d+:(17|24|34): replace \| with & in HaveIfmaForVgChaCha20Poly1305::check$',
   'rind/src/low/x86_64/cpu\.rs:\d+:\d+: replace enter_cpu_state -> u32 with 1$',
   # Pinned to its line: the `cpu_denied` of a release build or one without
   # an OS, which tests never are. The debug build's, under the same name, is
   # caught.
-  'rind/src/low/mod\.rs:196:\d+: replace cpu_denied -> bool with true$',
+  'rind/src/low/mod\.rs:233:\d+: replace cpu_denied -> bool with true$',
   # The FIPS module's `SystemRandom`, compiled only under `--cfg rind_fips`,
   # which no mutation run sets; `fips_rng`'s tests cover what it calls.
   # Pinned to its line: the other `fill`, under the same name, is caught.
@@ -364,7 +368,8 @@ exclude_re = [
   'rind/src/mid/rsa_priv/generate\.rs:\d+:\d+: replace \* with \+ in MillerRabinParams<\x27a>::random_base$',
   'rind/src/mid/rsa_priv/generate\.rs:\d+:58: replace \+ with - in MillerRabinParams<\x27a>::random_base$',
   'rind/src/mid/rsa_priv/generate\.rs:\d+:58: replace \+ with \* in MillerRabinParams<\x27a>::random_base$',
-  # Untested adapter code: quest/m2/confidence/mutants-adapters.md.
+  # The adapters' `Debug` and `Display` impls: no caller relies on their
+  # text, so no test pins it.
   'rind-dimpl/src/digest\.rs:\d+:\d+: replace <impl fmt::Debug for Running>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
   'rind-dimpl/src/kx\.rs:\d+:\d+: replace <impl fmt::Debug for Exchange>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
   'rind-dimpl/src/sign\.rs:\d+:\d+: replace <impl fmt::Debug for Key>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
@@ -381,12 +386,12 @@ exclude_re = [
   'rind-rustls/src/sign\.rs:\d+:\d+: replace <impl fmt::Debug for RsaSigningKey>::fmt -> Result<\(\), fmt::Error> with Ok\(\(\)\)$',
   'rind-rustls/src/sign\.rs:\d+:\d+: replace <impl fmt::Debug for RsaSigner>::fmt -> Result<\(\), fmt::Error> with Ok\(\(\)\)$',
   'rind-rustls/src/ticketer\.rs:\d+:\d+: replace <impl fmt::Debug for XChaCha20Ticketer>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
+  'rind-str0m/src/dtls\.rs:\d+:\d+: replace <impl std::fmt::Debug for Dtls>::fmt -> std::fmt::Result with Ok\(Default::default\(\)\)$',
+  'rind-str0m/src/srtp\.rs:\d+:\d+: replace <impl fmt::Debug for Cm>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
+  'rind-str0m/src/srtp\.rs:\d+:\d+: replace <impl fmt::Debug for Gcm>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
   # One AAD, concatenated, is that AAD. Deleting the one-element arm still
   # feeds `open` the same bytes.
   'rind-str0m/src/srtp\.rs:\d+:\d+: delete match arm \[aad\] in Gcm::open$',
-  'rind-rustls/src/ticketer\.rs:\d+:\d+: replace > with < in <impl ProducesTickets for XChaCha20Ticketer>::decrypt$',
-  'rind-rustls/src/ticketer\.rs:\d+:\d+: replace \* with /$',
-  'rind-rustls/src/ticketer\.rs:\d+:\d+: replace \* with \+$',
   # Discarding a VG routine's result runs rind's fallback, which computes the
   # same result, as `fallback_matches_vg` checks; only the time differs.
   'rind/src/mid/mlkem\.rs:\d+:\d+: replace vg_ran -> Option<T> with None$',
@@ -394,4 +399,14 @@ exclude_re = [
   # only the time differs.
   'rind/src/low/(x86_64|aarch64)/p256_vg\.rs:\d+:\d+: replace P256::(check|check_public_key) -> Option<Self> with None$',
   'rind/src/low/x86_64/p256_vg\.rs:\d+:\d+: replace \|\| with && in P256::check_public_key$',
+  # Either verification gives the same verdict, as `vg_verify_matches_rind`
+  # checks; which one a reused key takes changes only the time.
+  'rind/src/mid/p384\.rs:\d+:\d+: replace \|\| with && in VerifyingKey::raw_ecdsa_verify$',
+  # Refusing VG's P-384 runs rind's own, which computes the same result, as
+  # `vg_public_key_matches_comb` and `vg_verify_matches_rind` check; only the
+  # time differs.
+  'rind/src/low/(x86_64|aarch64)/p384_vg\.rs:\d+:\d+: replace (MulBase|Verify)::check -> Option<Self> with None$',
+  # Refusing VG's ChaCha20-Poly1305 runs aws-lc's, which computes the same
+  # result, as `paths_match` checks; only the time differs.
+  'rind/src/low/x86_64/cpu\.rs:\d+:\d+: replace HaveIfmaForVgChaCha20Poly1305::check -> Option<Self> with None$',
 ]
