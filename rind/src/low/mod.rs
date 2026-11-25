@@ -406,6 +406,8 @@ cfg_if::cfg_if! {
             mldsa_polyz_unpack_19, mldsa_rej_uniform_vartime, mldsa_rej_uniform_eta2_vartime,
             mldsa_rej_uniform_eta4_vartime,
         };
+        // Only its test calls VG's ML-DSA signing until a bench run switches to it.
+        #[cfg(test)]
         pub(crate) use x86_64::mldsa_vg;
         pub(crate) use x86_64::mlkem768_vg;
         pub(crate) use x86_64::p256_vg;
