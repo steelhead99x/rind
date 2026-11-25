@@ -16,7 +16,8 @@ ring = { package = "rind-ring", version = "0.17" }
 Every ring feature is accepted. As in ring, `alloc` gates RSA, `std` the
 errors' `std::error::Error` impls, and `wasm32_unknown_unknown_js` the
 browser's random source (see [WebAssembly](#webassembly)); the rest change
-nothing.
+nothing. Like ring, it builds without `std`, but always needs a global
+allocator, as rind does, even without `alloc`.
 
 The rename reaches only the crate that makes it. A binary moves every crate
 in its tree on ring 0.17 to rind, including dependencies that name ring such

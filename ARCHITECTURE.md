@@ -13,7 +13,9 @@ run time. [MIGRATING.md][migrating] maps each ring and aws-lc-rs item to it.
   `Signature`, so a key of one algorithm cannot reach another's call, and a
   program links only the algorithms it names. A caller that picks the
   algorithm at run time, such as a TLS stack, holds an enum of the modules'
-  public keys.
+  public keys. One private key of unknown type, read from a key file, loads
+  as `rind::KeyPair`, an enum of the modules' key pairs, whose
+  `from_pkcs8` reads the algorithm identifier and links every module.
 - Algorithms only old protocols should use sit in `legacy` submodules, such
   as `digest::legacy::SHA1`.
 - Key pairs name the DER format they load or encode (`from_pkcs8`,

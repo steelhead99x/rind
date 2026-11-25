@@ -12,9 +12,8 @@ returns, in terms of `Rind.Ed25519`'s spec, and SHA-512 as
 theorems are about its translation, with no hand model. `admin/prove` writes
 the aarch64 proof from this file by renaming the target.
 
-Verification is proven only on aarch64, in `Rind.Aarch64.Ed25519Verify`:
-x86_64's checks a multiple of the equation with half-size scalars, which
-nothing proves yet.
+Verification checks a multiple of the equation with half-size scalars on
+x86_64 and aarch64, which nothing proves yet.
 -/
 
 namespace rind.x86_64
@@ -582,13 +581,19 @@ theorem has_small_order_spec (bytes : Slice U8) :
     simp [hl]
 
 open Classical in
-theorem high_from_bytes_spec (h : Runs) (hs : RunsSha512) (hi : NoCurveIfma) (bytes : Slice U8) :
+/-- `high_from_bytes_spec` for whatever `mid::ed25519::VerifyingKey::from_bytes`
+holds of the key it loads, `Q`. -/
+theorem high_from_bytes_of (h : Runs) (Q : mid.ed25519.VerifyingKey → Prop) (bytes : Slice U8)
+    (hmid : mid.ed25519.VerifyingKey.from_bytes bytes ⦃ r =>
+      if bytes.length = 32 then
+        if edValidEncode (leNat bytes.val) then ∃ vk, r = .Ok vk ∧ vk.bytes.val = bytes.val ∧ Q vk
+        else r = .Err (.KeyRejected .NotOnCurve)
+      else r = .Err (.KeyRejected .WrongLength) ⦄) :
     high.ed25519.Ed25519VerifyingKey.from_bytes bytes ⦃ r =>
       if bytes.length ≠ 32 then r = .Err (.KeyRejected .WrongLength)
       else if leNat bytes.val % 2 ^ 255 ∈ edSmallOrderY then r = .Err (.KeyRejected .SmallOrder)
       else if edValidEncode (leNat bytes.val) then
-        ∃ vk, r = .Ok vk ∧ (mid.ed25519.VerifyingKey.bytes vk).val = bytes.val ∧
-          HoldsPoint vk (edDecode (leNat bytes.val))
+        ∃ vk, r = .Ok vk ∧ (mid.ed25519.VerifyingKey.bytes vk).val = bytes.val ∧ Q vk
       else r = .Err (.KeyRejected .NotOnCurve) ⦄ := by
   unfold high.ed25519.Ed25519VerifyingKey.from_bytes
   step
@@ -599,7 +604,7 @@ theorem high_from_bytes_spec (h : Runs) (hs : RunsSha512) (hi : NoCurveIfma) (by
       simp [error.Error.Insts.CoreConvertFromKeyFormatError.from]
     · simp only [hb, hl, hso, and_false, decide_false, Bool.false_eq_true, ↓reduceIte, ne_eq,
         not_true_eq_false]
-      step with mid_from_bytes_spec h hs hi bytes as ⟨r, hr⟩
+      step with hmid as ⟨r, hr⟩
       simp only [hl, ↓reduceIte] at hr
       split_ifs at hr ⊢ with hv
       · obtain ⟨vk, rfl, hvb, hvp⟩ := hr
@@ -608,10 +613,21 @@ theorem high_from_bytes_spec (h : Runs) (hs : RunsSha512) (hi : NoCurveIfma) (by
       · subst hr
         simp [core.result.Result.map]
   · simp only [hb, hl, false_and, decide_false, Bool.false_eq_true, ↓reduceIte, ne_eq, not_false_eq_true]
-    step with mid_from_bytes_spec h hs hi bytes as ⟨r, hr⟩
+    step with hmid as ⟨r, hr⟩
     simp only [hl, ↓reduceIte] at hr
     subst hr
     simp [core.result.Result.map]
+
+open Classical in
+theorem high_from_bytes_spec (h : Runs) (hs : RunsSha512) (hi : NoCurveIfma) (bytes : Slice U8) :
+    high.ed25519.Ed25519VerifyingKey.from_bytes bytes ⦃ r =>
+      if bytes.length ≠ 32 then r = .Err (.KeyRejected .WrongLength)
+      else if leNat bytes.val % 2 ^ 255 ∈ edSmallOrderY then r = .Err (.KeyRejected .SmallOrder)
+      else if edValidEncode (leNat bytes.val) then
+        ∃ vk, r = .Ok vk ∧ (mid.ed25519.VerifyingKey.bytes vk).val = bytes.val ∧
+          HoldsPoint vk (edDecode (leNat bytes.val))
+      else r = .Err (.KeyRejected .NotOnCurve) ⦄ :=
+  high_from_bytes_of h (fun vk => HoldsPoint vk (edDecode (leNat bytes.val))) bytes (mid_from_bytes_spec h hs hi bytes)
 
 /-! ## Signing, `mid::ed25519::SigningKey` -/
 
@@ -734,41 +750,52 @@ theorem high_sign_spec (h : Runs) (hs : RunsSha512) (k : high.ed25519.Ed25519Sig
   step
   exact mid_sign_spec h hs k seed hk msg hm
 
+/-- Cloning a path that runs rind's own arithmetic gives it back. -/
+theorem path_clone_rind (pt : mid.ed25519.EdwardsPoint) :
+    mid.ed25519.Path.Insts.CoreCloneClone.clone (.Rind pt) ⦃ p => p = .Rind pt ⦄ := by
+  unfold mid.ed25519.Path.Insts.CoreCloneClone.clone mid.ed25519.EdwardsPoint.Insts.CoreCloneClone.clone
+  step*
+
 theorem high_public_key_spec (h : Runs) (k : high.ed25519.Ed25519SigningKey)
-    (hp : ∃ pt, k.verifying_key.path = .Rind pt) :
+    (hc : mid.ed25519.Path.Insts.CoreCloneClone.clone k.verifying_key.path ⦃ p => p = k.verifying_key.path ⦄) :
     high.ed25519.Ed25519SigningKey.public_key k ⦃ vk => vk = k.verifying_key ⦄ := by
-  obtain ⟨pt, hpt⟩ := hp
   unfold high.ed25519.Ed25519SigningKey.public_key mid.ed25519.SigningKey.impl.verifying_key
-    mid.ed25519.VerifyingKey.Insts.CoreCloneClone.clone mid.ed25519.Path.Insts.CoreCloneClone.clone
-    mid.ed25519.EdwardsPoint.Insts.CoreCloneClone.clone
+    mid.ed25519.VerifyingKey.Insts.CoreCloneClone.clone
   simp only [bind_ok]
-  rw [hpt]
   step*
   subst_vars
   cases k with | mk _ _ vk => cases vk; simp_all
 
 theorem key_pair_new_spec (h : Runs) (k : high.ed25519.Ed25519SigningKey)
-    (hp : ∃ pt, k.verifying_key.path = .Rind pt) :
+    (hc : mid.ed25519.Path.Insts.CoreCloneClone.clone k.verifying_key.path ⦃ p => p = k.verifying_key.path ⦄) :
     high.signature.ed25519.KeyPair.new k ⦃ kp => kp.key = k ∧ kp.«public» = k.verifying_key ⦄ := by
   unfold high.signature.ed25519.KeyPair.new
-  step with high_public_key_spec h k hp as ⟨vk, hvk⟩
+  step with high_public_key_spec h k hc as ⟨vk, hvk⟩
   exact hvk
 
-theorem SeedKey.on_rind {k : mid.ed25519.SigningKey} {seed : List U8} (hk : SeedKey k seed) :
-    ∃ pt, k.verifying_key.path = .Rind pt :=
-  hk.2.2.2.imp fun _ h => h.1
+theorem SeedKey.clone {k : mid.ed25519.SigningKey} {seed : List U8} (hk : SeedKey k seed) :
+    mid.ed25519.Path.Insts.CoreCloneClone.clone k.verifying_key.path ⦃ p => p = k.verifying_key.path ⦄ := by
+  obtain ⟨pt, hpt, -⟩ := hk.2.2.2
+  rw [hpt]
+  exact path_clone_rind pt
 
 /-- A key pair whose private key is the 32-byte `seed`, holding its public
 key. -/
 def KeyPairOf (kp : high.signature.ed25519.KeyPair) (seed : List U8) : Prop :=
   SeedKey kp.key seed ∧ kp.«public» = kp.key.verifying_key
 
-theorem high_seed_from_bytes_spec (h : Runs) (hs : RunsSha512) (hi : NoCurveIfma) (seed : Slice U8) :
+/-- What `mid::ed25519::SigningKey::from_seed` holds of the key it makes
+from a seed, `P`, on every seed. -/
+def FromSeed (P : mid.ed25519.SigningKey → List U8 → Prop) : Prop :=
+  ∀ seed : Std.Array U8 32#usize, mid.ed25519.SigningKey.from_seed seed ⦃ k => P k seed.val ⦄
+
+theorem high_seed_from_bytes_of (h : Runs) (P : mid.ed25519.SigningKey → List U8 → Prop) (hfs : FromSeed P)
+    (seed : Slice U8) :
     high.ed25519.Ed25519SigningKey.from_bytes seed ⦃ r =>
-      if seed.length = 32 then ∃ k, r = .Ok k ∧ SeedKey k seed.val
+      if seed.length = 32 then ∃ k, r = .Ok k ∧ P k seed.val
       else r = .Err (.KeyRejected .WrongLength) ⦄ := by
   unfold high.ed25519.Ed25519SigningKey.from_bytes
-  step
+  step with new_secret_spec h
   step with core.array.TryFromArrayCopySlice.try_from.step 32#usize core.marker.CopyU8 seed as ⟨r, hr⟩
   by_cases hl : seed.length = 32
   · simp only [hl, ↓reduceIte]
@@ -776,7 +803,7 @@ theorem high_seed_from_bytes_spec (h : Runs) (hs : RunsSha512) (hi : NoCurveIfma
     · obtain ⟨ha, -⟩ := hr
       simp only [core.result.Result.map,
         high.ed25519.Ed25519SigningKey.from_bytes.closure.Insts.CoreOpsFunctionFnOnceTupleArrayU832Ed25519SigningKey.call_once]
-      step with from_seed_spec h hs hi a as ⟨k, hk⟩
+      step with hfs a as ⟨k, hk⟩
       simp only [core.result.Result.map_err]
       rw [ha] at hk
       simp [hk]
@@ -789,19 +816,26 @@ theorem high_seed_from_bytes_spec (h : Runs) (hs : RunsSha512) (hi : NoCurveIfma
         high.ed25519.Ed25519SigningKey.from_bytes.closure_1.Insts.CoreOpsFunctionFnOnceTupleTryFromSliceErrorError.call_once,
         core.convert.IntoFrom.into, error.Error.Insts.CoreConvertFromKeyFormatError.from]
 
-theorem high_generate_spec (h : Runs) (hs : RunsSha512) (hi : NoCurveIfma) (r : core.result.Result Unit getrandom.error.Error)
+theorem high_seed_from_bytes_spec (h : Runs) (hs : RunsSha512) (hi : NoCurveIfma) (seed : Slice U8) :
+    high.ed25519.Ed25519SigningKey.from_bytes seed ⦃ r =>
+      if seed.length = 32 then ∃ k, r = .Ok k ∧ SeedKey k seed.val
+      else r = .Err (.KeyRejected .WrongLength) ⦄ :=
+  high_seed_from_bytes_of h SeedKey (from_seed_spec h hs hi) seed
+
+theorem high_generate_of (h : Runs) (P : mid.ed25519.SigningKey → List U8 → Prop) (hfs : FromSeed P)
+    (r : core.result.Result Unit getrandom.error.Error)
     (out : Slice U8) (hout : out.length = 32)
     (hfill : getrandom.fill (Array.repeat 32#usize 0#u8).to_slice = ok (r, out)) :
     high.ed25519.Ed25519SigningKey.generate ⦃ key =>
       match r with
-      | .Ok _ => ∃ k, key = core.result.Result.Ok k ∧ SeedKey k out.val
+      | .Ok _ => ∃ k, key = core.result.Result.Ok k ∧ P k out.val
       | .Err _ => key = core.result.Result.Err error.Error.RngFailed ⦄ := by
   unfold high.ed25519.Ed25519SigningKey.generate mid.rng.SystemRandom.Insts.RindMidRngRandomSource.fill
-  rcases r with _ | e <;> simp only [Array.to_slice_mut, lift] <;> step <;> rw [hfill]
+  rcases r with _ | e <;> simp only [Array.to_slice_mut, lift] <;> step with new_secret_spec h <;> rw [hfill]
   · simp only [core.result.Result.map_err, core.result.Result.Insts.CoreOpsTry.branch]
     have hfrom : ((Array.repeat 32#usize 0#u8).from_slice out).val = out.val := by
       simp [Array.from_slice, hout]
-    step with from_seed_spec h hs hi _ as ⟨k, hk⟩
+    step with hfs _ as ⟨k, hk⟩
     rw [hfrom] at hk
     simp [hk]
   · simp [core.result.Result.map_err, core.result.Result.Insts.CoreOpsTry.branch,
@@ -809,6 +843,29 @@ theorem high_generate_spec (h : Runs) (hs : RunsSha512) (hi : NoCurveIfma) (r : 
       core.result.Result.Insts.CoreOpsTry_traitFromResidualResult.from_residual]
 
 /-! ## The signature API, `high::signature::ed25519` -/
+
+/-- `ed25519_generate` for keys that `FromSeed P` makes, whose path's clone
+gives it back. -/
+theorem ed25519_generate_of (h : Runs) (P : mid.ed25519.SigningKey → List U8 → Prop) (hfs : FromSeed P)
+    (hc : ∀ k seed, P k seed →
+      mid.ed25519.Path.Insts.CoreCloneClone.clone k.verifying_key.path ⦃ p => p = k.verifying_key.path ⦄)
+    (r : core.result.Result Unit getrandom.error.Error)
+    (out : Slice U8) (hout : out.length = 32)
+    (hfill : getrandom.fill (Array.repeat 32#usize 0#u8).to_slice = ok (r, out)) :
+    high.signature.ed25519.KeyPair.generate ⦃ kp =>
+      match r with
+      | .Ok _ => ∃ k, kp = core.result.Result.Ok k ∧ P k.key out.val ∧ k.«public» = k.key.verifying_key
+      | .Err _ => kp = core.result.Result.Err error.Error.RngFailed ⦄ := by
+  unfold high.signature.ed25519.KeyPair.generate
+  step with high_generate_of h P hfs r out hout hfill as ⟨key, hkey⟩
+  rcases r with _ | _ <;> simp only at hkey ⊢
+  · obtain ⟨k, rfl, hk⟩ := hkey
+    simp only [core.result.Result.Insts.CoreOpsTry.branch]
+    step with key_pair_new_spec h k (hc k _ hk) as ⟨kp, hkp1, hkp2⟩
+    exact ⟨kp, rfl, by rw [hkp1]; exact hk, by rw [hkp1]; exact hkp2⟩
+  · subst hkey
+    simp [core.result.Result.Insts.CoreOpsTry.branch,
+      core.result.Result.Insts.CoreOpsTry_traitFromResidualResult.from_residual]
 
 /-- A generated key pair's private key is the 32 bytes the random source drew,
 and a failed draw is refused. The draw itself is outside the functional spec. -/
@@ -818,15 +875,41 @@ theorem ed25519_generate (h : Runs) (hs : RunsSha512) (hi : NoCurveIfma) (r : co
     high.signature.ed25519.KeyPair.generate ⦃ kp =>
       match r with
       | .Ok _ => ∃ k, kp = core.result.Result.Ok k ∧ KeyPairOf k out.val
-      | .Err _ => kp = core.result.Result.Err error.Error.RngFailed ⦄ := by
-  unfold high.signature.ed25519.KeyPair.generate
-  step with high_generate_spec h hs hi r out hout hfill as ⟨key, hkey⟩
-  rcases r with _ | _ <;> simp only at hkey ⊢
-  · obtain ⟨k, rfl, hk⟩ := hkey
+      | .Err _ => kp = core.result.Result.Err error.Error.RngFailed ⦄ :=
+  ed25519_generate_of h SeedKey (from_seed_spec h hs hi) (fun _ _ hk => hk.clone) r out hout hfill
+
+/-- `ed25519_from_seed_and_public_key` for keys that `FromSeed P` makes,
+whose path's clone gives it back, and whose public key's bytes are `pk` just
+where `C` holds. -/
+theorem ed25519_from_seed_and_public_key_of (h : Runs) (P : mid.ed25519.SigningKey → List U8 → Prop)
+    (hfs : FromSeed P)
+    (hc : ∀ k seed, P k seed →
+      mid.ed25519.Path.Insts.CoreCloneClone.clone k.verifying_key.path ⦃ p => p = k.verifying_key.path ⦄)
+    (seed pk : Slice U8) (C : Prop) [Decidable C]
+    (hC : ∀ k, P k seed.val → ((mid.ed25519.VerifyingKey.bytes k.verifying_key).val = pk.val ↔ C)) :
+    high.signature.ed25519.KeyPair.from_seed_and_public_key seed pk ⦃ r =>
+      if seed.length = 32 then
+        if C then ∃ kp, r = .Ok kp ∧ P kp.key seed.val ∧ kp.«public» = kp.key.verifying_key
+        else r = .Err (.KeyRejected .MismatchedPublicKey)
+      else r = .Err (.KeyRejected .WrongLength) ⦄ := by
+  unfold high.signature.ed25519.KeyPair.from_seed_and_public_key
+  step with high_seed_from_bytes_of h P hfs seed as ⟨r, hr⟩
+  by_cases hl : seed.length = 32
+  · simp only [hl, ↓reduceIte] at hr ⊢
+    obtain ⟨k, rfl, hk⟩ := hr
     simp only [core.result.Result.Insts.CoreOpsTry.branch]
-    step with key_pair_new_spec h k hk.on_rind as ⟨kp, hkp1, hkp2⟩
-    exact ⟨kp, rfl, by rw [hkp1]; exact hk, by rw [hkp1]; exact hkp2⟩
-  · subst hkey
+    step with key_pair_new_spec h k (hc k _ hk) as ⟨kp, hkp1, hkp2⟩
+    have hkb : (mid.ed25519.VerifyingKey.bytes kp.«public»).val = pk.val ↔ C := by rw [hkp2]; exact hC k hk
+    unfold high.signature.ed25519.PublicKey.Insts.CoreConvertAsRefSliceU8.as_ref
+      high.ed25519.Ed25519VerifyingKey.bytes mid.ed25519.VerifyingKey.impl.bytes
+    by_cases hCc : C
+    · simp only [hCc, ↓reduceIte]
+      step*
+    · simp only [hCc, ↓reduceIte]
+      step*
+      simp [error.Error.Insts.CoreConvertFromKeyFormatError.from]
+  · simp only [hl, ↓reduceIte] at hr ⊢
+    subst hr
     simp [core.result.Result.Insts.CoreOpsTry.branch,
       core.result.Result.Insts.CoreOpsTry_traitFromResidualResult.from_residual]
 
@@ -839,28 +922,9 @@ theorem ed25519_from_seed_and_public_key (h : Runs) (hs : RunsSha512) (hi : NoCu
       if seed.length = 32 then
         if ed25519PublicKey seed.val = pk.val then ∃ kp, r = .Ok kp ∧ KeyPairOf kp seed.val
         else r = .Err (.KeyRejected .MismatchedPublicKey)
-      else r = .Err (.KeyRejected .WrongLength) ⦄ := by
-  unfold high.signature.ed25519.KeyPair.from_seed_and_public_key
-  step with high_seed_from_bytes_spec h hs hi seed as ⟨r, hr⟩
-  by_cases hl : seed.length = 32
-  · simp only [hl, ↓reduceIte] at hr ⊢
-    obtain ⟨k, rfl, hk⟩ := hr
-    simp only [core.result.Result.Insts.CoreOpsTry.branch]
-    step with key_pair_new_spec h k hk.on_rind as ⟨kp, hkp1, hkp2⟩
-    have hkb : (mid.ed25519.VerifyingKey.bytes kp.«public»).val = ed25519PublicKey seed.val := by rw [hkp2]; exact hk.2.2.1
-    unfold high.signature.ed25519.PublicKey.Insts.CoreConvertAsRefSliceU8.as_ref
-      high.ed25519.Ed25519VerifyingKey.bytes mid.ed25519.VerifyingKey.impl.bytes
-    step*
-    all_goals rw [Array.val_to_slice, hkb] at b_post
-    · have he : ed25519PublicKey seed.val = pk.val := b_post.mp ‹_›
-      simp only [he, ↓reduceIte]
-      exact ⟨kp, rfl, by rw [hkp1]; exact hk, by rw [hkp1]; exact hkp2⟩
-    · have he : ¬ ed25519PublicKey seed.val = pk.val := fun he => ‹¬b = true› (b_post.mpr he)
-      simp [he, error.Error.Insts.CoreConvertFromKeyFormatError.from]
-  · simp only [hl, ↓reduceIte] at hr ⊢
-    subst hr
-    simp [core.result.Result.Insts.CoreOpsTry.branch,
-      core.result.Result.Insts.CoreOpsTry_traitFromResidualResult.from_residual]
+      else r = .Err (.KeyRejected .WrongLength) ⦄ :=
+  ed25519_from_seed_and_public_key_of h SeedKey (from_seed_spec h hs hi) (fun _ _ hk => hk.clone) seed pk
+    (ed25519PublicKey seed.val = pk.val) (fun _ hk => by rw [hk.2.2.1])
 
 /-- An Ed25519 signature's bytes: RFC 8032's PureEd25519 signature of the
 message under the key pair's seed, for messages under 2⁶⁴ - 64 bytes. -/

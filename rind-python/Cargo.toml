@@ -26,3 +26,4 @@ rind = { version = "0.3.2", path = "../rind" }
 # whose stable ABI has the buffer protocol, so one wheel per platform covers
 # every CPython since.
 pyo3 = { version = "0.30", features = ["abi3-py311"] }
+zeroize = "1.9"

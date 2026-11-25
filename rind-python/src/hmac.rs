@@ -4,7 +4,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 use rind::hmac;
 
-use crate::{Bytes, algorithm, bytes, constants, error, submodule};
+use crate::{Bytes, Secret, algorithm, bytes, constants, error, submodule};
 
 algorithm!(
     /// An HMAC algorithm.
@@ -25,7 +25,7 @@ pub(crate) struct Key(pub(crate) Box<hmac::Key>);
 impl Key {
     /// Makes a key for `algorithm` from `key`, of any length.
     #[new]
-    fn new(algorithm: &Bound<'_, Algorithm>, key: Bytes<'_>) -> Self {
+    fn new(algorithm: &Bound<'_, Algorithm>, key: Secret<'_>) -> Self {
         Self(Box::new(hmac::Key::new(algorithm.get().inner, &key)))
     }
 }
@@ -73,10 +73,7 @@ impl Context {
 
     /// Returns the tag of the message; the context takes no more data.
     fn sign<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
-        // Signs a stack copy and drops the box, so the heap copy gets rind's
-        // wipe on drop; moving the context out of its box would skip it.
-        let context = self.0.take().ok_or_else(signed)?;
-        Ok(bytes(py, (*context).clone().sign()))
+        Ok(bytes(py, self.0.take().ok_or_else(signed)?.sign()))
     }
 }
 

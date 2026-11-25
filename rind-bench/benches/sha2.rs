@@ -147,11 +147,10 @@ fn sha256(c: &mut Criterion) {
             &input,
             |b, input| b.iter(|| test_rc_sha256(input)),
         );
-        for (lib, _dit) in criterion::rind_rows() {
-            group.bench_with_input(BenchmarkId::new(lib, size_name), &input, |b, input| {
-                b.iter(|| test_rind_sha256(input))
-            });
-        }
+        group.bench_with_input(BenchmarkId::new("rind", size_name), &input, |b, input| {
+            let _dit = criterion::rind_dit();
+            b.iter(|| test_rind_sha256(input))
+        });
         vg_row::<verified_garbage::hashes::sha256::Sha256>(
             &mut group,
             &rind::digest::SHA256,
@@ -209,11 +208,10 @@ fn sha512(c: &mut Criterion) {
             &input,
             |b, input| b.iter(|| test_rc_sha512(input)),
         );
-        for (lib, _dit) in criterion::rind_rows() {
-            group.bench_with_input(BenchmarkId::new(lib, size_name), &input, |b, input| {
-                b.iter(|| test_rind_sha512(input))
-            });
-        }
+        group.bench_with_input(BenchmarkId::new("rind", size_name), &input, |b, input| {
+            let _dit = criterion::rind_dit();
+            b.iter(|| test_rind_sha512(input))
+        });
         vg_row::<verified_garbage::hashes::sha512::Sha512>(
             &mut group,
             &rind::digest::SHA512,
@@ -272,6 +270,7 @@ fn sha512_256(c: &mut Criterion) {
             |b, input| b.iter(|| test_rc_sha512_256(input)),
         );
         group.bench_with_input(BenchmarkId::new("rind", size_name), &input, |b, input| {
+            let _dit = criterion::rind_dit();
             b.iter(|| test_rind_sha512_256(input))
         });
         vg_row::<verified_garbage::hashes::sha512_256::Sha512_256>(
@@ -305,6 +304,7 @@ fn sha256_updates(c: &mut Criterion) {
             },
         );
         group.bench_with_input(BenchmarkId::new("rind", chunk_name), &input, |b, input| {
+            let _dit = criterion::rind_dit();
             b.iter(|| {
                 let mut ctx = rind::digest::Context::new(&rind::digest::SHA256);
                 for part in input.chunks(chunk) {

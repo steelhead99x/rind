@@ -108,8 +108,9 @@ aws-lc <https://github.com/aws/aws-lc>, from OpenSSL and BoringSSL
   rind/src/low/generic/ghash_nohw.rs:
 
   - For 32-bit ARM, aesv8-armx.s (AES), ghashv8-armx.s (GHASH),
-    sha1-armv4-large.s (SHA1), sha256-armv4.s (SHA256), sha512-armv4.s
-    (SHA512), and chacha-armv4.s (ChaCha20); for aarch64 and x86_64, the
+    vpaes-armv7.s and bsaes-armv7.s (AES on NEON), ghash-armv4.s
+    (GHASH on NEON), sha1-armv4-large.s (SHA1), sha256-armv4.s
+    (SHA256), sha512-armv4.s (SHA512), and chacha-armv4.s (ChaCha20); for aarch64 and x86_64, the
     sha512_block_data_order_* routines and the K512 tables of
     sha512-armv8 and sha512-x86_64 (SHA512); for x86_64, the
     sha256_block_data_order_avx, _ssse3, and _nohw routines and the K256
@@ -215,12 +216,14 @@ OpenSSL <https://github.com/openssl/openssl>
   What: the files under rind/src/low/{x86_64,arm}/openssl, which
   admin/import-openssl takes from OpenSSL at commit
   2f4e3a5fec05394068cfa7379890ab552483a8a6: for x86_64, SHA-256 and
-  SHA-512 on AVX2, generated from
-  crypto/sha/asm/sha512-x86_64.pl, written by Andy Polyakov;
-  for 32-bit ARM, Keccak-f[1600] in integer code and on NEON, generated from
-  crypto/sha/asm/keccak1600-armv4.pl, written by Andy Polyakov.
+  SHA-512 on AVX2, generated from crypto/sha/asm/sha512-x86_64.pl,
+  written by Andy Polyakov; for 32-bit ARM, Keccak-f[1600] in integer code
+  and on NEON, generated from crypto/sha/asm/keccak1600-armv4.pl, and P-256's
+  field multiplication, squaring, addition, and subtraction, generated from
+  crypto/ec/asm/ecp_nistz256-armv4.pl, both written by Andy Polyakov.
   Copyright 2005-2026 The OpenSSL Project Authors. All Rights Reserved.
   Copyright 2017-2026 The OpenSSL Project Authors. All Rights Reserved.
+  Copyright 2015-2025 The OpenSSL Project Authors. All Rights Reserved.
   License: Apache-2.0. OpenSSL has no NOTICE file.
 
 curve25519-dalek <https://github.com/dalek-cryptography/curve25519-dalek>

@@ -35,7 +35,7 @@ pub(super) mod chacha20poly1305;
     path = "portable/edwards25519.rs"
 )]
 pub(super) mod edwards25519;
-#[cfg(rind_backend = "x86_64")]
+#[cfg(any(rind_backend = "x86_64", rind_backend = "aarch64"))]
 pub(super) mod half_size;
 pub(super) mod hash_to_curve;
 pub(super) mod md5;
@@ -46,6 +46,7 @@ pub(super) mod p384;
 pub(super) mod p521;
 pub(super) mod pbkdf2_vg;
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod ristretto255_tests;
 pub(super) mod rng;
 pub(super) mod rsa_key_size;

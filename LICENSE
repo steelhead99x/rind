@@ -28,9 +28,10 @@ Graviola <https://github.com/ctz/graviola>
   as cifra <https://github.com/ctz/cifra>, by the same author under
   CC0-1.0.
   rind/src/low/portable/sha256_iram.rs is rind's own ESP-IDF Xtensa
-  SHA-256 compression. Its 16-word window follows generic/sha256.rs, and
-  its round constants are generic/sha256_k.rs. Joe Birr-Pixton wrote both
-  for Graviola; the rotates and the block load do not.
+  SHA-256 compression. Its 16-word window follows Graviola's portable
+  SHA-256, and its round constants are generic/sha256_k.rs. Joe
+  Birr-Pixton wrote both for Graviola; the rotates and the block load do
+  not.
   Copyright 2024 Joe Birr-Pixton
   License: Apache-2.0 OR ISC OR MIT-0, the same choice as rind's own code.
   Graviola has no NOTICE file.
@@ -108,12 +109,14 @@ aws-lc <https://github.com/aws/aws-lc>, from OpenSSL and BoringSSL
   5ed12cce0fd4453f2f63300d44325ed14f845d6f,
   rind/src/low/arm/poly1305_arm.rs,
   rind/src/low/x86_64/ghash_ssse3_x86_64.rs,
-  rind/src/low/x86_64/rsaz.rs, rind/src/low/x86_64/aes_nohw.rs, and
-  rind/src/low/generic/ghash_nohw.rs:
+  rind/src/low/x86_64/rsaz.rs, rind/src/low/x86_64/aes_nohw.rs,
+  rind/src/low/generic/ghash_nohw.rs, rind/src/low/generic/sha256.rs, and
+  rind/src/low/generic/sha512.rs:
 
   - For 32-bit ARM, aesv8-armx.s (AES), ghashv8-armx.s (GHASH),
-    sha1-armv4-large.s (SHA1), sha256-armv4.s (SHA256), sha512-armv4.s
-    (SHA512), and chacha-armv4.s (ChaCha20); for aarch64 and x86_64, the
+    vpaes-armv7.s and bsaes-armv7.s (AES on NEON), ghash-armv4.s
+    (GHASH on NEON), sha1-armv4-large.s (SHA1), sha256-armv4.s
+    (SHA256), sha512-armv4.s (SHA512), and chacha-armv4.s (ChaCha20); for aarch64 and x86_64, the
     sha512_block_data_order_* routines and the K512 tables of
     sha512-armv8 and sha512-x86_64 (SHA512); for x86_64, the
     sha256_block_data_order_avx, _ssse3, and _nohw routines and the K256
@@ -155,6 +158,13 @@ aws-lc <https://github.com/aws/aws-lc>, from OpenSSL and BoringSSL
     Copyright (c) 2012, Intel Corporation. All Rights Reserved.
     Copyright (c) 2014, Intel Corporation. All Rights Reserved.
     Copyright (c) 2015 CloudFlare, Inc.
+    License: Apache-2.0.
+
+  - generic/sha256.rs and generic/sha512.rs, which port aws-lc's
+    sha256_block_data_order_nohw and its 64-bit
+    sha512_block_data_order_nohw, from crypto/fipsmodule/sha/sha256.c and
+    sha512.c, to Rust.
+    Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com) All rights reserved.
     License: Apache-2.0.
 
   - poly1305_arm_asm.s (Poly1305 with NEON), and poly1305_arm.rs, which
@@ -219,12 +229,14 @@ OpenSSL <https://github.com/openssl/openssl>
   What: the files under rind/src/low/{x86_64,arm}/openssl, which
   admin/import-openssl takes from OpenSSL at commit
   2f4e3a5fec05394068cfa7379890ab552483a8a6: for x86_64, SHA-256 and
-  SHA-512 on AVX2, generated from
-  crypto/sha/asm/sha512-x86_64.pl, written by Andy Polyakov;
-  for 32-bit ARM, Keccak-f[1600] in integer code and on NEON, generated from
-  crypto/sha/asm/keccak1600-armv4.pl, written by Andy Polyakov.
+  SHA-512 on AVX2, generated from crypto/sha/asm/sha512-x86_64.pl,
+  written by Andy Polyakov; for 32-bit ARM, Keccak-f[1600] in integer code
+  and on NEON, generated from crypto/sha/asm/keccak1600-armv4.pl, and P-256's
+  field multiplication, squaring, addition, and subtraction, generated from
+  crypto/ec/asm/ecp_nistz256-armv4.pl, both written by Andy Polyakov.
   Copyright 2005-2026 The OpenSSL Project Authors. All Rights Reserved.
   Copyright 2017-2026 The OpenSSL Project Authors. All Rights Reserved.
+  Copyright 2015-2025 The OpenSSL Project Authors. All Rights Reserved.
   License: Apache-2.0. OpenSSL has no NOTICE file.
 
 curve25519-dalek <https://github.com/dalek-cryptography/curve25519-dalek>
@@ -242,26 +254,32 @@ pyca/verified-garbage <https://github.com/pyca/verified-garbage>
   What: the files under rind/src/low/*/vg, which admin/import-vg
   takes from the Rust that verified-garbage generates from its Lean
   sources, at commit 0aa40d6c21fd02943fe5b38a5b69b6213d07764d:
-  ChaCha20-Poly1305 on aarch64 with SVE2, and the ChaCha20 and
-  Poly1305 routines it calls; ChaCha20 on x86_64 with AVX2 and with
-  AVX-512 VL; X25519 and Ed25519 on x86_64 with AVX-512 IFMA, and the
+  ChaCha20-Poly1305 on aarch64 with SVE2 and on x86_64 with AVX-512
+  IFMA, and the ChaCha20 and Poly1305 routines it calls; ChaCha20 on x86_64 with AVX2 and with
+  AVX-512 VL, and on aarch64 with NEON and with SVE2; X25519 and
+  Ed25519 on x86_64 with AVX-512 IFMA, and the
   SHA-512 and field and point routines they call; RSA's public
   operation and CRT on x86_64 with AVX-512 IFMA, and the Montgomery
-  product they call; ML-KEM-768's encapsulation key check and
+  product they call; RSA's R² mod n for a public modulus on x86_64
+  with BMI2 and ADX and on aarch64; ML-KEM-768's encapsulation key check and
   encapsulation on x86_64 and on aarch64 with the SHA-3 instructions,
   and its key generation and decapsulation on x86_64 with AVX-512;
   PBKDF2 on aarch64 over HMAC-SHA1 and HMAC-SHA256 with the crypto
   extension and over HMAC-SHA384 and HMAC-SHA512 with the SHA-512
   instructions; P-256's public key derivation, ECDH, and ECDSA
   verification on x86_64 with BMI2 and ADX, ECDH and verification
-  also with AVX-512 IFMA, and on aarch64; and the Keccak, hash,
-  arithmetic, and point routines and tables they call.
+  also with AVX-512 IFMA, and on aarch64; P-384's d·G on x86_64 and
+  aarch64, and its ECDSA verification on x86_64 with BMI2 and ADX and
+  on aarch64; and the Keccak, hash, arithmetic, field, scalar, and
+  point routines and tables they call.
   Copyright (c) Individual contributors.
   License: Apache-2.0 OR BSD-3-Clause, which the files keep.
 
-  What: the Lean ISA models, the ML-KEM and SHA-3 specs, and the RSA and
-  ChaCha20 specs and contracts rind's proofs import or restate, under
-  proofs/verified-garbage/VerifiedGarbage, which admin/import-vg-models
+  What: the Lean ISA models, the ML-KEM, SHA-3, SHA-512, X25519, Poly1305, and
+  ChaCha20-Poly1305 specs, and the RSA, ChaCha20, Ed25519, P-256, P-384, and
+  PBKDF2 specs and contracts rind's proofs import or restate, with the MD5, SHA-1,
+  SHA-2, and HMAC specs PBKDF2's import,
+  under proofs/verified-garbage/VerifiedGarbage, which admin/import-vg-models
   copies byte for byte from verified-garbage
   at the same commit, so they carry no SPDX comment; this entry names
   their license.

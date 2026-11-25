@@ -118,6 +118,7 @@ macro_rules! slh_dsa {
             });
 
             group.bench_function("rind", |b| {
+                let _dit = criterion::rind_dit();
                 use rind::slh_dsa::{KeyPair, $rind};
 
                 b.iter(|| {
@@ -172,6 +173,7 @@ macro_rules! slh_dsa {
             });
 
             group.bench_function("rind", |b| {
+                let _dit = criterion::rind_dit();
                 use rind::slh_dsa::{KeyPair, $rind};
                 let key = KeyPair::<$rind>::generate().unwrap();
 
@@ -241,6 +243,7 @@ macro_rules! slh_dsa {
             });
 
             group.bench_function("rind", |b| {
+                let _dit = criterion::rind_dit();
                 use rind::slh_dsa::{PublicKey, $rind};
                 let key = PublicKey::<$rind>::from_spki(&spki).unwrap();
 

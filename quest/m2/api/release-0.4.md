@@ -29,7 +29,7 @@ Decided 2026-11-12 (maintainer, rust2's /quest-unblock): keep rind-openmls out o
 
 Each change documents its own migration in MIGRATING.md, so this quest adds none. Delete it once 0.4.0 is published.
 
-The benchmark report is refreshed once before each minor release (maintainer, 2026-11-09), so this quest requires that run. Whoever plans the next minor release's quest creates the next run at the same path, from the last one in git history, and requires it.
+The benchmark report is refreshed once before each minor release (maintainer, 2026-11-09), so this quest requires that run. The first ran in [kixel-ai/rind#619](https://github.com/kixel-ai/rind/pull/619); a second, decided 2026-11-21 in [kixel-ai/rind#949](https://github.com/kixel-ai/rind/pull/949), measures what 0.4 ships. Whoever plans the next minor release's quest creates the next run at the same path, from the last one in git history, and requires it.
 
 ## Waiting
 
@@ -37,4 +37,4 @@ The benchmark report is refreshed once before each minor release (maintainer, 20
 
 ## Required
 
-- [Benchmark report refresh, before rind 0.4](/quest/m2/bench/report-refresh.md) - the report and the README's claims, current for the release
+- [Benchmark report refresh, before rind 0.4 is released](/quest/m2/bench/report-refresh.md) - the report regenerated on every host, with its gaps triaged

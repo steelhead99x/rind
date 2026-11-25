@@ -4,7 +4,17 @@
 //! which aws-lc lacks: the first byte picks the loader and the rest is its
 //! input. Both must accept and refuse alike, except where an [`Expect`] names
 //! a difference by design, and every key rind loads must re-encode to input
-//! both load again as the same key.
+//! both load again as the same key. `rind::KeyPair::from_pkcs8`, which no
+//! other library has, is checked against each type's own loader instead.
+//!
+//! RustCrypto, which shares no code with rind, reads each key rind loads, or
+//! its re-encoding, as the same key: its `pkcs8` and NIST curves the EC,
+//! Ed25519, and X25519 keys, its `rsa` the RSA keys, its `ml-kem` the
+//! encapsulation keys, and its `ml-dsa` the ML-DSA keys, each verifying what
+//! the other signs. The curves' and Ed25519's oracles for this tier derive
+//! each public key from its private key.
+
+use std::marker::PhantomData;
 
 use aws_lc_rs::agreement::ParsedPublicKeyFormat as Format;
 use aws_lc_rs::encoding::{AsBigEndian, AsDer};
@@ -21,6 +31,7 @@ use rind::slh_dsa::{self as our_slh_dsa, SlhDsaSha2_128s, SlhDsaShake128f};
 use rind::{ecdsa, ed25519, ml_dsa, rsa as our_rsa};
 
 mod der;
+mod oracle;
 
 fuzz_target!(|data: &[u8]| {
     let Some((&loader, input)) = data.split_first() else {
@@ -104,6 +115,7 @@ fuzz_target!(|data: &[u8]| {
         58 => slh_dsa_public::<SlhDsaShake128f, slh_dsa::Shake128f>(input),
         59 => slh_dsa_spki::<SlhDsaSha2_128s, slh_dsa::Sha2_128s>(input),
         60 => slh_dsa_spki::<SlhDsaShake128f, slh_dsa::Shake128f>(input),
+        61 => any_pkcs8(input),
         _ => {}
     }
 });
@@ -116,6 +128,8 @@ struct Curve {
     theirs: &'static theirs::EcdsaSigningAlgorithm,
     theirs_verify: &'static theirs::EcdsaVerificationAlgorithm,
     scalar_len: usize,
+    /// RustCrypto's scalar of a SEC1 `ECPrivateKey`.
+    sec1: fn(&[u8]) -> Option<Vec<u8>>,
 }
 
 const P256: Curve = Curve {
@@ -123,12 +137,17 @@ const P256: Curve = Curve {
         ours: &ours_ecdh::ECDH_P256,
         theirs: &theirs_ecdh::ECDH_P256,
         scalar_len: 32,
+        public_key: |scalar| oracle::Nist::public_key(&oracle::p256(), scalar),
+        pkcs8: rustcrypto_p256::pkcs8,
+        point: rustcrypto_p256::point,
+        spki: rustcrypto_p256::spki,
     },
     ours: &ecdsa::sign::P256_SHA256_ASN1,
     ours_verify: &ecdsa::verify::P256_SHA256_ASN1,
     theirs: &theirs::ECDSA_P256_SHA256_ASN1_SIGNING,
     theirs_verify: &theirs::ECDSA_P256_SHA256_ASN1,
     scalar_len: 32,
+    sec1: rustcrypto_p256::sec1,
 };
 
 const P384: Curve = Curve {
@@ -136,12 +155,17 @@ const P384: Curve = Curve {
         ours: &ours_ecdh::ECDH_P384,
         theirs: &theirs_ecdh::ECDH_P384,
         scalar_len: 48,
+        public_key: |scalar| oracle::Nist::public_key(&oracle::p384(), scalar),
+        pkcs8: rustcrypto_p384::pkcs8,
+        point: rustcrypto_p384::point,
+        spki: rustcrypto_p384::spki,
     },
     ours: &ecdsa::sign::P384_SHA384_ASN1,
     ours_verify: &ecdsa::verify::P384_SHA384_ASN1,
     theirs: &theirs::ECDSA_P384_SHA384_ASN1_SIGNING,
     theirs_verify: &theirs::ECDSA_P384_SHA384_ASN1,
     scalar_len: 48,
+    sec1: rustcrypto_p384::sec1,
 };
 
 const P521: Curve = Curve {
@@ -149,19 +173,33 @@ const P521: Curve = Curve {
         ours: &ours_ecdh::ECDH_P521,
         theirs: &theirs_ecdh::ECDH_P521,
         scalar_len: 66,
+        public_key: |scalar| oracle::Nist::public_key(&oracle::p521(), scalar),
+        pkcs8: rustcrypto_p521::pkcs8,
+        point: rustcrypto_p521::point,
+        spki: rustcrypto_p521::spki,
     },
     ours: &ecdsa::sign::P521_SHA512_ASN1,
     ours_verify: &ecdsa::verify::P521_SHA512_ASN1,
     theirs: &theirs::ECDSA_P521_SHA512_ASN1_SIGNING,
     theirs_verify: &theirs::ECDSA_P521_SHA512_ASN1,
     scalar_len: 66,
+    sec1: rustcrypto_p521::sec1,
 };
 
-/// An agreement algorithm on each side, and its scalar's length.
+/// An agreement algorithm on each side, its scalar's length, and its
+/// independent oracles.
 struct Ecdh {
     ours: &'static ours_ecdh::Algorithm,
     theirs: &'static theirs_ecdh::Algorithm,
     scalar_len: usize,
+    /// The oracle's public key of a scalar.
+    public_key: fn(&[u8]) -> Vec<u8>,
+    /// RustCrypto's scalar of a PKCS#8 document.
+    pkcs8: fn(&[u8]) -> Option<Vec<u8>>,
+    /// RustCrypto's uncompressed point of a bare one in any form it takes.
+    point: fn(&[u8]) -> Option<Vec<u8>>,
+    /// RustCrypto's uncompressed point of a `SubjectPublicKeyInfo`.
+    spki: fn(&[u8]) -> Option<Vec<u8>>,
 }
 
 impl Ecdh {
@@ -175,7 +213,73 @@ const X25519: Ecdh = Ecdh {
     ours: &ours_ecdh::X25519,
     theirs: &theirs_ecdh::X25519,
     scalar_len: 32,
+    public_key: |scalar| {
+        let mut public = [0; 32];
+        libcrux_curve25519::secret_to_public(&mut public, scalar.try_into().unwrap());
+        public.to_vec()
+    },
+    // RFC 8410's `CurvePrivateKey`, an octet string of the scalar.
+    pkcs8: |der| {
+        let (oid, key) = rustcrypto_pkcs8(der)?;
+        (oid == "1.3.101.110").then_some(key.strip_prefix(&[0x04, 0x20])?.to_vec())
+    },
+    // Any 32 bytes are a u-coordinate.
+    point: |point| Some(point.to_vec()),
+    spki: |der| {
+        let (oid, key) = rustcrypto_spki(der)?;
+        (oid == "1.3.101.110").then_some(key)
+    },
 };
+
+/// RustCrypto's `pkcs8` reading of a PKCS#8 document: its algorithm's
+/// object identifier and its private key's bytes.
+fn rustcrypto_pkcs8(der: &[u8]) -> Option<(String, Vec<u8>)> {
+    let info = pkcs8::PrivateKeyInfoRef::try_from(der).ok()?;
+    let oid = info.algorithm.oid.to_string();
+    Some((oid, info.private_key.as_bytes().to_vec()))
+}
+
+/// RustCrypto's `spki` reading of a `SubjectPublicKeyInfo`: its algorithm's
+/// object identifier and its public key's bytes.
+fn rustcrypto_spki(der: &[u8]) -> Option<(String, Vec<u8>)> {
+    let info = pkcs8::SubjectPublicKeyInfoRef::try_from(der).ok()?;
+    let key = info.subject_public_key.as_bytes()?.to_vec();
+    Some((info.algorithm.oid.to_string(), key))
+}
+
+/// RustCrypto's reading of one NIST curve's encodings.
+macro_rules! rustcrypto_curve {
+    ($module:ident, $curve:ident) => {
+        mod $module {
+            use ::$curve::elliptic_curve::sec1::ToSec1Point;
+            use ::$curve::pkcs8::{DecodePrivateKey, DecodePublicKey};
+
+            pub fn pkcs8(der: &[u8]) -> Option<Vec<u8>> {
+                let key = ::$curve::SecretKey::from_pkcs8_der(der).ok()?;
+                Some(key.to_bytes().to_vec())
+            }
+
+            pub fn sec1(der: &[u8]) -> Option<Vec<u8>> {
+                let key = ::$curve::SecretKey::from_sec1_der(der).ok()?;
+                Some(key.to_bytes().to_vec())
+            }
+
+            pub fn point(point: &[u8]) -> Option<Vec<u8>> {
+                let key = ::$curve::PublicKey::from_sec1_bytes(point).ok()?;
+                Some(key.to_sec1_point(false).as_bytes().to_vec())
+            }
+
+            pub fn spki(der: &[u8]) -> Option<Vec<u8>> {
+                let key = ::$curve::PublicKey::from_public_key_der(der).ok()?;
+                Some(key.to_sec1_point(false).as_bytes().to_vec())
+            }
+        }
+    };
+}
+
+rustcrypto_curve!(rustcrypto_p256, p256);
+rustcrypto_curve!(rustcrypto_p384, p384);
+rustcrypto_curve!(rustcrypto_p521, p521);
 
 /// An RSA verification algorithm on each side, and its smallest modulus,
 /// which rind checks as it verifies, as aws-lc-rs does.
@@ -203,29 +307,61 @@ const RSA_3072: Rsa = Rsa {
     min_bits: 3072,
 };
 
-/// An ML-DSA parameter set's aws-lc-rs algorithms, and its public key's
-/// length; rind's is a type.
+/// An ML-DSA parameter set's aws-lc-rs algorithms, RustCrypto's, and its
+/// public key's length; rind's is a type.
 struct MlDsa {
     theirs: &'static theirs::PqdsaSigningAlgorithm,
     theirs_verify: &'static theirs::PqdsaVerificationAlgorithm,
+    independent: &'static dyn RustCryptoMlDsa,
     public_key_len: usize,
+}
+
+/// RustCrypto's ML-DSA in one parameter set.
+trait RustCryptoMlDsa: Sync {
+    /// The public key of a seed, and its deterministic signature over a
+    /// message.
+    fn sign_with_seed(&self, seed: &[u8; 32], message: &[u8]) -> (Vec<u8>, Vec<u8>);
+    /// Whether a signature verifies over a message.
+    fn verify(&self, public_key: &[u8], message: &[u8], signature: &[u8]) -> bool;
+}
+
+impl<P: ::ml_dsa::MlDsaParams> RustCryptoMlDsa for PhantomData<fn() -> P> {
+    fn sign_with_seed(&self, seed: &[u8; 32], message: &[u8]) -> (Vec<u8>, Vec<u8>) {
+        let key = ::ml_dsa::ExpandedSigningKey::<P>::from_seed(&(*seed).into());
+        let public = key.verifying_key().encode().to_vec();
+        let signature = key.sign_deterministic(message, &[]).unwrap();
+        (public, signature.encode().to_vec())
+    }
+
+    fn verify(&self, public_key: &[u8], message: &[u8], signature: &[u8]) -> bool {
+        let (Ok(key), Ok(signature)) = (
+            public_key.try_into(),
+            ::ml_dsa::Signature::<P>::try_from(signature),
+        ) else {
+            return false;
+        };
+        ::ml_dsa::VerifyingKey::<P>::decode(key).verify_with_context(message, &[], &signature)
+    }
 }
 
 const MLDSA_44: MlDsa = MlDsa {
     theirs: &theirs::ML_DSA_44_SIGNING,
     theirs_verify: &theirs::ML_DSA_44,
+    independent: &PhantomData::<fn() -> ::ml_dsa::MlDsa44>,
     public_key_len: 1312,
 };
 
 const MLDSA_65: MlDsa = MlDsa {
     theirs: &theirs::ML_DSA_65_SIGNING,
     theirs_verify: &theirs::ML_DSA_65,
+    independent: &PhantomData::<fn() -> ::ml_dsa::MlDsa65>,
     public_key_len: 1952,
 };
 
 const MLDSA_87: MlDsa = MlDsa {
     theirs: &theirs::ML_DSA_87_SIGNING,
     theirs_verify: &theirs::ML_DSA_87,
+    independent: &PhantomData::<fn() -> ::ml_dsa::MlDsa87>,
     public_key_len: 2592,
 };
 
@@ -357,6 +493,7 @@ fn ecdh_scalar(ecdh: &Ecdh, input: &[u8]) {
     };
     let theirs_public = theirs.compute_public_key().unwrap();
     assert_eq!(ours.public_key().as_ref(), theirs_public.as_ref());
+    assert_eq!(ours.public_key().as_ref(), (ecdh.public_key)(input));
     assert_eq!(ours.to_scalar().as_ref(), input);
 
     // PKCS#8 loads again as the same key, on both sides for a NIST curve,
@@ -364,6 +501,7 @@ fn ecdh_scalar(ecdh: &Ecdh, input: &[u8]) {
     let pkcs8 = ours.to_pkcs8();
     let again = ours_ecdh::PrivateKey::from_pkcs8(ours_algorithm, pkcs8.as_ref()).unwrap();
     assert_eq!(again.public_key().as_ref(), theirs_public.as_ref());
+    assert_eq!((ecdh.pkcs8)(pkcs8.as_ref()).as_deref(), Some(input));
     if theirs_algorithm != &theirs_ecdh::X25519 {
         let theirs =
             theirs_ecdh::PrivateKey::from_private_key_der(theirs_algorithm, pkcs8.as_ref())
@@ -387,6 +525,15 @@ fn x25519_pkcs8(input: &[u8]) {
     let pkcs8 = ours.to_pkcs8();
     let again = ours_ecdh::PrivateKey::from_pkcs8(&ours_ecdh::X25519, pkcs8.as_ref()).unwrap();
     assert_eq!(again.public_key().as_ref(), ours.public_key().as_ref());
+    let scalar = ours.to_scalar();
+    assert_eq!(
+        (X25519.pkcs8)(pkcs8.as_ref()).as_deref(),
+        Some(scalar.as_ref())
+    );
+    assert_eq!(
+        ours.public_key().as_ref(),
+        (X25519.public_key)(scalar.as_ref())
+    );
     let fields: Vec<_> = elements(sequence(input).unwrap()).collect();
     if fields.len() == 3 && fields[0] == (0x02, &[0][..]) && !trailing(input) {
         assert_eq!(pkcs8.as_ref(), input);
@@ -441,8 +588,22 @@ fn agree_ecdsa(
         theirs.private_key().as_der().unwrap().as_ref()
     );
 
-    // The scalar loads with the point uncompressed or compressed.
+    // The oracle derives the same point from the scalar, and RustCrypto
+    // reads each encoding as the same key.
     let scalar = ours.to_scalar();
+    assert_eq!((curve.ecdh.public_key)(scalar.as_ref()), point);
+    assert_eq!(
+        (curve.ecdh.pkcs8)(pkcs8.as_ref()).as_deref(),
+        Some(scalar.as_ref())
+    );
+    assert_eq!(
+        (curve.sec1)(sec1.as_ref()).as_deref(),
+        Some(scalar.as_ref())
+    );
+    let spki = ours.public_key().to_spki();
+    assert_eq!((curve.ecdh.spki)(spki.as_ref()).as_deref(), Some(point));
+
+    // The scalar loads with the point uncompressed or compressed.
     let (x, y) = point[1..].split_at(point.len() / 2);
     let compressed = [&[0x02 | (y[y.len() - 1] & 1)][..], x].concat();
     for point in [point, &compressed] {
@@ -468,6 +629,7 @@ fn ecdsa_public(curve: &Curve, input: &[u8]) {
     assert_eq!(ours.as_ref(), input);
     let again = ecdsa::PublicKey::new(curve.ours_verify, ours.as_ref()).unwrap();
     assert_eq!(again.as_ref(), input);
+    assert_eq!((curve.ecdh.point)(input).as_deref(), Some(input));
 }
 
 fn rsa_private(
@@ -476,6 +638,8 @@ fn rsa_private(
     theirs: fn(&[u8]) -> Result<their_rsa::KeyPair, aws_lc_rs::error::KeyRejected>,
     expect: Expect,
 ) {
+    use rsa::pkcs1::EncodeRsaPublicKey;
+    use rsa::pkcs8::DecodePrivateKey;
     let (ours, theirs) = (ours(input), theirs(input));
     agree(&ours, &theirs, expect);
     let Ok(ours) = ours else {
@@ -495,6 +659,17 @@ fn rsa_private(
         ours.public_key().to_spki().as_ref(),
         theirs.public_key().as_der().unwrap().as_ref()
     );
+
+    // RustCrypto reads the same key, unless its primes are of such unequal
+    // size as it refuses, and signs as rind does.
+    if let Ok(independent) = rsa::PrivateKey::from_pkcs8_der(pkcs8.as_ref()) {
+        let independent_public = independent.to_public_key().to_pkcs1_der().unwrap();
+        assert_eq!(independent_public.as_bytes(), public.as_ref());
+        let message = b"rind";
+        let signature = ours.sign(&our_rsa::sign::PKCS1_SHA256, message).unwrap();
+        let wanted = independent.pkcs1v15_sign::<sha2::Sha256>(message).unwrap();
+        assert_eq!(signature.as_ref(), wanted);
+    }
     rsa_public(&RSA_2048, public.as_ref());
     rsa_spki(&RSA_2048, public.to_spki().as_ref());
 }
@@ -563,8 +738,14 @@ fn rsa_components(rsa: &Rsa, input: &[u8]) {
 
 /// `key`'s DER loads again on both sides, and as components on rind's.
 fn rsa_reencode(rsa: &Rsa, key: &our_rsa::PublicKey) {
+    use rsa::pkcs1::{DecodeRsaPublicKey, EncodeRsaPublicKey};
+    use rsa::pkcs8::DecodePublicKey;
     let again = our_rsa::PublicKey::new(key.as_ref()).unwrap();
     assert_eq!(again.as_ref(), key.as_ref());
+    let independent = rsa::PublicKey::from_pkcs1_der(key.as_ref()).unwrap();
+    assert_eq!(independent.to_pkcs1_der().unwrap().as_bytes(), key.as_ref());
+    let independent = rsa::PublicKey::from_public_key_der(key.to_spki().as_ref()).unwrap();
+    assert_eq!(independent.to_pkcs1_der().unwrap().as_bytes(), key.as_ref());
     theirs::ParsedPublicKey::new(rsa.theirs, key.as_ref()).unwrap();
 
     let theirs = their_rsa::PublicKey::from_der(key.as_ref()).unwrap();
@@ -647,6 +828,19 @@ fn agree_ed25519(
     );
     let pkcs8v1 = ours.to_pkcs8v1();
     assert_eq!(pkcs8v1.as_ref(), theirs.to_pkcs8v1().unwrap().as_ref());
+
+    // The oracle derives the same public key from the seed, and RustCrypto
+    // reads each encoding as the same key.
+    let seed = ours.to_seed();
+    let seed: &[u8; 32] = seed.as_ref().try_into().unwrap();
+    assert_eq!(public.as_ref(), oracle::ed25519::public_key(seed));
+    let wrapped = [&[0x04, 0x20][..], seed].concat();
+    for pkcs8 in [pkcs8.as_ref(), pkcs8v1.as_ref()] {
+        let (oid, key) = rustcrypto_pkcs8(pkcs8).unwrap();
+        assert_eq!((oid.as_str(), key), ("1.3.101.112", wrapped.clone()));
+    }
+    let (oid, key) = rustcrypto_spki(ours.public_key().to_spki().as_ref()).unwrap();
+    assert_eq!((oid.as_str(), &key[..]), ("1.3.101.112", public.as_ref()));
     let again = ed25519::KeyPair::from_pkcs8(pkcs8v1.as_ref()).unwrap();
     assert_eq!(again.public_key().as_ref(), public.as_ref());
     let seed = ours.to_seed();
@@ -708,9 +902,10 @@ fn ecdsa_spki(curve: &Curve, input: &[u8]) {
         return;
     };
 
-    // The point is aws-lc-rs's, uncompressed, and each encoding of it loads
-    // again on both sides as the same key.
+    // The point is aws-lc-rs's and RustCrypto's, uncompressed, and each
+    // encoding of it loads again on both sides as the same key.
     same_peer(&curve.ecdh, ours.as_ref(), input);
+    assert_eq!((curve.ecdh.spki)(input).as_deref(), Some(ours.as_ref()));
     let again = ecdsa::PublicKey::new(curve.ours_verify, ours.as_ref()).unwrap();
     assert_eq!(again.as_ref(), ours.as_ref());
     let spki = ours.to_spki();
@@ -788,6 +983,7 @@ fn their_ecdh_public(
 /// itself.
 fn ecdh_reencode(ecdh: &Ecdh, key: &ours_ecdh::PublicKey, point: &[u8]) {
     same_peer(ecdh, key.as_ref(), point);
+    assert_eq!((ecdh.point)(point).as_deref(), Some(key.as_ref()));
     let again = ours_ecdh::PublicKey::new(ecdh.ours, key.as_ref()).unwrap();
     assert_eq!(again.as_ref(), key.as_ref());
     let spki = key.to_spki();
@@ -795,6 +991,7 @@ fn ecdh_reencode(ecdh: &Ecdh, key: &ours_ecdh::PublicKey, point: &[u8]) {
     assert_eq!(again.as_ref(), key.as_ref());
     let theirs = their_ecdh_public(ecdh, spki.as_ref()).unwrap();
     assert!(theirs.format() == Format::X509);
+    assert_eq!((ecdh.spki)(spki.as_ref()).as_deref(), Some(key.as_ref()));
 }
 
 /// Whether rind's key `ours` and aws-lc-rs's key from `theirs`, in any form
@@ -842,14 +1039,27 @@ fn id_ecdh(input: &[u8]) -> bool {
 /// The input as an encapsulation key of each parameter set, of which its
 /// length picks at most one.
 fn mlkem_public(input: &[u8]) {
-    mlkem_public_of::<our_kem::MlKem512>(&their_kem::ML_KEM_512, input);
-    mlkem_public_of::<our_kem::MlKem768>(&their_kem::ML_KEM_768, input);
-    mlkem_public_of::<our_kem::MlKem1024>(&their_kem::ML_KEM_1024, input);
+    use ml_kem::KeyExport;
+    mlkem_public_of::<our_kem::MlKem512>(&their_kem::ML_KEM_512, input, |key| {
+        let key = ml_kem::EncapsulationKey::<ml_kem::MlKem512>::new(key.try_into().ok()?);
+        Some(key.ok()?.to_bytes().to_vec())
+    });
+    mlkem_public_of::<our_kem::MlKem768>(&their_kem::ML_KEM_768, input, |key| {
+        let key = ml_kem::EncapsulationKey::<ml_kem::MlKem768>::new(key.try_into().ok()?);
+        Some(key.ok()?.to_bytes().to_vec())
+    });
+    mlkem_public_of::<our_kem::MlKem1024>(&their_kem::ML_KEM_1024, input, |key| {
+        let key = ml_kem::EncapsulationKey::<ml_kem::MlKem1024>::new(key.try_into().ok()?);
+        Some(key.ok()?.to_bytes().to_vec())
+    });
 }
 
+/// Both load `input` as an encapsulation key alike, and so does RustCrypto,
+/// whose `independent` re-encodes it, or refuses it as `None`.
 fn mlkem_public_of<A: our_kem::Algorithm>(
     algorithm: &'static their_kem::Algorithm<their_kem::AlgorithmId>,
     input: &[u8],
+    independent: fn(&[u8]) -> Option<Vec<u8>>,
 ) {
     let ours = our_kem::EncapsulationKey::<A>::new(input);
     // aws-lc-rs checks the modulus only when it encapsulates.
@@ -857,10 +1067,13 @@ fn mlkem_public_of<A: our_kem::Algorithm>(
         .map_err(|_| "refused")
         .and_then(|key| key.encapsulate().map(|_| key).map_err(|_| "modulus"));
     agree(&ours, &theirs, Expect::Agree);
+    let independent = independent(input);
+    assert_eq!(ours.is_ok(), independent.is_some());
     let Ok(ours) = ours else {
         return;
     };
     assert_eq!(ours.as_ref(), input);
+    assert_eq!(independent.as_deref(), Some(input));
     let theirs = theirs.unwrap();
     assert_eq!(theirs.key_bytes().unwrap().as_ref(), input);
 }
@@ -913,9 +1126,20 @@ fn agree_ml_dsa<P: ParameterSet>(
     theirs::UnparsedPublicKey::new(set.theirs_verify, public.as_ref())
         .verify(message, signature.as_ref())
         .unwrap();
+    let independent = set.independent;
+    assert!(independent.verify(public.as_ref(), message, signature.as_ref()));
     let mut signature = [0; 4627];
     let len = theirs.sign(message, &mut signature).unwrap();
     public.verify(message, &signature[..len]).unwrap();
+
+    // RustCrypto derives the same key from the seed, if rind holds it, and
+    // rind verifies what it signs.
+    if let Some(seed) = ours.to_seed() {
+        let seed = seed.as_ref().try_into().unwrap();
+        let (independent_public, signature) = independent.sign_with_seed(seed, message);
+        assert_eq!(public.as_ref(), independent_public);
+        public.verify(message, &signature).unwrap();
+    }
 
     ml_dsa_public::<P>(set, public.as_ref());
     ml_dsa_spki::<P>(set, public.to_spki().as_ref());
@@ -1028,4 +1252,97 @@ fn slh_dsa_spki<P: our_slh_dsa::ParameterSet, R: slh_dsa::ParameterSet>(input: &
     let again = our_slh_dsa::PublicKey::<P>::from_spki(spki.as_ref()).unwrap();
     assert_eq!(again.as_ref(), ours.as_ref());
     slh_dsa_public::<P, R>(ours.as_ref());
+}
+
+/// `rind::KeyPair::from_pkcs8` takes a key exactly when one type's own loader
+/// does, as that type, so it adds no acceptance of its own.
+fn any_pkcs8(input: &[u8]) {
+    fn public(key: &rind::KeyPair) -> (&'static str, Vec<u8>) {
+        use rind::KeyPair::*;
+        match key {
+            EcdsaP256(key) => ("P-256", key.public_key().as_ref().to_vec()),
+            EcdsaP384(key) => ("P-384", key.public_key().as_ref().to_vec()),
+            EcdsaP521(key) => ("P-521", key.public_key().as_ref().to_vec()),
+            Ed25519(key) => ("Ed25519", key.public_key().as_ref().to_vec()),
+            Rsa(key) => ("RSA", key.public_key().as_ref().to_vec()),
+            MlDsa44(key) => ("ML-DSA-44", key.public_key().as_ref().to_vec()),
+            MlDsa65(key) => ("ML-DSA-65", key.public_key().as_ref().to_vec()),
+            MlDsa87(key) => ("ML-DSA-87", key.public_key().as_ref().to_vec()),
+            other => slh_dsa_public(other).unwrap_or(("other", format!("{other:?}").into_bytes())),
+        }
+    }
+    // A set's own loader refuses another set's OID before it rebuilds a key,
+    // so checking all twelve costs no more than checking one.
+    macro_rules! slh_dsa {
+        ($($set:ident),*) => {
+            fn slh_dsa_public(key: &rind::KeyPair) -> Option<(&'static str, Vec<u8>)> {
+                match key {
+                    $(rind::KeyPair::$set(key) => {
+                        Some((stringify!($set), key.public_key().as_ref().to_vec()))
+                    })*
+                    _ => None,
+                }
+            }
+            fn slh_dsa_own(input: &[u8]) -> [(&'static str, Result<Vec<u8>, rind::Error>); 12] {
+                [$((
+                    stringify!($set),
+                    our_slh_dsa::KeyPair::<our_slh_dsa::$set>::from_pkcs8(input)
+                        .map(|k| k.public_key().as_ref().to_vec()),
+                )),*]
+            }
+        };
+    }
+    slh_dsa!(
+        SlhDsaSha2_128s,
+        SlhDsaSha2_128f,
+        SlhDsaSha2_192s,
+        SlhDsaSha2_192f,
+        SlhDsaSha2_256s,
+        SlhDsaSha2_256f,
+        SlhDsaShake128s,
+        SlhDsaShake128f,
+        SlhDsaShake192s,
+        SlhDsaShake192f,
+        SlhDsaShake256s,
+        SlhDsaShake256f
+    );
+    let ecdsa =
+        |alg| ecdsa::KeyPair::from_pkcs8(alg, input).map(|k| k.public_key().as_ref().to_vec());
+    let own = [
+        ("P-256", ecdsa(&ecdsa::sign::P256_SHA256_ASN1)),
+        ("P-384", ecdsa(&ecdsa::sign::P384_SHA384_ASN1)),
+        ("P-521", ecdsa(&ecdsa::sign::P521_SHA512_ASN1)),
+        (
+            "Ed25519",
+            ed25519::KeyPair::from_pkcs8(input).map(|k| k.public_key().as_ref().to_vec()),
+        ),
+        (
+            "RSA",
+            our_rsa::KeyPair::from_pkcs8(input).map(|k| k.public_key().as_ref().to_vec()),
+        ),
+        (
+            "ML-DSA-44",
+            ml_dsa::KeyPair::<MlDsa44>::from_pkcs8(input).map(|k| k.public_key().as_ref().to_vec()),
+        ),
+        (
+            "ML-DSA-65",
+            ml_dsa::KeyPair::<MlDsa65>::from_pkcs8(input).map(|k| k.public_key().as_ref().to_vec()),
+        ),
+        (
+            "ML-DSA-87",
+            ml_dsa::KeyPair::<MlDsa87>::from_pkcs8(input).map(|k| k.public_key().as_ref().to_vec()),
+        ),
+    ];
+    let accepted: Vec<_> = own
+        .into_iter()
+        .chain(slh_dsa_own(input))
+        .filter_map(|(name, key)| Some((name, key.ok()?)))
+        .collect();
+    match rind::KeyPair::from_pkcs8(input) {
+        Ok(key) if public(&key).0 == "other" => {
+            assert!(accepted.is_empty(), "{key:?} {accepted:?}")
+        }
+        Ok(key) => assert_eq!(accepted, [public(&key)]),
+        Err(err) => assert!(accepted.is_empty(), "{err} {accepted:?}"),
+    }
 }

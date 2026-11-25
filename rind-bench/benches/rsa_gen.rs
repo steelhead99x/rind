@@ -14,7 +14,11 @@ fn rsa_key_generation(c: &mut Criterion) {
     // All these are gated under `NOISY_BENCHMARKS` for the benefit of codspeed,
     // which runs each test once and expects deterministic results.  RSA key generation
     // certainly is not that.
-    if option_env!("NOISY_BENCHMARKS").is_none() {
+    // Set at build time, or at run time, for a binary built elsewhere (an
+    // armv7 device) without a rebuild.
+    let noisy =
+        option_env!("NOISY_BENCHMARKS").is_some() || std::env::var_os("NOISY_BENCHMARKS").is_some();
+    if !noisy {
         return;
     }
 
@@ -43,6 +47,7 @@ fn rsa_key_generation(c: &mut Criterion) {
         });
 
         group.bench_function("rind", |b| {
+            let _dit = criterion::rind_dit();
             b.iter(|| {
                 black_box(rind::rsa::KeyPair::generate(ours).unwrap());
             })

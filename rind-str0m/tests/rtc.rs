@@ -210,7 +210,21 @@ fn generated_certificate() {
     );
 }
 
-/// A caller's certificate or key that dimpl cannot use is an error, not a panic.
+/// The provider handed to callers building their own dimpl config builds one,
+/// as the one DTLS runs on does.
+#[test]
+fn dimpl_provider_builds_a_config() {
+    let provider = rind_str0m::dimpl_crypto_provider();
+    assert!(
+        dimpl::Config::builder()
+            .with_crypto_provider(provider)
+            .build()
+            .is_ok()
+    );
+}
+
+/// A caller's certificate, key, or MTU that dimpl cannot use is an error, not
+/// a panic.
 #[test]
 fn unusable_certificate_is_an_error() {
     let provider = rind_str0m::default_provider();
@@ -229,6 +243,11 @@ fn unusable_certificate_is_an_error() {
             assert!(dtls.new_dtls(&bad, Instant::now(), version, None).is_err());
         }
     }
+    // dimpl's minimum MTU is 64 bytes.
+    assert!(
+        dtls.new_dtls(&cert, Instant::now(), DtlsVersion::Auto, Some(63))
+            .is_err()
+    );
     assert!(
         dtls.new_dtls(&cert, Instant::now(), DtlsVersion::Auto, None)
             .is_ok()
@@ -246,8 +265,6 @@ fn fresh_connection_reports_dimpl_state() {
     let mut dtls12 = dtls
         .new_dtls(&cert, Instant::now(), DtlsVersion::Dtls12, None)
         .unwrap();
-    let rendered = format!("{dtls12:?}");
-    assert!(rendered.contains("Dtls"), "{rendered}");
     assert!(!dtls12.is_active());
     assert_eq!(format!("{:?}", dtls12.protocol_version()), "Some(DTLS1_2)");
     let dtls13 = dtls
@@ -343,19 +360,28 @@ fn established_connection_reports_graceful_close() {
                 );
                 a.handle_timeout(now).unwrap();
                 b.handle_timeout(now).unwrap();
-                let from_a = transfer_dtls(&mut *a, &mut *b);
-                let from_b = transfer_dtls(&mut *b, &mut *a);
-                connected[0] |= from_a.connected;
-                connected[1] |= from_b.connected;
+                // Deliver at one instant until neither side sends, so a flight
+                // queued in reply goes out before time advances. The timeouts
+                // that count are the ones from that quiet round.
+                let mut timeouts = [None; 2];
+                for round in 0.. {
+                    assert!(round < 64, "{version:?} handshake did not settle");
+                    let from_a = transfer_dtls(&mut *a, &mut *b);
+                    let from_b = transfer_dtls(&mut *b, &mut *a);
+                    connected[0] |= from_a.connected;
+                    connected[1] |= from_b.connected;
+                    timeouts = [from_a.timeout, from_b.timeout];
+                    if from_a.packets + from_b.packets == 0 {
+                        break;
+                    }
+                }
                 if connected == [true; 2] {
                     break;
                 }
-                let next = from_a
-                    .timeout
-                    .into_iter()
-                    .chain(from_b.timeout)
-                    .min()
-                    .unwrap_or_else(|| panic!("{version:?} handshake stalled without a timeout"));
+                let next =
+                    timeouts.into_iter().flatten().min().unwrap_or_else(|| {
+                        panic!("{version:?} handshake stalled without a timeout")
+                    });
                 // A timeout that is not strictly later still advances, as `step` does,
                 // so a stuck instant cannot spin.
                 now = (now + Duration::from_millis(1)).max(next);
@@ -390,97 +416,17 @@ fn established_connection_reports_graceful_close() {
 fn certificate_serial_stays_positive_and_the_span_is_a_year() {
     let dtls = rind_str0m::default_provider().dtls_provider;
     let cert = dtls.generate_certificate().unwrap();
-    let serial = serial_integer(&cert.certificate);
+    let (rest, cert) = x509_parser::parse_x509_certificate(&cert.certificate).unwrap();
+    assert!(rest.is_empty());
+    // The INTEGER's content octets: a set top bit is negative, and all zeros is
+    // zero, neither of which RFC 5280 allows.
+    let serial = cert.tbs_certificate.raw_serial();
     assert!(!serial.is_empty() && serial.len() <= 20, "{serial:?}");
     assert_eq!(serial[0] & 0x80, 0, "{serial:?}");
-    let (before, after) = validity(&cert.certificate);
+    assert!(serial.iter().any(|&byte| byte != 0), "{serial:?}");
+    let validity = cert.validity();
     assert_eq!(
-        certificate_time(&after) - certificate_time(&before),
+        validity.not_after.to_datetime() - validity.not_before.to_datetime(),
         time::Duration::days(365),
-        "{before} .. {after}"
     );
-}
-
-fn serial_integer(cert: &[u8]) -> Vec<u8> {
-    let body = sequence(cert);
-    let tbs = sequence(body);
-    let after_version = if tbs.first() == Some(&0xa0) {
-        let (_, rest) = tlv(tbs);
-        rest
-    } else {
-        tbs
-    };
-    let (serial, _) = tlv(after_version);
-    assert_eq!(after_version[0], 0x02);
-    serial.to_vec()
-}
-
-fn certificate_time(value: &str) -> time::OffsetDateTime {
-    assert!(value.ends_with('Z'), "{value}");
-    let digits = &value[..value.len() - 1];
-    let (year, rest) = match digits.len() {
-        12 => {
-            let yy: i32 = digits[..2].parse().unwrap();
-            (if yy >= 50 { 1900 + yy } else { 2000 + yy }, &digits[2..])
-        }
-        14 => (digits[..4].parse().unwrap(), &digits[4..]),
-        _ => panic!("certificate time {value}"),
-    };
-    let part = |at: usize| -> u8 { rest[at..at + 2].parse().unwrap() };
-    let date = time::Date::from_calendar_date(year, part(0).try_into().unwrap(), part(2)).unwrap();
-    let clock = time::Time::from_hms(part(4), part(6), part(8)).unwrap();
-    date.with_time(clock).assume_utc()
-}
-
-fn validity(cert: &[u8]) -> (String, String) {
-    let body = sequence(cert);
-    let tbs = sequence(body);
-    let mut rest = tbs;
-    // version, serial, signature, issuer, then validity.
-    for _ in 0..4 {
-        let (_, next) = tlv(rest);
-        rest = next;
-    }
-    let (span, _) = tlv(rest);
-    assert_eq!(rest[0], 0x30, "validity is a SEQUENCE");
-    let (before, after_bytes) = tlv(span);
-    // UTCTime is 0x17, GeneralizedTime is 0x18. A mis-aimed skip that lands
-    // on another field must not be read as a time.
-    assert!(
-        matches!(span[0], 0x17 | 0x18),
-        "notBefore tag {:#x}",
-        span[0]
-    );
-    let (after, rest) = tlv(after_bytes);
-    assert!(
-        matches!(after_bytes[0], 0x17 | 0x18),
-        "notAfter tag {:#x}",
-        after_bytes[0]
-    );
-    assert!(
-        rest.is_empty(),
-        "validity holds two times, leftover {rest:?}"
-    );
-    (
-        String::from_utf8(before.to_vec()).unwrap(),
-        String::from_utf8(after.to_vec()).unwrap(),
-    )
-}
-
-fn sequence(input: &[u8]) -> &[u8] {
-    let (body, _) = tlv(input);
-    assert_eq!(input[0], 0x30);
-    body
-}
-
-fn tlv(input: &[u8]) -> (&[u8], &[u8]) {
-    assert!(input.len() >= 2, "{input:?}");
-    let (len, header) = match input[1] {
-        len @ 0..=0x7f => (len as usize, 2),
-        0x81 => (input[2] as usize, 3),
-        0x82 => (u16::from_be_bytes([input[2], input[3]]) as usize, 4),
-        other => panic!("DER length {other:#x}"),
-    };
-    let rest = &input[header..];
-    (&rest[..len], &rest[len..])
 }

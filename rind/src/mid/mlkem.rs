@@ -489,7 +489,13 @@ impl<P: Params> DecapKey<P> {
         // 8. - 15.
         let mut s = Coeffs::<P::Vector, Normal>::zero();
         let mut e = Coeffs::<P::Vector, Normal>::zero();
-        sample_poly_cbd(P::ETA1, &sigma.0, 0, s.polys_mut().chain(e.polys_mut()));
+        sample_poly_cbd(
+            P::ETA1,
+            P::K,
+            &sigma.0,
+            0,
+            s.polys_mut().chain(e.polys_mut()),
+        );
 
         // 16. ŝ <- NTT(s)
         let mut s_hat = s.ntt();
@@ -626,19 +632,22 @@ impl<P: Params> Decoded<P> {
         // 4. - 8. rolled into self.transpose_a_hat.
 
         // 9. - 12. y_i <- SamplePolyCBD_eta1(PRF(r, N))
-        let mut y = Coeffs::<P::Vector, Normal>::zero();
-        sample_poly_cbd(P::ETA1, &r.0, 0, y.polys_mut());
-
         // 13. - 16. e_1 <- SamplePolyCBD_eta2(PRF(r, N))
         // 17. e_2 <- SamplePolyCBD_eta2(PRF(r, N))
+        //
+        // N counts on from y's into e_1's and e_2's, so where eta1 is eta2
+        // one call samples all three, and hashes them in fewer batches.
+        let mut y = Coeffs::<P::Vector, Normal>::zero();
         let mut e_1 = Coeffs::<P::Vector, Normal>::zero();
         let mut e_2 = Coeffs::<Poly, Normal>::zero();
-        sample_poly_cbd(
-            ETA2,
-            &r.0,
-            P::K as u8,
-            e_1.polys_mut().chain(core::iter::once(&mut e_2.0)),
-        );
+        let errors = e_1.polys_mut().chain(core::iter::once(&mut e_2.0));
+        match P::ETA1 == ETA2 {
+            true => sample_poly_cbd(ETA2, P::K, &r.0, 0, y.polys_mut().chain(errors)),
+            false => {
+                sample_poly_cbd(P::ETA1, P::K, &r.0, 0, y.polys_mut());
+                sample_poly_cbd(ETA2, P::K, &r.0, P::K as u8, errors);
+            }
+        }
 
         // 18. y^ <- NTT(y)
         let y_hat = y.ntt();
@@ -1217,34 +1226,38 @@ impl<V: Array<Poly>> Coeffs<V, Normal> {
 }
 
 /// `SamplePolyCBD_eta(PRF_eta(sigma, n))` into each of `polys`, with `n`
-/// counting from `first`.
+/// counting from `first`, for the parameter set of rank `k`.
 fn sample_poly_cbd<'a>(
     eta: usize,
+    k: usize,
     sigma: &[u8; 32],
     first: u8,
     polys: impl Iterator<Item = &'a mut Poly>,
 ) {
     match eta {
-        2 => sample_poly_cbd2(sigma, first, polys),
+        2 => sample_poly_cbd2(k, sigma, first, polys),
         3 => sample_poly_cbd3(sigma, first, polys),
         _ => unreachable!(),
     }
 }
 
-/// [`sample_poly_cbd`] for `eta = 2`, four polynomials at a time.
+/// [`sample_poly_cbd`] for `eta = 2`, eight polynomials at a time, which
+/// x86_64 CPUs with AVX-512 hash at once (but for ML-KEM-768) and others four
+/// at a time.
 fn sample_poly_cbd2<'a>(
+    k: usize,
     sigma: &[u8; 32],
     mut n: u8,
     mut polys: impl Iterator<Item = &'a mut Poly>,
 ) {
     loop {
-        let batch: [Option<&mut Poly>; 4] = core::array::from_fn(|_| polys.next());
+        let batch: [Option<&mut Poly>; 8] = core::array::from_fn(|_| polys.next());
         let count = batch.iter().take_while(|p| p.is_some()).count();
         if count == 0 {
             return;
         }
 
-        let mut bufs = [[0; 40]; 4];
+        let mut bufs = [[0; 40]; 8];
         for buf in &mut bufs[..count] {
             buf[..32].copy_from_slice(sigma);
             buf[32] = n;
@@ -1252,16 +1265,43 @@ fn sample_poly_cbd2<'a>(
             n += 1;
         }
 
-        let mut samples = [[0; 128]; 4];
-        match count {
-            1 => shake256_batch_of::<1>(&bufs, &mut samples),
-            2 => shake256_batch_of::<2>(&bufs, &mut samples),
-            3 => shake256_batch_of::<3>(&bufs, &mut samples),
-            _ => sha3::shake256_batch(&bufs, &mut samples),
+        // ML-KEM-768 never hashes eight at a time: it takes its six or
+        // seven four at a time, over the verified four-way Keccak-f, so
+        // Graviola's unproven eight-way Keccak is off its path, as in
+        // `sample_ntt`. Where that would run, ML-KEM-768 runs
+        // pyca/verified-garbage's routines instead.
+        let mut samples = [[0; 128]; 8];
+        // Only x86_64 has an eight-way PRF, so elsewhere the fours run all
+        // of it.
+        #[cfg(rind_backend = "x86_64")]
+        match (k, count) {
+            (3, _) | (_, 1..=4) => shake256_fours(&bufs, &mut samples, count),
+            _ => low::mlkem_shake256_8x(&bufs, &mut samples, count, shake256_fours),
+        }
+        #[cfg(not(rind_backend = "x86_64"))]
+        {
+            let _ = k;
+            shake256_fours(&bufs, &mut samples, count);
         }
 
         for (sample, poly) in samples.iter().zip(batch.into_iter().flatten()) {
             sample_cbd2(sample, poly);
+        }
+    }
+}
+
+/// [`sha3::shake256_batch`] of the first `count` of eight inputs, four at a
+/// time.
+fn shake256_fours(inputs: &[[u8; 40]; 8], outputs: &mut [[u8; 128]; 8], count: usize) {
+    let (inputs, _) = inputs.as_chunks::<4>();
+    let (outputs, _) = outputs.as_chunks_mut::<4>();
+    for (i, (inputs, outputs)) in inputs.iter().zip(outputs).enumerate() {
+        match count.saturating_sub(i * 4) {
+            0 => {}
+            1 => shake256_batch_of::<1>(inputs, outputs),
+            2 => shake256_batch_of::<2>(inputs, outputs),
+            3 => shake256_batch_of::<3>(inputs, outputs),
+            _ => sha3::shake256_batch(inputs, outputs),
         }
     }
 }
@@ -1340,6 +1380,7 @@ const Q_HALF: i16 = (Q + 1) / 2;
 const N: usize = 256;
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
     use crate::test::{Acvp, acvp};

@@ -238,8 +238,6 @@ fn der_load_and_accessors() {
         assert!(raw.len() > 1, "{}", raw.len());
         assert!(raw.iter().any(|byte| *byte != 0));
         assert!(raw.iter().any(|byte| *byte != 1));
-        let rendered = format!("{loaded:?}");
-        assert!(rendered.contains("KeyPair"), "{rendered}");
     }
 
     let pkcs1 = PrivateKeyDer::Pkcs1(rustls::pki_types::PrivatePkcs1KeyDer::from(

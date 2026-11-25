@@ -349,16 +349,19 @@ impl TryFrom<&PrivateKeyDer<'_>> for KeyPair {
         let PrivateKeyDer::Pkcs8(key) = key else {
             return Err(Error::CouldNotParseKeyPair);
         };
-        // rcgen's `ring` backend tries the algorithms in this order.
-        [
-            &PKCS_ED25519,
-            &PKCS_ECDSA_P256_SHA256,
-            &PKCS_ECDSA_P384_SHA384,
-            &PKCS_RSA_SHA256,
-        ]
-        .into_iter()
-        .find_map(|alg| Self::from_pkcs8_der_and_sign_algo(key, alg).ok())
-        .ok_or(Error::CouldNotParseKeyPair)
+        // rcgen's `ring` backend signs RSA keys with SHA-256, and no P-521 key.
+        let der = key.secret_pkcs8_der();
+        let (key, alg) = match rind::KeyPair::from_pkcs8(der) {
+            Ok(rind::KeyPair::EcdsaP256(key)) => (Key::Ecdsa(key), &PKCS_ECDSA_P256_SHA256),
+            Ok(rind::KeyPair::EcdsaP384(key)) => (Key::Ecdsa(key), &PKCS_ECDSA_P384_SHA384),
+            Ok(rind::KeyPair::Ed25519(key)) => (Key::Ed25519(key), &PKCS_ED25519),
+            Ok(rind::KeyPair::Rsa(key)) => {
+                (Key::Rsa(key, &rsa::sign::PKCS1_SHA256), &PKCS_RSA_SHA256)
+            }
+            _ => return Err(Error::CouldNotParseKeyPair),
+        };
+        ring_pkcs8_version(der, alg == &PKCS_ED25519).map_err(|_| Error::CouldNotParseKeyPair)?;
+        Ok(Self::new(key, alg, der.to_vec()))
     }
 }
 
@@ -434,5 +437,49 @@ mod tests {
             load(&v2, &PKCS_ED25519).err(),
             rejected("PublicKeyIsMissing")
         );
+    }
+
+    /// A key loaded without its algorithm signs as rcgen's `ring` backend
+    /// finds it, refusing what that backend does: a P-521 key, a type that
+    /// cannot sign or that ring lacks, and a v2 document ring refuses.
+    #[test]
+    fn finds_the_algorithm_as_ring() {
+        let find = |der: &[u8]| KeyPair::try_from(der).map(|key| key.algorithm());
+        let ecdsa = |alg| EcdsaKeyPair::generate(alg).unwrap().to_pkcs8();
+        let rsa = RsaKeyPair::from_pkcs1(include_bytes!("../../rind/src/high/rsa/rsa2048.der"))
+            .unwrap()
+            .to_pkcs8();
+        let ed25519 = Ed25519KeyPair::generate().unwrap();
+        for (pkcs8, alg) in [
+            (
+                ecdsa(&ecdsa::sign::P256_SHA256_ASN1),
+                &PKCS_ECDSA_P256_SHA256,
+            ),
+            (
+                ecdsa(&ecdsa::sign::P384_SHA384_ASN1),
+                &PKCS_ECDSA_P384_SHA384,
+            ),
+            (rsa, &PKCS_RSA_SHA256),
+            (ed25519.to_pkcs8(), &PKCS_ED25519),
+            (ed25519.to_pkcs8v1(), &PKCS_ED25519),
+        ] {
+            assert_eq!(find(pkcs8.as_ref()), Ok(alg));
+            if alg != &PKCS_ED25519 {
+                let v2 = with_version(pkcs8.as_ref(), 1);
+                assert_eq!(find(&v2), Err(Error::CouldNotParseKeyPair));
+            }
+        }
+
+        let ed25519_v2 = with_version(ed25519.to_pkcs8v1().as_ref(), 1);
+        let x25519 = rind::agreement::PrivateKey::generate(&rind::agreement::X25519).unwrap();
+        let ml_dsa = rind::ml_dsa::KeyPair::<rind::ml_dsa::MlDsa44>::generate().unwrap();
+        for pkcs8 in [
+            ed25519_v2,
+            ecdsa(&ecdsa::sign::P521_SHA512_ASN1).as_ref().to_vec(),
+            x25519.to_pkcs8().as_ref().to_vec(),
+            ml_dsa.to_pkcs8().as_ref().to_vec(),
+        ] {
+            assert_eq!(find(&pkcs8), Err(Error::CouldNotParseKeyPair));
+        }
     }
 }

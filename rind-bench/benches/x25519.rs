@@ -92,6 +92,7 @@ fn x25519(c: &mut Criterion) {
     });
 
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         b.iter(|| {
             use rind::agreement::*;
             let our_private_key = PrivateKey::generate(&X25519).unwrap();
@@ -178,6 +179,7 @@ fn keygen(c: &mut Criterion) {
     });
 
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         b.iter(|| {
             use rind::agreement::*;
             let key = PrivateKey::generate(&X25519).unwrap();
@@ -243,6 +245,7 @@ fn stored(c: &mut Criterion) {
     });
 
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         use rind::agreement::*;
         let key = PrivateKey::from_scalar(&X25519, &scalar).unwrap();
 

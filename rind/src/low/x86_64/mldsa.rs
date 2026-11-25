@@ -159,6 +159,7 @@ rej_eta!(
 );
 
 /// For each 8-bit mask, the indices of its set bits, packed low first.
+#[cfg_attr(coverage_nightly, coverage(off))] // const-evaluated only
 const fn rej_uniform_table() -> [u8; 2048] {
     let mut t = [0; 2048];
     let mut m = 0;

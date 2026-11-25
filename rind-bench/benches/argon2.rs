@@ -22,6 +22,10 @@ const COSTS: [(&str, u32, u32, u32); 2] = [
 fn argon2(c: &mut Criterion) {
     let (password, salt) = (b"password", b"per-user salt");
     for (name, memory_kib, passes, lanes) in COSTS {
+        // 64 MiB across four lanes is the one row that needs real memory.
+        if criterion::low_memory() && memory_kib > 1 << 14 {
+            continue;
+        }
         let mut group = c.benchmark_group(format!("argon2id-{name}"));
         group.sample_size(10);
         group.throughput(Throughput::Bytes(memory_kib as u64 * 1024 * passes as u64));
@@ -51,6 +55,7 @@ fn argon2(c: &mut Criterion) {
             })
         });
         group.bench_function("rind", |b| {
+            let _dit = criterion::rind_dit();
             let params = rind::argon2::Params::new(memory_kib, passes, lanes).unwrap();
             let secret = rind::argon2::Secret::new(password);
             b.iter(|| {

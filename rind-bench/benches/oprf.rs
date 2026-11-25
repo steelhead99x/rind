@@ -52,6 +52,7 @@ fn oprf(c: &mut Criterion) {
     let mut group = c.benchmark_group("oprf-ristretto255-blind");
     group.throughput(Throughput::Elements(1));
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         b.iter(|| black_box(rind::oprf::Blind::new(&RISTRETTO255_SHA512, INPUT).unwrap()));
     });
     group.bench_function("rustcrypto", |b| {
@@ -62,6 +63,7 @@ fn oprf(c: &mut Criterion) {
     let mut group = c.benchmark_group("oprf-ristretto255-evaluate");
     group.throughput(Throughput::Elements(1));
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         let (_, blinded) = rind::oprf::Blind::new(&RISTRETTO255_SHA512, INPUT).unwrap();
         b.iter(|| black_box(rind_server.blind_evaluate(blinded.as_ref()).unwrap()));
     });
@@ -76,6 +78,7 @@ fn oprf(c: &mut Criterion) {
     let mut group = c.benchmark_group("oprf-ristretto255-finalize");
     group.throughput(Throughput::Elements(1));
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         b.iter_batched(
             || {
                 let (blind, blinded) = rind::oprf::Blind::new(&RISTRETTO255_SHA512, INPUT).unwrap();
@@ -130,6 +133,7 @@ fn voprf(c: &mut Criterion) {
     let mut group = c.benchmark_group("voprf-p384-blind");
     group.throughput(Throughput::Elements(1));
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         b.iter(|| black_box(rind_voprf::Blind::new(suite, INPUT).unwrap()));
     });
     group.bench_function("rustcrypto", |b| {
@@ -141,6 +145,7 @@ fn voprf(c: &mut Criterion) {
     let mut group = c.benchmark_group("voprf-p384-evaluate");
     group.throughput(Throughput::Elements(1));
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         let (_, blinded) = rind_voprf::Blind::new(suite, INPUT).unwrap();
         b.iter(|| black_box(rind_server.blind_evaluate(blinded.as_ref()).unwrap()));
     });
@@ -154,6 +159,7 @@ fn voprf(c: &mut Criterion) {
     let mut group = c.benchmark_group("voprf-p384-finalize");
     group.throughput(Throughput::Elements(1));
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         b.iter_batched(
             || {
                 let (blind, blinded) = rind_voprf::Blind::new(suite, INPUT).unwrap();

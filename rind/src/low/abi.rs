@@ -869,6 +869,7 @@ mod arch {
 mod arch;
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
 
     /// Runs `f` and returns its panic message, failing if it did not panic.
@@ -962,6 +963,11 @@ mod tests {
             "aarch64/cpu.rs",
             "reads_dit",
             "a test, whose assembly only reads DIT",
+        ),
+        (
+            "aarch64/cpu.rs",
+            "read_midr",
+            "one `mrs` into a register the compiler allocates, which no ABI governs",
         ),
         (
             "aarch64/aes_cbc.rs",

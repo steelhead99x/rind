@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 
-# Usage: admin/ctgrind [unit|wycheproof|adapters|fips] [cargo test args...]
+# Usage: admin/ctgrind [unit|wycheproof|adapters|fips] [cargo nextest run args...]
 # Runs every suite but fips unless one is named, so CI can run them in
 # parallel. fips checks the FIPS module, which refuses a CPU below its
 # baseline, so the CPU-masked runs leave it out.
@@ -22,7 +22,7 @@ set -e
 # Valgrind (through 3.27) decodes no AVX-512, VAES, VPCLMULQDQ, or SHA
 # instruction and hides them from `cpuid`, so rind's AES-GCM on VAES, SHA-1
 # and SHA-256 on the SHA extensions, and AVX-512 ML-KEM, RSA, ChaCha20,
-# X25519, Ed25519, and P-256 ECDH go unchecked here. `admin/ct-sde` checks
+# ChaCha20-Poly1305, X25519, Ed25519, and P-256 ECDH go unchecked here. `admin/ct-sde` checks
 # them under Intel SDE, all but Graviola's AVX-512 sampler for ML-KEM-512,
 # ML-KEM-1024, and ML-KEM-768's fallback from pyca/verified-garbage, which
 # samples only the public matrix.
@@ -45,9 +45,10 @@ set -e
 self="$(cd "$(dirname "$0")" && pwd)/ctgrind"
 valgrind="valgrind --error-exitcode=99 --unw-stack-scan-thresh=3 --suppressions=$(dirname "$self")/ctgrind.supp"
 
-# Cargo runs each test binary through this script. `--track-origins=yes`
-# roughly doubles memcheck's cost, so only a binary memcheck failed reruns
-# with it, to name where each secret came from.
+# nextest runs each test in its own process, through this script, so the
+# tests spread over every core while valgrind runs each process's threads on
+# one. `--track-origins=yes` roughly doubles memcheck's cost, so only a test
+# memcheck failed reruns with it, to name where each secret came from.
 if [ "$1" = --run ]; then
     shift
     status=0
@@ -125,14 +126,52 @@ if [ -n "${RIND_SCOPE:-}" ]; then
     fi
 fi
 
+# `--no-fail-fast` reports every test memcheck fails, not just the first.
+set -- --no-fail-fast "$@"
+
+# True when this invocation builds aarch64, either by `--target` or by
+# running on an aarch64 host with no target named.
+targets_aarch64() {
+    seen=0
+    aarch64=0
+    prev=
+    for arg in "$@"; do
+        case "$prev" in
+            --target)
+                seen=1
+                case "$arg" in
+                    aarch64-* | arm64-*) aarch64=1 ;;
+                esac
+                ;;
+        esac
+        case "$arg" in
+            --target=aarch64-* | --target=arm64-*)
+                seen=1
+                aarch64=1
+                ;;
+            --target=*) seen=1 ;;
+        esac
+        prev=$arg
+    done
+    if [ "$seen" -eq 1 ]; then
+        [ "$aarch64" -eq 1 ]
+        return
+    fi
+    case "$(uname -m)" in
+        aarch64 | arm64) return 0 ;;
+    esac
+    return 1
+}
+
 # rind's unit tests mark its secrets through the `__ctgrind` hooks. Wycheproof
 # runs without them, since its harness compares secret outputs directly.
-if [ "$suite" = all ] || [ "$suite" = unit ]; then
-    cargo test -p rind --lib --features __ctgrind "$@"
-fi
-if [ "$suite" = all ] || [ "$suite" = wycheproof ]; then
-    cargo test -p rind --test wycheproof "$@"
-fi
+run_suites() {
+    if [ "$suite" = all ] || [ "$suite" = unit ]; then
+        cargo nextest run -p rind --lib --features __ctgrind "$@"
+    fi
+    if [ "$suite" = all ] || [ "$suite" = wycheproof ]; then
+        cargo nextest run -p rind --test wycheproof "$@"
+    fi
 
 # Each adapter's ctgrind test marks the secrets it hands rind, while rind's
 # hooks mark the keys rind generates or parses. Python's tests run through
@@ -145,13 +184,88 @@ if [ "$suite" = all ] || [ "$suite" = adapters ]; then
     case " $* " in
         *armv7-unknown-linux-gnueabihf*) set -- --exclude rind-openssl "$@" ;;
     esac
-    cargo test --workspace --exclude rind --exclude rind-python --exclude rind-fips --lib --test ctgrind --features rind/__ctgrind "$@"
+    cargo nextest run --workspace --exclude rind --exclude rind-python --exclude rind-fips --lib --test ctgrind --features rind/__ctgrind "$@"
 fi
 
 # The FIPS module as it ships, built with rind's hooks: its test marks the
 # secrets it hands the module. Then the ACVP build's deterministic services,
-# which only that build exports.
+# which only that build exports. A filter naming only `acvp` selects nothing
+# in the first build, which nextest otherwise fails on.
 if [ "$suite" = fips ]; then
-    cargo test -p rind-fips --test ctgrind --features __ctgrind,rind/__ctgrind "$@"
-    cargo test -p rind-fips --test ctgrind --features __ctgrind,__acvp,rind/__ctgrind "$@" -- --exact acvp
+    cargo nextest run -p rind-fips --test ctgrind --features __ctgrind,rind/__ctgrind --no-tests=warn "$@"
+    cargo nextest run -p rind-fips --test ctgrind --features __ctgrind,__acvp,rind/__ctgrind "$@" -- --exact acvp
+fi
+}
+
+# The aarch64 multiplier schedule each pass runs. Detection cannot see the
+# core under valgrind, which hides `HWCAP_CPUID` (UPSTREAM.md, "Valgrind
+# hides HWCAP_CPUID from aarch64 programs"), so it always picks `_alt`, the
+# wide schedules: an aarch64 run forces each family in a pass of its own, so
+# both run whatever the host, and `RIND_TEST_ARM_WIDE_MUL` makes
+# `detects_the_expected_cpu` check that each pass got the one it forced.
+# `--cfg rind_cpu_disable` keeps the variables alive in a `--release` build.
+# The FIPS module honours only the denial, never a force, so its first pass
+# forces nothing and asserts nothing. The portable backend has no narrow
+# schedule, so a `rind_portable` run takes one pass, but for the fips suite,
+# whose module build replaces the caller's flags (rind-fips/build.rs).
+#
+# A caller that sets either variable has picked its schedule, and its
+# `RIND_TEST_ARM_WIDE_MUL` with it, so it gets the one pass it asked for.
+# rind reads only whether a variable is set, so an empty or `0` value counts:
+# `RIND_CPU_DISABLE_wide_mul=` would otherwise deny the forced wide pass and
+# fail it. Otherwise a value left over from a native run is dropped, since
+# valgrind would contradict it.
+schedule_requested=${RIND_CPU_DISABLE_wide_mul+set}${RIND_CPU_FORCE_wide_mul+set}
+portable_requested() {
+    [ "$suite" != fips ] && env | grep -q '^[A-Z0-9_]*RUSTFLAGS=.*rind_portable'
+}
+if [ -n "$schedule_requested" ] || ! targets_aarch64 "$@" || portable_requested; then
+    [ -n "$schedule_requested" ] || unset RIND_TEST_ARM_WIDE_MUL
+    run_suites "$@"
+    exit
+fi
+
+case " ${RUSTFLAGS-} " in
+    *" rind_cpu_disable "*) ;;
+    *)
+        RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }--cfg rind_cpu_disable"
+        export RUSTFLAGS
+        ;;
+esac
+
+# Each pass in a subshell of its own, so its variables end with it, under
+# `set -e` there: a subshell on the left of `||` would run with `set -e`
+# off, and a failed suite followed by a passing one would read as a pass.
+# Both passes run, so one log shows both families, and either failing fails
+# the script.
+set +e
+if [ "$suite" = fips ]; then
+    echo "ctgrind: detected multiplier (the FIPS module honours no force)" >&2
+    (
+        set -e
+        unset RIND_TEST_ARM_WIDE_MUL
+        run_suites "$@"
+    )
+else
+    echo "ctgrind: wide multiplier (RIND_CPU_FORCE_wide_mul=1)" >&2
+    (
+        set -e
+        # shellcheck disable=SC2030 # each pass's variables end with it
+        export RIND_CPU_FORCE_wide_mul=1 RIND_TEST_ARM_WIDE_MUL=1
+        run_suites "$@"
+    )
+fi
+wide=$?
+echo "ctgrind: narrow multiplier (RIND_CPU_DISABLE_wide_mul=1)" >&2
+(
+    set -e
+    # shellcheck disable=SC2031 # as above
+    export RIND_CPU_DISABLE_wide_mul=1 RIND_TEST_ARM_WIDE_MUL=0
+    run_suites "$@"
+)
+narrow=$?
+set -e
+if [ "$wide" -ne 0 ] || [ "$narrow" -ne 0 ]; then
+    echo "ctgrind: first pass exited $wide, narrow pass exited $narrow" >&2
+    exit 1
 fi

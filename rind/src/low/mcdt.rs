@@ -43,12 +43,28 @@ impl Mcdt {
     pub(crate) fn enter() -> Self {
         Self(if needed() { enter() } else { None })
     }
+
+    /// As [`Mcdt::enter`], for code that may change MXCSR itself, such as
+    /// pyca/verified-garbage's routines that enter the mitigation on their
+    /// own and leave it entered: on drop this restores any MXCSR the code
+    /// changed, on a CPU that needs no mitigation and under one already held.
+    #[cfg(rind_backend = "x86_64")]
+    #[inline(always)]
+    pub(crate) fn enter_restoring() -> Self {
+        Self(Some(if needed() {
+            enter().unwrap_or(MITIGATED)
+        } else {
+            mxcsr()
+        }))
+    }
 }
 
 impl Drop for Mcdt {
     #[inline]
     fn drop(&mut self) {
-        if let Some(saved) = self.0 {
+        if let Some(saved) = self.0
+            && mxcsr() != saved
+        {
             leave(saved);
         }
     }
@@ -91,7 +107,7 @@ fn leave(saved: u32) {
 }
 
 /// This thread's MXCSR.
-fn mxcsr() -> u32 {
+pub(super) fn mxcsr() -> u32 {
     let mut value = 0u32;
     // SAFETY: stores MXCSR to `value`.
     unsafe {
@@ -194,6 +210,42 @@ mod tests {
         assert_eq!(mxcsr(), before);
     }
 
+    // As pyca/verified-garbage's routines change it, loading Intel's value
+    // with its six status flags set, from the caller's value or from Intel's
+    // already held, and as other code inside the guard might, toggling a
+    // status flag, on a CPU that needs the mitigation or not.
+    #[test]
+    #[cfg(rind_backend = "x86_64")]
+    #[cfg_attr(
+        feature = "__ctgrind",
+        ignore = "valgrind models only MXCSR's rounding mode"
+    )]
+    fn restoring_guard_undoes_a_change() {
+        fn set(value: u32) {
+            // SAFETY: loads MXCSR from a valid value, which the test restores.
+            unsafe {
+                core::arch::asm!("ldmxcsr dword ptr [{v}]", v = in(reg) &value, options(nostack));
+            }
+        }
+        let before = mxcsr();
+        assert_ne!(before, MITIGATED);
+        for start in [before, MITIGATED] {
+            set(start);
+            let guard = Mcdt::enter_restoring();
+            set(MITIGATED);
+            drop(guard);
+            assert_eq!(mxcsr(), start);
+
+            let guard = Mcdt::enter_restoring();
+            let changed = mxcsr() ^ 1;
+            set(changed);
+            assert_eq!(mxcsr(), changed);
+            drop(guard);
+            assert_eq!(mxcsr(), start);
+        }
+        set(before);
+    }
+
     #[test]
     fn reads_the_vendor() {
         // `__cpuid` is safe from Rust 1.94 but `unsafe` on the 1.90 MSRV.
@@ -204,7 +256,13 @@ mod tests {
         assert_eq!(is_intel(), vendor.as_flattened() == b"GenuineIntel");
     }
 
-    // x86-cpu.yml names whether each CPU model it emulates needs the
+    // See `low::x86_64::cpu`'s report.
+    #[test]
+    fn reports_dispatch() {
+        println!("rind dispatch: mcdt {}", needed());
+    }
+
+    // admin/x86-cpu names whether each CPU model it emulates needs the
     // mitigation, since nothing else on a host reports `MCDT_NO`.
     #[test]
     fn detects_the_expected_cpu() {

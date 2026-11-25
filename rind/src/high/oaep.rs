@@ -42,6 +42,7 @@ impl fmt::Debug for OaepAlgorithm {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))] // const-evaluated only
 const fn oaep<H: Hash>(hash: OaepHash) -> OaepAlgorithm {
     OaepAlgorithm {
         hash,

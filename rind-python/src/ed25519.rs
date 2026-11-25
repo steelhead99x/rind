@@ -5,7 +5,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 use rind::ed25519;
 
-use crate::{Bytes, PublicKeyCell, bytes, error};
+use crate::{Bytes, PublicKeyCell, Secret, bytes, error};
 
 /// An Ed25519 public key, whose `bytes` are its 32-byte encoding.
 #[pyclass(frozen, module = "pyrind.ed25519")]
@@ -76,20 +76,20 @@ impl KeyPair {
     /// Loads a key pair from PKCS#8 v1 or v2 DER, refused if a v2 key's
     /// public key does not match.
     #[staticmethod]
-    fn from_pkcs8(der: Bytes<'_>) -> PyResult<Self> {
+    fn from_pkcs8(der: Secret<'_>) -> PyResult<Self> {
         Self::wrap(ed25519::KeyPair::from_pkcs8(&der))
     }
 
     /// Loads a 32-byte seed, as a JWK's `d` holds it, deriving its public
     /// key.
     #[staticmethod]
-    fn from_seed(seed: Bytes<'_>) -> PyResult<Self> {
+    fn from_seed(seed: Secret<'_>) -> PyResult<Self> {
         Self::wrap(ed25519::KeyPair::from_seed(&seed))
     }
 
     /// Loads a 32-byte seed, refused unless `public_key` is its public key.
     #[staticmethod]
-    fn from_seed_and_public_key(seed: Bytes<'_>, public_key: Bytes<'_>) -> PyResult<Self> {
+    fn from_seed_and_public_key(seed: Secret<'_>, public_key: Bytes<'_>) -> PyResult<Self> {
         Self::wrap(ed25519::KeyPair::from_seed_and_public_key(
             &seed,
             &public_key,

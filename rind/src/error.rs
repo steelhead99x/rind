@@ -78,6 +78,9 @@ pub(crate) enum KeyFormatError {
     DuplicateIdentifier,
     UnknownIdentifier,
     MismatchedCommitments,
+    UnknownPkcs8Algorithm,
+    UnsupportedCurve,
+    X25519CannotSign,
 }
 
 impl From<KeyFormatError> for Error {
@@ -149,6 +152,13 @@ impl core::fmt::Display for KeyRejected {
             KeyFormatError::MismatchedCommitments => {
                 write!(f, "nonce commitments that are not the signer's")
             }
+            KeyFormatError::UnknownPkcs8Algorithm => {
+                write!(f, "a PKCS#8 key of an algorithm rind does not support")
+            }
+            KeyFormatError::UnsupportedCurve => {
+                write!(f, "an EC key on a curve rind does not support")
+            }
+            KeyFormatError::X25519CannotSign => write!(f, "an X25519 key, which cannot sign"),
         }
     }
 }

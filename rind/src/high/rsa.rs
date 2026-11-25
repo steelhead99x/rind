@@ -22,7 +22,7 @@ pub(crate) const MAX_PKCS8_LEN: usize = SigningKey::MAX_PKCS1_BUFFER_LEN + 64;
 /// The algorithms an RSA key's `SubjectPublicKeyInfo` or PKCS#8 may name,
 /// all for the same key, as aws-lc takes them: `rsaEncryption`, RFC 4055's
 /// `id-RSAES-OAEP`, and X.509's `id-ea-rsa`.
-static KEY_ALGORITHMS: [&asn1::ObjectId; 3] = [
+pub(crate) static KEY_ALGORITHMS: [&asn1::ObjectId; 3] = [
     &asn1::oid::rsaEncryption,
     &asn1::oid::id_RSAES_OAEP,
     &asn1::oid::id_ea_rsa,
@@ -558,6 +558,17 @@ impl SigningKey {
             .map(SigningKey)
     }
 
+    /// The key [`Self::generate`] makes from `seed`, for a trace whose two
+    /// runs must differ in the primes and not in the stack.
+    #[cfg(test)]
+    pub(crate) fn generate_seeded(size: RsaKeySize, seed: &[u8]) -> Result<Self, Error> {
+        use crate::high::hmac_drbg::HmacDrbg;
+        let _entry = Entry::new_secret();
+        let mut candidates = HmacDrbg::<hash::Sha256>::new(seed, b"ct-qemu-candidates", b"");
+        let mut witnesses = HmacDrbg::<hash::Sha256>::new(seed, b"ct-qemu-witnesses", b"");
+        rsa_priv::RsaPrivateKey::generate(size, &mut candidates, &mut witnesses).map(SigningKey)
+    }
+
     /// The key [`Self::generate`] makes of the primes `p` and `q`, for
     /// tests whose vectors give them.
     #[cfg(test)]
@@ -974,6 +985,46 @@ mod tests {
     use crate::high::hmac_drbg::HmacDrbg;
     use crate::mid::rng::SliceRandomSource;
     use crate::test::{Acvp, acvp};
+
+    /// The ct-qemu key is this helper. The same seed is the same public key,
+    /// a different seed is not, and the key signs.
+    #[test]
+    fn generate_seeded_follows_the_seed() {
+        fn spki(seed: &[u8]) -> Vec<u8> {
+            let key = SigningKey::generate_seeded(RsaKeySize::Rsa2048, seed).unwrap();
+            let mut buf = [0u8; 600];
+            key.public_key().to_spki_der(&mut buf).unwrap().to_vec()
+        }
+        let seed = b"0123456789abcdef";
+        assert_eq!(spki(seed), spki(seed));
+        assert_ne!(spki(seed), spki(b"fedcba9876543210"));
+        // The ct-qemu trace signs through `rsa::KeyPair`, after this encoding.
+        let signing = SigningKey::generate_seeded(RsaKeySize::Rsa2048, seed).unwrap();
+        let mut der = [0u8; MAX_PKCS8_LEN];
+        let key = crate::rsa::KeyPair::from_pkcs8(signing.to_pkcs8_der(&mut der).unwrap()).unwrap();
+        let signature = key.sign(&crate::rsa::sign::PKCS1_SHA256, b"ct").unwrap();
+        key.public_key()
+            .verify(&crate::rsa::verify::PKCS1_SHA256, b"ct", signature.as_ref())
+            .unwrap();
+    }
+
+    /// Signs under the narrow-multiplier schedules. Key generation stays
+    /// outside the trace; its public candidate loop is not the multiplication.
+    #[cfg(rind_backend = "aarch64")]
+    #[test]
+    #[ignore = "admin/ct-qemu runs it under qemu"]
+    fn ct_qemu_rsa() {
+        use crate::low::ct_qemu;
+        use crate::rsa::KeyPair as RsaKeyPair;
+        use crate::rsa::sign::PKCS1_SHA256 as RSA_PKCS1_SHA256;
+
+        let seed = ct_qemu::seed().to_le_bytes();
+        let bytes = |n: usize| seed.iter().cycle().take(n).copied().collect::<Vec<_>>();
+        let signing = SigningKey::generate_seeded(RsaKeySize::Rsa2048, &bytes(32)).unwrap();
+        let mut der = [0u8; MAX_PKCS8_LEN];
+        let key = RsaKeyPair::from_pkcs8(signing.to_pkcs8_der(&mut der).unwrap()).unwrap();
+        ct_qemu::traced(|| key.sign(&RSA_PKCS1_SHA256, &bytes(32)).unwrap());
+    }
 
     /// Verifies each test's signature under its group's key, returning
     /// `None` for a group whose public exponent rind refuses: above 33 bits,

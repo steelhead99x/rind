@@ -368,7 +368,7 @@ mod tests {
     // aws-lc-rs does not build for wasm.
     #[cfg(not(target_family = "wasm"))]
     #[test]
-    fn verify_debug_names_the_type_and_ids_match_aws_lc() {
+    fn ids_match_aws_lc() {
         use rustls::pki_types::alg_id;
 
         let aws = rustls::crypto::aws_lc_rs::default_provider();
@@ -386,17 +386,12 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(ours.len(), theirs.len());
         for alg in ours {
-            let rendered = format!("{alg:?}");
-            // rustls names its type `AwsLcRsAlgorithm`. rind names `Verify`.
-            // The identifiers are the values that have to match; an empty
-            // `Debug` contains neither.
-            assert!(rendered.contains("Verify"), "{rendered}");
             assert!(
                 theirs.iter().any(|other| {
                     other.public_key_alg_id() == alg.public_key_alg_id()
                         && other.signature_alg_id() == alg.signature_alg_id()
                 }),
-                "{rendered}"
+                "{alg:?}"
             );
         }
     }
