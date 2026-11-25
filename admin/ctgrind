@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 
-# Usage: admin/ctgrind [unit|wycheproof|adapters|fips] [cargo nextest run args...]
+# Usage: admin/ctgrind [unit|wycheproof|adapters|fips|esp32c6] [cargo nextest run args...]
 # Runs every suite but fips unless one is named, so CI can run them in
 # parallel. fips checks the FIPS module, which refuses a CPU below its
 # baseline, so the CPU-masked runs leave it out.
@@ -62,11 +62,33 @@ fi
 
 suite=all
 case "$1" in
-    unit | wycheproof | adapters | fips)
+    unit | wycheproof | adapters | fips | esp32c6)
         suite=$1
         shift
         ;;
 esac
+
+# The ESP32-C6 sensor suite checks the portable backend the chip runs, so it
+# forces it on the host here, as the `portable` job does, with the chip's
+# 32-bit limbs unless the caller chose a width. rustc passes these cfgs to
+# rind/build.rs as CARGO_CFG_RIND_PORTABLE and CARGO_CFG_RIND_LIMB. It always
+# builds `--release`, as the portable job does: curve25519-dalek's unoptimized
+# serial scalar code trips memcheck on a secret seed.
+if [ "$suite" = esp32c6 ]; then
+    case "${RUSTFLAGS:-}" in
+        *rind_portable*) ;;
+        *) RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }--cfg rind_portable --cfg curve25519_dalek_backend=\"serial\"" ;;
+    esac
+    case "$RUSTFLAGS" in
+        *rind_limb*) ;;
+        *) RUSTFLAGS="$RUSTFLAGS --cfg rind_limb=\"32\"" ;;
+    esac
+    export RUSTFLAGS
+    case " $* " in
+        *" --release "*) ;;
+        *) set -- --release "$@" ;;
+    esac
+fi
 
 # Valgrind runs ADX instructions but hides them from `cpuid`, so this switch
 # makes rind check s2n-bignum's ADX routines rather than their `_alt` twins;
@@ -115,6 +137,8 @@ if [ -n "${RIND_SCOPE:-}" ]; then
     if [ "$suite" != fips ] && env | grep -q '^[A-Z0-9_]*RUSTFLAGS=.*rind_portable'; then
         backend="$backend|portable"
     fi
+    # The sensor suite builds only the portable backend, whatever the host.
+    [ "$suite" != esp32c6 ] || backend=portable
     root=$(dirname "$self")/..
     # Its own command, so a base it cannot resolve fails the run under
     # `set -e` rather than reading as an empty diff.
@@ -159,4 +183,14 @@ fi
 if [ "$suite" = fips ]; then
     cargo nextest run -p rind-fips --test ctgrind --features __ctgrind,rind/__ctgrind --no-tests=warn "$@"
     cargo nextest run -p rind-fips --test ctgrind --features __ctgrind,__acvp,rind/__ctgrind "$@" -- --exact acvp
+fi
+
+# The ESP32-C6 sensor example's secret path (key derivation, sealing, opening).
+# admin/esp32c6 is a workspace of its own, which the suites above never reach,
+# so it has a suite of its own. It builds the portable code the chip runs on
+# the host, since valgrind does not run riscv32; it is not in `all`, which
+# builds only the main workspace, so CI runs it by name. It forces the portable
+# backend itself (see above), since the `build` jobs that run it do not.
+if [ "$suite" = esp32c6 ]; then
+    cargo nextest run --manifest-path "$(dirname "$self")/esp32c6/Cargo.toml" --test ctgrind --features sensor,ctgrind "$@"
 fi
