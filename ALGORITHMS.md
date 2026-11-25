@@ -203,12 +203,12 @@ with portable Rust in place of the assembly armv7 runs regardless.
   is one `mull` and `muluh`, or `mul` and `mulhu`, and on Xtensa each sum
   adds `u32` halves, where LLVM branches on a `u64` add's carry; and HACL*'s
   ✓ on other 32-bit ones, which nobody has measured and whose long multiply
-  may not be fixed-time (riscv32 without M calls `__mulsi3`), so rind's
+  may not be fixed-time (riscv32 without M calls `__muldi3`), so rind's
   limbs would gain nothing there: HACL*'s products are the same multiplies.
-  HACL*'s
-  streaming state counts its input in a 32-bit length that a 64-bit AEAD can
-  overflow; it also has 26-bit limbs but keeps them in `u64`s. Nothing
-  proves rind's; its tests check it against HACL*'s and Graviola's. SHA-3's, ML-KEM's, and
+  HACL*'s streaming state counts its input in a 32-bit length that a 64-bit
+  AEAD can overflow; it also has 26-bit limbs but keeps them in `u64`s.
+  Nothing proves rind's; its tests check it against HACL*'s and Graviola's.
+  SHA-3's, ML-KEM's, and
   ML-DSA's Keccak-f is rind's, s2n-bignum's Keccak spec in Rust, which
   [`proofs/`](proofs/README.md) proves is FIPS 202's KECCAK-f[1600]; it
   measured as fast as RustCrypto's and libcrux-sha3's, which nothing proves.
