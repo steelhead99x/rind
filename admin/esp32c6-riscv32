@@ -118,7 +118,7 @@ def main():
     if cmd == "build":
         build_lib()
     elif cmd == "host":
-        subprocess.run([CARGO, "test", "--locked", "--features", "all", "--lib"], cwd=CRATE, env=dict(os.environ), check=True)
+        subprocess.run([CARGO, "test", "--locked", "--features", "all compare", "--lib"], cwd=CRATE, env=dict(os.environ), check=True)
     elif cmd == "firmware":
         e = dict(os.environ)
         e["RUSTFLAGS"] = (e.get("RUSTFLAGS", "") + " -C link-arg=-Tlinkall.x -C force-frame-pointers " + CFG).strip()
@@ -131,13 +131,14 @@ def main():
               f"  espflash flash --port PORT --chip esp32c6 {elf}\n"
               f"then read the serial log into a file and run admin/esp32c6-bench-ingest on it")
     elif cmd == "test":
-        rows = run_qemu(build_runner(["all"]))
-        expected = set(algorithms()) | {"baseline"}
+        # `compare` adds the check that rind and each vendor give the same bytes.
+        rows = run_qemu(build_runner(["all", "compare"]))
+        expected = set(algorithms()) | {"baseline", "vendors-agree"}
         bad = [n for n, r in rows.items() if not r["ok"]]
         if bad or set(rows) != expected:
             fail(f"checks failed {bad}, missing {sorted(expected - set(rows))}, "
                  f"unexpected {sorted(set(rows) - expected)}")
-        print(f"all {len(algorithms())} known-answer checks passed on riscv32imac under qemu-user")
+        print(f"all {len(rows) - 1} known-answer checks passed on riscv32imac under qemu-user")
     elif cmd == "size":
         out = None
         if "--out" in sys.argv:

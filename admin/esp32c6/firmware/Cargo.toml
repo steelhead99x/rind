@@ -7,8 +7,14 @@ publish = false
 
 [workspace]
 
+[features]
+# `bench` times the algorithms after the checks. Without it the image is the
+# LED status firmware: the checks, the LED, and the summary, no timing rows.
+default = ["bench"]
+bench = []
+
 [dependencies]
-rind-esp32c6 = { path = "..", features = ["all"] }
+rind-esp32c6 = { path = "..", features = ["all", "compare"] }
 getrandom = "0.4"
 esp-hal = { version = "1.2", features = ["esp32c6", "unstable"] }
 esp-bootloader-esp-idf = { version = "0.6", features = ["esp32c6"] }
