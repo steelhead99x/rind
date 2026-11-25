@@ -10,7 +10,11 @@ LOG holds the lines the firmware (admin/esp32c6/firmware) prints:
 
   RIND-FW v1 done failed=<n> cpu_mhz=<n> rounds=<n> kats=<n> rows=<n>
   RIND-KAT v1 <algorithm> ok|FAIL
-  RIND-BENCH v1 <operation> median_ns=<n> min_ns=<n> max_ns=<n> rounds=<n> iters=<n>
+  RIND-BENCH v1 <operation> [lib=<library>] median_ns=<n> min_ns=<n> max_ns=<n> rounds=<n> iters=<n>
+  RIND-BENCH v1 <operation> [lib=<library>] size_failure=heap|stack need=<n> have=<n>
+
+A size_failure row is an operation the board had too little heap or stack for;
+it is kept as a result with `status` `size-failure` and no time.
 
 The `kats=` and `rows=` on the done line declare how many check and benchmark
 lines follow it. A copy holding fewer (a reset, or a capture stopped between
@@ -30,7 +34,7 @@ panic, a failed check, a malformed row, or no rows, instead of writing a file
 that looks like a result.
 
 The output's `status` is `ok` and its `results` rows have the operation IDs
-`admin/bench-report` uses, with `library` `rind`. It is not a bench-report
+`admin/bench-report` uses, with `library` the vendor that ran it. It is not a bench-report
 host: bench-report has no ESP32-C6 host or controls yet, so `render` does not
 read it. It is the data to put in `benchmarks/esp32c6.md`.
 """
@@ -39,9 +43,12 @@ import json
 import re
 import sys
 
+# `lib=<library>` names the vendor a row measured. Older v1 firmware printed
+# rind's rows without it, so a row with none is rind's.
 ROW = re.compile(
-    r"^RIND-BENCH v1 (\S+) median_ns=(\d+) min_ns=(\d+) max_ns=(\d+) rounds=(\d+) iters=(\d+)$"
+    r"^RIND-BENCH v1 (\S+) (?:lib=(\S+) )?median_ns=(\d+) min_ns=(\d+) max_ns=(\d+) rounds=(\d+) iters=(\d+)$"
 )
+SKIP = re.compile(r"^RIND-BENCH v1 (\S+) (?:lib=(\S+) )?size_failure=(heap|stack) need=(\d+) have=(\d+)$")
 KAT = re.compile(r"^RIND-KAT v1 (\S+) (ok|FAIL)$")
 # `kats=<n> rows=<m>` declares how many check and benchmark lines follow, so a
 # copy cut off after some rows is told from a whole one. Firmware that predates
@@ -107,6 +114,11 @@ def complete(blocks):
     return whole
 
 
+def with_lib(row):
+    """`row` with the implicit `rind` filled in for a row that names no lib."""
+    return (row[0], row[1] or "rind", *row[2:])
+
+
 def parse(text):
     """The first complete summary in `text`, as the output dict."""
     blocks, cur = [], None
@@ -133,12 +145,12 @@ def parse(text):
                 boot_kat[m[1]] = m[2] == "ok"
             else:
                 cur["kat"].append((m[1], m[2] == "ok"))
-        elif (m := ROW.match(line)):
+        elif (m := ROW.match(line)) or (m := SKIP.match(line)):
             # A row before the first summary's `done` line (or after a boot
             # marker) is the tail of a summary the capture began inside:
             # well formed, but part of no block, so it is discarded.
             if cur is not None:
-                cur["rows"].append(m.groups())
+                cur["rows"].append(with_lib(m.groups()))
         elif line.startswith("RIND-FW v1 start"):
             # A new boot ends the block before it: its startup checks are the
             # next boot's, not more of this summary.
@@ -167,8 +179,9 @@ def parse(text):
     if len(set(names)) != len(names):
         raise Refused("a known-answer check is repeated in one summary")
     # A declared row count is met by a repeated row as well as by a distinct
-    # one, so a summary with a missing measurement could pass as whole.
-    ops = [r[0] for r in first["rows"]]
+    # one, so a summary with a missing measurement could pass as whole. One
+    # operation is timed once per library, so the pair must be unique.
+    ops = [(r[0], r[1]) for r in first["rows"]]
     if len(set(ops)) != len(ops):
         raise Refused("a benchmark row is repeated in one summary")
     first = dict(first, kat=dict(first["kat"]))
@@ -178,14 +191,31 @@ def parse(text):
         raise Refused("the log's boot checks disagree with its summary")
     failed, mhz, rounds = (int(x) for x in first["done"][:3])
     results = []
-    for op, med, lo, hi, r, it in first["rows"]:
+    for row in first["rows"]:
+        if len(row) == 5:
+            # The operation did not fit in the board's heap or stack: a recorded
+            # result, not a panic.
+            op, lib, which, need, have = row
+            results.append(
+                {
+                    "operation": op,
+                    "library": lib,
+                    "id": op.replace("{lib}", lib),
+                    "status": "size-failure",
+                    "limit": which,
+                    "need_bytes": int(need),
+                    "have_bytes": int(have),
+                }
+            )
+            continue
+        op, lib, med, lo, hi, r, it = row
         if int(lo) > int(med) or int(med) > int(hi):
             raise Refused(f"{op}: min, median and max are out of order")
         results.append(
             {
                 "operation": op,
-                "library": "rind",
-                "id": op.replace("{lib}", "rind"),
+                "library": lib,
+                "id": op.replace("{lib}", lib),
                 "ns": int(med),
                 "ns_low": int(lo),
                 "ns_high": int(hi),
@@ -216,7 +246,7 @@ def selftest():
         "ESP-ROM:esp32c6-20220919\nMAC 10:bd:a3:b4:2c:48 /dev/ttyACM1 /home/u/x\n"
         "RIND-FW v1 start target=esp32c6\n"
         "RIND-FW v1 done failed=0 cpu_mhz=160 rounds=7\n"
-        "RIND-KAT v1 sha256 ok\nRIND-BENCH v1 sha256/{lib}/1350B median_ns=100 min_ns=90 max_ns=120 rounds=7 iters=8\n"
+        "RIND-KAT v1 sha256 ok\nRIND-BENCH v1 sha256/{lib}/1350B lib=rind median_ns=100 min_ns=90 max_ns=120 rounds=7 iters=8\n"
     )
     out = parse(good + good)
     assert out["results"][0]["id"] == "sha256/rind/1350B" and out["cpu"]["mhz"] == 160
@@ -230,6 +260,19 @@ def selftest():
         else:
             raise AssertionError(f"accepted: {why}")
 
+    skipped = good + "RIND-BENCH v1 mldsa65-sign/{lib} lib=rind size_failure=heap need=110336 have=50000\n"
+    out2 = parse(skipped + skipped)
+    assert out2["results"][1]["status"] == "size-failure" and out2["results"][1]["limit"] == "heap"
+    assert "ns" not in out2["results"][1]
+    check_scrubbed(out2)
+    # Rows in the older format, with no `lib=`, are rind's, and read the same
+    # as the explicit form; the two may be mixed across copies.
+    old = good.replace(" lib=rind", "")
+    assert "lib=" not in old and parse(old + old) == parse(good + good)
+    assert parse(old + good) == parse(good + good)
+    old_skip = skipped.replace(" lib=rind", "")
+    assert parse(old_skip + old_skip) == parse(skipped + skipped)
+    refuses(good + "RIND-BENCH v1 x lib=rind size_failure=disk need=1 have=0\n" + good, "malformed")
     refuses("RIND-FW v1 panic at x", "panicked")
     refuses(good.replace("sha256 ok", "sha256 FAIL"), "failed")
     refuses(good.replace("failed=0", "failed=1"), "failed")
@@ -262,14 +305,14 @@ def selftest():
     refuses(good + "RIND-FW v1 done failed=0 cpu_mhz=160 rounds=7\nRIND-KAT v1 sha256 FA", "failed")
     # Legacy firmware (no declared counts): a shorter copy that is a prefix of a
     # longer one was cut off and is dropped, whichever comes first.
-    two = good + "RIND-BENCH v1 sha512/{lib}/1350B median_ns=200 min_ns=190 max_ns=220 rounds=7 iters=8\n"
+    two = good + "RIND-BENCH v1 sha512/{lib}/1350B lib=rind median_ns=200 min_ns=190 max_ns=220 rounds=7 iters=8\n"
     cut = good
     assert len(parse(two + cut)["results"]) == 2
     assert len(parse(cut + two)["results"]) == 2
     refuses(two + good.replace("median_ns=100", "median_ns=101"), "disagree")
     # Firmware that declares its counts: only whole copies count.
-    row1 = "RIND-BENCH v1 sha256/{lib}/1350B median_ns=100 min_ns=90 max_ns=120 rounds=7 iters=8\n"
-    row2 = "RIND-BENCH v1 sha512/{lib}/1350B median_ns=200 min_ns=190 max_ns=220 rounds=7 iters=8\n"
+    row1 = "RIND-BENCH v1 sha256/{lib}/1350B lib=rind median_ns=100 min_ns=90 max_ns=120 rounds=7 iters=8\n"
+    row2 = "RIND-BENCH v1 sha512/{lib}/1350B lib=rind median_ns=200 min_ns=190 max_ns=220 rounds=7 iters=8\n"
     whole = (
         "RIND-FW v1 done failed=0 cpu_mhz=160 rounds=7 kats=1 rows=2\n"
         "RIND-KAT v1 sha256 ok\n" + row1 + row2
@@ -308,6 +351,21 @@ def selftest():
         "repeated",
     )
     refuses(good.replace(row1, row1 + row1) * 2, "repeated")
+    # The same operation for two libraries is two rows; for one library, in
+    # the older format with no `lib=` too, it is a repeat.
+    two_libs = (
+        "RIND-FW v1 done failed=0 cpu_mhz=160 rounds=7 kats=1 rows=2\n"
+        "RIND-KAT v1 sha256 ok\n" + row1 + row1.replace("lib=rind", "lib=sha2")
+    )
+    assert [r["id"] for r in parse(two_libs + two_libs)["results"]] == [
+        "sha256/rind/1350B",
+        "sha256/sha2/1350B",
+    ]
+    refuses(
+        "RIND-FW v1 done failed=0 cpu_mhz=160 rounds=7 kats=1 rows=2\n"
+        "RIND-KAT v1 sha256 ok\n" + row1 + row1.replace(" lib=rind", ""),
+        "repeated",
+    )
     leaked = dict(out, note="10:bd:a3:b4:2c:48")
     try:
         check_scrubbed(leaked)

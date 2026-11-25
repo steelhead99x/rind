@@ -29,6 +29,7 @@ use esp_hal::{
     time::{Duration, Instant, Rate},
 };
 use esp_println::println;
+#[cfg(feature = "bench")]
 use rind_esp32c6::bench::{self, Clock};
 
 esp_bootloader_esp_idf::esp_app_desc!();
@@ -50,10 +51,24 @@ unsafe extern "Rust" fn __getrandom_v03_custom(
     Ok(())
 }
 
+unsafe extern "C" {
+    /// The end of .bss, where the heap array ends and the stack's room begins.
+    static _stack_end: u8;
+}
+
+#[cfg(feature = "bench")]
 struct Timer;
+#[cfg(feature = "bench")]
 impl Clock for Timer {
     fn now_ns(&mut self) -> u64 {
         Instant::now().duration_since_epoch().as_micros() * 1000
+    }
+
+    fn free(&mut self) -> (usize, usize) {
+        let marker = 0u8;
+        let sp = core::ptr::addr_of!(marker) as usize;
+        let floor = core::ptr::addr_of!(_stack_end) as usize;
+        (esp_alloc::HEAP.free(), sp.saturating_sub(floor))
     }
 }
 
@@ -164,14 +179,24 @@ fn main() -> ! {
     }
     println!("{summary}");
 
-    let mut timer = Timer;
+    #[allow(unused_mut)]
     let mut rows = String::new();
+    #[allow(unused_mut)]
     let mut row_count = 0u32;
-    bench::run_all(&mut timer, ROUNDS, 1, |r| {
-        let _ = writeln!(rows, "{}", r.line());
-        row_count += 1;
-        leds.blink(State::Running, 1);
-    });
+    #[cfg(feature = "bench")]
+    {
+        let mut timer = Timer;
+        bench::run_all(&mut timer, ROUNDS, 1, |r| {
+            let _ = writeln!(rows, "{}", r.line());
+            row_count += 1;
+            leds.blink(State::Running, 1);
+        });
+        rind_esp32c6::vendors::run_all(&mut timer, ROUNDS, 1, |r| {
+            let _ = writeln!(rows, "{}", r.line());
+            row_count += 1;
+            leds.blink(State::Running, 1);
+        });
+    }
     let state = if failed == 0 {
         State::Passed
     } else {
