@@ -235,17 +235,23 @@ mod generic {
     #[cfg(any(rind_backend = "portable", test))]
     pub(super) mod sha512;
     // Rolled SHA-512 on 32-bit microcontrollers (ESP-IDF or no OS), whose
-    // small instruction cache the unrolled body would crowd. Tests compile
+    // small instruction cache the unrolled body would crowd, unless the
+    // ESP32-S3 asks for its unrolled body. Tests compile
     // it everywhere and check it against FIPS 180-4.
     #[cfg(any(
         all(
             rind_backend = "portable",
             not(target_pointer_width = "64"),
-            any(target_os = "espidf", target_os = "none")
+            any(target_os = "espidf", target_os = "none"),
+            not(all(rind_esp32s3, feature = "esp32s3-sha512-unrolled"))
         ),
         test
     ))]
     pub(super) mod sha512_rolled;
+    // The ESP32-S3's SHA-512: the rolled loop, or the unrolled IRAM body with
+    // `esp32s3-sha512-unrolled`. Tests compile it everywhere.
+    #[cfg(any(all(rind_backend = "portable", rind_esp32s3), test))]
+    pub(super) mod sha512_esp32s3;
     pub(super) mod zeroise;
 }
 
@@ -560,6 +566,8 @@ cfg_if::cfg_if! {
 
     } else if #[cfg(rind_backend = "aarch64")] {
         pub(in crate::low) use aarch64::cpu::{enter_cpu_state, zero_bytes, ct_compare_bytes, ct_compare_16, leave_cpu_state};
+        #[cfg(all(rind_dit, debug_assertions))]
+        pub(in crate::low) use aarch64::cpu::dit_on;
         #[cfg(rind_fips)]
         pub(crate) use aarch64::cpu::missing_cpu_feature;
         pub(crate) use aarch64::aes::{AesDecKey, AesKey};

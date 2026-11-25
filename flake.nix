@@ -239,6 +239,21 @@
             installPhase = "install -D ct-qemu-plugin.so $out/lib/ct-qemu-plugin.so";
           };
 
+          # The plugin `admin/dit-qemu` loads into qemu-aarch64 to read
+          # PSTATE.DIT at every instruction, built like the tracer above.
+          dit-qemu-plugin = pkgs.stdenv.mkDerivation {
+            name = "dit-qemu-plugin";
+            src = ./admin/dit-qemu-plugin.c;
+            dontUnpack = true;
+            nativeBuildInputs = [ pkgs.pkg-config ];
+            buildInputs = [ pkgs.glib ];
+            buildPhase = ''
+              $CC -O2 -shared -fPIC -Wall -Werror -I${pkgs.qemu-user}/include \
+                $(pkg-config --cflags glib-2.0) -o dit-qemu-plugin.so $src
+            '';
+            installPhase = "install -D dit-qemu-plugin.so $out/lib/dit-qemu-plugin.so";
+          };
+
           # OpenSSL's `evp_test` and its X25519 and Ed25519 data, from the
           # source of the OpenSSL the dev shell has. `sh/openssl.sh` runs them
           # with rind-openssl loaded and preferred. A static build, so the
@@ -754,6 +769,22 @@
               env.OPENSSL_EVP_TEST = openssl-evp-test;
             };
 
+            # `admin/dit-disasm` runs in it: llvm-objdump, and the standard
+            # library of the aarch64 targets whose barrier after setting DIT
+            # it reads, Apple's and one that is not.
+            dit-disasm = pkgs.mkShell {
+              packages = [
+                (rust-stable.minimal.override {
+                  extensions = [ "llvm-tools" ];
+                  targets = [
+                    "aarch64-unknown-linux-gnu"
+                    "aarch64-apple-darwin"
+                  ];
+                })
+                pkgs.python3
+              ];
+            };
+
             # `just check` runs `admin/ct-vartime` in it: llvm-objdump, and the
             # standard library of each target it builds rind's rlib for.
             ct-vartime = mkDevShell {
@@ -919,6 +950,23 @@
               target = "aarch64-unknown-linux-gnu";
               cross = pkgs.pkgsCross.aarch64-multiplatform;
             };
+
+            # `admin/dit-qemu` runs the aarch64 tests in it under qemu's `max`
+            # CPU, which has FEAT_DIT, and the plugin that reads PSTATE.DIT at
+            # every instruction.
+            dit-qemu =
+              (qemu-shell {
+                target = "aarch64-unknown-linux-gnu";
+                cross = pkgs.pkgsCross.aarch64-multiplatform;
+                cpu = "max";
+              }).overrideAttrs
+                (old: {
+                  nativeBuildInputs = old.nativeBuildInputs ++ [
+                    pkgs.python3
+                    pkgs.qemu-user
+                  ];
+                  RIND_DIT_QEMU_PLUGIN = "${dit-qemu-plugin}/lib/dit-qemu-plugin.so";
+                });
 
             # `just qemu s390x` tests the portable backend on big-endian
             # s390x in it.

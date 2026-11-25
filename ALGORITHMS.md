@@ -156,7 +156,7 @@ with portable Rust in place of the assembly armv7 runs regardless.
 | MD5 | rind |  |  |  |
 | SHA-1 | rind | aws-lc |  | rind |
 | SHA-256 | aws-lc ⚡ | aws-lc |  | aws-lc ⚡ except ESP-IDF Xtensa, where rind's 16-round body runs from IRAM |
-| SHA-384, SHA-512, SHA-512/256 | aws-lc | aws-lc ✓ | aws-lc ⚡ | aws-lc ⚡, except rind's rolled loop on 32-bit microcontrollers |
+| SHA-384, SHA-512, SHA-512/256 | aws-lc | aws-lc ✓ | aws-lc ⚡ | aws-lc ⚡, except rind's rolled loop on 32-bit microcontrollers, and its unrolled body on ESP32-S3 with `esp32s3-sha512-unrolled`, in IRAM on ESP-IDF |
 | SHA3-256, SHA3-384, SHA3-512 | s2n-bignum ✓ + Graviola |  | OpenSSL ⚡ + Graviola | rind + Graviola |
 | HMAC | Graviola ⚡ |  |  |  |
 | HKDF | rind ⚡ |  |  |  |
@@ -225,6 +225,53 @@ with portable Rust in place of the assembly armv7 runs regardless.
   for a small instruction cache. On a Seeed XIAO ESP32-S3 it took about
   0.033 of HACL*'s time, whose unrolled body, about 47 KiB in 32-bit
   codegen, missed that cache.
+- portable, ESP32-S3: 32-bit SHA-512 is that same rolled loop, in ordinary
+  flash text with `K` in flash `.rodata`. The `esp32s3-sha512-unrolled`
+  feature selects rind's unrolled body in `generic::sha512_esp32s3`
+  instead: sixteen-round groups with constant indexes and an `l32i` message
+  load, so no bounds check, iterator, or `memset` can outline into flash.
+  On ESP-IDF that block is in `.iram1` and `K` is in `.dram1`; the driver
+  `sha512_compress_blocks` stays in ordinary flash text, so the update path
+  is not a cache-off API. On `xtensa-esp32s3-none-elf` there is no IRAM
+  placement, so the feature leaves the unrolled body and `K` in ordinary
+  flash, where the body costs 17 KiB of flash text for a speed that, at
+  80 MHz, matched the IRAM placement (below); leave the feature off there
+  unless you need the speed. MEASURED object sizes (esp rustc 1.97.0.0,
+  8ea53bcd7; `.o` linked with the layout script's synthetic script, driver
+  included; board images were not built):
+
+  | Build | opt 3 | opt s | opt z |
+  | --- | --- | --- | --- |
+  | default, rolled, flash text | 1,373 | 1,425 | 1,405 |
+  | default, rolled, flash `.rodata` (K and 80 bytes of other constants) | 720 | 720 | 720 |
+  | `esp32s3-sha512-unrolled`, ESP-IDF, IRAM (block and pool) | 18,533 | 17,792 | 17,797 |
+  | `esp32s3-sha512-unrolled`, ESP-IDF, DRAM `K` | 640 | 640 | 640 |
+  | `esp32s3-sha512-unrolled`, none-elf, flash text | 18,633 | 17,889 | 17,897 |
+
+  Those sizes were measured before rind's SHA-2 moved to aws-lc's ports;
+  `admin/esp32s3-sha512-layout` prints the current ones. Board time, MEASURED
+  on one S3 at 80 MHz (interleaved controls within 0.1%, SHA-512 KATs
+  including one million `a` passing for rind and RustCrypto on every image):
+  rind SHA-512 at 16 B / 243 B / 1500 B / 16 KB, unrolled from flash
+  297.0 / 876.2 / 3,489 / 37,420 us; rolled default 322.8 / 954.9 / 3,797 /
+  40,725 us; unrolled in IRAM (bench-only placement on bare metal) 296.9 /
+  876.2 / 3,490 / 37,422 us. Unrolled from flash and from IRAM are equal
+  within 0.01% there: on that S3 and clock the cache hides flash. The
+  default trades about 8.7% of SHA-512 speed for 17,136 B of text. Earlier
+  runs at 240 MHz measured the IRAM body at 0.911 to 0.918 of the rolled
+  loop's cycles and unrolled from flash 11.3 to 13.1 times slower; why they
+  differ is not established. `admin/esp32s3-sha512-layout` checks the
+  default objects (no IRAM or DRAM section, no `l32i` byte swap, compressor
+  and driver under 4,096 bytes of text and literals at opt-level 3, s, and
+  z) and the unrolled ones (sections, the relocation allowlist, no call from
+  the block), prints the block's IRAM and literal-pool bytes and `K`'s 640
+  bytes of DRAM, fails above its `iram_ceiling`, 20,480 bytes, and runs on
+  QEMU's ESP32-S3 CPU the Xtensa message load, at byte offsets 1 and 3, and
+  FIPS 180-4's "abc" block through both builds' whole compressor. That run
+  is the emulator's model of the core, not a cycle count. Host FIPS 180-4
+  vectors, RFC 6234's one-million-`a` message included, cover both Rust
+  bodies and their equality on arbitrary chaining states; both are
+  straight-line over the block, and ctgrind marks the block secret.
 - portable, ESP-IDF Xtensa: SHA-256 is rind's own FIPS 180-4 compression
   in `low/portable/sha256_iram.rs`, sixteen rounds unrolled and the
   schedule body run three times, placed in IRAM with `K` in `.dram1`.
@@ -515,6 +562,7 @@ BINSEC.
 | `sha3_keccak4_f1600` | not imported | `sha3_keccak4_f1600`: `SHA3_KECCAK4_F1600_SUBROUTINE_SAFE` |
 | `sha3_keccak4_f1600_alt::sha3_keccak4_f1600` | `sha3_keccak4_f1600_alt`: none | `sha3_keccak4_f1600_alt`: `SHA3_KECCAK4_F1600_ALT_SUBROUTINE_SAFE` |
 | `sha3_keccak_f1600` | `sha3_keccak_f1600`: none | `sha3_keccak_f1600`: `SHA3_KECCAK_F1600_SUBROUTINE_SAFE` |
+| `sha3_keccak_f1600_alt2::sha3_keccak_f1600` | not imported | `sha3_keccak_f1600_alt2`: `SHA3_KECCAK_F1600_ALT2_SUBROUTINE_SAFE` |
 | `sha3_keccak_f1600_alt::sha3_keccak_f1600` | not imported | `sha3_keccak_f1600_alt`: `SHA3_KECCAK_F1600_ALT_SUBROUTINE_SAFE` |
 <!-- end admin/prove-bytes inventory -->
 
@@ -880,7 +928,10 @@ have some different options depending on CPU features:
   unit, and scalar code on others. On Neoverse N2 the scalar code measured 2.1x faster
   than the SHA3 instructions for SHA-3, and 1.1-1.3x for ML-KEM and ML-DSA,
   which run it one state at a time; mlkem-native and verified-garbage make
-  the same choice.
+  the same choice. On Cortex-A72, the Raspberry Pi 4's core, that scalar
+  code is s2n-bignum's `sha3_keccak_f1600_alt2`, compiled for that core,
+  which permutes in 0.67x the time there; it took 1.24x on Cortex-A76 and
+  1.14x on Cortex-A78AE, so only a `MIDR_EL1` naming Cortex-A72 picks it.
 - We have s2n-bignum's verified 4-wide Keccak-f on aarch64 cores other than
   Apple's, and Apple's without the SHA3 instructions, which runs one state in scalar code beside two NEON pairs, after
   [Becker and Kannwischer](https://eprint.iacr.org/2022/1243), so the scalar

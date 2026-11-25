@@ -76,6 +76,42 @@ impl Dit {
             _thread: PhantomData,
         }
     }
+
+    /// Runs `f` with DIT held, as [`Dit::hold`] over its body would, and
+    /// returns what it returns.
+    pub fn with<R>(f: impl FnOnce() -> R) -> R {
+        let _dit = Self::hold();
+        f()
+    }
+
+    /// Runs `each` on every item of `items` under one guard, stopping at the
+    /// first error, which it returns.
+    pub fn batch<I: IntoIterator, E>(
+        items: I,
+        mut each: impl FnMut(I::Item) -> Result<(), E>,
+    ) -> Result<(), E> {
+        let _dit = Self::hold();
+        items.into_iter().try_for_each(&mut each)
+    }
+
+    /// Whether a guard on this thread is holding DIT on: never, since the
+    /// module sets no DIT.
+    ///
+    /// ```
+    /// let total = rind_fips::cpu::Dit::with(|| {
+    ///     assert!(!rind_fips::cpu::Dit::is_held());
+    ///     2 + 2
+    /// });
+    /// assert_eq!(total, 4);
+    /// assert_eq!(
+    ///     rind_fips::cpu::Dit::batch([1, 2, 3], |n| if n < 3 { Ok(()) } else { Err(n) }),
+    ///     Err(3)
+    /// );
+    /// ```
+    #[must_use]
+    pub fn is_held() -> bool {
+        false
+    }
 }
 
 impl Drop for Dit {

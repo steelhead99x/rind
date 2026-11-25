@@ -64,7 +64,7 @@ pub fn capabilities() -> Value {
     });
     let feats = [
         "FEAT_AES", "FEAT_PMULL", "FEAT_SHA1", "FEAT_SHA256", "FEAT_SHA512", "FEAT_SHA3", "FEAT_DotProd",
-        "FEAT_BF16", "FEAT_I8MM", "FEAT_SME", "FEAT_SME2", "FEAT_DIT", "FEAT_LSE", "FEAT_RDM",
+        "FEAT_BF16", "FEAT_I8MM", "FEAT_SME", "FEAT_SME2", "FEAT_DIT", "FEAT_SB", "FEAT_LSE", "FEAT_RDM",
     ];
     let features: Vec<&str> = feats.iter().copied().filter(|f| sysctl_u64(&format!("hw.optional.arm.{f}")) == Some(1)).collect();
     let osv = sysctl_str("kern.osproductversion").unwrap_or_default();

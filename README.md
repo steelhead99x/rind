@@ -226,6 +226,22 @@ let _dit = rind::cpu::Dit::hold();
 
 The guard covers every rind call its thread makes, including those through
 rind-rustls and the other adapters, and does nothing off aarch64.
+`rind::cpu::Dit::with(|| ...)` holds one over a closure, and
+`rind::cpu::Dit::batch(packets, |packet| ...)` over one batch of datagrams,
+releasing it when the closure returns or unwinds. Each rind call already
+toggles DIT at most once, however much it computes inside.
+
+After setting DIT, rind runs the speculation barrier Apple asks for on
+Apple's platforms: `sb` where the core has it, else `dsb nsh; isb sy`. On
+any other aarch64 core it runs none, which is what the Arm architecture
+requires (Arm ARM DDI 0487 M.d, sections C5.1.3.3 and B1.5.6): a write to
+PSTATE.DIT takes effect in program order, and instructions run
+speculatively after it count as running with DIT set. There, the guarantee
+rests on that architectural rule alone; we have not tested it on any core
+but Apple's, and Apple's cores are a separate case. The FIPS module's code
+keeps Apple's barrier on every target, its glibc Linux cores included.
+[The sources][dit-barrier] are collected for this split. Key wipes on drop
+run without DIT: a wipe stores zeros and loads nothing secret.
 
 ## Platforms
 
@@ -372,3 +388,4 @@ from other projects keeps its source's license, which [LICENSE] lists.
 [platforms]: https://github.com/kixel-ai/rind/blob/main/PLATFORMS.md
 [architecture]: https://github.com/kixel-ai/rind/blob/main/ARCHITECTURE.md
 [audit]: https://github.com/kixel-ai/rind/blob/main/AUDIT.md
+[dit-barrier]: https://github.com/kixel-ai/rind/blob/main/benchmarks/apple-dit-barrier.md

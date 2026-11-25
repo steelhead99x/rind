@@ -334,6 +334,24 @@ jobs:
       - name: ct-qemu
         run: nix develop .#ct-qemu-aarch64 --command admin/ct-qemu --target aarch64-unknown-linux-gnu
 
+  # The other half of rind's timing defence on aarch64: every instruction of
+  # each public call that handles a secret runs with PSTATE.DIT set, once the
+  # call has set it. `admin/dit-qemu` reads DIT at every instruction under
+  # qemu-aarch64 (see `rind/src/low/entry/tests.rs`).
+  dit-qemu:
+    needs: select
+    if: ${{ !cancelled() && (!inputs.jobs || contains(fromJSON(needs.select.outputs.jobs || '[]'), 'dit-qemu')) }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/nix
+
+      - name: dit-qemu
+        run: nix develop .#dit-qemu --command admin/dit-qemu
+
   # BINSEC proves each `ct_binsec` test's region constant time for every
   # secret at once, symbolically, on the code the runner's CPU takes short of
   # the instructions it cannot decode (see `admin/ct-binsec`). The portable

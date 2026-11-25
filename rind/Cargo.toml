@@ -27,6 +27,17 @@ ml-dsa = []
 slh-dsa = []
 # zeroize's `ZeroizeOnDrop` on every type that wipes itself on drop.
 zeroize = ["dep:zeroize"]
+# Runs the unrolled SHA-512 body on the ESP32-S3 instead of the rolled loop
+# every 32-bit microcontroller runs by default. The unrolled body is about 18 KiB of
+# code against the rolled loop's 1.4 KiB. On `xtensa-esp32s3-espidf` it is
+# placed in IRAM (and `K` in internal DRAM); it was 0.911 to 0.918 of the
+# rolled loop's cycles at 240 MHz and about 8.7% faster than it at 80 MHz
+# (one board; see ALGORITHMS.md); the IRAM that costs is what the
+# `ESP32-S3 SHA-512 layout` workflow prints, and admin/esp32s3-sha512-layout
+# caps it at 20 KiB. On `xtensa-esp32s3-none-elf` there is no IRAM placement,
+# the body runs from flash and measured the same speed as from IRAM at 80 MHz,
+# for 17 KiB more flash text than the default. It does nothing elsewhere.
+esp32s3-sha512-unrolled = []
 __ctgrind = ["dep:crabgrind"]
 
 [dependencies]
@@ -189,6 +200,17 @@ unexpected_cfgs = { level = "warn", check-cfg = [
   "cfg(coverage_nightly)",
   # Lets an optimised build honour `RIND_CPU_DISABLE_*`, for benches and ctgrind.
   "cfg(rind_cpu_disable)",
+  # Leaves DIT on once rind sets it, to measure the toggle's cost (see
+  # src/low/entry.rs, `leave_secret`).
+  "cfg(rind_dit_sticky)",
+  # Picks the barrier after setting DIT on any target, to measure its cost:
+  # "apple" (the default on Apple's targets, and in the FIPS module's code,
+  # though the module sets no DIT), "isb", or "none" (the default elsewhere;
+  # see src/low/aarch64/cpu.rs, `barrier_after_set`).
+  'cfg(rind_dit_barrier, values("apple", "isb", "none"))',
+  # Leaves DIT on between calls for a bounded batch, to measure coalescing
+  # without a guard (see src/low/entry.rs, `autohold`).
+  "cfg(rind_dit_autohold)",
   # Plants the variable-time operations `admin/ct-vartime` must find.
   "cfg(rind_vartime_planted)",
   # Forces the portable backend, for testing it on x86_64 (see build.rs).

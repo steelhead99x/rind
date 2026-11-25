@@ -1,0 +1,204 @@
+# How each public function rind exports without making an `Entry` of its
+# own is still covered by DIT: see admin/dit-coverage. One per line:
+# <file module>::<impl type>::<fn> <class> <reason>.
+aead/gcm::Iv::assume_unique_for_key public computes on public parameters only
+aead/gcm::Key::new delegates to super::Key::new, which enter
+aead/gcm::Key::open_in_place delegates to open, which enter
+aead/gcm::Key::open_in_place_separate_tag delegates to open, which enter
+aead/gcm::Key::seal_in_place_append_tag delegates to seal_in_place_separate_tag, which enter
+aead/gcm::Key::seal_in_place_separate_tag delegates to Nonce::assume_unique_for_key, seal_in_place_separate_tag, which enter
+aead/gcm::Key::tag_len accessor returns the tag length
+aead/quic::Algorithm::key_len public computes on public parameters only
+aead/quic::HeaderProtectionKey::mask delegates to mask, which enter
+aead/quic::HeaderProtectionKey::new delegates to the algorithm's key constructor, which enters
+aead::Algorithm::key_len public computes on public parameters only
+aead::Algorithm::nonce_len accessor returns what the value holds
+aead::Algorithm::tag_len accessor returns what the value holds
+aead::Key::new delegates to the algorithm's key expansion, which enters
+aead::Key::open_in_place delegates to open_in_place_separate_tag, which enter
+aead::Key::open_in_place_separate_tag delegates to open, which enter
+aead::Key::seal_in_place_append_tag delegates to seal_in_place_separate_tag, which enter
+aead::Key::seal_in_place_separate_tag delegates to seal, which enter
+aead::Nonce::assume_unique_for_key accessor returns what the value holds
+aead::Nonce::from_sequence public computes on public parameters only
+aead::RandomizedNonceKey::new delegates to XChaCha20Poly1305::new, which enter
+aead::RandomizedNonceKey::open_in_place delegates to decrypt, which enter
+aead::RandomizedNonceKey::seal_in_place_append_tag delegates to fill, encrypt, which enter
+fips/acvp::-::ml_dsa_key_gen delegates to from_seed, which enter
+fips/acvp::-::ml_kem_check_encapsulation_key delegates to encapsulation_key, which enter
+fips/acvp::-::ml_kem_decap delegates to decapsulation_key, decaps, which enter
+fips::-::broken public reads the test-only break switch
+fips::-::check_rsa_modulus public checks a public modulus length
+fips::-::digest delegates to crate::digest::Digest::new, which enter
+fips::-::error_code public maps an error to its code
+fips::-::error_from_code public maps a code to its error
+fips::-::fail public reports a failed self-test and aborts
+fips::-::hold_drbgs delegates to crate::fips_rng::hold, which enter
+fips::-::missing_cpu_feature delegates to crate::low::missing_cpu_feature, which enter
+fips::-::zeroise_drbgs delegates to crate::fips_rng::zeroise_all, which enter
+fips::DrbgHold::release_in_child delegates to crate::fips_rng::forked, which enter
+high/agreement::PrivateKey::agree delegates to agree, which enter
+high/agreement::PrivateKey::algorithm accessor returns the algorithm
+high/agreement::PrivateKey::from_pkcs8 delegates to the curve's load, which enters
+high/agreement::PrivateKey::from_scalar delegates to the curve's load, which enters
+high/agreement::PrivateKey::from_sec1 delegates to the curve's load, which enters
+high/agreement::PrivateKey::generate delegates to the curve's generate, which enters
+high/agreement::PrivateKey::public_key accessor returns what the value holds
+high/agreement::PrivateKey::to_pkcs8 delegates to to_pkcs8, which enter
+high/agreement::PublicKey::algorithm accessor returns what the value holds
+high/agreement::PublicKey::from_spki delegates to spki::decode, which enter
+high/agreement::PublicKey::new delegates to the curve's public key parser, which enters
+high/agreement::PublicKey::to_spki public encodes a public key
+high/argon2::Params::new public computes on public parameters only
+high/argon2::Secret::new accessor stores the password it is given
+high/blind_rsa::Blinding::finalize delegates to rsa finalize, which enters secret
+high/blind_rsa::KeyPair::blind_sign delegates to blind_sign, which enter
+high/blind_rsa::KeyPair::from_pkcs8 delegates to rsa::SigningKey::from_pkcs8_der, which enter
+high/blind_rsa::KeyPair::generate delegates to rsa::SigningKey::generate, which enter
+high/blind_rsa::KeyPair::public_key accessor returns what the value holds
+high/blind_rsa::KeyPair::to_pkcs8 delegates to to_pkcs8_der, which enter
+high/blind_rsa::PublicKey::blind delegates to blind_with, which enter
+high/blind_rsa::PublicKey::from_components delegates to rsa::VerifyingKey::from_components, which enter
+high/blind_rsa::PublicKey::to_spki delegates to to_pkcs1_der, which enter
+high/digest::Algorithm::output_len accessor returns what the value holds
+high/digest::Context::new delegates to the algorithm's start, which sets the initial state; the compressors enter
+high/digest::Context::update delegates to update, which enter
+high/frost::Commitments::identifier public computes on public parameters only
+high/frost::Commitments::suite accessor returns what the value holds
+high/frost::Identifier::suite accessor returns what the value holds
+high/frost::PublicKey::suite accessor returns what the value holds
+high/frost::SignatureShare::identifier public computes on public parameters only
+high/frost::SignatureShare::suite accessor returns what the value holds
+high/frost::SigningNonces::suite accessor returns what the value holds
+high/frost::SigningPackage::public_key accessor returns what the value holds
+high/frost::SigningPackage::suite accessor returns what the value holds
+high/frost::SigningShare::identifier accessor returns what the value holds
+high/frost::SigningShare::min_signers accessor returns what the value holds
+high/frost::SigningShare::public_key accessor returns what the value holds
+high/frost::SigningShare::suite accessor returns what the value holds
+high/frost::SigningShare::to_scalar accessor copies the stored scalar bytes
+high/frost::VssCommitment::min_signers accessor returns what the value holds
+high/frost::VssCommitment::public_key accessor returns what the value holds
+high/frost::VssCommitment::suite accessor returns what the value holds
+high/hkdf::Prk::expand public computes on public parameters only
+high/hkdf::Prk::fill delegates to expand_into, which enter
+high/hkdf::Prk::new delegates to hmac::Key::new, which enter
+high/hkdf::Salt::new delegates to hmac::Key::new, which enter
+high/hmac::Algorithm::tag_len accessor returns what the value holds
+high/hmac::Context::update delegates to update, which enter
+high/hmac::Context::with_key delegates to start, which enter
+high/hmac::Key::algorithm public computes on public parameters only
+high/hpke::PrivateKey::from_scalar delegates to agreement::PrivateKey::from_scalar, which enter
+high/hpke::PrivateKey::generate delegates to agreement::PrivateKey::generate, which enter
+high/hpke::PrivateKey::kem accessor returns the KEM
+high/hpke::PrivateKey::public_key accessor returns what the value holds
+high/hpke::PrivateKey::to_scalar delegates to to_scalar, which enter
+high/hpke::PublicKey::kem accessor returns what the value holds
+high/hpke::PublicKey::new delegates to agreement::PublicKey::new, which enter
+high/hpke::Recipient::export delegates to export, which enter
+high/hpke::Sender::export delegates to export, which enter
+high/kem::Ciphertext::new delegates to mlkem::Ciphertext::from_slice, which enter
+high/kem::DecapsulationKey::decapsulate delegates to SharedSecret::new, decaps, which enter
+high/kem::DecapsulationKey::generate delegates to mlkem::DecapKey::generate, which enter
+high/kem::DecapsulationKey::public_key accessor returns what the value holds
+high/kem::EncapsulationKey::encapsulate delegates to encaps, SharedSecret::new, which enter
+high/kem::EncapsulationKey::new delegates to mlkem::EncapKey::from_bytes, which enter
+high/oaep::DecryptingKey::decrypt delegates to the algorithm's decrypt, which enters
+high/oaep::DecryptingKey::from_pkcs1 delegates to rsa::SigningKey::from_pkcs1_der, which enter
+high/oaep::DecryptingKey::from_pkcs8 delegates to rsa::SigningKey::from_pkcs8_der, which enter
+high/oaep::DecryptingKey::generate delegates to rsa::SigningKey::generate, which enter
+high/oaep::DecryptingKey::public_key accessor returns what the value holds
+high/oaep::DecryptingKey::to_pkcs8 delegates to to_pkcs8_der, which enter
+high/oaep::EncryptingKey::encrypt delegates to rsa::VerifyingKey::encrypt_oaep, which enters secret
+high/oaep::EncryptingKey::from_components delegates to rsa::VerifyingKey::from_components, which enter
+high/oaep::EncryptingKey::from_spki delegates to rsa::VerifyingKey::from_spki_der, which enter
+high/oaep::EncryptingKey::max_message_len public computes on public parameters only
+high/oaep::EncryptingKey::new delegates to rsa::VerifyingKey::from_pkcs1_der, which enter
+high/oaep::EncryptingKey::to_spki delegates to to_spki_der, which enter
+high/oprf/voprf::Blind::finalize delegates to Self::finalize_batch, which enter
+high/oprf/voprf::Blind::suite delegates to suite, which enter
+high/oprf/voprf::PublicKey::suite delegates to suite, which enter
+high/oprf/voprf::ServerKey::public_key accessor returns what the value holds
+high/oprf/voprf::ServerKey::suite delegates to suite, which enter
+high/oprf::Blind::suite delegates to suite, which enter
+high/oprf::ServerKey::suite delegates to suite, which enter
+high/pbkdf2::Secret::derive delegates to derive, which enter
+high/pbkdf2::Secret::new delegates to pbkdf2_vg::Key::new, which enter
+high/pbkdf2::Secret::verify delegates to verify, which enter
+high/signature/ecdsa::KeyPair::from_pkcs8 delegates to the curve's load, which enters
+high/signature/ecdsa::KeyPair::from_scalar_and_public_key delegates to the curve's load, which enters
+high/signature/ecdsa::KeyPair::from_sec1 delegates to the curve's load, which enters
+high/signature/ecdsa::KeyPair::generate delegates to the curve's load, which enters
+high/signature/ecdsa::KeyPair::public_key accessor returns what the value holds
+high/signature/ecdsa::KeyPair::sign delegates to the curve's sign, which enters
+high/signature/ecdsa::KeyPair::sign_digest delegates to the curve's sign_digest, which enters
+high/signature/ecdsa::KeyPair::to_pkcs8 delegates to ecdsa::SigningKey::to_pkcs8_der, which enters
+high/signature/ecdsa::KeyPair::to_scalar delegates to ecdsa::SigningKey::to_scalar, which enters
+high/signature/ecdsa::PublicKey::from_spki delegates to spki::decode, which enter
+high/signature/ecdsa::PublicKey::new delegates to the curve's public key parser, which enters
+high/signature/ecdsa::PublicKey::to_spki delegates to spki::encode, which enter
+high/signature/ecdsa::PublicKey::verify delegates to verify, which enter
+high/signature/ecdsa::PublicKey::verify_digest delegates to signed_digest, verify_digest, which enter
+high/signature/ed25519::KeyPair::from_pkcs8 delegates to Ed25519SigningKey::from_pkcs8_der, which enter
+high/signature/ed25519::KeyPair::from_seed delegates to Ed25519SigningKey::from_bytes, which enter
+high/signature/ed25519::KeyPair::from_seed_and_public_key delegates to Ed25519SigningKey::from_bytes, which enter
+high/signature/ed25519::KeyPair::generate delegates to Ed25519SigningKey::generate, which enter
+high/signature/ed25519::KeyPair::public_key accessor returns what the value holds
+high/signature/ed25519::KeyPair::sign delegates to sign, which enter
+high/signature/ed25519::KeyPair::to_pkcs8 delegates to to_pkcs8_der, which enter
+high/signature/ed25519::KeyPair::to_pkcs8v1 delegates to to_pkcs8_der, which enter
+high/signature/ed25519::KeyPair::to_seed accessor copies the stored seed
+high/signature/ed25519::PublicKey::from_spki delegates to spki::decode, which enter
+high/signature/ed25519::PublicKey::new delegates to Ed25519VerifyingKey::from_bytes, which enter
+high/signature/ed25519::PublicKey::to_spki delegates to to_spki_der, which enter
+high/signature/ed25519::PublicKey::verify delegates to verify, which enter
+high/signature/ml_dsa::KeyPair::from_seed delegates to mldsa::KeyPair::from_seed, which enter
+high/signature/ml_dsa::KeyPair::generate delegates to mldsa::KeyPair::generate, which enter
+high/signature/ml_dsa::KeyPair::has_seed public computes on public parameters only
+high/signature/ml_dsa::KeyPair::public_key accessor returns what the value holds
+high/signature/ml_dsa::KeyPair::sign delegates to sign, which enter
+high/signature/ml_dsa::KeyPair::to_seed accessor copies the stored seed
+high/signature/ml_dsa::PublicKey::from_spki delegates to spki::decode, which enter
+high/signature/ml_dsa::PublicKey::new delegates to mldsa::PublicKey::from_bytes, which enter
+high/signature/ml_dsa::PublicKey::to_spki delegates to spki::encode, which enter
+high/signature/ml_dsa::PublicKey::verify delegates to verify, which enter
+high/signature/rsa::KeyPair::from_components delegates to rsa::SigningKey::from_components, which enter
+high/signature/rsa::KeyPair::from_pkcs1 delegates to rsa::SigningKey::from_pkcs1_der, which enter
+high/signature/rsa::KeyPair::from_pkcs8 delegates to rsa::SigningKey::from_pkcs8_der, which enter
+high/signature/rsa::KeyPair::generate delegates to rsa::SigningKey::generate, which enter
+high/signature/rsa::KeyPair::public_key accessor returns what the value holds
+high/signature/rsa::KeyPair::sign delegates to the algorithm's sign, which enters
+high/signature/rsa::KeyPair::to_pkcs8 delegates to to_pkcs8_der, which enter
+high/signature/rsa::PublicKey::from_components delegates to rsa::VerifyingKey::from_components, which enter
+high/signature/rsa::PublicKey::from_spki delegates to rsa::VerifyingKey::from_spki_der, which enter
+high/signature/rsa::PublicKey::modulus_len public computes on public parameters only
+high/signature/rsa::PublicKey::new delegates to rsa::VerifyingKey::from_pkcs1_der, which enter
+high/signature/rsa::PublicKey::to_spki delegates to to_spki_der, which enter
+high/signature/rsa::PublicKey::verify delegates to the algorithm's verify, which enters
+high/signature/rsa::SigningAlgorithm::pss_sha256 public builds an algorithm description
+high/signature/rsa::SigningAlgorithm::pss_sha384 public builds an algorithm description
+high/signature/rsa::SigningAlgorithm::pss_sha512 public builds an algorithm description
+high/signature/rsa::VerificationAlgorithm::pss_sha256 public builds an algorithm description
+high/signature/rsa::VerificationAlgorithm::pss_sha384 public builds an algorithm description
+high/signature/rsa::VerificationAlgorithm::pss_sha512 public builds an algorithm description
+high/signature/slh_dsa::KeyPair::generate delegates to slhdsa::KeyPair::generate, which enter
+high/signature/slh_dsa::KeyPair::public_key accessor returns what the value holds
+high/signature/slh_dsa::KeyPair::sign delegates to sign, which enter
+high/signature/slh_dsa::PublicKey::from_spki delegates to spki::decode, which enter
+high/signature/slh_dsa::PublicKey::new public copies a public key
+high/signature/slh_dsa::PublicKey::to_spki delegates to spki::encode, which enter
+high/signature/slh_dsa::PublicKey::verify delegates to slhdsa::verify, which enter
+high/spake2plus::ProverSecrets::start delegates to start_at, which enter
+high/spake2plus::VerifierRecord::start delegates to start_at, which enter
+high/vrf::KeyPair::algorithm accessor returns the algorithm
+high/vrf::KeyPair::public_key accessor returns what the value holds
+high/vrf::PublicKey::algorithm public computes on public parameters only
+lib::-::fill delegates to fill, which enter
+mid/aes_cbc::AesCbcEncryptingKey::encrypt delegates to encrypt_blocks, which enter
+mid/aes_cbc::CbcIv::as_bytes accessor returns the IV
+mid/aes_cbc::CbcIv::assume_unpredictable accessor returns what the value holds
+mid/aes_cbc::CbcIv::random delegates to crate::rand::fill, which enter
+mid/aes_kw::AesKek::unwrap_key delegates to unwrap_padded, which enter
+mid/aes_kw::AesKek::wrap_key delegates to wrap, wrap_padded, which enter
+mid/chacha20::ChaCha20::new accessor copies the key into the value
+

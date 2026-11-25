@@ -738,6 +738,8 @@ impl ServerKey {
 
     /// Encodes the key as the scalar [`Self::from_scalar`] loads.
     pub fn to_scalar(&self) -> Scalar {
+        // Each group converts its scalar to bytes.
+        let _entry = Entry::new_secret();
         dispatch!(KeyInner, &self.0, key => key.to_scalar())
     }
 

@@ -369,7 +369,8 @@ impl<P: Params> DecapKey<P> {
     /// generates keys only from seeds.
     #[cfg(any(test, rind_fips))]
     pub(crate) fn from_bytes(dk: &P::DecapKeyBytes) -> Option<Self> {
-        let _entry = low::Entry::new_public();
+        // Decoding reads the secret polynomials, so under DIT.
+        let _entry = low::Entry::new_secret();
         // Its arithmetic runs multiplies Intel's MXCSR mitigation covers.
         let _mcdt = low::Mcdt::enter();
         let key = Self::decode(dk, true);

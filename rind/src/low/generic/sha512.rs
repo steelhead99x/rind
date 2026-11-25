@@ -95,7 +95,21 @@ pub(crate) fn sha512_compress_blocks(state: &mut [u64; 8], blocks: &[u8]) {
     }
 }
 
-// FIPS 180-4 §4.2.3.
+// FIPS 180-4 §4.2.3. With `esp32s3-sha512-unrolled` on ESP-IDF, in internal
+// DRAM rather than flash `.rodata`, for `sha512_esp32s3`'s IRAM body: `.iram1`
+// code is expected not to touch flash while the cache is off.
+//
+// SAFETY: the attribute only selects the output section. The bytes are these
+// constants, and ESP-IDF maps `.dram1` into internal DRAM.
+#[cfg_attr(
+    all(
+        target_arch = "xtensa",
+        target_os = "espidf",
+        rind_esp32s3,
+        feature = "esp32s3-sha512-unrolled",
+    ),
+    unsafe(link_section = ".dram1.rodata")
+)]
 pub(super) static K: [u64; 80] = [
     0x428a2f98d728ae22,
     0x7137449123ef65cd,

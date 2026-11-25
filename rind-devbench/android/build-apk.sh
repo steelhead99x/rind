@@ -2,6 +2,12 @@
 # Builds RindBench-android.apk without Gradle: cargo (NDK clang) -> javac -> d8 -> aapt2 -> zipalign -> apksigner.
 # Needs ANDROID_HOME (SDK with build-tools 35, platforms/android-35, ndk), JDK 17+, rustup target aarch64-linux-android.
 set -eu
+# CPU denies set environment variables, which is only safe before a process starts a second thread.
+# An Android app's process is multi-threaded before any of our code runs, so there is no such point.
+if [ -n "${RIND_DEVBENCH_DENY:-}" ]; then
+  echo "RIND_DEVBENCH_DENY is not supported on Android (no thread-free point to set the environment); unset it" >&2
+  exit 1
+fi
 cd "$(dirname "$0")"
 HERE=$PWD
 SDK=${ANDROID_HOME:-$HOME/Android/Sdk}

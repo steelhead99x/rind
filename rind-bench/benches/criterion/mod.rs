@@ -103,3 +103,34 @@ pub fn dit_per_call<'a>(
 pub fn dit_per_call_aead_rows() -> impl Iterator<Item = (usize, &'static str, &'static [u8])> {
     aead_rows().filter(|(size, ..)| [32, 1350].contains(size))
 }
+
+/// verified-garbage's rows: `verified-garbage`, then, on an aarch64 CPU with
+/// DIT, `verified-garbage-dit-held`, whose `true` asks the row to time its
+/// loop inside `verified_garbage::dit::scope` with [`vg_scope!`].
+///
+/// verified-garbage sets DIT around each keyed call (MACs, AEADs, ciphers)
+/// on any aarch64 CPU with DIT, and its scope holds it across calls as
+/// [`rind_dit`] does for rind's rows. Its unkeyed hashes never set DIT, so
+/// its hash rows take no pair.
+#[allow(dead_code)]
+pub fn vg_rows() -> impl Iterator<Item = (&'static str, bool)> {
+    #[cfg(all(target_arch = "aarch64", not(target_os = "none")))]
+    let dit = std::arch::is_aarch64_feature_detected!("dit");
+    #[cfg(not(all(target_arch = "aarch64", not(target_os = "none"))))]
+    let dit = false;
+    std::iter::once(("verified-garbage", false))
+        .chain(dit.then_some(("verified-garbage-dit-held", true)))
+}
+
+/// Runs `$body`, the row's timed loop, inside `verified_garbage::dit::scope`
+/// when `$held`, from [`vg_rows`].
+#[allow(unused_macros)]
+macro_rules! vg_scope {
+    ($held:expr, $body:expr) => {
+        if $held {
+            verified_garbage::dit::scope(|| $body)
+        } else {
+            $body
+        }
+    };
+}

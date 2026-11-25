@@ -97,17 +97,18 @@ fn bench<V: verified_garbage::hmac::HmacHash>(
             verified_garbage::hmac::Hmac::<V>::mac(key, &input).as_ref(),
             rind::hmac::sign(&rind::hmac::Key::new(ours, key), &input).as_ref()
         );
-        group.bench_with_input(
-            BenchmarkId::new("verified-garbage", size_name),
-            &input,
-            |b, input| {
-                b.iter(|| {
-                    let mut ctx = verified_garbage::hmac::Hmac::<V>::new(key);
-                    ctx.update(input);
-                    black_box(ctx.finalize())
-                })
-            },
-        );
+        for (lib, held) in criterion::vg_rows() {
+            group.bench_with_input(BenchmarkId::new(lib, size_name), &input, |b, input| {
+                vg_scope!(
+                    held,
+                    b.iter(|| {
+                        let mut ctx = verified_garbage::hmac::Hmac::<V>::new(key);
+                        ctx.update(input);
+                        black_box(ctx.finalize())
+                    })
+                )
+            });
+        }
 
         let ring_key = ring::hmac::Key::new(ring, key);
         group.bench_with_input(

@@ -30,7 +30,9 @@ qemu. iOS devices' code is only built.
   runners does. On Linux, the public-key arithmetic
   runs s2n-bignum's narrow-multiplier schedules when `MIDR_EL1` names
   Cortex-A72, Cortex-A76, or Neoverse N1, and its `_alt` schedules
-  everywhere else (see [ALGORITHMS.md](ALGORITHMS.md)). The register is read
+  everywhere else, and Keccak-f runs a lone state on s2n-bignum's
+  `sha3_keccak_f1600_alt2` when it names Cortex-A72 (see
+  [ALGORITHMS.md](ALGORITHMS.md)). The register is read
   on whichever core makes the first such call, and the choice is cached for
   the process, as aws-lc does. On a chip that mixes core types, such as
   Cortex-A76 with Cortex-A55, every core then runs the schedule that first

@@ -187,6 +187,60 @@ class Render(unittest.TestCase):
             ],
         )
 
+    def test_vg_dit_held_shows_beside_vg_but_never_sets_the_fastest(self):
+        everyone = hosts()
+        held_rows = [
+            ("hmac-sha256/{lib}/64B", "rind", 120.0),
+            ("hmac-sha256/{lib}/64B", "verified-garbage", 110.0),
+            ("hmac-sha256/{lib}/64B", "verified-garbage-dit-held", 60.0),
+            ("hmac-sha256/{lib}/64B", "ring", 90.0),
+        ]
+        everyone["kixtop"]["results"] += [{"operation": op, "library": lib, "ns": ns} for op, lib, ns in held_rows]
+        kixtop = everyone["kixtop"]
+        self.assertEqual(br.dit_pairs(kixtop), [("hmac-sha256/64B", "verified-garbage", 110.0, 60.0)])
+        # The held row is no rival: ring is the fastest, and rind's gap is
+        # against ring.
+        self.assertEqual(br.fastest(br.times(kixtop)["hmac-sha256/64B"]), "ring")
+        self.assertEqual(br.gaps_of(everyone, None)[("hmac-sha256/64B", "kixtop")], (120.0 / 90.0, "ring"))
+        table = br.dit_pair_table(kixtop)
+        self.assertEqual(table[0], "| Operation | Library | Default (DIT set per call) | DIT held | Held over default |")
+        self.assertIn("| HMAC-SHA256, 64 B | verified-garbage | 110 ns | 60 ns | 0.55× |", table)
+        text = br.report(everyone, None, VERIFIED, [])[br.REPORT]
+        self.assertIn("DIT pairs on `kixtop`: each library's default time beside its DIT-held one.", text)
+        self.assertNotIn("DIT pairs on `nixos`", text)
+        self.assertIn("verified-garbage (DIT held) times verified-garbage with `verified_garbage::dit::scope`", text)
+        self.assertIn("How each library sets DIT on aarch64", text)
+        self.assertIn("rind's column is timed holding it", text)
+        self.assertIn("ring, never", text)
+        self.assertIn("| Operation | rind | ring | verified-garbage | verified-garbage (DIT held) |", br.host_table(kixtop, VERIFIED))
+        # Without a held row, the report says nothing of DIT's modes.
+        plain = br.report(hosts(), None, VERIFIED, [])[br.REPORT]
+        self.assertNotIn("How each library sets DIT", plain)
+        self.assertNotIn("DIT pairs on", plain)
+
+    def test_site_data_never_counts_a_variant_as_the_fastest(self):
+        everyone = hosts()
+        everyone["kixtop"]["results"] += [
+            {"operation": "hmac-sha256/{lib}/64B", "library": "verified-garbage", "ns": 110.0},
+            {"operation": "hmac-sha256/{lib}/64B", "library": "verified-garbage-dit-held", "ns": 60.0},
+        ]
+        data = br.site_data(everyone, None, VERIFIED, [])
+        kixtop = next(h for h in data["hosts"] if h["name"] == "kixtop")
+        # verified-garbage alone, beside its own held row, has no rival.
+        self.assertNotIn("hmac-sha256/64B", kixtop["fastest"])
+        self.assertEqual(kixtop["fastest"]["x25519-ecdh"], "rind")
+        variants = {lib["id"]: lib["variant_of"] for lib in data["libraries"]}
+        self.assertEqual(variants["verified-garbage-dit-held"], "verified-garbage")
+        self.assertIsNone(variants["rind"])
+        self.assertNotIn("verified-garbage-dit-held", kixtop["grid"]["hmac-sha256/64B"])
+
+    def test_every_library_documents_how_it_sets_dit(self):
+        # A library added to the report must say whether it sets DIT, so its
+        # rows are never silently compared with a held or unheld one.
+        self.assertEqual(set(br.DIT_MODES), set(br.COLUMNS) - set(br.VARIANTS))
+        self.assertTrue(all(br.LIBRARIES[held] == held for held in br.VARIANTS))
+        self.assertTrue(all(base in br.COLUMNS for base in br.VARIANTS.values()))
+
     def test_fastest_bin_holds_within_ten_percent(self):
         self.assertEqual(br.bin_of(1.0, br.SPEED_BINS), 0)
         self.assertEqual(br.bin_of(1.1, br.SPEED_BINS), 0)

@@ -35,6 +35,9 @@ opaque low.aarch64.sha3_keccak_f1600.sha3_keccak_f1600
 opaque low.aarch64.sha3_keccak_f1600_alt.sha3_keccak_f1600
   : Array Std.U64 25#usize → Array Std.U64 24#usize → Result (Array Std.U64 25#usize)
 
+opaque low.aarch64.sha3_keccak_f1600_alt2.sha3_keccak_f1600
+  : Array Std.U64 25#usize → Array Std.U64 24#usize → Result (Array Std.U64 25#usize)
+
 opaque low.aarch64.sha3_keccak2_f1600.sha3_keccak2_f1600
   : Array (Array Std.U64 25#usize) 2#usize → Array Std.U64 24#usize →
     Result (Array (Array Std.U64 25#usize) 2#usize)
@@ -255,6 +258,9 @@ opaque low.entry.Entry.assert_held : Result Unit
 opaque low.aarch64.cpu.HaveSha3.check : Result (Option low.aarch64.cpu.HaveSha3)
 
 opaque low.aarch64.cpu.HaveSha3.check_keccak : Result (Option low.aarch64.cpu.HaveSha3)
+
+/-- Whether single-state Keccak-f runs `_alt2`, from `MIDR_EL1`. -/
+opaque low.aarch64.cpu.keccak_alt2 : Result Bool
 
 opaque low.aarch64.cpu.HaveCryptoExt.check : Result (Option low.aarch64.cpu.HaveCryptoExt)
 

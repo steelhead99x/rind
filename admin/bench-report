@@ -342,6 +342,7 @@ LIBRARIES = {
     "libcrux-ml-kem": "libcrux",
     "openssl": "openssl",
     "verified-garbage": "verified-garbage",
+    "verified-garbage-dit-held": "verified-garbage-dit-held",
 }
 
 # The CPU features by architecture, as rind-cpuid names them, without which a
@@ -1075,7 +1076,7 @@ def summary(args):
         cells = []
         for t in host_times:
             libs = ranked_against(t, row_name(op))
-            others = {lib: ns for lib, ns in libs.items() if lib != "rind"}
+            others = {lib: ns for lib, ns in libs.items() if lib != "rind" and lib not in VARIANTS}
             if "rind" not in libs or not others:
                 cells.append("-")
                 continue
@@ -1108,11 +1109,93 @@ COLUMNS = {
     "libcrux": "libcrux",
     "openssl": "OpenSSL",
     "verified-garbage": "verified-garbage",
+    "verified-garbage-dit-held": "verified-garbage (DIT held)",
 }
+
+# Rows that time a library's own code another way, by that library. Each
+# shows beside the library, with its proofs, but never counts as the fastest
+# or as a rival in a gap. verified-garbage's DIT-held row holds
+# `verified_garbage::dit::scope` across the timed loop, on an aarch64 CPU
+# with DIT; rind's own column is always timed holding `rind::cpu::Dit`, and
+# its `dit-per-call/` rows time it without.
+VARIANTS = {"verified-garbage-dit-held": "verified-garbage"}
+
+# How each library sets aarch64's data-independent timing (DIT) in the
+# versions rind-bench pins, read from their sources. A library that sets it
+# around each call pays a toggle per call that one which never sets it does
+# not, so its default row and another library's are not like for like on a
+# CPU with DIT; its DIT-held row, where it has a guard, is the closer match.
+DIT_MODES = {
+    "rind": (
+        "around each call that handles a secret, on any aarch64 CPU with DIT; `rind::cpu::Dit` holds it, and "
+        "rind's column is timed holding it"
+    ),
+    "verified-garbage": (
+        "around each keyed call (MACs, AEADs, ciphers), on any aarch64 CPU with DIT, and never for an unkeyed "
+        "hash; `verified_garbage::dit::scope` holds it"
+    ),
+    "graviola": "around each call, on any aarch64 CPU with DIT, with no guard to hold it",
+    "aws-lc-rs": "never: aws-lc-sys builds aws-lc without `ENABLE_DATA_INDEPENDENT_TIMING`",
+    "ring": "never",
+    "rustcrypto": "never",
+    "libcrux": "never",
+    "openssl": "never",
+}
+
+
+def dit_pairs(host):
+    """Each operation a host timed both a library's default row and its
+    DIT-held row for: (row, library, default ns, held ns), in report order."""
+    host_times = times(host)
+    out = []
+    for op in OPERATIONS:
+        row = row_name(op)
+        libs = host_times.get(row, {})
+        for held, base in VARIANTS.items():
+            if held in libs and base in libs:
+                out.append((row, base, libs[base], libs[held]))
+    return out
+
+
+def dit_pair_table(host):
+    """A host's DIT pairs as a table of their own, so a reader sees each
+    default time beside its held one, and never one standing for the other."""
+    pairs = dit_pairs(host)
+    if not pairs:
+        return []
+    lines = [
+        "| Operation | Library | Default (DIT set per call) | DIT held | Held over default |",
+        "|---|---|---|---|---|",
+    ]
+    for row, lib, default, held in pairs:
+        lines.append(f"| {label(row)} | {COLUMNS[lib]} | {human(default)} | {human(held)} | {held / default:.2f}× |")
+    return lines
+
+
+def dit_note(libs):
+    """What the report says about DIT, for the libraries `libs` it shows."""
+    held = [lib for lib in VARIANTS if lib in libs]
+    if not held:
+        return []
+    modes = "; ".join(f"{COLUMNS[lib]}, {DIT_MODES[lib]}" for lib in COLUMNS if lib in libs and lib in DIT_MODES)
+    return [
+        "verified-garbage (DIT held) times verified-garbage with `verified_garbage::dit::scope` held across the "
+        "timed loop, as rind's column holds `rind::cpu::Dit::hold()`, so that DIT is set once rather than around "
+        "each call. Only an aarch64 CPU with DIT times it, for verified-garbage's keyed rows, and it never counts "
+        "as the fastest library.",
+        "",
+        "How each library sets DIT on aarch64, from its source at the pinned version: " + modes + ". So on a "
+        "CPU with DIT a library's default row pays a DIT toggle per call that a library which never sets it "
+        "does not: compare a held row with those libraries, and default rows with each other. Each host "
+        "with both rows lists them side by side under its times.",
+        "",
+    ]
+
 
 def fastest(libs):
     """The fastest library of an operation's times by library."""
-    return min(libs, key=libs.get)
+    rivals = {lib: ns for lib, ns in libs.items() if lib not in VARIANTS}
+    return min(rivals, key=rivals.get)
 
 
 # Each operation's label, by its row name without a message size.
@@ -1788,7 +1871,7 @@ def gaps_of(hosts, tiers):
         host_times = times(host)
         for row in host_times:
             libs = ranked_against(host_times, row)
-            others = {lib: ns for lib, ns in libs.items() if lib != "rind"}
+            others = {lib: ns for lib, ns in libs.items() if lib != "rind" and lib not in VARIANTS}
             if "rind" in libs and others:
                 best = min(others, key=others.get)
                 if libs["rind"] / others[best] > SLOWER:
@@ -2010,7 +2093,7 @@ def standing(hosts):
         for h in hosts.values()
         for t in [times(h)]
         for libs in (ranked_against(t, row) for row in t)
-        if "rind" in libs and any(lib != "rind" for lib in libs)
+        if "rind" in libs and any(lib != "rind" and lib not in VARIANTS for lib in libs)
     ]
     return sum(r <= SLOWER for r in ratios), len(ratios)
 
@@ -2053,7 +2136,7 @@ def overview_svg(hosts, verified, theme):
                         continue
                     ratio = libs[lib] / min(ranked_against(host_times[name], row).values())
                     fill = svg.theme["speed"][bin_of(ratio, SPEED_BINS)]
-                    proof = proof_for(verified, lib, row, hosts[name])
+                    proof = proof_for(verified, VARIANTS.get(lib, lib), row, hosts[name])
                     title = f"{label(row)}, {COLUMNS[lib]} on {name}: {human(libs[lib])}, {ratio:.2f}× the fastest"
                     if proof:
                         title += f"; verified: {proof['proof']}"
@@ -2096,7 +2179,7 @@ def host_svg(name, host, verified, theme):
                     continue
                 ratio = libs[lib] / min(ranked_against(host_times, row).values())
                 fill = svg.theme["speed"][bin_of(ratio, SPEED_BINS)]
-                proof = proof_for(verified, lib, row, host)
+                proof = proof_for(verified, VARIANTS.get(lib, lib), row, host)
                 title = f"{label(row)}, {COLUMNS[lib]}: {human(libs[lib])}, {ratio:.2f}× the fastest"
                 if proof:
                     title += f"; verified: {proof['proof']}"
@@ -2224,7 +2307,7 @@ def host_table(host, verified):
             if lib not in libs:
                 cells.append("-")
                 continue
-            check = " ✓" if proof_for(verified, lib, row, host) else ""
+            check = " ✓" if proof_for(verified, VARIANTS.get(lib, lib), row, host) else ""
             cells.append(f"{human(libs[lib])}{check}")
         lines.append(f"| {label(row)} | " + " | ".join(cells) + " |")
     return lines
@@ -2324,7 +2407,7 @@ def comparison_table(hosts, verified):
                 if row.startswith(DIT_PER_CALL) and lib != "rind":
                     continue
                 libs = ranked_against(t, row)
-                if lib in libs and any(other != lib for other in libs):
+                if lib in libs and any(other != lib and other not in VARIANTS for other in libs):
                     timings += 1
                     lead += libs[lib] / libs[fastest(libs)] <= SLOWER
         name = COLUMNS[lib] if lib == "rind" else f"[{COLUMNS[lib]}]({link})"
@@ -2386,7 +2469,7 @@ def site_data(hosts, tiers, verified, gaps):
     proof_index = {id(e): i for i, e in enumerate(verified)}
     rows = {row_name(op) for op in OPERATIONS}
     # The libraries the verified page has a column for.
-    proven = columns(*hosts.values())
+    proven = [lib for lib in columns(*hosts.values()) if lib not in VARIANTS]
 
     def grid_cell(h, timed, lib, row):
         """A library's cell for an operation on a host, for the verified
@@ -2443,12 +2526,12 @@ def site_data(hosts, tiers, verified, gaps):
             best = fastest(against)
             out["times"][row] = cells(out["libraries"], libs, against[best])
             # One library alone has no rival, so no fastest.
-            if len(against) > 1:
+            if sum(lib not in VARIANTS for lib in against) > 1:
                 out["fastest"][row] = best
             proofs = {
                 lib: proof_index[id(p)]
                 for lib in libs
-                if (p := proof_for(verified, lib, row, h)) is not None
+                if (p := proof_for(verified, VARIANTS.get(lib, lib), row, h)) is not None
             }
             if proofs:
                 out["proofs"][row] = proofs
@@ -2529,7 +2612,7 @@ def site_data(hosts, tiers, verified, gaps):
             for edge, text, color in zip(SPEED_BINS + [None], SPEED_LABELS, SPEED)
         ],
         "standing": standing(hosts),
-        "libraries": [{"id": lib, "name": COLUMNS[lib]} for lib in COLUMNS],
+        "libraries": [{"id": lib, "name": COLUMNS[lib], "variant_of": VARIANTS.get(lib)} for lib in COLUMNS],
         "sections": [
             {"name": section, "operations": [{"id": row_name(op), "label": label(row_name(op))} for op in ops]}
             for section, ops in SECTIONS
@@ -2626,6 +2709,7 @@ def report(hosts, tiers, verified, gaps):
             "Over rustls's aws-lc-rs provider it makes 214 through Rust's allocator and about 90 more in AWS-LC's C "
             "code, which only a process-wide count such as valgrind's sees (2026-11-13).",
             "",
+            *dit_note(columns(*hosts.values())),
             *picture("overview", "Time over the fastest library's, by operation, library, and host"),
             "",
         ]
@@ -2659,6 +2743,11 @@ def report(hosts, tiers, verified, gaps):
             "",
             "</details>",
             "",
+            *(
+                [f"DIT pairs on `{name}`: each library's default time beside its DIT-held one.", "", *pairs, ""]
+                if (pairs := dit_pair_table(h))
+                else []
+            ),
         ]
         for theme, suffix in (("light", ""), ("dark", "-dark")):
             files[f"{name}{suffix}.svg"] = host_svg(name, h, verified, theme)

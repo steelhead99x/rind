@@ -212,6 +212,14 @@ module patch '^(patch/|rind-ring/|(rind/)?Cargo\.toml$|sh/patch\.sh$)' \
 # rind's low, mid, and high layers reference only the layers below them.
 module structure '^(rind/(src/|Cargo\.toml$)|admin/structure$)' \
     tools='cargo cargo-modules'
+# Every public function of rind's either makes an `Entry`, which sets DIT on
+# aarch64 for a secret, or admin/dit-coverage.txt says how it needs none.
+module dit '^(rind/src/|admin/dit-coverage(\.txt)?$)' \
+    tools='python3'
+# The barrier after `msr DIT, #1` in rind's release builds: Apple's sequence
+# on Apple's targets, none on other aarch64 targets (admin/dit-disasm).
+module ditbarrier '^(rind/(src/low/(aarch64/|entry)|build\.rs$|Cargo\.toml$)|admin/dit-disasm$|flake\.(nix|lock)$)' \
+    tools='nix' compiles
 # admin/build-cost builds these against rind's public API, and
 # admin/binary-size holds what rind adds to each to its record, which any
 # change to rind's code or the toolchain can move.
@@ -701,6 +709,8 @@ step() {
             run nix develop "$logs/regenerate#regenerate" --command "$logs/regenerate/admin/regenerate"
             ;;
         check:structure) run admin/structure ;;
+        check:dit) run python3 admin/dit-coverage ;;
+        check:ditbarrier) run nix develop .#dit-disasm --command admin/dit-disasm ;;
         check:deny) run cargo deny --locked check ;;
         check:versions) run sh/adapter-versions.sh ;;
         check:adapters) run python3 admin/adapter-api ;;
