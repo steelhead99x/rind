@@ -648,7 +648,7 @@ mod tests {
             for c in [0, 1, Limb::MAX] {
                 let mut x = vec![Limb::MAX; n];
                 let rest = mul_add2(&mut x, &vec![Limb::MAX; n], Limb::MAX, Limb::MAX, c);
-                // 2^b(n + 2) - 2^2b + c, as n + 2 limbs.
+                // 2^(b(n + 2)) - 2^2b + c, as n + 2 limbs.
                 let mut want = vec![Limb::MAX; n + 2];
                 want[0] = c;
                 want[1] = 0;
