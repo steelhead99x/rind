@@ -11,7 +11,9 @@ use crate::mid;
 use crate::mid::rng::{RandomSource, SystemRandom};
 
 pub(crate) mod hash_to_curve;
-mod precomp;
+// Visible to `low`: on x86_64, pyca/verified-garbage's `d·G` reads this table
+// too (admin/import-vg, `SHARED`).
+pub(crate) mod precomp;
 
 /// A P-256 public key.
 #[derive(Clone, Debug)]
@@ -160,11 +162,8 @@ impl PrivateKey {
     fn vg_public_key(&self, vg: low::p256_vg::P256) -> [u8; PublicKey::BYTES] {
         // It fails only for a scalar outside [1, n), which `Scalar`'s
         // checked decoding refuses.
-        let encoded = match vg
-            .public_key(&self.scalar.as_bytes())
-            .map(low::ct::into_public)
-        {
-            Some(encoded) => encoded,
+        let encoded = match vg.public_key(&self.scalar.as_bytes()) {
+            Some(encoded) => low::ct::into_public(encoded),
             None => panic!("internal fault"),
         };
         // Checked on the curve, as `public_point` checks rind's.
@@ -827,7 +826,7 @@ impl JacobianMontPoint {
 
         // The first point is infinity, with a zero `z`, when its digit is zero.
         let (digit, sign) = windows[0];
-        point.select_w7(&precomp::CURVE_GENERATOR_PRECOMP[0], digit, sign);
+        point.select_w7(&precomp::CURVE_GENERATOR_PRECOMP.0[0], digit, sign);
         let mut result = Self::from_affine(&point);
         low::bignum_mux(
             digit.into(),
@@ -839,7 +838,7 @@ impl JacobianMontPoint {
         #[allow(clippy::needless_range_loop)]
         for w in 1..37 {
             let (digit, sign) = windows[w];
-            point.select_w7(&precomp::CURVE_GENERATOR_PRECOMP[w], digit, sign);
+            point.select_w7(&precomp::CURVE_GENERATOR_PRECOMP.0[w], digit, sign);
             low::p256_point_add_affine(&mut result.xyz, &point.xy);
         }
         result
@@ -865,6 +864,9 @@ impl JacobianMontPoint {
             None => p.public_naf::<5>(),
             Some(_) => p.public_naf::<6>(),
         };
+        #[cfg(rind_backend = "x86_64")]
+        let g_multiples = &precomp::CURVE_GENERATOR_PRECOMP.0[0][..];
+        #[cfg(not(rind_backend = "x86_64"))]
         let g_multiples = &precomp::CURVE_GENERATOR_PRECOMP[0][..];
 
         let mut result = Self::infinity();
@@ -1455,8 +1457,13 @@ fn booth_recode_w7(v: u8) -> (u8, u8) {
 /// 37 rows of the 64 multiples `i * 2^(7 * j) * G`, one row per 7-bit window.
 ///
 /// 37 := 256 / 7 + 1, as Booth recoding carries into a window above the top bit.
+///
+/// On a cache line's boundary: pyca/verified-garbage's `d·G` reads the table
+/// too, 32 bytes at a time, and measured 1.3% slower where those loads
+/// crossed lines.
 #[cfg(rind_backend = "x86_64")]
-type AffineMontPointTable = [[u64; 512]; 37];
+#[repr(C, align(64))]
+pub(crate) struct AffineMontPointTable(pub(crate) [[u64; 512]; 37]);
 
 /// 43 rows of the 32 multiples `i * 2^(6 * j) * G`, one row per 6-bit window.
 ///
@@ -1669,7 +1676,7 @@ mod tests {
             assert_eq!(sum[..32], bytes[..], "{words:x?}");
             assert_eq!(sum[32], 0, "{words:x?}");
             // One window for each row of the generator table.
-            assert_eq!(windows, precomp::CURVE_GENERATOR_PRECOMP.len());
+            assert_eq!(windows, generator_rows().len());
         }
     }
 
@@ -1793,11 +1800,20 @@ mod tests {
         println!("montify n = {:016x?}", Scalar::montifier().0);
     }
 
+    /// The generator table's rows, which x86_64 wraps to align.
+    fn generator_rows() -> &'static [impl AsRef<[u64]> + 'static] {
+        #[cfg(rind_backend = "x86_64")]
+        return &precomp::CURVE_GENERATOR_PRECOMP.0;
+        #[cfg(not(rind_backend = "x86_64"))]
+        return &precomp::CURVE_GENERATOR_PRECOMP;
+    }
+
     #[test]
     fn base_point_precomp() {
         let mut base = JacobianMontPoint::from_affine(&CURVE_GENERATOR);
-        for row in &precomp::CURVE_GENERATOR_PRECOMP {
+        for row in generator_rows() {
             let mut multiple = base;
+            let row = row.as_ref();
             for (i, entry) in (1..).zip(row.as_chunks::<8>().0) {
                 assert_eq!(&multiple.as_affine().xy, entry);
                 multiple = match i {

@@ -16,12 +16,12 @@ impl fmt::Display for Unspecified {
 // aws-lc-rs overrides the deprecated `description` and `cause`, so a caller
 // still on them gets its answers.
 #[allow(deprecated)]
-impl std::error::Error for Unspecified {
+impl core::error::Error for Unspecified {
     fn description(&self) -> &str {
         "Unspecified"
     }
 
-    fn cause(&self) -> Option<&dyn std::error::Error> {
+    fn cause(&self) -> Option<&dyn core::error::Error> {
         None
     }
 }
@@ -133,12 +133,12 @@ impl fmt::Display for KeyRejected {
 }
 
 #[allow(deprecated)]
-impl std::error::Error for KeyRejected {
+impl core::error::Error for KeyRejected {
     fn description(&self) -> &str {
         self.description_()
     }
 
-    fn cause(&self) -> Option<&dyn std::error::Error> {
+    fn cause(&self) -> Option<&dyn core::error::Error> {
         None
     }
 }

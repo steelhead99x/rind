@@ -60,7 +60,9 @@ Each bullet names one file.
   Manual's AArch32 pseudocode (DDI 0487, part F).
 - `aarch32/proofs/decode.ml`: rind's. Their A32 encodings.
 - `aarch32/proofs/aarch32.ml`: rind's. The step relation, symbolic-execution
-  tactics, and AAPCS argument and clobber lists.
+  tactics, AAPCS argument and clobber lists, and the tactics that promote a
+  core theorem to one of a subroutine, with the five small routines that
+  check them and the step conversion as the file loads.
 - `aarch32/proofs/consttime.ml`: rind's. s2n-bignum's safety tactics
   specialized to the model.
 - `aarch32/proofs/base.ml`: rind's. What a proof on the model loads.
@@ -95,8 +97,9 @@ What aws-lc's x86_64 ChaCha20-Poly1305 and ChaCha20 routines need,
 AES-CTR and AES-CBC routines, `aes_hw_ctr32_encrypt_blocks` and
 `aes_hw_cbc_encrypt`, its P-256 mixed additions,
 `ecp_nistz256_point_add_affine` and `ecp_nistz256_point_add_affinex`, and
-what OpenSSL's `sha512_block_data_order_avx2` adds to them: BMI1's `ANDN`,
-BMI2's `RORX`, and `PUSH m64`. With them every instruction of those
+what OpenSSL's `sha512_block_data_order_avx2` and
+`sha256_block_data_order_avx2` add to them: BMI1's `ANDN`, BMI2's `RORX`,
+`PUSH m64`, and VEX `VPSHUFD`. With them every instruction of those
 routines, as rind's release build emits them,
 decodes. Posting them to awslabs/s2n-bignum needs the maintainer's approval
 ([kixel-ai/rind#448](https://github.com/kixel-ai/rind/pull/448)).
@@ -104,6 +107,7 @@ decodes. Posting them to awslabs/s2n-bignum needs the maintainer's approval
 | Instruction | Encoding | Note |
 | --- | --- | --- |
 | `VPALIGNR xmm/ymm, xmm/ymm, xmm/ymm/m, imm8` | VEX.128/256.66.0F3A.WIG 0F /r ib | `PALIGNR` in each 128-bit lane |
+| `VPSHUFD xmm/ymm, xmm/ymm/m, imm8` | VEX.128/256.66.0F.WIG 70 /r ib | `PSHUFD` in each 128-bit lane |
 | `PSLLD xmm, imm8` | 66 0F 72 /6 ib | |
 | `PSRLD xmm, imm8` | 66 0F 72 /2 ib | |
 | `PSLLDQ xmm, imm8` | 66 0F 73 /7 ib | semantics as in [awslabs/s2n-bignum#439](https://github.com/awslabs/s2n-bignum/pull/439) |
@@ -145,26 +149,83 @@ the event trace s2n-bignum's safety proofs read.
 
 | Instructions | Forms |
 | --- | --- |
-| `AND`, `EOR`, `SUB`, `RSB`, `ADD`, `ADC`, `SBC`, `RSC`, `ORR`, `BIC`, and their `S` forms | register with an immediate shift, or a modified immediate |
+| `AND`, `EOR`, `SUB`, `RSB`, `ADD`, `ADC`, `SBC`, `RSC`, `ORR`, `BIC`, and their `S` forms | register with an immediate shift, register shifted by a register, or a modified immediate |
 | `TST`, `TEQ`, `CMP`, `CMN` | the same operands |
 | `MOV`, `MVN`, and their `S` forms | the same operands |
 | `MOVW`, `MOVT` | 16-bit immediate |
-| `LDR`, `LDRB`, `STR`, `STRB` | 12-bit immediate offset, pre-indexed, or post-indexed |
-| `B` | 24-bit offset |
+| `MUL`, `UMULL`, `UMLAL` | without `S` |
+| `REV` | |
+| `LDR`, `LDRB`, `STR`, `STRB` | 12-bit immediate or shifted register offset, pre-indexed, or post-indexed |
+| `LDRD`, `STRD` | 8-bit immediate offset, pre-indexed, or post-indexed |
+| `LDM`, `STM`, `PUSH` and `POP` among them | each of the four addressing modes, with or without write-back |
+| `B`, `BL` | 24-bit offset |
+| `BX` | |
+| `NOP`, `DMB` | `DMB` under any option |
 
-Each takes any condition but the unconditional space. The decoder refuses
-everything else: Thumb, register-shifted registers, PC as an operand or
-destination, `LDRT` and the other unprivileged forms, write-back to the
-transferred register, and every other encoding. Loads and stores may be
-unaligned, as Linux and Android leave them.
+Each but `DMB` takes any condition but the unconditional space. An instruction
+whose condition fails changes nothing but the events it records, which are
+the ones it records when it runs, as s2n-bignum's safety proofs require of
+every instruction: a branch (`B`, `BL`, `BX`, or a load into PC) its jump to
+the next instruction, as s2n-bignum's other models' conditional branches do,
+and a load or store an access of no bytes at the address it would have used,
+which `memaccess_inbounds` accepts of any list of ranges that is not empty.
+Its length differs from a taken access's, so a condition that depends on a
+secret shows in the trace, as a branch's does.
+Such an instruction does not fault, wherever its address points, as the CPU
+transfers nothing, but one whose bytes would run past 0xffffffff leaves the
+model as if it ran, which is sound whatever the CPU does. R15 is an operand, the instruction's
+address plus 8, of a data-processing instruction with an immediate or an
+immediate shift, as `ADR` is, and the base of a word load, a literal load. It
+is a destination only of a word load from another base with an immediate
+offset and of `LDM`, each a branch. The decoder refuses everything else:
+Thumb, R15 anywhere else, `LDRT` and the other unprivileged forms, write-back
+to a transferred register, SP in an `LDM` or `STM` list, the flag-setting
+multiplies, `BLX`, and every other encoding.
+
+A step either has one next state or, where the instruction would leave what
+the model holds, any: a proof that reaches such a step proves nothing, as in
+s2n-bignum's other models. That is `BX`, or a load into PC, of a target not
+aligned to four bytes, which enters Thumb when its bit 0 is set and is
+otherwise unpredictable; `LDRD`, `STRD`, `LDM`, or `STM` at an address not
+aligned to four bytes, which faults; and `LDR` into PC from such an address,
+which is unpredictable where unaligned loads are allowed, not a fault; and a
+transfer whose bytes would run past 0xffffffff, which is unpredictable. So a
+subroutine's theorem assumes `aligned 4` of its return address and, where it
+uses the stack, of SP. Other loads and stores may be unaligned, as Linux and
+Android leave them. The step conversion decides `aarch32_nowrap a n`, that
+`n` bytes from `a` stay below 2^32, from `aligned 4` for a word, from the
+values the assumptions' `val x = n` give the address's terms, or from an
+assumption `aarch32_nowrap` of a region holding the transfer, whose length
+may be symbolic where the assumptions' arithmetic bounds it, as a theorem
+states of each buffer and stack frame that an unaligned word or a transfer of
+more than one word reaches.
+
+`AARCH32_MK_EXEC_RULE` gives a word that does not decode no theorem rather
+than failing, since A32 routines keep literal pools and tables among their
+instructions, and the step conversion folds a constant offset from R15 into
+`word (pc + n)`, where a proof states what the pool holds, or into
+`word_sub (word pc) (word n)` for an address before `pc`, the code's first
+byte.
+`AARCH32_ADD_RETURN_NOSTACK_TAC` and `AARCH32_ADD_RETURN_STACK_TAC` are
+`RISCV_ADD_RETURN_NOSTACK_TAC` and `RISCV_ADD_RETURN_STACK_TAC` for the AAPCS:
+a return by `bx lr`, or a prologue and epilogue around the core, by default
+one `push` and one `pop` that returns.
 
 `simulator.ml` cosimulates the model as s2n-bignum's
-`riscv/proofs/simulator.ml` does its own: directed cases at the shifts' and
-carries' edges, a backward branch, and unaligned word loads and stores, then
-random instructions from every row above, each with a random condition and
-state, branches forward and back and word offsets unaligned, which
+`riscv/proofs/simulator.ml` does its own: directed cases at the shifts',
+carries', and multiply's edges, a backward branch, unaligned word loads and
+stores, a push and load of every register, and skipped transfers at an
+address that would fault, then random instructions from every row above,
+each with a random condition and state, and transfers whose condition fails
+through any address short of the top, which
 `cosim_runner.c` and `cosim_start.S` run under qemu-arm, and the model must
-prove reach the same state. `admin/prove cosim` runs 1000 random cases,
-printing the seed, which
+prove reach the same state. The executor reports where it holds the
+instruction and its scratch buffer, so the cases reach every form: `BX`,
+`POP`, and `LDR` into PC branch to a landing slot whose address a register or
+the buffer holds, a literal load reads the buffer, `LDM` and `STM` go through
+SP or a register that may be in the list, and each theorem says what an
+instruction that reads R15 computes. `admin/prove cosim` runs up to 1000
+cases in all, the directed ones among them, so at most 979 random ones, and
+its timeout may stop it sooner; it prints the seed, which
 `S2N_BIGNUM_SEMATEST_SEED` repeats. Offering the model upstream is also a
 post to awslabs/s2n-bignum, which needs the maintainer's approval.

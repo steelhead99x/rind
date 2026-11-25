@@ -11,7 +11,9 @@
 //! ```
 //!
 //! Every ring feature is accepted. As in ring, `alloc` gates RSA and `std` the
-//! errors' `std::error::Error` impls; the rest change nothing.
+//! errors' `std::error::Error` impls; the rest change nothing. Like ring, it
+//! builds without `std`, but always needs a global allocator, as rind does,
+//! even without `alloc`.
 //!
 //! The rename reaches only the crate that makes it. A binary moves every crate
 //! in its tree on ring 0.17 to rind, including dependencies that name ring such
@@ -43,12 +45,9 @@
 //! too, fails to build:
 //!
 //! - `aead::chacha20_poly1305_openssh`: rind refuses it, having no SSH consumer.
-//! - `rsa::KeyPairComponents` and `rsa::KeyPair::from_components`: building a
-//!   key from components means encoding its secret parts as DER, which
-//!   branches on their leading bytes. Load the key as PKCS#1 or PKCS#8.
-//! - `io`, `test`, `deprecated_test`, and `test_file!`: ring's DER reader and
-//!   test harness, which are no cryptography. `test::rand`'s fixed random
-//!   sources could not work, since rind draws its own randomness.
+//! - `test`, `deprecated_test`, and `test_file!`: ring's test harness, which
+//!   is no cryptography. `test::rand`'s fixed random sources could not work,
+//!   since rind draws its own randomness.
 //!
 //! And these behave differently:
 //!
@@ -61,10 +60,24 @@
 //!   does; a public key on its own is not wiped.
 //! - A [`error::KeyRejected`]'s `Display` gives rind's reason, not ring's
 //!   name for it, which ring documents as changing between releases.
+//! - An RSA key whose integers disagree is refused when it loads, as
+//!   aws-lc-rs refuses it, where ring takes a wrong `d`, which it never uses,
+//!   and finds a wrong `e` or CRT integer only when it signs.
+//! - `rsa::KeyPair::from_components` takes private integers with leading
+//!   zero bytes, as aws-lc-rs does, where ring refuses those wider than it
+//!   expects: refusing them would branch on their secret first bytes.
 
 // ring's API has these shapes, which a drop-in keeps.
 #![allow(clippy::len_without_is_empty, clippy::new_without_default)]
 #![warn(missing_docs, unreachable_pub)]
+// Unit tests keep std's prelude; `sh/dispatch.sh`'s nostd module builds the
+// library on a target without std.
+#![cfg_attr(not(test), no_std)]
+
+// rind itself needs an allocator, so rind-ring always has one.
+extern crate alloc;
+#[cfg(all(feature = "std", not(test)))]
+extern crate std;
 
 use core::fmt;
 
@@ -78,6 +91,7 @@ pub mod digest;
 pub mod error;
 pub mod hkdf;
 pub mod hmac;
+pub mod io;
 pub mod pbkdf2;
 pub mod pkcs8;
 pub mod rand;

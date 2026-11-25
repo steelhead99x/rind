@@ -54,6 +54,7 @@ fn bench<R: sha3::Digest, V: verified_garbage::hashes::HashFunction>(
             |b, input| b.iter(|| libcrux(input)),
         );
         group.bench_with_input(BenchmarkId::new("rind", size_name), &input, |b, input| {
+            let _dit = criterion::rind_dit();
             b.iter(|| {
                 let mut ctx = rind::digest::Context::new(ours);
                 ctx.update(input);

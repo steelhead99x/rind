@@ -5,14 +5,18 @@ use core::fmt;
 use crate::error::{Error, KeyFormatError};
 use crate::high::asn1::{self, Type, pkix};
 use crate::high::ed25519::Ed25519SigningKey;
-use crate::high::{pkcs8, spki};
+#[cfg(any(feature = "ml-dsa", feature = "slh-dsa"))]
+use crate::high::pkcs8;
+use crate::high::spki;
 use crate::low;
-use crate::ml_dsa::{MlDsa44, MlDsa65, MlDsa87, ParameterSet};
+#[cfg(feature = "ml-dsa")]
+use crate::ml_dsa::{self, MlDsa44, MlDsa65, MlDsa87, ParameterSet};
+#[cfg(feature = "slh-dsa")]
 use crate::slh_dsa::{
-    SlhDsaSha2_128f, SlhDsaSha2_128s, SlhDsaSha2_192f, SlhDsaSha2_256f, SlhDsaShake128f,
+    self, SlhDsaSha2_128f, SlhDsaSha2_128s, SlhDsaSha2_192f, SlhDsaSha2_256f, SlhDsaShake128f,
     SlhDsaShake192f, SlhDsaShake256f,
 };
-use crate::{ecdsa, ed25519, ml_dsa, rsa, slh_dsa};
+use crate::{ecdsa, ed25519, rsa};
 
 const ECDSA_SIGNING: [&ecdsa::SigningAlgorithm; 6] = [
     &ecdsa::sign::P256_SHA256_ASN1,
@@ -69,6 +73,37 @@ fn ecdsa_generated_public_key_agrees_whichever_reads_first() {
             }
         }
     }
+}
+
+// Keys that keep a value their uses build, an ECDSA key pair's public key and
+// an ML-DSA public key's expansion, shared by threads that race to build it,
+// sign and verify as on one thread: ThreadSanitizer, in `sanitizers.yml`,
+// fails a read of the kept value that races its build.
+#[test]
+// wasm32-wasip2 cannot spawn threads.
+#[cfg(not(target_family = "wasm"))]
+fn keys_shared_across_threads() {
+    let pair = ecdsa::KeyPair::generate(&ecdsa::sign::P256_SHA256_ASN1).unwrap();
+    #[cfg(feature = "ml-dsa")]
+    let (public, signature) = {
+        let signer = ml_dsa::KeyPair::<MlDsa44>::generate().unwrap();
+        let public = ml_dsa::PublicKey::<MlDsa44>::new(signer.public_key().as_ref()).unwrap();
+        (public, signer.sign(b"message").unwrap())
+    };
+    std::thread::scope(|s| {
+        for _ in 0..4 {
+            s.spawn(|| {
+                for _ in 0..2 {
+                    let ecdsa = pair.sign(b"message").unwrap();
+                    pair.public_key()
+                        .verify(b"message", ecdsa.as_ref())
+                        .unwrap();
+                    #[cfg(feature = "ml-dsa")]
+                    public.verify(b"message", signature.as_ref()).unwrap();
+                }
+            });
+        }
+    });
 }
 
 #[test]
@@ -459,6 +494,7 @@ fn rsa_public_key_components() {
     }
 }
 
+#[cfg(feature = "ml-dsa")]
 /// A PKCS#8 ML-DSA key of `oid` holding `private_key`, and `public_key` if
 /// given (v2).
 fn ml_dsa_pkcs8(
@@ -478,6 +514,7 @@ fn ml_dsa_pkcs8(
     der.to_vec()
 }
 
+#[cfg(feature = "ml-dsa")]
 #[test]
 fn ml_dsa_encodings() {
     fn check<P: ParameterSet>(other: &asn1::ObjectId) {
@@ -633,6 +670,7 @@ fn ml_dsa_encodings() {
     }
 }
 
+#[cfg(feature = "slh-dsa")]
 /// A PKCS#8 SLH-DSA key of `oid` holding `private_key`, and `public_key`
 /// if given (v2).
 fn slh_dsa_pkcs8(oid: &asn1::ObjectId, private_key: &[u8], public_key: Option<&[u8]>) -> Vec<u8> {
@@ -643,6 +681,7 @@ fn slh_dsa_pkcs8(oid: &asn1::ObjectId, private_key: &[u8], public_key: Option<&[
     der.to_vec()
 }
 
+#[cfg(feature = "slh-dsa")]
 #[test]
 fn slh_dsa_encodings() {
     // Only the f sets: an s set's key costs a tenth of a second to load
@@ -740,6 +779,7 @@ fn slh_dsa_encodings() {
     check::<SlhDsaShake256f>(&asn1::oid::id_slh_dsa_shake_192f);
 }
 
+#[cfg(feature = "slh-dsa")]
 /// RFC 9909's examples: a key pair, and a certificate it signs itself.
 #[test]
 fn slh_dsa_rfc9909() {
@@ -885,7 +925,6 @@ fn public_keys_round_trip_through_spki() {
 
     let rsa = rsa::KeyPair::from_pkcs1(include_bytes!("../rsa/rsa2048.der")).unwrap();
     let ed25519 = ed25519::KeyPair::generate().unwrap();
-    let ml_dsa = ml_dsa::KeyPair::<MlDsa44>::generate().unwrap();
     // Each kind of key: its encoding, its SPKI, and its parser.
     let mut keys: Vec<(String, Vec<u8>, Vec<u8>, Parse)> = vec![
         (
@@ -900,13 +939,17 @@ fn public_keys_round_trip_through_spki() {
             ed25519.public_key().to_spki().as_ref().to_vec(),
             |der| ed25519::PublicKey::from_spki(der).map(|key| key.as_ref().to_vec()),
         ),
-        (
+    ];
+    #[cfg(feature = "ml-dsa")]
+    {
+        let ml_dsa = ml_dsa::KeyPair::<MlDsa44>::generate().unwrap();
+        keys.push((
             "ML-DSA-44".into(),
             ml_dsa.public_key().as_ref().to_vec(),
             ml_dsa.public_key().to_spki().as_ref().to_vec(),
             |der| ml_dsa::PublicKey::<MlDsa44>::from_spki(der).map(|key| key.as_ref().to_vec()),
-        ),
-    ];
+        ));
+    }
     let parsers: [Parse; 3] = [
         |der| {
             ecdsa::PublicKey::from_spki(&ecdsa::verify::P256_SHA256_ASN1, der)
@@ -1024,13 +1067,16 @@ fn encodings_fit_the_largest_keys() {
         ecdsa.public_key().as_ref()
     );
 
-    let ml_dsa = ml_dsa::KeyPair::<MlDsa87>::generate().unwrap();
-    let spki = ml_dsa.public_key().to_spki();
-    let parsed = pkix::SubjectPublicKeyInfo::from_bytes(spki.as_ref()).unwrap();
-    assert_eq!(
-        parsed.subjectPublicKey.as_octets(),
-        ml_dsa.public_key().as_ref()
-    );
+    #[cfg(feature = "ml-dsa")]
+    {
+        let ml_dsa = ml_dsa::KeyPair::<MlDsa87>::generate().unwrap();
+        let spki = ml_dsa.public_key().to_spki();
+        let parsed = pkix::SubjectPublicKeyInfo::from_bytes(spki.as_ref()).unwrap();
+        assert_eq!(
+            parsed.subjectPublicKey.as_octets(),
+            ml_dsa.public_key().as_ref()
+        );
+    }
 
     let ed25519 = ed25519::KeyPair::generate().unwrap();
     let reloaded = ed25519::KeyPair::from_pkcs8(ed25519.to_pkcs8().as_ref()).unwrap();
@@ -1043,5 +1089,48 @@ fn encodings_fit_the_largest_keys() {
     assert_eq!(
         parsed.subjectPublicKey.as_octets(),
         ed25519.public_key().as_ref()
+    );
+}
+
+/// A cloned public key verifies what the original does, with an expansion
+/// of its own, and a cloned signature is the same bytes.
+#[cfg(all(feature = "ml-dsa", feature = "slh-dsa"))]
+#[test]
+fn post_quantum_clones_verify() {
+    let key = ml_dsa::KeyPair::<MlDsa44>::generate().unwrap();
+    let signature = key.sign(b"message").unwrap();
+    let copy = signature.clone();
+    assert_eq!(copy.as_ref(), signature.as_ref());
+    let public_key = key.public_key().clone();
+    for _ in 0..2 {
+        public_key.verify(b"message", copy.as_ref()).unwrap();
+    }
+    assert_eq!(public_key.as_ref(), key.public_key().as_ref());
+    let clone = public_key.clone();
+    clone.verify(b"message", signature.as_ref()).unwrap();
+
+    let key = slh_dsa::KeyPair::<SlhDsaSha2_128f>::generate().unwrap();
+    let signature = key.sign(b"message").unwrap();
+    let copy = signature.clone();
+    assert_eq!(copy.as_ref(), signature.as_ref());
+    let public_key = key.public_key().clone();
+    assert_eq!(public_key.as_ref(), key.public_key().as_ref());
+    public_key.verify(b"message", copy.as_ref()).unwrap();
+}
+
+/// Ed25519 and RSA signatures show as their bytes.
+#[test]
+fn signatures_debug_as_bytes() {
+    let key = ed25519::KeyPair::from_seed(&[7; 32]).unwrap();
+    let signature = key.sign(b"message");
+    assert_eq!(
+        format!("{signature:?}"),
+        format!("Signature({:?})", signature.as_ref())
+    );
+    let key = rsa::KeyPair::from_pkcs8(include_bytes!("../rsa/rsa2048.pkcs8.der")).unwrap();
+    let signature = key.sign(&rsa::sign::PKCS1_SHA256, b"message").unwrap();
+    assert_eq!(
+        format!("{signature:?}"),
+        format!("Signature({:?})", signature.as_ref())
     );
 }

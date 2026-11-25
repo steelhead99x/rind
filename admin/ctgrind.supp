@@ -106,7 +106,7 @@
 # public: whether the base64 was well-formed (`err == 0` in base64ct's
 # `decode`), where the PEM's delimiters and whitespace sit, and that the
 # base64 is ASCII, which `str::from_utf8` and `char_indices` check as they
-# read it.
+# read it and `str::get` checks at its first byte.
 # Frames are v0-mangled, or short names where a release build inlined them.
 {
    base64ct-decode-validity
@@ -145,6 +145,20 @@
    Memcheck:Cond
    ...
    fun:*strip_whitespace*
+}
+{
+   rind-rcgen-pem-char-boundary
+   Memcheck:Cond
+   fun:check_range
+   ...
+   fun:*10rind_rcgen3pem6decode*
+}
+{
+   rind-rcgen-pem-char-boundary-debug
+   Memcheck:Cond
+   fun:*4core3str6traits*10SliceIndex*3get*
+   ...
+   fun:*10rind_rcgen3pem6decode*
 }
 {
    rind-rcgen-pem-utf8

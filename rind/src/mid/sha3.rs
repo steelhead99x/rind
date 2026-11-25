@@ -9,7 +9,7 @@ use crate::low::{Entry, sha3_keccak_f1600, sha3_keccak_nof4_f1600, sha3_keccak4_
 
 /// A context for incremental computation of a SHA3 hash with an `R`-byte
 /// rate and an `OUT`-byte digest.
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub(crate) struct Sha3Context<const R: usize, const OUT: usize> {
     sponge: Sponge<R, SHA_PAD_BYTE>,
 }
@@ -57,6 +57,7 @@ pub(crate) type Shake256Sponge = Sponge<SHAKE_256_R_BYTES, SHAKE_PAD_BYTE>;
 /// its input.
 ///
 /// ML-KEM squeezes the sponges directly; ML-DSA reads through this.
+#[cfg(any(feature = "ml-dsa", test))]
 pub(crate) struct Shake<const R: usize> {
     sponge: SqueezingSponge<R>,
     buffer: [u8; R],
@@ -70,8 +71,10 @@ pub(crate) struct Shake<const R: usize> {
 pub(crate) type Shake128 = Shake<SHAKE_128_R_BYTES>;
 
 /// SHAKE256's reader.
+#[cfg(feature = "ml-dsa")]
 pub(crate) type Shake256 = Shake<SHAKE_256_R_BYTES>;
 
+#[cfg(any(feature = "ml-dsa", test))]
 impl<const R: usize> Shake<R> {
     /// Pads what `sponge` has absorbed, to read its output.
     pub(crate) fn new(sponge: &Sponge<R, SHAKE_PAD_BYTE>) -> Self {
@@ -215,7 +218,8 @@ pub(crate) struct Shake4x<const R: usize> {
     lanes: usize,
 }
 
-/// Four SHAKE128 instances in step.
+/// Four SHAKE128 instances in step, as ML-DSA expands its matrix.
+#[cfg(any(feature = "ml-dsa", test))]
 pub(crate) type Shake128x4 = Shake4x<SHAKE_128_R_BYTES>;
 
 /// Four SHAKE256 instances in step.
@@ -263,10 +267,12 @@ impl<const R: usize> Shake4x<R> {
 
 /// SHAKE256 of each of `inputs`, one to four, four at once, writing the
 /// first `OUT` bytes of each, at most a block, to its item of `outputs`.
+/// Items of `outputs` past the inputs stay as they were.
 /// Each input is its `P` parts in turn, and the inputs' parts agree in
 /// length, so they absorb in place, without being copied together.
 ///
 /// SLH-DSA hashes this way; unlike `Shake4x`, an input may span blocks.
+#[cfg(feature = "slh-dsa")]
 pub(crate) fn shake256_x4<const OUT: usize, const P: usize>(
     inputs: &[[&[u8]; P]],
     outputs: &mut [[u8; OUT]],
@@ -310,14 +316,14 @@ pub(crate) fn shake256_x4<const OUT: usize, const P: usize>(
     }
     permute(&mut states);
 
-    for (s, output) in states.iter().zip(outputs.iter_mut()) {
+    for (s, output) in states.iter().zip(&mut outputs[..lanes]) {
         store_bytes(s, output);
     }
 }
 
 /// A sponge absorbing input, XORed into the state as it arrives, so it needs
 /// no buffer.
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub(crate) struct Sponge<const R: usize, const PAD: u8> {
     s: [u64; 25],
     /// The bytes of the current block absorbed so far, under `R`.
@@ -643,6 +649,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "slh-dsa")]
     #[test]
     fn shake256_x4_matches_single() {
         let _entry = Entry::new_secret();
@@ -655,8 +662,9 @@ mod tests {
                     .iter()
                     .map(|i| [&i[..len / 3], &i[len / 3..len / 2], &i[len / 2..len]])
                     .collect();
-                let mut outputs = [[0u8; 40]; 4];
+                let mut outputs = [[0xA5u8; 40]; 4];
                 shake256_x4(&inputs, &mut outputs);
+                assert!(outputs[lanes..].iter().all(|o| *o == [0xA5; 40]));
                 for (input, output) in inputs.iter().zip(&outputs) {
                     let mut sponge = Shake256Sponge::new();
                     for part in input {

@@ -13,10 +13,13 @@ draft-irtf-cfrg-xchacha-03 as `Rind.Spec` transliterates them, through the
 dispatch `Rind.X86_64.AeadDispatch` models. HChaCha20 runs HACL*'s rounds,
 which are Rust, so it is proven here too.
 
-Below rind's Rust, they take `OnePass` as a hypothesis: that aws-lc's one-pass
-routines, which `one_pass` calls (or, on a CPU with AVX-512 IFMA and from 2
-KiB, its separate vector passes), compute RFC 8439's ciphertext and tag. No
-proof covers those routines yet, so no theorem here earns the ✓.
+They are about CPUs where `HaveIfmaForVgChaCha20Poly1305`'s check fails
+and `HaveSse41`'s passes, which run aws-lc's one-pass routines. CPUs that
+pass the first run pyca/verified-garbage's, and CPUs that fail both the
+separate passes, which no theorem here covers yet. Below rind's Rust, they take `OnePass` as a hypothesis: that
+aws-lc's one-pass routines, which `one_pass` calls, compute RFC 8439's
+ciphertext and tag. No proof covers those routines yet, so no theorem here
+earns the ✓.
 -/
 
 namespace rind.x86_64
@@ -26,10 +29,7 @@ a message of at most 2^38 - 64 bytes, as many as its 32-bit block counter
 covers from block 1: sealing leaves the ChaCha20 ciphertext in place and
 returns the Poly1305 tag over the AAD and it, and opening leaves the
 plaintext and returns the tag over the AAD and the ciphertext it was given.
-Either half, AVX2 or SSE4.1, computes the same, and so do the separate
-passes `one_pass` runs instead from 2 KiB on a CPU with AVX-512 IFMA:
-verified-garbage's ChaCha20 and OpenSSL's Poly1305, which no proof covers
-either. -/
+Either half, AVX2 or SSE4.1, computes the same. -/
 def OnePass : Prop :=
   ∀ sse41 avx2 (key : Std.Array U8 32#usize) (nonce : Std.Array U8 12#usize) (aad inout : Slice U8),
     inout.length ≤ 2 ^ 38 - 64 →
@@ -44,10 +44,12 @@ def OnePass : Prop :=
         (chacha20poly1305.macData (bvs aad.val) (bvs inout.val)) ⦄
 
 /-- rind runs aws-lc's one-pass routines on this CPU, and they compute RFC
-8439's AEAD: its entry guard passes and holds, and its CPU-feature checks find
-SSE4.1. None reads an input. -/
+8439's AEAD: its entry guard passes and holds, and of its CPU-feature checks,
+`HaveIfmaForVgChaCha20Poly1305`'s fails and `HaveSse41`'s passes. None reads
+an input. -/
 def RunsChaCha20Poly1305 : Prop :=
   (∃ e, low.entry.Entry.new_secret = ok e) ∧ low.entry.Entry.assert_held = ok () ∧
+  low.x86_64.cpu.HaveIfmaForVgChaCha20Poly1305.check = ok none ∧
   (∃ s, low.x86_64.cpu.HaveSse41.check = ok (some s)) ∧ (∃ a, low.x86_64.cpu.HaveAvx2.check = ok a) ∧
   OnePass
 
@@ -67,9 +69,9 @@ theorem chacha20_poly1305_seal_spec (h : RunsChaCha20Poly1305) (key : Std.Array 
       r.2.length = inout.length ∧
       (bvs r.2.val, bvs r.1.val) =
         chacha20poly1305.seal (bvs key.val) (bvs nonce.val) (bvs aad.val) (bvs inout.val) ⦄ := by
-  obtain ⟨-, -, ⟨s, hs⟩, ⟨a, ha⟩, hop⟩ := h
+  obtain ⟨-, -, hi, ⟨s, hs⟩, ⟨a, ha⟩, hop⟩ := h
   unfold low.x86_64.chacha20poly1305.seal
-  simp only [hs, ha, bind_ok]
+  simp only [hi, hs, ha, bind_ok]
   exact (hop s a key nonce aad inout hl).1
 
 theorem chacha20_poly1305_open_spec (h : RunsChaCha20Poly1305) (key : Std.Array U8 32#usize)
@@ -81,9 +83,9 @@ theorem chacha20_poly1305_open_spec (h : RunsChaCha20Poly1305) (key : Std.Array 
       r.1 = (poly1305.mac (chacha20poly1305.otk (bvs key.val) (bvs nonce.val))
         (chacha20poly1305.macData (bvs aad.val) (bvs inout.val)) == bvs tag.val) ⦄ := by
   have hh := h.2.1
-  obtain ⟨-, -, ⟨s, hs⟩, ⟨a, ha⟩, hop⟩ := h
+  obtain ⟨-, -, hi, ⟨s, hs⟩, ⟨a, ha⟩, hop⟩ := h
   unfold low.x86_64.chacha20poly1305.open
-  simp only [hs, ha, bind_ok]
+  simp only [hi, hs, ha, bind_ok]
   apply WP.spec_bind (hop s a key nonce aad inout hl).2
   rintro ⟨actual, pt⟩ ⟨hlen, hpt, hmac⟩
   simp only [lift, bind_ok]

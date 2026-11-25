@@ -22,9 +22,11 @@
 - Breaking: RSA's SHA-1 algorithms and other modulus floors move from
   `package:rind/legacy.dart` to `package:rind/rsa_legacy.dart`, imported
   `as rsa` beside `package:rind/rsa.dart`.
-- The unauthenticated ciphers: AES-CBC (`AesCbcEncryptingKey`,
-  `AesCbcDecryptingKey`, `CbcIv`), AES-CTR (`AesCtr`), and ChaCha20
-  (`ChaCha20`), sized by `CipherAlgorithm`.
+- RSA-PSS with a salt length of the caller's choosing, as 0.1.1's
+  `RsaPssSigningAlgorithm` is, takes this shape: `rsa.PssSigningAlgorithm`,
+  which `rsa.KeyPair.sign` takes as an `rsa.SigningScheme` beside
+  `rsa.SigningAlgorithm`, and `rsa.PssVerificationAlgorithm`, an
+  `rsa.VerificationAlgorithm`.
 
 | 0.1.0 | 0.2.0 |
 |---|---|
@@ -70,6 +72,25 @@
 | `AgreementPublicKey.bytes` and `EncapsulationKey.bytes`, the list the key holds | a new copy each read |
 | `EcdsaKeyPair.toSpki()`, `Ed25519KeyPair.toSpki()`, `RsaKeyPair.toSpki()`, `RsaDecryptingKey.toSpki()` | `publicKey.toSpki()` |
 | `RsaEncryptingKey(algorithm, der)`, PKCS#1 or SPKI | `rsa.EncryptingKey(algorithm, der)`, PKCS#1, or `rsa.EncryptingKey.fromSpki(algorithm, der)` |
+| `RsaSigningScheme`, from 0.1.1 | `rsa.SigningScheme` |
+| `RsaPssSigningAlgorithm.sha256(saltLength)`, from 0.1.1, and its SHA-384 and SHA-512 kin | `rsa.PssSigningAlgorithm.sha256(saltLength)` |
+| `RsaVerificationAlgorithm.pssSha256(saltLength)`, from 0.1.1, and its SHA-384 and SHA-512 kin | `rsa.PssVerificationAlgorithm.sha256(saltLength)` |
+
+## 0.1.1
+
+- The unauthenticated ciphers: AES-CBC (`AesCbcEncryptingKey`,
+  `AesCbcDecryptingKey`, `CbcIv`), AES-CTR (`AesCtr`), and ChaCha20
+  (`ChaCha20`), sized by `CipherAlgorithm`.
+- AES-GCM under IVs of any length but zero (`GcmKey`, `GcmIv`), and RSA-PSS
+  with a salt length of the caller's choosing (`RsaPssSigningAlgorithm`, which
+  `RsaKeyPair.sign` and `RsaKeyPair.publicKey` now take as an
+  `RsaSigningScheme`, and `RsaVerificationAlgorithm.pssSha256` and its
+  SHA-384 and SHA-512 kin).
+- rind wipes a key's native memory when Dart frees the key.
+- No call throws `UnsupportedError` for a missing CPU feature: rind runs on
+  every CPU of each target it supports.
+- An RSA `PublicKey` whose modulus is below its algorithm's floor parses, and
+  `verify` throws `RindError.keyRejected`.
 
 ## 0.1.0
 

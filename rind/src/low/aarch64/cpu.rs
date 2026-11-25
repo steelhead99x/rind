@@ -4,17 +4,11 @@
 use core::sync::atomic::{AtomicU8, Ordering};
 
 pub(crate) fn enter_cpu_state() -> u32 {
-    #[cfg(target_vendor = "apple")]
-    return dit::maybe_enable();
-    #[cfg(not(target_vendor = "apple"))]
-    0
+    dit::maybe_enable()
 }
 
 pub(crate) fn leave_cpu_state(old: u32) {
-    #[cfg(target_vendor = "apple")]
     dit::maybe_disable(old);
-    #[cfg(not(target_vendor = "apple"))]
-    let _ = old;
 }
 
 /// Effectively memset(ptr, 0, len), but not visible to optimiser
@@ -128,7 +122,7 @@ pub(crate) struct HaveCryptoExt(());
 impl HaveCryptoExt {
     /// Detects the extension once, then answers from the cached result.
     pub(crate) fn check() -> Option<Self> {
-        (features() & CRYPTO_EXT != 0).then_some(Self(()))
+        has(CRYPTO_EXT).then_some(Self(()))
     }
 }
 
@@ -140,7 +134,7 @@ pub(crate) struct HaveSha3(());
 
 impl HaveSha3 {
     pub(crate) fn check() -> Option<Self> {
-        (features() & SHA3 != 0).then_some(Self(()))
+        has(SHA3).then_some(Self(()))
     }
 
     /// The token where Keccak-f runs on the SHA3 instructions: only on Apple
@@ -165,13 +159,12 @@ pub(crate) struct HaveSve2(());
 
 impl HaveSve2 {
     pub(crate) fn check() -> Option<Self> {
-        (features() & SVE2 != 0).then_some(Self(()))
+        has(SVE2).then_some(Self(()))
     }
 }
 
 const CRYPTO_EXT: u8 = 1 << 1;
 const SHA3: u8 = 1 << 2;
-#[cfg(target_vendor = "apple")]
 const DIT: u8 = 1 << 3;
 #[cfg(target_vendor = "apple")]
 const SB: u8 = 1 << 4;
@@ -198,6 +191,52 @@ pub(crate) fn wide_multiplier() -> bool {
     }
 }
 
+/// Whether single-state Keccak-f runs s2n-bignum's `sha3_keccak_f1600_alt2`
+/// rather than `sha3_keccak_f1600`, on a core without the SHA3 Keccak path.
+///
+/// `_alt2` is scalar base Armv8, compiled for Cortex-A72, and holds the
+/// state in registers. It runs only for a core whose `MIDR_EL1` names
+/// Cortex-A72. On the Pi 4 it takes 0.67x the time of `sha3_keccak_f1600`,
+/// and on Cortex-A76 and Cortex-A78AE 1.24x and 1.14x, so no feature or
+/// multiplier class picks it. Both are correct and constant time on every
+/// core. The part is read on the first call, as [`wide_multiplier`] does.
+#[inline]
+pub(crate) fn keccak_alt2() -> bool {
+    match KECCAK.load(Ordering::Relaxed) {
+        PICK_UNSET => detect_keccak_once(),
+        PICK_ON => true,
+        _ => false,
+    }
+}
+
+/// Those the target enables at compile time, which every CPU that runs the
+/// binary has. Rust's `aes` covers PMULL, and its `sha2` SHA-1.
+const ENABLED: u8 = (if cfg!(all(target_feature = "aes", target_feature = "sha2")) {
+    CRYPTO_EXT
+} else {
+    0
+}) | (if cfg!(target_feature = "sha3") {
+    SHA3
+} else {
+    0
+}) | (if cfg!(target_feature = "sve2") {
+    SVE2
+} else {
+    0
+});
+
+/// Whether the CPU has the feature `wanted`.
+///
+/// True at compile time for a feature the target enables (`cpu_enabled`):
+/// Apple's targets, which enable the crypto extension and SHA3, carry no
+/// table-free AES. A build that can deny a feature still asks.
+#[inline]
+fn has(wanted: u8) -> bool {
+    use super::super::{CPU_DENIABLE, cpu_enabled};
+    cpu_enabled(CPU_DENIABLE, u32::from(ENABLED), u32::from(wanted))
+        || features() & wanted == wanted
+}
+
 static FEATURES: AtomicU8 = AtomicU8::new(0);
 /// Separate from [`FEATURES`], so an AES or SHA check does not read the
 /// part. `0` means the choice has not been made.
@@ -205,6 +244,11 @@ static WIDE: AtomicU8 = AtomicU8::new(WIDE_UNSET);
 const WIDE_UNSET: u8 = 0;
 const WIDE_NARROW: u8 = 1;
 const WIDE_ALT: u8 = 2;
+/// [`keccak_alt2`]'s choice, cached as [`WIDE`] is.
+static KECCAK: AtomicU8 = AtomicU8::new(PICK_UNSET);
+const PICK_UNSET: u8 = 0;
+const PICK_OFF: u8 = 1;
+const PICK_ON: u8 = 2;
 
 /// The detected features, read once. Inlined, so a check is a load and a
 /// test, with the first call's detection out of line.
@@ -249,16 +293,13 @@ fn detect() -> u8 {
         && test_toggle("sha2", detected!("sha2"));
     let sha3 = test_toggle("sha3", detected!("sha3"));
     let sve2 = test_toggle("sve2", detected!("sve2"));
+    let dit = test_toggle("dit", detected!("dit"));
     let features = (if crypto_ext { CRYPTO_EXT } else { 0 })
         | (if sha3 { SHA3 } else { 0 })
-        | (if sve2 { SVE2 } else { 0 });
+        | (if sve2 { SVE2 } else { 0 })
+        | (if dit { DIT } else { 0 });
     #[cfg(target_vendor = "apple")]
     let features = features
-        | if test_toggle("dit", detected!("dit")) {
-            DIT
-        } else {
-            0
-        }
         | if test_toggle("sb", detected!("sb")) {
             SB
         } else {
@@ -286,6 +327,45 @@ fn detect_wide_once() -> bool {
     let wide = wide_toggle(detect_wide_multiplier());
     WIDE.store(if wide { WIDE_ALT } else { WIDE_NARROW }, Ordering::Relaxed);
     wide
+}
+
+/// `RIND_CPU_DISABLE_keccak_alt2` and `RIND_CPU_FORCE_keccak_alt2`, read as
+/// [`wide_toggle`] reads its pair. `_alt2` is scalar base Armv8, so forcing
+/// it cannot fault.
+fn keccak_toggle(detected: bool) -> bool {
+    !crate::low::cpu_denied("keccak_alt2") && (detected || cpu_forced("keccak_alt2"))
+}
+
+#[cold]
+#[inline(never)]
+fn detect_keccak_once() -> bool {
+    let alt2 = keccak_toggle(detect_keccak_alt2());
+    KECCAK.store(if alt2 { PICK_ON } else { PICK_OFF }, Ordering::Relaxed);
+    alt2
+}
+
+/// Whether `MIDR_EL1` names Cortex-A72, read as [`detect_wide_multiplier`]
+/// reads it. A core with no part to read runs `sha3_keccak_f1600`, as it did
+/// before, and so does valgrind, which hides `HWCAP_CPUID`; `admin/ctgrind`
+/// forces `_alt2` in its narrow pass.
+fn detect_keccak_alt2() -> bool {
+    #[cfg(all(rind_std, target_os = "linux"))]
+    {
+        #[cfg(all(any(debug_assertions, rind_cpu_disable), not(rind_fips)))]
+        if let Some(midr) = midr_fixture() {
+            return midr.is_some_and(cortex_a72);
+        }
+        read_midr().is_some_and(cortex_a72)
+    }
+    #[cfg(not(all(rind_std, target_os = "linux")))]
+    false
+}
+
+/// Whether `midr` names Cortex-A72 (implementer `0x41`, part `0xd08`), the
+/// Pi 4's core, of any variant or revision.
+#[cfg(any(all(rind_std, target_os = "linux"), test))]
+fn cortex_a72(midr: u64) -> bool {
+    (midr >> 24) & 0xff == 0x41 && (midr >> 4) & 0xfff == 0xd08
 }
 
 /// Apple's cores are wide. On Linux, so is every part except the known
@@ -327,8 +407,9 @@ fn detect_wide_multiplier() -> bool {
     true
 }
 
-/// `RIND_TEST_MIDR=narrow|wide|none` stands in for `MIDR_EL1`: a
-/// Cortex-A76 r4p1, a Neoverse V1 r1p1, or a kernel without `HWCAP_CPUID`.
+/// `RIND_TEST_MIDR=a72|narrow|wide|none` stands in for `MIDR_EL1`: a
+/// Cortex-A72 r0p3, a Cortex-A76 r4p1, a Neoverse V1 r1p1, or a kernel
+/// without `HWCAP_CPUID`.
 /// Not in the FIPS module, where no variable names the part.
 #[cfg(all(
     rind_std,
@@ -338,6 +419,7 @@ fn detect_wide_multiplier() -> bool {
 ))]
 fn midr_fixture() -> Option<Option<u64>> {
     let midr = match std::env::var("RIND_TEST_MIDR").ok().as_deref() {
+        Some("a72") => Some(0x410f_d083),
         Some("narrow") => Some(0x414f_d0b1),
         Some("wide") => Some(0x411f_d401),
         Some("none") => None,
@@ -398,11 +480,13 @@ fn narrow_part(implementer: u64, part: u64) -> bool {
     implementer == 0x41 && matches!(part, 0xd08 | 0xd0b | 0xd0c)
 }
 
-// DIT changes what runs only on Apple's cores, where from the M3 it turns off
-// the data memory-dependent prefetcher that GoFetch reads secrets through. Arm
-// says it has no effect on any current Arm core, so elsewhere rind skips the
-// cost of setting it.
-#[cfg(target_vendor = "apple")]
+// Set on every core whose OS reports it, which a hypervisor, Windows, or a
+// BSD may not (PLATFORMS.md): Arm says some cores with DIT, such as
+// Neoverse V1, may run the instructions it covers in data-dependent time
+// without it, and strongly recommends that software set it (KA005181,
+// https://developer.arm.com/documentation/ka005181/1-0/). On
+// Apple's cores from the M3 it also turns off the data memory-dependent
+// prefetcher that GoFetch reads secrets through.
 mod dit {
     pub(super) fn maybe_enable() -> u32 {
         if super::features() & super::DIT != 0 {
@@ -452,6 +536,7 @@ mod dit {
             // Arm requires no barrier after a PSTATE write, but Apple asks
             // for a speculation barrier after setting DIT, so that nothing
             // after it runs speculatively without DIT.
+            #[cfg(target_vendor = "apple")]
             if super::features() & super::SB != 0 {
                 // SAFETY: in this branch, we verified `sb` cpu feature is supported
                 unsafe { speculation_barrier() }
@@ -466,6 +551,7 @@ mod dit {
     }
 
     /// Runs nothing after it speculatively until everything before it completes.
+    #[cfg(target_vendor = "apple")]
     #[target_feature(enable = "sb")]
     pub(super) fn speculation_barrier() {
         // SAFETY: `sb` is defined only if `sb` cpu feature is supported
@@ -546,7 +632,6 @@ mod tests {
         unsafe { call!(unsafe zero_bytes, bytes.as_mut_ptr(), 100) };
         assert_eq!(bytes, [0; 100]);
         call!(prefetch_ro::<u8>, bytes.as_ptr());
-        #[cfg(target_vendor = "apple")]
         if std::arch::is_aarch64_feature_detected!("dit") {
             // SAFETY: the CPU has DIT, which this leaves as it found it.
             unsafe {
@@ -604,6 +689,9 @@ mod tests {
         if let Some(expected) = std::env::var_os("RIND_TEST_ARM_WIDE_MUL") {
             assert_eq!(wide_multiplier(), expected == "1");
         }
+        if let Some(expected) = std::env::var_os("RIND_TEST_ARM_KECCAK_ALT2") {
+            assert_eq!(keccak_alt2(), expected == "1");
+        }
         if let Some(expected) = std::env::var_os("RIND_TEST_ARM_SVE2") {
             assert_eq!(HaveSve2::check().is_some(), expected == "1");
         }
@@ -646,6 +734,83 @@ mod tests {
         assert!(wide_from_midr(0));
         assert!(wide_from_midr(0x4100_000b));
         assert!(wide_from_midr(0x41d0_b000));
+    }
+
+    #[test]
+    fn midr_selects_cortex_a72_for_keccak() {
+        // Cortex-A72 of any variant and revision, with the reserved upper
+        // bits set or not.
+        for variant in 0..16u64 {
+            for revision in 0..16u64 {
+                let midr = 0x410f_d080 | (variant << 20) | revision;
+                assert!(cortex_a72(midr), "{midr:#x}");
+                assert!(cortex_a72(midr | (u64::MAX << 32)), "{midr:#x}");
+            }
+        }
+        // Cortex-A76, Neoverse N1, Cortex-A78AE (the Jetson Orin), N2, V1,
+        // and Apple M1, which `_alt2` does not speed up or was not measured
+        // on.
+        for midr in [
+            0x414f_d0b1,
+            0x413f_d0c1,
+            0x410f_d421,
+            0x410f_d490,
+            0x411f_d401,
+            0x610f_0230,
+        ] {
+            assert!(!cortex_a72(midr), "{midr:#x}");
+        }
+        // Part `0xd08` from other implementers, and shifted out of the part
+        // field.
+        for implementer in [0x00, 0x42, 0x51, 0x61, 0xc0] {
+            assert!(!cortex_a72((implementer << 24) | 0x000f_d080));
+        }
+        assert!(!cortex_a72(0));
+        assert!(!cortex_a72(0x4100_0d08));
+        assert!(!cortex_a72(0x41d0_8000));
+    }
+
+    // Disable wins over force, as for `wide_mul`.
+    #[cfg(any(debug_assertions, rind_cpu_disable))]
+    #[test]
+    fn keccak_alt2_env_overrides() {
+        const CHILD: &str = "RIND_TEST_KECCAK_TOGGLE";
+        if let Some(mode) = std::env::var_os(CHILD) {
+            assert_eq!(keccak_alt2(), mode == "alt2");
+            println!("{CHILD} done");
+            return;
+        }
+        let cases: &[(&str, bool, bool)] = if cfg!(rind_fips) {
+            &[("scalar", true, true), ("scalar", true, false)]
+        } else {
+            &[
+                ("scalar", true, true),
+                ("alt2", false, true),
+                ("scalar", true, false),
+            ]
+        };
+        for &(mode, disable, force) in cases {
+            let mut cmd = reexec();
+            let test = concat!(module_path!(), "::keccak_alt2_env_overrides");
+            let test = test.split_once("::").unwrap().1;
+            cmd.args([test, "--exact", "--nocapture"])
+                .env(CHILD, mode)
+                .env_remove("RIND_CPU_DISABLE_keccak_alt2")
+                .env_remove("RIND_CPU_FORCE_keccak_alt2");
+            if disable {
+                cmd.env("RIND_CPU_DISABLE_keccak_alt2", "1");
+            }
+            if force {
+                cmd.env("RIND_CPU_FORCE_keccak_alt2", "1");
+            }
+            let output = cmd.output().unwrap();
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            assert!(
+                output.status.success() && stdout.contains(&format!("{CHILD} done")),
+                "{mode} (disable {disable}, force {force}):\n{stdout}{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
     }
 
     // The override is process-wide, so each case is a child. Disable wins
@@ -711,6 +876,7 @@ mod tests {
             #[cfg(rind_fips)]
             let _ = missing_cpu_feature();
             assert_eq!(WIDE.load(Ordering::Relaxed), WIDE_UNSET);
+            assert_eq!(KECCAK.load(Ordering::Relaxed), PICK_UNSET);
             println!("{CHILD} done");
             return;
         }
@@ -728,18 +894,28 @@ mod tests {
     }
 
     // A core that runs `mrs DIT` has DIT, whatever the OS reports, so a child
-    // process runs it.
-    #[cfg(target_vendor = "apple")]
+    // process runs it, on a Unix OS, which reports the illegal instruction
+    // as a signal. A hypervisor may hide DIT, as GitHub's arm64 runners'
+    // does, but no OS reports it on a core without it, and macOS reports it
+    // on every core with it.
+    #[cfg(unix)]
     #[test]
-    fn enables_dit_whenever_the_cpu_has_it() {
+    #[cfg_attr(
+        feature = "__ctgrind",
+        ignore = "valgrind hides DIT from the test but not from its child"
+    )]
+    fn enables_dit_whenever_the_os_reports_it() {
         let has_dit = child_reads_dit();
+        let reported = std::arch::is_aarch64_feature_detected!("dit");
+        assert!(has_dit || !reported, "the OS reports DIT the core lacks");
+        #[cfg(target_vendor = "apple")]
+        assert_eq!(reported, has_dit);
 
-        let expected = test_toggle("dit", has_dit);
+        let expected = test_toggle("dit", reported);
         assert_eq!(features() & DIT != 0, expected);
-        // A denied DIT is left alone, as under `admin/ctgrind`, whose
-        // valgrind runs no DIT instruction.
+        // A DIT the OS hides or the caller denies is left alone.
         if has_dit && !expected {
-            // SAFETY: this core has DIT, though `test_toggle` denies it.
+            // SAFETY: this core has DIT, though rind may not set it.
             unsafe { dit::write(0) };
             drop(crate::low::Entry::new_secret());
             let _held = crate::cpu::Dit::hold();
@@ -763,7 +939,6 @@ mod tests {
         }
     }
 
-    #[cfg(target_vendor = "apple")]
     #[test]
     fn dit_hold_keeps_dit_on_across_calls() {
         if features() & DIT == 0 {
@@ -789,11 +964,22 @@ mod tests {
         assert_eq!(unsafe { dit::read() }, 0);
     }
 
-    #[cfg(target_vendor = "apple")]
+    #[cfg(unix)]
     fn child_reads_dit() -> bool {
         let test = concat!(module_path!(), "::reads_dit");
         let test = test.split_once("::").unwrap().1;
-        let out = std::process::Command::new(std::env::current_exe().unwrap())
+        // Under qemu-user, as `just qemu aarch64` runs the tests on another
+        // host, the child needs qemu too.
+        let mut runner = std::env::var("CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUNNER")
+            .ok()
+            .filter(|_| cfg!(all(target_os = "linux", target_env = "gnu")))
+            .unwrap_or_default()
+            .split_whitespace()
+            .map(std::ffi::OsString::from)
+            .collect::<Vec<_>>();
+        runner.push(std::env::current_exe().unwrap().into());
+        let out = std::process::Command::new(&runner[0])
+            .args(&runner[1..])
             .args([test, "--exact", "--nocapture"])
             .env("RIND_TEST_READ_DIT", "1")
             .output()
@@ -810,7 +996,7 @@ mod tests {
 
     /// Runs `mrs DIT` for `child_reads_dit`, which an illegal instruction
     /// kills on a core without DIT.
-    #[cfg(target_vendor = "apple")]
+    #[cfg(unix)]
     #[test]
     fn reads_dit() {
         if std::env::var_os("RIND_TEST_READ_DIT").is_some() {
@@ -822,8 +1008,9 @@ mod tests {
         }
     }
 
-    /// The register and `detect_wide_multiplier` name the same schedule, and
-    /// the register is one of the cores Linux lists. A mutant that returns a
+    /// The register and `detect_wide_multiplier` name the same schedule,
+    /// `detect_keccak_alt2` the same Keccak-f kernel, and the register is one
+    /// of the cores Linux lists. A mutant that returns a
     /// constant survives on a host with that answer;
     /// [`midr_fixture_selects_the_schedule`] has both answers.
     #[cfg(target_os = "linux")]
@@ -834,8 +1021,10 @@ mod tests {
         // the detection agree.
         let midr = read_midr();
         let detected = detect_wide_multiplier();
+        let alt2 = detect_keccak_alt2();
         if read_midr() == midr {
             assert_eq!(detected, midr.is_none_or(wide_from_midr));
+            assert_eq!(alt2, midr.is_some_and(cortex_a72));
         }
         // qemu-user shows the host's sysfs, which has no aarch64 registers,
         // so this part runs only on an aarch64 kernel that lists them.
@@ -855,8 +1044,8 @@ mod tests {
         }
     }
 
-    /// `narrow` is Cortex-A76, `wide` is Neoverse V1, `none` has no
-    /// `HWCAP_CPUID`.
+    /// `a72` is Cortex-A72, `narrow` is Cortex-A76, `wide` is Neoverse V1,
+    /// `none` has no `HWCAP_CPUID`. Only `a72` runs `_alt2`.
     #[cfg(all(
         target_os = "linux",
         any(debug_assertions, rind_cpu_disable),
@@ -868,11 +1057,12 @@ mod tests {
         if std::env::var_os(CHILD).is_some() {
             let mode = std::env::var("RIND_TEST_MIDR").unwrap();
             let wide = detect_wide_multiplier();
-            assert_eq!(wide, mode != "narrow", "{mode}");
+            assert_eq!(wide, mode != "narrow" && mode != "a72", "{mode}");
+            assert_eq!(detect_keccak_alt2(), mode == "a72", "{mode}");
             println!("{CHILD} {mode}");
             return;
         }
-        for mode in ["narrow", "wide", "none"] {
+        for mode in ["a72", "narrow", "wide", "none"] {
             let stdout = run_child(
                 concat!(module_path!(), "::midr_fixture_selects_the_schedule"),
                 &[(CHILD, "1"), ("RIND_TEST_MIDR", mode)],
@@ -897,9 +1087,11 @@ mod tests {
             };
             assert_eq!(WIDE.load(Ordering::Relaxed), WIDE_UNSET);
             let expected = read_midr().is_none_or(wide_from_midr);
+            let expected_alt2 = read_midr().is_some_and(cortex_a72);
             match install_openat_filter(action) {
                 Ok(()) => {
                     let wide = wide_multiplier();
+                    let alt2 = keccak_alt2();
                     let _ = HaveCryptoExt::check();
                     let mut out = [0; 4];
                     super::super::wide_mux::curve25519_x25519(
@@ -910,6 +1102,7 @@ mod tests {
                     assert_ne!(out, [0; 4]);
                     // Disable and force still apply on top of detection.
                     assert_eq!(wide, wide_toggle(expected));
+                    assert_eq!(alt2, keccak_toggle(expected_alt2));
                     println!("{CHILD} done");
                 }
                 Err(err) if seccomp_unavailable(&err) => {

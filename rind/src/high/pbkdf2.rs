@@ -16,7 +16,7 @@ use crate::mid::pbkdf2_vg;
 /// A PBKDF2 algorithm, chosen by one of this module's constants.
 pub struct Algorithm {
     hmac: &'static hmac::Algorithm,
-    vg: &'static pbkdf2_vg::Algorithm,
+    vg: pbkdf2_vg::Algorithm,
 }
 
 impl fmt::Debug for Algorithm {
@@ -31,25 +31,25 @@ impl fmt::Debug for Algorithm {
 /// such as WPA2 and older PKCS#12 files still require it.
 pub static PBKDF2_HMAC_SHA1: Algorithm = Algorithm {
     hmac: &hmac::HMAC_SHA1,
-    vg: &pbkdf2_vg::SHA1,
+    vg: pbkdf2_vg::Algorithm::Sha1,
 };
 
 /// PBKDF2-HMAC-SHA256.
 pub static PBKDF2_HMAC_SHA256: Algorithm = Algorithm {
     hmac: &hmac::HMAC_SHA256,
-    vg: &pbkdf2_vg::SHA256,
+    vg: pbkdf2_vg::Algorithm::Sha256,
 };
 
 /// PBKDF2-HMAC-SHA384.
 pub static PBKDF2_HMAC_SHA384: Algorithm = Algorithm {
     hmac: &hmac::HMAC_SHA384,
-    vg: &pbkdf2_vg::SHA384,
+    vg: pbkdf2_vg::Algorithm::Sha384,
 };
 
 /// PBKDF2-HMAC-SHA512.
 pub static PBKDF2_HMAC_SHA512: Algorithm = Algorithm {
     hmac: &hmac::HMAC_SHA512,
-    vg: &pbkdf2_vg::SHA512,
+    vg: pbkdf2_vg::Algorithm::Sha512,
 };
 
 /// A secret, such as a password, keyed once for every salt it derives with; wiped on drop.

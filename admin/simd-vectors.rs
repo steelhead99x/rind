@@ -16,6 +16,7 @@ use std::mem::transmute;
 type Unary = unsafe fn(__m128i) -> __m128i;
 type Binary = unsafe fn(__m128i, __m128i) -> __m128i;
 type Binary256 = unsafe fn(__m256i, __m256i) -> __m256i;
+type Unary256 = unsafe fn(__m256i) -> __m256i;
 
 macro_rules! imm8 {
     ($f:ident) => {
@@ -101,6 +102,26 @@ fn clmul<const I: i32>(a: __m128i, b: __m128i) -> __m128i {
     _mm_clmulepi64_si128::<I>(a, b)
 }
 
+#[target_feature(enable = "avx2")]
+fn slli32<const I: i32>(a: __m256i) -> __m256i {
+    _mm256_slli_epi32::<I>(a)
+}
+
+#[target_feature(enable = "avx2")]
+fn srli32<const I: i32>(a: __m256i) -> __m256i {
+    _mm256_srli_epi32::<I>(a)
+}
+
+#[target_feature(enable = "avx2")]
+fn shuffle256<const I: i32>(a: __m256i) -> __m256i {
+    _mm256_shuffle_epi32::<I>(a)
+}
+
+#[target_feature(enable = "avx2")]
+fn permute2x128<const I: i32>(a: __m256i, b: __m256i) -> __m256i {
+    _mm256_permute2x128_si256::<I>(a, b)
+}
+
 /// SplitMix64, from a fixed seed.
 struct Rng(u64);
 
@@ -169,7 +190,9 @@ fn main() {
 
     let binary: [(&str, Binary); 13] = [
         ("sse2._mm_xor_si128", |a, b| unsafe { _mm_xor_si128(a, b) }),
-        ("sse2._mm_cmpeq_epi32", |a, b| unsafe { _mm_cmpeq_epi32(a, b) }),
+        ("sse2._mm_cmpeq_epi32", |a, b| unsafe {
+            _mm_cmpeq_epi32(a, b)
+        }),
         ("sse2._mm_and_si128", |a, b| unsafe { _mm_and_si128(a, b) }),
         ("sse2._mm_or_si128", |a, b| unsafe { _mm_or_si128(a, b) }),
         ("sse2._mm_add_epi64", |a, b| unsafe { _mm_add_epi64(a, b) }),
@@ -208,11 +231,25 @@ fn main() {
 
     // Each 256-bit binary on pairs of 128-bit halves from `pairs`, and on a
     // vector against itself, where every lane compares equal.
-    let binary256: [(&str, Binary256); 4] = [
-        ("avx2._mm256_cmpeq_epi32", |a, b| unsafe { _mm256_cmpeq_epi32(a, b) }),
-        ("avx2._mm256_add_epi32", |a, b| unsafe { _mm256_add_epi32(a, b) }),
-        ("avx2._mm256_and_si256", |a, b| unsafe { _mm256_and_si256(a, b) }),
-        ("avx2._mm256_xor_si256", |a, b| unsafe { _mm256_xor_si256(a, b) }),
+    let binary256: [(&str, Binary256); 6] = [
+        ("avx2._mm256_or_si256", |a, b| unsafe {
+            _mm256_or_si256(a, b)
+        }),
+        ("avx2._mm256_shuffle_epi8", |a, b| unsafe {
+            _mm256_shuffle_epi8(a, b)
+        }),
+        ("avx2._mm256_cmpeq_epi32", |a, b| unsafe {
+            _mm256_cmpeq_epi32(a, b)
+        }),
+        ("avx2._mm256_add_epi32", |a, b| unsafe {
+            _mm256_add_epi32(a, b)
+        }),
+        ("avx2._mm256_and_si256", |a, b| unsafe {
+            _mm256_and_si256(a, b)
+        }),
+        ("avx2._mm256_xor_si256", |a, b| unsafe {
+            _mm256_xor_si256(a, b)
+        }),
     ];
     for (name, f) in binary256 {
         for w in pairs.windows(2) {
@@ -243,9 +280,92 @@ fn main() {
         );
     }
 
+    let unary256: [(&str, [Unary256; 256]); 3] = [
+        ("_mm256_slli_epi32", imm8!(slli32)),
+        ("_mm256_srli_epi32", imm8!(srli32)),
+        ("_mm256_shuffle_epi32", imm8!(shuffle256)),
+    ];
+    for (name, fs) in unary256 {
+        for (imm, f) in fs.iter().enumerate() {
+            for a in [v256(inputs[1], inputs[2]), v256(rng.u128(), rng.u128())] {
+                let r = unsafe { f(a) };
+                guard(
+                    format!("core.core_arch.x86.avx2.{name} ⟨{imm}#32⟩ {}", q256(a)),
+                    q256(r),
+                );
+            }
+        }
+    }
+    for (imm, f) in imm8!(permute2x128).iter().enumerate() {
+        let (a, b) = (v256(rng.u128(), rng.u128()), v256(rng.u128(), rng.u128()));
+        let r = unsafe { f(a, b) };
+        guard(
+            format!(
+                "core.core_arch.x86.avx2._mm256_permute2x128_si256 ⟨{imm}#32⟩ {} {}",
+                q256(a),
+                q256(b)
+            ),
+            q256(r),
+        );
+    }
+    for w in inputs.windows(2) {
+        let a = v256(w[0], w[1]);
+        let x = unsafe {
+            [
+                _mm256_extract_epi32::<0>(a),
+                _mm256_extract_epi32::<1>(a),
+                _mm256_extract_epi32::<2>(a),
+                _mm256_extract_epi32::<3>(a),
+                _mm256_extract_epi32::<4>(a),
+                _mm256_extract_epi32::<5>(a),
+                _mm256_extract_epi32::<6>(a),
+                _mm256_extract_epi32::<7>(a),
+            ]
+        };
+        for (i, x) in x.iter().enumerate() {
+            guard(
+                format!(
+                    "((·.bv) <$> core.core_arch.x86.avx._mm256_extract_epi32 ⟨{i}#32⟩ {})",
+                    q256(a)
+                ),
+                format!("{}#32", *x as u32),
+            );
+        }
+        let d: [i32; 8] = unsafe { transmute(a) };
+        let r = unsafe { _mm256_setr_epi32(d[0], d[1], d[2], d[3], d[4], d[5], d[6], d[7]) };
+        let args: Vec<String> = d.iter().map(|x| format!("⟨{}#32⟩", *x as u32)).collect();
+        guard(
+            format!(
+                "core.core_arch.x86.avx._mm256_setr_epi32 {}",
+                args.join(" ")
+            ),
+            q256(r),
+        );
+        let b: [i8; 32] = unsafe { transmute(a) };
+        let r = unsafe {
+            _mm256_set_epi8(
+                b[31], b[30], b[29], b[28], b[27], b[26], b[25], b[24], b[23], b[22], b[21], b[20],
+                b[19], b[18], b[17], b[16], b[15], b[14], b[13], b[12], b[11], b[10], b[9], b[8],
+                b[7], b[6], b[5], b[4], b[3], b[2], b[1], b[0],
+            )
+        };
+        let args: Vec<String> = b
+            .iter()
+            .rev()
+            .map(|x| format!("⟨{}#8⟩", *x as u8))
+            .collect();
+        guard(
+            format!("core.core_arch.x86.avx._mm256_set_epi8 {}", args.join(" ")),
+            q256(r),
+        );
+    }
+
     for &a in &inputs {
         let r = unsafe { _mm_aesimc_si128(v(a)) };
-        guard(format!("core.core_arch.x86.aes._mm_aesimc_si128 {}", q(v(a))), q(r));
+        guard(
+            format!("core.core_arch.x86.aes._mm_aesimc_si128 {}", q(v(a))),
+            q(r),
+        );
     }
 
     let unary: [(&str, [Unary; 256]); 7] = [

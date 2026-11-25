@@ -71,6 +71,30 @@ case "$arch" in
         ;;
 esac
 
+# The FIPS module refuses to load on a CPU without the features it requires
+# (rind-fips/README.md), so its target stops before the first tier that
+# denies one.
+if [[ $(basename "$target") == fips ]]; then
+    case "$arch" in
+        x86_64 | x86_64-sde) required=" aes pclmulqdq adx movbe " ;;
+        aarch64) required=" aes pmull sha2 " ;;
+        *)
+            echo "error: the FIPS module does not build for $arch" >&2
+            exit 1
+            ;;
+    esac
+    kept=()
+    for tier in "${tiers[@]}"; do
+        for feature in $tier; do
+            if [[ $required == *" $feature "* ]]; then
+                break 2
+            fi
+        done
+        kept+=("$tier")
+    done
+    tiers=("${kept[@]}")
+fi
+
 deny=()
 for tier in "${tiers[@]}"; do
     for feature in $tier; do

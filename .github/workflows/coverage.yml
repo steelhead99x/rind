@@ -5,6 +5,9 @@ on:
     - cron: "0 18 * * *"
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
   group: coverage-${{ github.ref }}
   cancel-in-progress: true
@@ -13,12 +16,25 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
+  # Each tier's run of `admin/coverage`; the gate merges them, since a
+  # function only one architecture or backend compiles is run only there.
+  measure:
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
+            tier: native
+          - os: ubuntu-latest
+            tier: portable
+          - os: ubuntu-24.04-arm
+            tier: native
+          # GitHub's arm64 runners run AArch32 code, so armv7 runs natively
+          # but for its Cortex-A15 tier.
+          - os: ubuntu-24.04-arm
+            tier: armv7
           - os: macos-latest
+            tier: native
 
     runs-on: ${{ matrix.os }}
     steps:
@@ -33,9 +49,42 @@ jobs:
       # an unprofiled program.
       # See UPSTREAM.md, "Ubuntu's AppArmor denies Intel SDE's sandbox".
       - name: Allow user namespaces
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && runner.arch == 'X64' && matrix.tier == 'native'
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
-      # The summary table in the log is the report.
+      # The summary table in the log is this tier's report.
       - name: Measure coverage
-        run: nix develop .#coverage --command ./admin/coverage
+        run: nix develop .#coverage --command ./admin/coverage ${{ matrix.tier }}
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage-${{ runner.os }}-${{ runner.arch }}-${{ matrix.tier }}
+          path: target/coverage/*-${{ matrix.tier }}.json
+          if-no-files-found: error
+
+  # Fails on a published function no tier runs that admin/coverage.allow does
+  # not allow, and on a file whose uncovered regions or branches rise past
+  # admin/coverage.baseline. The `coverage.baseline` artifact holds this
+  # run's counts, to commit when they fall.
+  gate:
+    needs: measure
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: coverage-*
+          path: tiers
+          merge-multiple: true
+
+      - name: Check coverage
+        run: python3 admin/coverage-gate check --baseline-out coverage.baseline tiers/*.json
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: coverage.baseline
+          path: coverage.baseline

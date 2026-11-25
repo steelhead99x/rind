@@ -26,7 +26,10 @@
 )]
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(
-    all(target_arch = "xtensa", target_os = "espidf"),
+    any(
+        all(target_arch = "xtensa", target_os = "espidf"),
+        all(rind_esp32s3, feature = "esp32s3-sha512-unrolled")
+    ),
     feature(asm_experimental_arch)
 )]
 // Unit tests run on hosted targets and keep `std`'s prelude.
@@ -70,17 +73,23 @@ mod high;
 /// Errors.  Common to all layers.
 mod error;
 
+#[cfg(feature = "zeroize")]
+mod zeroize_on_drop;
+
 /// The FIPS module's random generator, which [`mid::rng`] draws from in the
 /// module's build.
-#[cfg(any(test, rind_fips))]
+#[cfg(all(any(test, rind_fips), feature = "ml-dsa", feature = "slh-dsa"))]
 mod fips_rng;
 
 /// What the FIPS module (`rind-fips`) needs beyond the public API: its
 /// self-tests, its error state, and its errors' codes. Only the module's own
-/// build compiles it.
-#[cfg(any(test, rind_fips))]
+/// build compiles it, with every algorithm.
+#[cfg(all(any(test, rind_fips), feature = "ml-dsa", feature = "slh-dsa"))]
 #[doc(hidden)]
 pub mod fips;
+
+#[cfg(all(rind_fips, not(all(feature = "ml-dsa", feature = "slh-dsa"))))]
+compile_error!("the FIPS module builds rind with its default features");
 
 /// Test infrastructure.
 #[cfg(test)]
@@ -89,6 +98,7 @@ mod test;
 
 // vvv Public API
 pub use error::{Error, KeyRejected};
+pub use high::signature::any::KeyPair;
 
 /// Non-API documentation
 #[cfg(doc)]
@@ -278,8 +288,8 @@ pub mod rsa {
         OaepAlgorithm, Plaintext,
     };
     pub use crate::high::signature::rsa::{
-        KeyPair, PssSaltLength, PublicKey, PublicKeyComponents, Signature, SigningAlgorithm,
-        VerificationAlgorithm,
+        KeyPair, KeyPairComponents, PssSaltLength, PublicKey, PublicKeyComponents, Signature,
+        SigningAlgorithm, VerificationAlgorithm,
     };
     pub use crate::mid::rsa_key_size::RsaKeySize as KeySize;
 
@@ -569,6 +579,8 @@ pub mod ed25519 {
 /// The parameter set is a type, so a key of one set fails to compile where
 /// another's is expected, and a signature is a fixed-size array.
 ///
+/// The `ml-dsa` Cargo feature, on by default, builds this module.
+///
 /// ```
 /// # fn main() -> Result<(), rind::Error> {
 /// use rind::ml_dsa::{KeyPair, MlDsa65, PublicKey};
@@ -581,6 +593,7 @@ pub mod ed25519 {
 /// # Ok(())
 /// # }
 /// ```
+#[cfg(feature = "ml-dsa")]
 pub mod ml_dsa {
     pub use crate::high::signature::ml_dsa::{KeyPair, ParameterSet, PublicKey, Seed, Signature};
     pub use crate::mid::mldsa::{MlDsa44, MlDsa65, MlDsa87};
@@ -592,6 +605,8 @@ pub mod ml_dsa {
 /// The parameter set is a type, so a key of one set fails to compile where
 /// another's is expected. A signature, up to 49,856 bytes, lives on the
 /// heap.
+///
+/// The `slh-dsa` Cargo feature, on by default, builds this module.
 ///
 /// ```
 /// # fn main() -> Result<(), rind::Error> {
@@ -605,6 +620,7 @@ pub mod ml_dsa {
 /// # Ok(())
 /// # }
 /// ```
+#[cfg(feature = "slh-dsa")]
 pub mod slh_dsa {
     pub use crate::high::signature::slh_dsa::{KeyPair, ParameterSet, PublicKey, Signature};
     pub use crate::mid::slhdsa::{

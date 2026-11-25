@@ -1,7 +1,7 @@
 #![no_main]
 
-//! PBKDF2 against aws-lc-rs for any secret, salt, and output length, and
-//! checking that output tampered with.
+//! PBKDF2 against aws-lc-rs and RustCrypto for any secret, salt, and output
+//! length, and checking that output tampered with.
 
 use std::num::NonZeroU32;
 
@@ -10,6 +10,9 @@ use libfuzzer_sys::{arbitrary, arbitrary::Arbitrary, fuzz_target};
 use rind::pbkdf2 as ours;
 
 mod edit;
+
+/// RustCrypto's PBKDF2: password, salt, iterations, and output.
+type Independent = fn(&[u8], &[u8], u32, &mut [u8]);
 
 #[derive(Arbitrary, Debug)]
 struct Input {
@@ -25,16 +28,34 @@ struct Input {
 }
 
 fuzz_target!(|input: Input| {
-    let (ours_algorithm, theirs_algorithm, hash_len) = match input.algorithm % 4 {
-        0 => (
-            &ours::legacy::PBKDF2_HMAC_SHA1,
-            theirs::PBKDF2_HMAC_SHA1,
-            20,
-        ),
-        1 => (&ours::PBKDF2_HMAC_SHA256, theirs::PBKDF2_HMAC_SHA256, 32),
-        2 => (&ours::PBKDF2_HMAC_SHA384, theirs::PBKDF2_HMAC_SHA384, 48),
-        _ => (&ours::PBKDF2_HMAC_SHA512, theirs::PBKDF2_HMAC_SHA512, 64),
-    };
+    use ::pbkdf2::pbkdf2_hmac;
+    let (ours_algorithm, theirs_algorithm, independent, hash_len): (_, _, Independent, _) =
+        match input.algorithm % 4 {
+            0 => (
+                &ours::legacy::PBKDF2_HMAC_SHA1,
+                theirs::PBKDF2_HMAC_SHA1,
+                pbkdf2_hmac::<sha1::Sha1>,
+                20,
+            ),
+            1 => (
+                &ours::PBKDF2_HMAC_SHA256,
+                theirs::PBKDF2_HMAC_SHA256,
+                pbkdf2_hmac::<sha2::Sha256>,
+                32,
+            ),
+            2 => (
+                &ours::PBKDF2_HMAC_SHA384,
+                theirs::PBKDF2_HMAC_SHA384,
+                pbkdf2_hmac::<sha2::Sha384>,
+                48,
+            ),
+            _ => (
+                &ours::PBKDF2_HMAC_SHA512,
+                theirs::PBKDF2_HMAC_SHA512,
+                pbkdf2_hmac::<sha2::Sha512>,
+                64,
+            ),
+        };
     let iterations = NonZeroU32::new(u32::from(input.iterations) + 1).unwrap();
     let (secret, salt) = (&input.secret, &input.salt);
     let len = usize::from(input.len) % 512;
@@ -51,6 +72,9 @@ fuzz_target!(|input: Input| {
     let mut theirs_out = vec![0; len];
     theirs::derive(theirs_algorithm, iterations, salt, secret, &mut theirs_out);
     assert_eq!(ours_out, theirs_out);
+    let mut independent_out = vec![0; len];
+    independent(secret, salt, iterations.get(), &mut independent_out);
+    assert_eq!(ours_out, independent_out);
 
     // A shorter key is a prefix of a longer one, so cutting the end off
     // leaves a valid key.

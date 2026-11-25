@@ -47,6 +47,7 @@ fn bench<V: verified_garbage::kdf::pbkdf2_hmac::Pbkdf2Hash>(
         })
     });
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         b.iter(|| {
             rind::pbkdf2::Secret::new(ours, b"password")
                 .derive(iterations, b"salt", &mut out)

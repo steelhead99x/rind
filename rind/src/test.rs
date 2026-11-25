@@ -230,40 +230,20 @@ pub(crate) fn cctv_value<'a>(record: &'a [(String, Vec<u8>)], name: &str) -> &'a
 /// hundreds of times slower than it runs natively: hours for its tests. Its
 /// tests then check only the 128f sets, which take every code path the
 /// others do, and whose secrets the others handle alike.
+#[cfg(feature = "slh-dsa")]
 pub(crate) const CTGRIND_DEBUG: bool = cfg!(all(feature = "__ctgrind", debug_assertions));
 
 pub(crate) mod bignum;
 mod binsec;
 pub(crate) mod file_test;
+
+#[cfg(all(
+    any(rind_backend = "arm", rind_backend = "portable"),
+    not(any(miri, target_family = "wasm"))
+))]
+pub(crate) mod reference;
 #[cfg(any(rind_backend = "x86_64", rind_backend = "aarch64"))]
-pub(crate) mod p256_vg;
-
-std::thread_local! {
-    static OPPOSITE_HASHES: core::cell::Cell<bool> = const { core::cell::Cell::new(false) };
-}
-
-/// While held, this thread's hashes to a group add their first map output
-/// to its own negation, so the real sum and the identity refusal after it
-/// run on an opposite pair, which no known message reaches.
-pub(crate) struct OppositeHashes(());
-
-impl OppositeHashes {
-    pub(crate) fn new() -> Self {
-        OPPOSITE_HASHES.set(true);
-        Self(())
-    }
-
-    /// Whether one is held on this thread.
-    pub(crate) fn held() -> bool {
-        OPPOSITE_HASHES.get()
-    }
-}
-
-impl Drop for OppositeHashes {
-    fn drop(&mut self) {
-        OPPOSITE_HASHES.set(false);
-    }
-}
+pub(crate) mod vg_ec;
 
 /// Messages and domain separation tags for crosschecking hashes to a curve:
 /// empty, short, and random messages, with tags of one byte, 255 bytes, and
@@ -325,9 +305,10 @@ fn aws_lc_hashed_point(bits: u16, msg: &[u8], dst: &[u8]) -> Option<AwsLcPoint> 
         usize,
     ) -> core::ffi::c_int;
 
-    // SAFETY: each pointer is to a live buffer of the length passed with it.
-    // `EC_POINT_new`'s result is checked for null before the hash. A refused
-    // hash frees its point here; an accepted one is freed by `AwsLcPoint`.
+    // SAFETY: `group` is a static curve. Each pointer passed to `hash` is a
+    // live buffer of the length passed with it, and `point` is non-null.
+    // A refused hash frees its point here; an accepted one is freed by
+    // `AwsLcPoint`.
     unsafe {
         let (group, hash): (*const EC_GROUP, HashToCurve) = match bits {
             256 => (EC_group_p256(), EC_hash_to_curve_p256_xmd_sha256_sswu),
@@ -335,7 +316,7 @@ fn aws_lc_hashed_point(bits: u16, msg: &[u8], dst: &[u8]) -> Option<AwsLcPoint> 
             _ => unreachable!(),
         };
         let point = EC_POINT_new(group);
-        assert!(!point.is_null(), "EC_POINT_new failed");
+        assert!(!point.is_null());
         let ok = hash(
             group,
             point,

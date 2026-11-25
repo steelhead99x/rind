@@ -58,21 +58,22 @@ fn signed_by_ca() {
     }
 }
 
+/// RSA keys load, and generate at 2048 bits, as on rcgen's `aws_lc_rs` backend.
 #[test]
-fn rsa_loads_but_does_not_generate() {
+fn rsa_loads_and_generates() {
     let der = rsa_pkcs8();
     for algorithm in [&PKCS_RSA_SHA256, &PKCS_RSA_SHA384, &PKCS_RSA_SHA512] {
-        let key = KeyPair::from_pkcs8_der_and_sign_algo(&der, algorithm).unwrap();
-        let cert = params().self_signed(&key).unwrap();
-
-        for provider in providers() {
-            verify(&provider, cert.der(), cert.der()).unwrap();
-            load(&provider, cert.der(), &key);
+        for key in [
+            KeyPair::from_pkcs8_der_and_sign_algo(&der, algorithm).unwrap(),
+            KeyPair::generate_for(algorithm).unwrap(),
+        ] {
+            assert_eq!(key.algorithm(), algorithm);
+            let cert = params().self_signed(&key).unwrap();
+            for provider in providers() {
+                verify(&provider, cert.der(), cert.der()).unwrap();
+                load(&provider, cert.der(), &key);
+            }
         }
-        assert_eq!(
-            KeyPair::generate_for(algorithm).unwrap_err(),
-            Error::KeyGenerationUnavailable
-        );
     }
 }
 
@@ -238,25 +239,16 @@ fn der_load_and_accessors() {
         assert!(raw.len() > 1, "{}", raw.len());
         assert!(raw.iter().any(|byte| *byte != 0));
         assert!(raw.iter().any(|byte| *byte != 1));
-        let rendered = format!("{loaded:?}");
-        assert!(rendered.contains("KeyPair"), "{rendered}");
     }
 
     let pkcs1 = PrivateKeyDer::Pkcs1(rustls::pki_types::PrivatePkcs1KeyDer::from(
         &include_bytes!("../../rind/src/high/rsa/rsa2048.der")[..],
     ));
-    // aws-lc's rcgen provider accepts this RSA key. rind-rcgen refuses its
-    // PKCS#1 encoding, even for the matching algorithm, but accepts PKCS#8.
+    // As rcgen's `aws_lc_rs` backend, PKCS#1 loads, and serializes as given.
     let reference = rcgen::KeyPair::from_der_and_sign_algo(&pkcs1, &PKCS_RSA_SHA256).unwrap();
-    let pkcs8 = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(
-        &include_bytes!("../../rind/src/high/rsa/rsa2048.pkcs8.der")[..],
-    ));
-    let accepted = KeyPair::from_der_and_sign_algo(&pkcs8, &PKCS_RSA_SHA256).unwrap();
-    assert_eq!(accepted.public_key_raw(), reference.public_key_raw());
-    assert!(matches!(
-        KeyPair::from_der_and_sign_algo(&pkcs1, &PKCS_RSA_SHA256),
-        Err(Error::CouldNotParseKeyPair)
-    ));
+    let loaded = KeyPair::from_der_and_sign_algo(&pkcs1, &PKCS_RSA_SHA256).unwrap();
+    assert_eq!(loaded.public_key_raw(), reference.public_key_raw());
+    assert_eq!(loaded.serialized_der(), reference.serialized_der());
 }
 
 fn load(provider: &CryptoProvider, cert: &CertificateDer<'_>, key: &KeyPair) {

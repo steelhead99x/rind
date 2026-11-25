@@ -1,0 +1,221 @@
+#!/usr/bin/env python3
+"""Checks what rind adds to a binary against admin/binary-size.txt.
+
+Usage: admin/binary-size [--write]
+
+Builds admin/build-cost-fixtures' `rind` and `rustls` programs, the latter
+over rind-rustls, in release with one codegen unit, and sums the sizes of the
+functions and tables that rind and rind-rustls define in each: what the
+linker kept of them. One codegen unit keeps code no fixture calls from moving
+the sums, which the default sixteen let it do by shifting what rustc inlines;
+it measures a build about 0.5% smaller than a default release.
+
+Fails unless each sum is the one recorded for this host's target, so a change
+that grows or shrinks rind in a binary records the new size, with `--write`,
+and its diff shows by how much. On a target with no record the programs are
+only built, with or without `--write`: the sizes are one toolchain's, the Nix
+dev shell's on x86_64 Linux, where CI runs this, and `nm` reads them only
+from ELF.
+
+The fixtures float on the newest rustls for admin/build-cost, and which of
+rind's code a program keeps depends on its other crates, so each builds here
+from its own lockfile, admin/binary-size-<fixture>.lock, copied over the
+fixture's ignored one. cargo still adds to the copy what the lockfile lacks,
+such as a new version of rind, and `--write` records the result. To take
+newer releases, delete the lockfile and run `--write`.
+
+The code rustc emits for a crate depends on its `-C metadata`, and cargo
+hashes into that the absolute path of a path dependency outside the
+workspace, as rind and rind-rustls are to a fixture's: the same tree built
+from two checkouts differed by thousands of bytes. So this script is also
+the builds' rustc wrapper, giving rind's own crates a `-C metadata` that
+leaves out where the checkout is. Remapping paths cannot help, and cargo's
+trim-paths only leaves the path out from a later release than the pinned
+toolchain's.
+"""
+
+import hashlib
+import os
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+FIXTURES = ROOT / "admin" / "build-cost-fixtures"
+RECORD = ROOT / "admin" / "binary-size.txt"
+# Its own, since cargo does not rebuild for a changed wrapper: a build
+# without it, or with an earlier version of it, would look up to date.
+TARGET_DIR = ROOT / "target" / "binary-size"
+
+# Each fixture and the features it builds with.
+BUILDS = {"rind": [], "rustls": ["rind"]}
+
+HEADER = """\
+# Bytes of rind's and rind-rustls's functions and tables in each program of
+# admin/build-cost-fixtures, built in release with one codegen unit, by
+# target. `admin/binary-size` checks them, and `just fix` records a change.
+"""
+
+# A symbol rind or rind-rustls defines, by its demangled name: a path in the
+# crate, or an impl on one of its types.
+OURS = re.compile(r"^[<&\[(]*(?:rind|rind_rustls)::")
+
+
+def lockfile(fixture):
+    """The lockfile `fixture` builds from here."""
+    return ROOT / "admin" / f"binary-size-{fixture}.lock"
+
+
+def build_env():
+    """The environment for each build, free of settings that change its code."""
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if not k.startswith(("CARGO_PROFILE_", "CARGO_TARGET_", "CARGO_BUILD_"))
+        and k not in ("RUSTFLAGS", "CARGO_INCREMENTAL")
+    }
+    # Empty, it also overrides the flags of a cargo configuration file.
+    env["CARGO_ENCODED_RUSTFLAGS"] = ""
+    # A cargo configuration file's `[profile.release]` applies whatever the
+    # environment holds, unless a variable sets the key. So each key that
+    # changes the code or its symbols takes cargo's release default, but one
+    # codegen unit, for the reason the docstring gives.
+    for key, value in {
+        "OPT_LEVEL": "3",
+        "LTO": "false",
+        "CODEGEN_UNITS": "1",
+        "DEBUG": "false",
+        "DEBUG_ASSERTIONS": "false",
+        "OVERFLOW_CHECKS": "false",
+        "PANIC": "unwind",
+        "STRIP": "debuginfo",
+    }.items():
+        env[f"CARGO_PROFILE_RELEASE_{key}"] = value
+    env["RUSTC_WRAPPER"] = str(Path(__file__).resolve())
+    env["RIND_BINARY_SIZE_RUSTC"] = "1"
+    env.pop("RUSTC_WORKSPACE_WRAPPER", None)
+    return env
+
+
+def rustc(args):
+    """Runs rustc as cargo asks, with a `-C metadata` for a crate in this
+    checkout from its path within it, not the checkout's own."""
+    sources = [Path(a).resolve() for a in args if a.endswith(".rs")]
+    if len(sources) == 1 and sources[0].is_relative_to(ROOT):
+        # What else sets one build of a crate apart: its features and type.
+        key = [str(sources[0].relative_to(ROOT))]
+        key += [f"{a} {b}" for a, b in zip(args, args[1:]) if a in ("--cfg", "--crate-type")]
+        metadata = "metadata=" + hashlib.sha256("\n".join(sorted(key)).encode()).hexdigest()[:16]
+        args = [metadata if a.startswith("metadata=") else a for a in args]
+    os.execvp(args[0], args)
+
+
+def build(fixture, features, host, env, write):
+    """Builds `fixture` in release for `host` from its lockfile and returns its
+    binary."""
+    used = FIXTURES / fixture / "Cargo.lock"
+    if lockfile(fixture).exists():
+        shutil.copyfile(lockfile(fixture), used)
+    elif write:
+        used.unlink(missing_ok=True)
+    else:
+        sys.exit(f"error: no {lockfile(fixture)}; `admin/binary-size --write` resolves one")
+    # The target named, since a cargo configuration's `build.target` would
+    # otherwise move the binary.
+    cmd = ["cargo", "build", "--release", "--target", host, "--target-dir", str(TARGET_DIR)]
+    cmd += ["--manifest-path", str(FIXTURES / fixture / "Cargo.toml")]
+    if features:
+        cmd += ["--features", ",".join(features)]
+    subprocess.run(cmd, env=env, check=True)
+    if write:
+        shutil.copyfile(used, lockfile(fixture))
+    return TARGET_DIR / host / "release" / f"build-cost-{fixture}"
+
+
+def clear_stale_builds():
+    """Empties the target directory if this script changed since it built
+    there, so no build from an earlier wrapper is reused."""
+    stamp = TARGET_DIR / "wrapper.sha256"
+    digest = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+    if stamp.exists() and stamp.read_text() == digest:
+        return
+    shutil.rmtree(TARGET_DIR, ignore_errors=True)
+    TARGET_DIR.mkdir(parents=True)
+    stamp.write_text(digest)
+
+
+def measure(binary):
+    """The bytes rind and rind-rustls define in `binary`."""
+    nm = subprocess.run(
+        ["nm", "--defined-only", "-S", "-C", str(binary)], check=True, capture_output=True, text=True
+    ).stdout
+    # Two names for one address, such as a function and its alias, count once.
+    sizes = {}
+    for line in nm.splitlines():
+        m = re.match(r"([0-9a-f]+) ([0-9a-f]+) \S (.+)$", line)
+        if m and OURS.match(m.group(3)):
+            address = int(m.group(1), 16)
+            sizes[address] = max(sizes.get(address, 0), int(m.group(2), 16))
+    if not sizes:
+        sys.exit(f"error: {binary} names no rind symbol; was it stripped?")
+    return sum(sizes.values())
+
+
+def read_record():
+    """The recorded bytes, by target and fixture."""
+    record = {}
+    for line in RECORD.read_text().splitlines():
+        if line and not line.startswith("#"):
+            target, fixture, size = line.split()
+            record[target, fixture] = int(size)
+    return record
+
+
+def main():
+    # cargo runs the wrapper as `<wrapper> <rustc> <args>`.
+    if os.environ.get("RIND_BINARY_SIZE_RUSTC"):
+        rustc(sys.argv[1:])
+    if sys.argv[1:] not in ([], ["--write"]):
+        sys.exit(__doc__)
+    write = sys.argv[1:] == ["--write"]
+    env = build_env()
+    host = subprocess.run(["rustc", "-vV"], env=env, check=True, capture_output=True, text=True).stdout
+    target = re.search(r"^host: (.+)$", host, re.M).group(1)
+
+    record = read_record()
+    clear_stale_builds()
+    binaries = {
+        fixture: build(fixture, features, target, env, write) for fixture, features in BUILDS.items()
+    }
+    failed = False
+    for fixture, binary in binaries.items():
+        want = record.get((target, fixture))
+        if want is None:
+            print(f"{fixture}: built; {target} has no recorded size")
+            continue
+        size = measure(binary)
+        if write:
+            record[target, fixture] = size
+        elif size == want:
+            print(f"{fixture}: {size} bytes of rind, as recorded")
+        else:
+            failed = True
+            print(
+                f"error: {fixture}: {size} bytes of rind on {target}, {size - want:+} "
+                f"({(size - want) / want:+.1%}) against the {want} recorded",
+                file=sys.stderr,
+            )
+    if write:
+        rows = [f"{t} {f} {size}\n" for (t, f), size in sorted(record.items())]
+        RECORD.write_text(HEADER + "".join(rows))
+    if failed:
+        sys.exit(
+            "error: rind's size in a binary changed. If the change is meant, record it with "
+            "`admin/binary-size --write` (`just fix`) and say why in the pull request."
+        )
+
+
+if __name__ == "__main__":
+    main()

@@ -260,7 +260,7 @@ fn rsa_pub_components_from_private_key(der: &[u8]) -> Result<(Vec<u8>, Vec<u8>)>
 fn rsa_pub_components_from_public_key(der: &[u8]) -> Result<(Vec<u8>, Vec<u8>)> {
     // Refuses the keys rind cannot parse.
     rsa::PublicKey::new(der).map_err(invalid_rsa)?;
-    let key = pkcs1::RsaPublicKey::from_der(der).map_err(invalid_rsa)?;
+    let key = pkcs1::RsaPublicKeyRef::from_der(der).map_err(invalid_rsa)?;
     Ok((
         key.modulus.as_bytes().to_vec(),
         key.public_exponent.as_bytes().to_vec(),
