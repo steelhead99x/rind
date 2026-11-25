@@ -2228,3 +2228,543 @@ let EXIT = prove(EXIT_GOAL,
     EXIT_STEP_TAC 0x566 THEN EXIT_TAIL_TAC 0x566 TAIL_B 6;
     REWRITE_TAC[ARITH_RULE `(6 <= 6 <=> T) /\ (6 <= 7 <=> T)`] THEN
     EXIT_STEP_TAC 0x566 THEN EXIT_TAIL_TAC 0x566 TAIL_B 7]);;
+
+(* ------------------------------------------------------------------------- *)
+(* The decryption, whole: its frame, the one-block path, and the subroutine. *)
+(* ------------------------------------------------------------------------- *)
+
+(* The one-block decryption, from 0xc0 to the return at 0x870. *)
+let DEC_ONE_GOAL = `!key ks r buf iv x ivec pc.
+  r IN {9,11,13} /\ LENGTH (ks:int128 list) = r + 2 /\
+  nonoverlapping (buf:int64,16) (key:int64,16 * (r + 2)) /\
+  nonoverlapping (buf,16) (word pc,0xbc9) /\
+  nonoverlapping (buf,16) (ivec:int64,16) /\
+  nonoverlapping (ivec,16) (key,16 * (r + 2)) /\
+  nonoverlapping (ivec,16) (word pc,0xbc9)
+  ==> ensures x86
+   (\s. bytes_loaded s (word pc) aes_hw_cbc_encrypt_mc /\
+        read RIP s = word(pc + 0xc0) /\
+        read RDI s = buf /\ read RSI s = buf /\ read RDX s = word 16 /\
+        read RCX s = key /\ read R8 s = ivec /\ read R10 s = word r /\
+        read (memory :> bytes(key,16 * (r + 2))) s = aes_key_num ks /\
+        read (memory :> bytes128 ivec) s = iv /\
+        read (memory :> bytes128 buf) s = x)
+   (\s. read RIP s = word(pc + 0x870) /\
+        read (memory :> bytes128 buf) s = word_xor (aes_hw_decrypt ks x) iv /\
+        read (memory :> bytes128 ivec) s = x)
+   (MAYCHANGE [RIP; RCX; R10] ,,
+    MAYCHANGE [ZMM0; ZMM1; ZMM2; ZMM3; ZMM4] ,,
+    MAYCHANGE SOME_FLAGS ,,
+    MAYCHANGE [memory :> bytes(buf,16); memory :> bytes(ivec,16)] ,,
+    MAYCHANGE [events])`;;
+
+let DEC_ONE = time prove(DEC_ONE_GOAL,
+  REWRITE_TAC[SOME_FLAGS] THEN REPEAT GEN_TAC THEN STRIP_TAC THEN
+  KEY_CASES_TAC THEN ENSURES_INIT_TAC "s0" THEN GHOST_YMMS_TAC THEN
+  X86_XSTEPS_UNTIL_TAC AES_HW_CBC_ENCRYPT_EXEC 0x870 1 THEN
+  XMMS_OF_YMMS_TAC THEN ENSURES_FINAL_STATE_TAC THEN ASM_REWRITE_TAC[]);;
+
+(* A region a of l1 bytes at the offset k from b lies within b's l2 bytes. *)
+let SUB_CONTAINED = prove
+ (`!a b:int64 k l1 l2.
+     word_sub a b = word k /\ k + l1 <= l2 /\ l2 < 2 EXP 64
+     ==> contained (a,l1) (b,l2)`,
+  REPEAT STRIP_TAC THEN REWRITE_TAC[CONTAINED_QFREE; DIMINDEX_64] THEN
+  ASM_REWRITE_TAC[] THEN
+  SUBGOAL_THEN `val(word k:int64) = k` SUBST1_TAC THENL
+   [REWRITE_TAC[VAL_WORD; DIMINDEX_64] THEN MATCH_MP_TAC MOD_LT THEN ASM_ARITH_TAC;
+    ASM_ARITH_TAC]);;
+
+(* The frame's slot below the saved rbp lies in the 48 bytes under the stack
+   pointer, as does the saved rbp itself. *)
+let FP_SLOT = prove
+ (`!stk:int64.
+     contained (word_sub (word_and (word_sub (word_sub stk (word 8)) (word 16))
+                                   (word 18446744073709551600)) (word 8),8)
+               (word_sub stk (word 48),48) /\
+     contained (word_add stk (word 18446744073709551608),8)
+               (word_sub stk (word 48),48)`,
+  GEN_TAC THEN CONJ_TAC THEN MATCH_MP_TAC SUB_CONTAINED THENL
+   [X_CHOOSE_THEN `t:num` STRIP_ASSUME_TAC (SPEC `stk:int64` ALIGN_SLOT) THEN
+    EXISTS_TAC `16 - t` THEN ASM_REWRITE_TAC[] THEN
+    CONJ_TAC THENL [CONV_TAC WORD_RULE; ASM_ARITH_TAC];
+    EXISTS_TAC `40` THEN CONV_TAC NUM_REDUCE_CONV THEN
+    SUBGOAL_THEN `word 18446744073709551608:int64 = word_neg(word 8)` SUBST1_TAC THENL
+     [CONV_TAC WORD_REDUCE_CONV; CONV_TAC WORD_RULE]]);;
+
+(* The two stack slots the frame writes are disjoint. *)
+let FP_SLOTS = prove
+ (`!stk:int64.
+     nonoverlapping
+       (word_sub (word_and (word_sub (word_sub stk (word 8)) (word 16))
+                           (word 18446744073709551600)) (word 8),8)
+       (word_add stk (word 18446744073709551608),8)`,
+  GEN_TAC THEN X_CHOOSE_THEN `t:num` STRIP_ASSUME_TAC (SPEC `stk:int64` ALIGN_SLOT) THEN
+  ASM_REWRITE_TAC[NONOVERLAPPING_QFREE; DIMINDEX_64] THEN
+  SUBGOAL_THEN `word_sub (word_add (word_sub stk (word 48)) (word(16 - t)))
+                         (word_add stk (word 18446744073709551608)):int64 =
+                word_sub (word(16 - t)) (word 40)` SUBST1_TAC THENL
+   [SUBGOAL_THEN `word 18446744073709551608:int64 = word_neg(word 8)` SUBST1_TAC THENL
+     [CONV_TAC WORD_REDUCE_CONV; CONV_TAC WORD_RULE];
+    ALL_TAC] THEN
+  REWRITE_TAC[VAL_WORD_SUB_CASES; VAL_WORD; DIMINDEX_64] THEN
+  SUBGOAL_THEN `(16 - t) MOD 2 EXP 64 = 16 - t /\ 40 MOD 2 EXP 64 = 40` STRIP_ASSUME_TAC THENL
+   [CONJ_TAC THEN MATCH_MP_TAC MOD_LT THEN ASM_ARITH_TAC; ALL_TAC] THEN
+  ASM_REWRITE_TAC[] THEN ASM_ARITH_TAC);;
+
+let NO_SLOT = prove
+ (`!(x:int64) l (s:int64) m (t:int64) k.
+     nonoverlapping (x,l) (s,m) /\ contained (t,k) (s,m)
+     ==> nonoverlapping (x,l) (t,k) /\ nonoverlapping (t,k) (x,l)`,
+  REPEAT GEN_TAC THEN STRIP_TAC THEN
+  SUBGOAL_THEN `nonoverlapping (x:int64,l) (t,k)` ASSUME_TAC THENL
+   [MATCH_MP_TAC NONOVERLAPPING_SUBREGIONS THEN
+    MAP_EVERY EXISTS_TAC [`x:int64`; `l:num`; `s:int64`; `m:num`] THEN
+    ASM_REWRITE_TAC[] THEN REWRITE_TAC[contained; CONTAINED_MODULO_REFL; LE_REFL];
+    ASM_MESON_TAC[NONOVERLAPPING_SYM]]);;
+
+(* The disjointness the tails of the decryption assume, from the stack region. *)
+let DHYP_LEMMA = prove
+ (list_mk_forall([`key:int64`; `r:num`; `buf:int64`; `n:num`; `ivec:int64`;
+                  `fp:int64`; `stackpointer:int64`; `pc:num`],
+   mk_imp(`fp = word_and (word_sub (word_sub stackpointer (word 8)) (word 16))
+                   (word 18446744073709551600) /\
+     ALL (nonoverlapping (buf:int64,16 * n))
+      [(key:int64,16 * (r + 2)); (word pc,0xbc9); (ivec:int64,16);
+       (word_sub stackpointer (word 48),48)] /\
+     ALL (nonoverlapping (ivec,16))
+      [(key,16 * (r + 2)); (word pc,0xbc9); (word_sub stackpointer (word 48),48)] /\
+     ALL (nonoverlapping (word_sub stackpointer (word 48),48))
+      [(key,16 * (r + 2)); (word pc,0xbc9)]`,
+   `ALL (nonoverlapping (buf:int64,16 * n))
+        [(key:int64,16 * (r + 2)); (word pc,0xbc9); (ivec:int64,16);
+         (word_add (stackpointer:int64) (word 18446744073709551608),8)] /\
+    ALL (nonoverlapping (ivec,16))
+        [(key,16 * (r + 2)); (word pc,0xbc9);
+         (word_add stackpointer (word 18446744073709551608),8)] /\
+    ALL (nonoverlapping (word_sub (fp:int64) (word 8),8))
+        [(buf,16 * n); (ivec,16); (key,16 * (r + 2)); (word pc,0xbc9);
+         (word_add stackpointer (word 18446744073709551608),8)]`)),
+  REWRITE_TAC[ALL] THEN REPEAT GEN_TAC THEN STRIP_TAC THEN
+  MP_TAC(SPEC `stackpointer:int64` FP_SLOT) THEN
+  MP_TAC(SPEC `stackpointer:int64` FP_SLOTS) THEN
+  FIRST_X_ASSUM(SUBST_ALL_TAC) THEN STRIP_TAC THEN STRIP_TAC THEN
+  REPEAT CONJ_TAC THEN
+  ASM_MESON_TAC[NO_SLOT; NONOVERLAPPING_SYM]);;
+
+(* A region outside the 48 bytes under the stack pointer is outside the slot
+   the push writes, the saved rbp, which lies in them. *)
+let STACK_SLOT = prove
+ (`!(x:int64) l stk.
+     nonoverlapping (x,l) (word_sub stk (word 48),48)
+     ==> nonoverlapping (x,l) (word_add stk (word 18446744073709551608),8) /\
+         nonoverlapping (word_add stk (word 18446744073709551608),8) (x,l)`,
+  REPEAT GEN_TAC THEN DISCH_TAC THEN
+  MP_TAC(SPECL [`x:int64`; `l:num`; `word_sub (stk:int64) (word 48)`; `48`;
+                `word_add (stk:int64) (word 18446744073709551608)`; `8`] NO_SLOT) THEN
+  ASM_REWRITE_TAC[FP_SLOT]);;
+
+(* The whole of the decryption, from the entry to its return at 0x870 with the
+   stack pointer, and rbp, restored. fp is the aligned rsp the frame leaves. *)
+let DEC_FRAME_GOAL = `!key ks r buf n iv inp ivec enc pc stackpointer rbp0 fp.
+  r IN {9,11,13} /\ LENGTH (ks:int128 list) = r + 2 /\ 16 * n < 2 EXP 64 /\
+  val(word_zx enc:int32) = 0 /\
+  fp = word_and (word_sub (word_sub stackpointer (word 8)) (word 16))
+                (word 18446744073709551600) /\
+  ALL (nonoverlapping (buf:int64,16 * n))
+      [(key:int64,16 * (r + 2)); (word pc,0xbc9); (ivec:int64,16);
+       (word_sub stackpointer (word 48),48)] /\
+  ALL (nonoverlapping (ivec,16))
+      [(key,16 * (r + 2)); (word pc,0xbc9); (word_sub stackpointer (word 48),48)] /\
+  ALL (nonoverlapping (word_sub stackpointer (word 48),48))
+      [(key,16 * (r + 2)); (word pc,0xbc9)]
+  ==> ensures x86
+   (\s. bytes_loaded s (word pc) aes_hw_cbc_encrypt_mc /\
+        read RIP s = word pc /\ read RSP s = stackpointer /\ read RBP s = rbp0 /\
+        read RDI s = buf /\ read RSI s = buf /\ read RDX s = word(16 * n) /\
+        read RCX s = key /\ read R8 s = ivec /\ read R9 s = enc /\
+        read (memory :> bytes32(word_add key (word 240))) s = word r /\
+        read (memory :> bytes(key,16 * (r + 2))) s = aes_key_num ks /\
+        read (memory :> bytes128 ivec) s = iv /\
+        read (memory :> bytes(buf,16 * n)) s = cbc_num inp 0 n)
+   (\s. read RIP s = word(pc + 0x870) /\
+        read RSP s = stackpointer /\ read RBP s = rbp0 /\
+        read (memory :> bytes(buf,16 * n)) s = cbc_num (cbc_dec ks iv inp) 0 n /\
+        read (memory :> bytes128 ivec) s = (if n = 0 then iv else inp(n - 1)))
+   (MAYCHANGE [RIP; RSP; RAX; RCX; RDX; RSI; RDI; RBP; R10; R11] ,,
+    MAYCHANGE [ZMM0; ZMM1; ZMM2; ZMM3; ZMM4; ZMM5; ZMM6; ZMM7;
+               ZMM8; ZMM9; ZMM10; ZMM11; ZMM12; ZMM13; ZMM14; ZMM15] ,,
+    MAYCHANGE SOME_FLAGS ,,
+    MAYCHANGE [memory :> bytes(buf,16 * n); memory :> bytes(ivec,16);
+               memory :> bytes(word_add stackpointer (word 18446744073709551608),8);
+               memory :> bytes(word_sub fp (word 8),8)] ,,
+    MAYCHANGE [events])`;;
+
+let READ_ONE = prove
+ (`!(f:num->int128) j (a:int64) s.
+     read (memory :> bytes(a,16 * 1)) s = cbc_num f j 1 <=>
+     read (memory :> bytes128 a) s = f j`,
+  REWRITE_TAC[READ_BLOCKS; ARITH_RULE `i < 1 <=> i = 0`] THEN
+  REPEAT GEN_TAC THEN EQ_TAC THENL
+   [DISCH_THEN(MP_TAC o SPEC `0`) THEN REWRITE_TAC[MULT_CLAUSES; ADD_CLAUSES; WORD_ADD_0];
+    DISCH_TAC THEN GEN_TAC THEN DISCH_THEN SUBST1_TAC THEN
+    ASM_REWRITE_TAC[MULT_CLAUSES; ADD_CLAUSES; WORD_ADD_0]]);;
+
+let READ_ONE16 = REWRITE_RULE[MULT_CLAUSES] READ_ONE;;
+
+let READ_BYTES_Z = prove
+ (`!(a:int64) s. read (memory :> bytes(a,0)) s = 0`,
+  REWRITE_TAC[READ_COMPONENT_COMPOSE; READ_BYTES_TRIVIAL]);;
+
+let SUB8 = prove
+ (`!x:int64. word_sub x (word 8) = word_add x (word 18446744073709551608)`,
+  GEN_TAC THEN
+  SUBGOAL_THEN `word 18446744073709551608:int64 = word_neg(word 8)` SUBST1_TAC THENL
+   [CONV_TAC WORD_REDUCE_CONV; CONV_TAC WORD_RULE]);;
+
+(* The blocks 0 to 5 as single blocks, kept beside the whole region. *)
+let MEM6_TAC =
+  FIRST_ASSUM(MP_TAC o check (fun th -> can (term_match []
+    `read (memory :> bytes(buf,16 * n)) s = cbc_num inp 0 n`) (concl th))) THEN
+  SUBGOAL_THEN `n = 6 + (n - 6)`
+    (fun th -> GEN_REWRITE_TAC (LAND_CONV o ONCE_DEPTH_CONV) [th]) THENL
+   [ASM_ARITH_TAC; ALL_TAC] THEN
+  REWRITE_TAC[READ_BLOCKS_SPLIT_GEN] THEN
+  CONV_TAC(LAND_CONV(LAND_CONV BLOCKS_EXPAND_CONV)) THEN
+  CONV_TAC(LAND_CONV NUM_REDUCE_CONV) THEN
+  REWRITE_TAC[GSYM WORD_ADD_ASSOC; GSYM WORD_ADD] THEN STRIP_TAC;;
+
+(* The first round key, as the code loads it. *)
+let KEY0_TAC =
+  FIRST_ASSUM(fun th ->
+    if can (term_match [] `read (memory :> bytes(key,16 * (r + 2))) s0 = aes_key_num ks`) (concl th)
+    then MP_TAC(SPEC `0` (MATCH_MP READ_KEY_R
+           (CONJ (ASSUME `LENGTH(ks:int128 list) = r + 2`) th)))
+    else failwith "") THEN
+  ANTS_TAC THENL [ARITH_TAC; REWRITE_TAC[MULT_CLAUSES; WORD_ADD_0] THEN DISCH_TAC];;
+
+let STACK_FACTS = `nonoverlapping (ivec:int64,16) (word_add stackpointer (word 18446744073709551608),8) /\
+                    nonoverlapping (word pc:int64,3017) (word_add stackpointer (word 18446744073709551608),8) /\
+                    nonoverlapping (word_add stackpointer (word 18446744073709551608),8) (word pc:int64,3017) /\
+                    nonoverlapping (key:int64,16 * (r + 2)) (word_add stackpointer (word 18446744073709551608),8) /\
+                    nonoverlapping (word_add stackpointer (word 18446744073709551608),8) (key:int64,16 * (r + 2))`;;
+
+let FRAME_ARGS = [`key:int64`; `r:num`; `buf:int64`; `n:num`; `ivec:int64`;
+                  `fp:int64`; `stackpointer:int64`; `pc:num`];;
+
+let SLOT_TAC =
+  RULE_ASSUM_TAC(REWRITE_RULE[MATCH_MP WORD_ZX_ROUNDS (ASSUME `r IN {9,11,13}`)]) THEN
+  RULE_ASSUM_TAC(fun th -> if can (term_match [] `read (memory :> bytes64 (word_sub (stackpointer:int64) (word 8))) s = rbp0`) (concl th) then REWRITE_RULE[SUB8] th else th) THEN
+  RULE_ASSUM_TAC(fun th -> if can (find_term (fun t -> is_const t && fst(dest_const t) = "MAYCHANGE")) (concl th) then REWRITE_RULE[SUB8] th else th);;
+
+let DEC_FRAME = time prove
+ (DEC_FRAME_GOAL,
+  REWRITE_TAC[ALL; SOME_FLAGS] THEN REPEAT GEN_TAC THEN STRIP_TAC THEN
+  SUBGOAL_THEN `word_zx (enc:int64):int32 = word 0` ASSUME_TAC THENL
+   [ASM_REWRITE_TAC[GSYM VAL_EQ_0] THEN ASM_REWRITE_TAC[VAL_WORD_0]; ALL_TAC] THEN
+  ASM_CASES_TAC `n = 0` THENL
+   [FIRST_X_ASSUM(SUBST_ALL_TAC o check (fun th -> concl th = `n = 0`)) THEN REWRITE_TAC[MULT_CLAUSES; cbc_num; READ_BYTES_0] THEN
+    ENSURES_INIT_TAC "s0" THEN X86_STEPS_TAC AES_HW_CBC_ENCRYPT_EXEC (1--2) THEN
+    ENSURES_FINAL_STATE_TAC THEN ASM_REWRITE_TAC[];
+    ALL_TAC] THEN
+  SUBGOAL_THEN `val(word(16 * n):int64) = 16 * n /\ ~(16 * n = 0)`
+   STRIP_ASSUME_TAC THENL
+   [ASM_SIMP_TAC[VAL_WORD_BLOCKS] THEN UNDISCH_TAC `~(n = 0)` THEN ARITH_TAC;
+    ALL_TAC] THEN
+  ASM_CASES_TAC `n = 1` THENL
+   [FIRST_X_ASSUM(SUBST_ALL_TAC o check (fun th -> concl th = `n = 1`)) THEN
+    REWRITE_TAC[MULT_CLAUSES] THEN
+    ENSURES_INIT_TAC "s0" THEN
+    RULE_ASSUM_TAC(REWRITE_RULE[READ_ONE; READ_ONE16]) THEN
+    RULE_ASSUM_TAC(REWRITE_RULE[MULT_CLAUSES]) THEN GHOST_YMMS_TAC THEN
+    X86_XSTEPS_TAC AES_HW_CBC_ENCRYPT_EXEC (1--6) THEN XMMS_OF_YMMS_TAC THEN
+    RULE_ASSUM_TAC(REWRITE_RULE[MATCH_MP WORD_ZX_ROUNDS (ASSUME `r IN {9,11,13}`)]) THEN
+    MP_TAC(SPECL [`key:int64`; `ks:int128 list`; `r:num`; `buf:int64`; `iv:int128`;
+                  `(inp:num->int128) 0`; `ivec:int64`; `pc:num`] DEC_ONE) THEN
+    ASM_REWRITE_TAC[SOME_FLAGS] THEN
+    X86_BIGSTEP_TAC AES_HW_CBC_ENCRYPT_EXEC "s7" THEN
+    ENSURES_FINAL_STATE_TAC THEN ASM_REWRITE_TAC[READ_ONE; READ_ONE16; cbc_dec; SUB_REFL];
+    SUBGOAL_THEN `~(val(word_sub (word(16 * n)) (word 16):int64) = 0)` ASSUME_TAC THENL
+     [SUBGOAL_THEN `word_sub (word(16 * n)) (word 16):int64 = word(16 * n - 16)` SUBST1_TAC THENL
+       [SUBGOAL_THEN `16 <= 16 * n` (fun th -> REWRITE_TAC[WORD_SUB; th]) THEN ASM_ARITH_TAC; ALL_TAC] THEN
+      SUBGOAL_THEN `val(word(16 * n - 16):int64) = 16 * n - 16` SUBST1_TAC THENL
+       [MATCH_MP_TAC VAL_WORD_EQ THEN REWRITE_TAC[DIMINDEX_64] THEN ASM_ARITH_TAC;
+        ASM_ARITH_TAC];
+      ALL_TAC] THEN
+    ASM_CASES_TAC `n <= 5` THENL
+     [SUBGOAL_THEN `1 <= n /\ ~(n = 1) /\ n <= 5` STRIP_ASSUME_TAC THENL
+       [ASM_ARITH_TAC; ALL_TAC] THEN
+      SUBGOAL_THEN `nonoverlapping (ivec:int64,16) (word_add stackpointer (word 18446744073709551608),8) /\
+                    nonoverlapping (word pc:int64,3017) (word_add stackpointer (word 18446744073709551608),8) /\
+                    nonoverlapping (word_add stackpointer (word 18446744073709551608),8) (word pc:int64,3017) /\
+                    nonoverlapping (key:int64,16 * (r + 2)) (word_add stackpointer (word 18446744073709551608),8) /\
+                    nonoverlapping (word_add stackpointer (word 18446744073709551608),8) (key:int64,16 * (r + 2))`
+        STRIP_ASSUME_TAC THENL
+       [ASM_MESON_TAC[STACK_SLOT; NONOVERLAPPING_SYM]; ALL_TAC] THEN
+      SUBGOAL_THEN `16 * n < 80 \/ val(word_sub (word(16 * n)) (word 80):int64) = 0` ASSUME_TAC THENL
+       [ASM_CASES_TAC `n = 5` THENL
+         [ASM_REWRITE_TAC[] THEN DISJ2_TAC THEN CONV_TAC(ONCE_DEPTH_CONV NUM_MULT_CONV) THEN
+          REWRITE_TAC[WORD_SUB_REFL; VAL_WORD_0];
+          DISJ1_TAC THEN ASM_ARITH_TAC];
+        ALL_TAC] THEN
+      ENSURES_INIT_TAC "s0" THEN GHOST_YMMS_TAC THEN
+      X86_XSTEPS_TAC AES_HW_CBC_ENCRYPT_EXEC (1--17) THEN XMMS_OF_YMMS_TAC THEN
+      RULE_ASSUM_TAC(REWRITE_RULE[MATCH_MP WORD_ZX_ROUNDS (ASSUME `r IN {9,11,13}`)]) THEN
+      RULE_ASSUM_TAC(fun th -> if can (term_match [] `read (memory :> bytes64 (word_sub (stackpointer:int64) (word 8))) s = rbp0`) (concl th) then REWRITE_RULE[SUB8] th else th) THEN
+      RULE_ASSUM_TAC(fun th -> if can (find_term (fun t -> is_const t && fst(dest_const t) = "MAYCHANGE")) (concl th) then REWRITE_RULE[SUB8] th else th) THEN
+      MP_TAC(SPECL [`key:int64`; `r:num`; `buf:int64`; `n:num`; `ivec:int64`;
+                    `fp:int64`; `stackpointer:int64`; `pc:num`] DHYP_LEMMA) THEN
+      ASM_REWRITE_TAC[ALL] THEN STRIP_TAC THEN
+      MP_TAC(SPECL [`key:int64`; `ks:int128 list`; `r:num`; `buf:int64`; `n:num`;
+                    `0`; `n:num`; `iv:int128`; `inp:num->int128`; `ivec:int64`;
+                    `fp:int64`; `stackpointer:int64`; `rbp0:int64`; `pc:num`] TAIL_A) THEN
+      REWRITE_TAC[MULT_CLAUSES; ADD_CLAUSES; WORD_ADD_0; cbc_num; READ_BYTES_Z] THEN
+      ASM_REWRITE_TAC[ALL; SOME_FLAGS] THEN
+      X86_BIGSTEP_TAC AES_HW_CBC_ENCRYPT_EXEC "s18" THEN
+      ENSURES_FINAL_STATE_TAC THEN ASM_REWRITE_TAC[];
+      SUBGOAL_THEN `6 <= n` ASSUME_TAC THENL [ASM_ARITH_TAC; ALL_TAC] THEN
+      SUBGOAL_THEN `~(16 * n < 80 \/ val(word_sub (word(16 * n)) (word 80):int64) = 0)` ASSUME_TAC THENL
+       [SUBGOAL_THEN `word_sub (word(16 * n)) (word 80):int64 = word(16 * n - 80)` SUBST1_TAC THENL
+         [SUBGOAL_THEN `80 <= 16 * n` (fun th -> REWRITE_TAC[WORD_SUB; th]) THEN ASM_ARITH_TAC; ALL_TAC] THEN
+        SUBGOAL_THEN `val(word(16 * n - 80):int64) = 16 * n - 80` SUBST1_TAC THENL
+         [MATCH_MP_TAC VAL_WORD_EQ THEN REWRITE_TAC[DIMINDEX_64] THEN ASM_ARITH_TAC;
+          ASM_ARITH_TAC];
+        ALL_TAC] THEN
+      SUBGOAL_THEN STACK_FACTS STRIP_ASSUME_TAC THENL
+       [ASM_MESON_TAC[STACK_SLOT; NONOVERLAPPING_SYM]; ALL_TAC] THEN
+      ASM_CASES_TAC `n <= 7` THENL
+       [SUBGOAL_THEN `16 * n < 112 \/ val(word_sub (word(16 * n)) (word 112):int64) = 0` ASSUME_TAC THENL
+         [ASM_CASES_TAC `n = 7` THENL
+           [ASM_REWRITE_TAC[] THEN DISJ2_TAC THEN CONV_TAC(ONCE_DEPTH_CONV NUM_MULT_CONV) THEN
+            REWRITE_TAC[WORD_SUB_REFL; VAL_WORD_0];
+            DISJ1_TAC THEN ASM_ARITH_TAC];
+          ALL_TAC] THEN
+        ENSURES_INIT_TAC "s0" THEN MEM6_TAC THEN KEY0_TAC THEN GHOST_YMMS_TAC THEN
+        X86_XSTEPS_TAC AES_HW_CBC_ENCRYPT_EXEC (1--13) THEN
+        X86_XSTEPS_TAC AES_HW_CBC_ENCRYPT_EXEC (14--31) THEN XMMS_OF_YMMS_TAC THEN
+        SLOT_TAC THEN
+        MP_TAC(SPECL FRAME_ARGS DHYP_LEMMA) THEN
+        ASM_REWRITE_TAC[ALL] THEN STRIP_TAC THEN
+        MP_TAC(SPECL [`key:int64`; `ks:int128 list`; `r:num`; `buf:int64`; `n:num`;
+                      `0`; `n:num`; `iv:int128`; `inp:num->int128`; `ivec:int64`;
+                      `fp:int64`; `stackpointer:int64`; `rbp0:int64`; `pc:num`] TAIL_B) THEN
+        REWRITE_TAC[MULT_CLAUSES; ADD_CLAUSES; WORD_ADD_0; cbc_num; READ_BYTES_Z] THEN
+        ASM_REWRITE_TAC[ALL; SOME_FLAGS] THEN
+        X86_BIGSTEP_TAC AES_HW_CBC_ENCRYPT_EXEC "s32" THEN
+        ENSURES_FINAL_STATE_TAC THEN ASM_REWRITE_TAC[];
+        SUBGOAL_THEN `8 <= n` ASSUME_TAC THENL [ASM_ARITH_TAC; ALL_TAC] THEN
+        SUBGOAL_THEN `~(16 * n < 112 \/ val(word_sub (word(16 * n)) (word 112):int64) = 0)` ASSUME_TAC THENL
+         [SUBGOAL_THEN `word_sub (word(16 * n)) (word 112):int64 = word(16 * n - 112)` SUBST1_TAC THENL
+           [SUBGOAL_THEN `112 <= 16 * n` (fun th -> REWRITE_TAC[WORD_SUB; th]) THEN ASM_ARITH_TAC; ALL_TAC] THEN
+          SUBGOAL_THEN `val(word(16 * n - 112):int64) = 16 * n - 112` SUBST1_TAC THENL
+           [MATCH_MP_TAC VAL_WORD_EQ THEN REWRITE_TAC[DIMINDEX_64] THEN ASM_ARITH_TAC;
+            ASM_ARITH_TAC];
+          ALL_TAC] THEN
+        ENSURES_INIT_TAC "s0" THEN MEM6_TAC THEN KEY0_TAC THEN GHOST_YMMS_TAC THEN
+        X86_XSTEPS_TAC AES_HW_CBC_ENCRYPT_EXEC (1--13) THEN
+        X86_XSTEPS_TAC AES_HW_CBC_ENCRYPT_EXEC (14--34) THEN XMMS_OF_YMMS_TAC THEN
+        SLOT_TAC THEN
+        SUBGOAL_THEN `word_sub (word(16 * n)) (word 112):int64 = word(16 * n - 112)` (fun th -> RULE_ASSUM_TAC(REWRITE_RULE[th])) THENL
+         [SUBGOAL_THEN `112 <= 16 * n` (fun th -> REWRITE_TAC[WORD_SUB; th]) THEN
+          UNDISCH_TAC `8 <= n` THEN ARITH_TAC; ALL_TAC] THEN
+        MP_TAC(SPECL FRAME_ARGS DHYP_LEMMA) THEN
+        ASM_REWRITE_TAC[ALL] THEN STRIP_TAC THEN
+        SUBGOAL_THEN `?p e. p + 1 + e = n /\ e < 8 /\ n MOD 8 = e` STRIP_ASSUME_TAC THENL
+         [MAP_EVERY EXISTS_TAC [`n - 1 - n MOD 8`; `n MOD 8`] THEN UNDISCH_TAC `8 <= n` THEN ARITH_TAC; ALL_TAC] THEN
+        MP_TAC(SPECL [`key:int64`; `ks:int128 list`; `r:num`; `buf:int64`; `n:num`;
+                      `iv:int128`; `inp:num->int128`; `pc:num`; `p:num`; `e:num`] LOOP) THEN
+        ANTS_TAC THENL [ASM_REWRITE_TAC[]; ALL_TAC] THEN
+        DISCH_THEN(MP_TAC o SPECL [`n:num`; `0`]) THEN
+        REWRITE_TAC[MULT_CLAUSES; ADD_CLAUSES; WORD_ADD_0; cbc_num; READ_BYTES_Z] THEN
+        ASM_REWRITE_TAC[ALL; SOME_FLAGS] THEN
+        X86_BIGSTEP_TAC AES_HW_CBC_ENCRYPT_EXEC "s35" THEN
+        MP_TAC(SPECL [`key:int64`; `ks:int128 list`; `r:num`; `buf:int64`; `n:num`; `p:num`; `e:num`;
+                      `iv:int128`; `inp:num->int128`; `ivec:int64`;
+                      `fp:int64`; `stackpointer:int64`; `rbp0:int64`; `pc:num`] EXIT) THEN
+        ASM_REWRITE_TAC[ALL; SOME_FLAGS] THEN
+        ANTS_TAC THENL
+         [FIRST_X_ASSUM(MP_TAC o check (fun th -> concl th = `p + 1 + e = n`)) THEN ARITH_TAC;
+          ALL_TAC] THEN
+        X86_BIGSTEP_TAC AES_HW_CBC_ENCRYPT_EXEC "s36" THEN
+        ENSURES_FINAL_STATE_TAC THEN ASM_REWRITE_TAC[]]]]);;
+
+let SLOT1_EQ = prove
+ (`!stk:int64. word_add stk (word 18446744073709551608) =
+               word_add (word_sub stk (word 48)) (word 40)`,
+  GEN_TAC THEN
+  SUBGOAL_THEN `word 18446744073709551608:int64 = word_neg(word 8)` SUBST1_TAC THENL
+   [CONV_TAC WORD_REDUCE_CONV; ALL_TAC] THEN
+  SUBGOAL_THEN `word 40:int64 = word_sub (word 48) (word 8)` SUBST1_TAC THENL
+   [CONV_TAC WORD_REDUCE_CONV; CONV_TAC WORD_RULE]);;
+
+(* The same, with the frame's two stack slots as the 48 bytes under the stack
+   pointer. *)
+let DEC_CORE_GOAL = `!key ks r buf n iv inp ivec enc pc stackpointer rbp0.
+  r IN {9,11,13} /\ LENGTH (ks:int128 list) = r + 2 /\ 16 * n < 2 EXP 64 /\
+  val(word_zx enc:int32) = 0 /\
+  ALL (nonoverlapping (buf:int64,16 * n))
+      [(key:int64,16 * (r + 2)); (word pc,0xbc9); (ivec:int64,16);
+       (word_sub stackpointer (word 48),48)] /\
+  ALL (nonoverlapping (ivec,16))
+      [(key,16 * (r + 2)); (word pc,0xbc9); (word_sub stackpointer (word 48),48)] /\
+  ALL (nonoverlapping (word_sub stackpointer (word 48),48))
+      [(key,16 * (r + 2)); (word pc,0xbc9)]
+  ==> ensures x86
+   (\s. bytes_loaded s (word pc) aes_hw_cbc_encrypt_mc /\
+        read RIP s = word pc /\ read RSP s = stackpointer /\ read RBP s = rbp0 /\
+        read RDI s = buf /\ read RSI s = buf /\ read RDX s = word(16 * n) /\
+        read RCX s = key /\ read R8 s = ivec /\ read R9 s = enc /\
+        read (memory :> bytes32(word_add key (word 240))) s = word r /\
+        read (memory :> bytes(key,16 * (r + 2))) s = aes_key_num ks /\
+        read (memory :> bytes128 ivec) s = iv /\
+        read (memory :> bytes(buf,16 * n)) s = cbc_num inp 0 n)
+   (\s. read RIP s = word(pc + 0x870) /\
+        read RSP s = stackpointer /\ read RBP s = rbp0 /\
+        read (memory :> bytes(buf,16 * n)) s = cbc_num (cbc_dec ks iv inp) 0 n /\
+        read (memory :> bytes128 ivec) s = (if n = 0 then iv else inp(n - 1)))
+   (MAYCHANGE [RIP; RSP; RAX; RCX; RDX; RSI; RDI; RBP; R10; R11] ,,
+    MAYCHANGE [ZMM0; ZMM1; ZMM2; ZMM3; ZMM4; ZMM5; ZMM6; ZMM7;
+               ZMM8; ZMM9; ZMM10; ZMM11; ZMM12; ZMM13; ZMM14; ZMM15] ,,
+    MAYCHANGE SOME_FLAGS ,,
+    MAYCHANGE [memory :> bytes(buf,16 * n); memory :> bytes(ivec,16);
+               memory :> bytes(word_sub stackpointer (word 48),48)] ,,
+    MAYCHANGE [events])`;;
+
+let DEC_CORE = time prove
+ (DEC_CORE_GOAL,
+  REPEAT GEN_TAC THEN STRIP_TAC THEN
+  MP_TAC(SPECL [`key:int64`; `ks:int128 list`; `r:num`; `buf:int64`; `n:num`;
+                `iv:int128`; `inp:num->int128`; `ivec:int64`; `enc:int64`; `pc:num`;
+                `stackpointer:int64`; `rbp0:int64`;
+                `word_and (word_sub (word_sub stackpointer (word 8)) (word 16))
+                          (word 18446744073709551600):int64`] DEC_FRAME) THEN
+  ASM_REWRITE_TAC[] THEN
+  DISCH_THEN(fun th ->
+    fun (asl,w as g) ->
+      let c1 = rand(concl th) in
+      let sub = prove(list_mk_icomb "subsumed" [c1; rand w],
+        X_CHOOSE_THEN `t:num` STRIP_ASSUME_TAC (SPEC `stackpointer:int64` ALIGN_SLOT) THEN
+        REWRITE_TAC[SOME_FLAGS] THEN ASM_REWRITE_TAC[SLOT1_EQ] THEN SUBSUMED_MAYCHANGE_TAC) in
+      ACCEPT_TAC (MATCH_MP ENSURES_FRAME_SUBSUMED (CONJ sub th)) g));;
+
+(* The same without rbp in the frame, as the code saves it and restores it. *)
+let DEC_CORE3_GOAL =
+  subst [`MAYCHANGE [RIP; RSP; RAX; RCX; RDX; RSI; RDI; R10; R11]`,
+         `MAYCHANGE [RIP; RSP; RAX; RCX; RDX; RSI; RDI; RBP; R10; R11]`]
+        DEC_CORE_GOAL;;
+
+let ENSURES_WEAKEN = prove
+ (`!(P:x86state->bool) Q Q' C C'.
+     (!s. Q s ==> Q' s) /\ C subsumed C' /\ ensures x86 P Q C
+     ==> ensures x86 P Q' C'`,
+  MESON_TAC[ENSURES_POSTCONDITION_THM; ENSURES_FRAME_SUBSUMED]);;
+
+let PRESERVE_RBP_TAC =
+  MATCH_MP_TAC(ISPECL [`RBP`; `rbp0:int64`] ENSURES_MAYCHANGE_EXISTING_PRESERVED) THEN
+  CONJ_TAC THENL [CONV_TAC EXTENSIONALLY_VALID_COMPONENT_CONV; ALL_TAC] THEN
+  REWRITE_TAC[] THEN CONJ_TAC THENL
+   [REWRITE_TAC[MAYCHANGE; SEQ_ID] THEN
+    REWRITE_TAC[GSYM SEQ_ASSOC] THEN
+    PURE_REWRITE_TAC[ASSIGNS_SEQ] THEN
+    CONV_TAC (TOP_DEPTH_CONV BETA_CONV) THEN
+    REWRITE_TAC[ASSIGNS_THM] THEN
+    REWRITE_TAC[LEFT_IMP_EXISTS_THM] THEN REPEAT GEN_TAC THEN
+    DISCH_THEN(SUBST1_TAC o SYM) THEN
+    CONV_TAC(LAND_CONV(DEPTH_CONV
+     COMPONENT_READ_OVER_WRITE_ORTHOGONAL_CONV)) THEN
+    REFL_TAC;
+    ALL_TAC] THEN
+  CONJ_TAC THENL
+   [REPEAT STRIP_TAC THEN ASM_REWRITE_TAC[] THEN NO_TAC;
+    REWRITE_TAC[GSYM CONJ_ASSOC; GSYM SEQ_ASSOC]];;
+
+let DEC_CORE3 = time prove
+ (DEC_CORE3_GOAL,
+  REWRITE_TAC[SOME_FLAGS] THEN REPEAT GEN_TAC THEN STRIP_TAC THEN PRESERVE_RBP_TAC THEN
+  MP_TAC(SPECL [`key:int64`; `ks:int128 list`; `r:num`; `buf:int64`; `n:num`;
+                `iv:int128`; `inp:num->int128`; `ivec:int64`; `enc:int64`; `pc:num`;
+                `stackpointer:int64`; `rbp0:int64`] DEC_CORE) THEN
+  ASM_REWRITE_TAC[] THEN
+  DISCH_THEN(fun th ->
+    fun (asl,w as g) ->
+      let th = REWRITE_RULE[SOME_FLAGS] th in
+      let c1 = rand(concl th) and q1 = rand(rator(concl th)) in
+      let c2 = rand w and q2 = rand(rator w) in
+      let s = `s:x86state` in
+      let qimp = prove(mk_forall(s, mk_imp(mk_comb(q1,s), mk_comb(q2,s))),
+        GEN_TAC THEN BETA_TAC THEN STRIP_TAC THEN ASM_REWRITE_TAC[]) in
+      let sub = prove(list_mk_icomb "subsumed" [c1; c2], SUBSUMED_MAYCHANGE_TAC) in
+      ACCEPT_TAC (MATCH_MP ENSURES_WEAKEN (CONJ qimp (CONJ sub th))) g));;
+
+(* The one-line gap between the stack's 48 bytes and its return address. *)
+let STACK_RET = prove
+ (`!stk:int64. nonoverlapping (word_sub stk (word 48),48) (stk,8)`,
+  GEN_TAC THEN REWRITE_TAC[NONOVERLAPPING_QFREE; DIMINDEX_64] THEN
+  SUBGOAL_THEN `word_sub (word_sub stk (word 48)) stk:int64 = word_neg(word 48)` SUBST1_TAC THENL
+   [CONV_TAC WORD_RULE; ALL_TAC] THEN
+  SUBGOAL_THEN `val(word_neg(word 48):int64) = 2 EXP 64 - 48` SUBST1_TAC THENL
+   [REWRITE_TAC[VAL_WORD_NEG; VAL_WORD; DIMINDEX_64] THEN CONV_TAC NUM_REDUCE_CONV;
+    ARITH_TAC]);;
+
+(* Decryption goal. C_ARGUMENTS [buf; buf; ...] specializes inp == out, since
+   the sole caller in rind (AesHwDecKey::cbc_decrypt) decrypts in place. *)
+let DEC_SUB_GOAL = `!buf n key ks r ivec iv inp enc pc stackpointer returnaddress.
+  r IN {9,11,13} /\ LENGTH (ks:int128 list) = r + 2 /\ 16 * n < 2 EXP 64 /\
+  val(word_zx enc:int32) = 0 /\
+  ALL (nonoverlapping (buf:int64,16 * n))
+      [(key:int64,256); (ivec:int64,16); (word pc,0xbc9);
+       (word_sub stackpointer (word 48),48); (stackpointer,8)] /\
+  ALL (nonoverlapping (ivec,16))
+      [(key,256); (word pc,0xbc9); (word_sub stackpointer (word 48),48);
+       (stackpointer,8)] /\
+  ALL (nonoverlapping (word_sub stackpointer (word 48),48))
+      [(key,256); (word pc,0xbc9)]
+  ==> ensures x86
+   (\s. bytes_loaded s (word pc) aes_hw_cbc_encrypt_mc /\
+        read RIP s = word pc /\
+        read RSP s = stackpointer /\
+        read (memory :> bytes64 stackpointer) s = returnaddress /\
+        C_ARGUMENTS [buf; buf; word(16 * n); key; ivec; enc] s /\
+        read (memory :> bytes32(word_add key (word 240))) s = word r /\
+        (!i. i < r + 2
+             ==> read (memory :> bytes128(word_add key (word(16 * i)))) s = EL i ks) /\
+        read (memory :> bytes128 ivec) s = iv /\
+        (!i. i < n
+             ==> read (memory :> bytes128(word_add buf (word(16 * i)))) s = inp i))
+   (\s. read RIP s = returnaddress /\
+        read RSP s = word_add stackpointer (word 8) /\
+        (!i. i < n
+             ==> read (memory :> bytes128(word_add buf (word(16 * i)))) s =
+                 cbc_dec ks iv inp i) /\
+        read (memory :> bytes128 ivec) s = (if n = 0 then iv else inp(n - 1)))
+   (MAYCHANGE [RSP] ,, MAYCHANGE_REGS_AND_FLAGS_PERMITTED_BY_ABI ,,
+    MAYCHANGE [memory :> bytes(buf,16 * n); memory :> bytes(ivec,16);
+               memory :> bytes(word_sub stackpointer (word 48),48)] ,,
+    MAYCHANGE [events])`;;
+
+let AES_HW_CBC_ENCRYPT_DECRYPT_SUBROUTINE_CORRECT = time prove
+ (DEC_SUB_GOAL,
+  REWRITE_TAC[ALL; C_ARGUMENTS; MAYCHANGE_REGS_AND_FLAGS_PERMITTED_BY_ABI] THEN
+  REPEAT GEN_TAC THEN STRIP_TAC THEN
+  SUBGOAL_THEN `nonoverlapping (buf:int64,16 * n) (key:int64,16 * (r + 2)) /\
+                nonoverlapping (ivec:int64,16) (key,16 * (r + 2)) /\
+                nonoverlapping (word_sub stackpointer (word 48),48) (key,16 * (r + 2))`
+    STRIP_ASSUME_TAC THENL
+   [REPEAT CONJ_TAC THEN MATCH_MP_TAC NONOVERLAPPING_KEY THEN ASM_REWRITE_TAC[];
+    ALL_TAC] THEN
+  ENSURES_INIT_TAC "s0" THEN
+  SUBGOAL_THEN `read (memory :> bytes(buf,16 * n)) s0 = cbc_num inp 0 n /\
+                read (memory :> bytes(key,16 * (r + 2))) s0 = aes_key_num ks`
+   STRIP_ASSUME_TAC THENL
+   [REWRITE_TAC[READ_BLOCKS_0] THEN CONJ_TAC THENL
+     [FIRST_ASSUM ACCEPT_TAC;
+      REWRITE_TAC[GSYM(ASSUME `LENGTH(ks:int128 list) = r + 2`); READ_KEY] THEN
+      ASM_REWRITE_TAC[]];
+    ALL_TAC] THEN
+  MP_TAC(SPECL [`key:int64`; `ks:int128 list`; `r:num`; `buf:int64`; `n:num`;
+                `iv:int128`; `inp:num->int128`; `ivec:int64`; `enc:int64`; `pc:num`;
+                `stackpointer:int64`; `read RBP s0`] DEC_CORE3) THEN
+  ASM_REWRITE_TAC[ALL; SOME_FLAGS] THEN
+  X86_BIGSTEP_TAC AES_HW_CBC_ENCRYPT_EXEC "s1" THEN
+  X86_STEPS_TAC AES_HW_CBC_ENCRYPT_EXEC [2] THEN
+  ENSURES_FINAL_STATE_TAC THEN ASM_REWRITE_TAC[GSYM READ_BLOCKS_0; ETA_AX]);;
