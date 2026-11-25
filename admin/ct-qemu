@@ -165,8 +165,8 @@ def main():
     for name, cpu in runs:
         with tempfile.TemporaryDirectory() as tmp:
             diff, records = compare(target, exe, name, cpu, tmp, plugin)
+        planted = is_planted(name)
         name = "{} ({})".format(name, cpu)
-        planted = is_planted(name.split()[0])
         if records == 0:
             print("FAIL {}: traced nothing".format(name))
             failed = True

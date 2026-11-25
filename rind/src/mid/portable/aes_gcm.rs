@@ -562,8 +562,9 @@ mod tests {
     // under qemu's `max` CPU and on NEON under the Cortex-A15, for each key
     // size, with a secret key, nonce or IV, AAD, and message, for
     // `admin/ct-qemu`. The message spans a GHASH chunk, then 5 blocks, which
-    // take the CTR routine's 3-block loop and 2-block tail, and a partial
-    // block; the AAD is an even run of blocks and a partial one.
+    // take the crypto extension's 3-block loop and 2-block tail, and on NEON
+    // bsaes's whole batches for the chunk and vpaes for the 5, then a
+    // partial block; the AAD is an even run of blocks and a partial one.
     #[cfg(rind_backend = "arm")]
     #[test]
     #[ignore = "admin/ct-qemu runs it under qemu-arm"]
