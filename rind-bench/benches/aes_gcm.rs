@@ -111,6 +111,7 @@ fn key_setup(
         b.iter(|| aws_lc_rs::aead::UnboundKey::new(aws, black_box(key)).unwrap())
     });
     group.bench_function(BenchmarkId::new("rind", "key"), |b| {
+        let _dit = criterion::rind_dit();
         b.iter(|| rind::aead::Key::new(ours, black_box(key)).unwrap())
     });
     group.bench_function(BenchmarkId::new("verified-garbage", "key"), |b| {
@@ -162,13 +163,12 @@ fn aes128_gcm(c: &mut Criterion) {
             let key = aes_gcm::Aes128Gcm::new_from_slice(&key).unwrap();
             b.iter(|| test_rc_aes128_gcm(&key, &nonce, aad, &mut buf));
         });
-        for (lib, _dit) in criterion::rind_rows() {
-            group.bench_function(BenchmarkId::new(lib, size_name), |b| {
-                use rind::aead::{AES_128_GCM, Key};
-                let key = Key::new(&AES_128_GCM, &key).unwrap();
-                b.iter(|| test_rind_aes_gcm(&key, &nonce, aad, &mut buf));
-            });
-        }
+        group.bench_function(BenchmarkId::new("rind", size_name), |b| {
+            let _dit = criterion::rind_dit();
+            use rind::aead::{AES_128_GCM, Key};
+            let key = Key::new(&AES_128_GCM, &key).unwrap();
+            b.iter(|| test_rind_aes_gcm(&key, &nonce, aad, &mut buf));
+        });
         vg_seal(
             &mut group,
             &key,
@@ -195,6 +195,19 @@ fn aes128_gcm(c: &mut Criterion) {
             let mut key = ossl_aead::Sealer::new(openssl::cipher::Cipher::aes_128_gcm(), &key);
             b.iter(|| key.seal(&nonce, aad, &mut buf));
         });
+    }
+    group.finish();
+
+    if let Some(mut group) = criterion::dit_per_call(c, "aes128-gcm") {
+        for (size, size_name, aad) in criterion::dit_per_call_aead_rows() {
+            let mut buf = vec![0u8; size];
+            group.throughput(Throughput::Bytes(size as u64));
+            group.bench_function(BenchmarkId::new("rind", size_name), |b| {
+                use rind::aead::{AES_128_GCM, Key};
+                let key = Key::new(&AES_128_GCM, &key).unwrap();
+                b.iter(|| test_rind_aes_gcm(&key, &nonce, aad, &mut buf));
+            });
+        }
     }
 }
 
@@ -234,13 +247,12 @@ fn aes256_gcm(c: &mut Criterion) {
             let key = aes_gcm::Aes256Gcm::new_from_slice(&key).unwrap();
             b.iter(|| test_rc_aes256_gcm(&key, &nonce, aad, &mut buf));
         });
-        for (lib, _dit) in criterion::rind_rows() {
-            group.bench_function(BenchmarkId::new(lib, size_name), |b| {
-                use rind::aead::{AES_256_GCM, Key};
-                let key = Key::new(&AES_256_GCM, &key).unwrap();
-                b.iter(|| test_rind_aes_gcm(&key, &nonce, aad, &mut buf));
-            });
-        }
+        group.bench_function(BenchmarkId::new("rind", size_name), |b| {
+            let _dit = criterion::rind_dit();
+            use rind::aead::{AES_256_GCM, Key};
+            let key = Key::new(&AES_256_GCM, &key).unwrap();
+            b.iter(|| test_rind_aes_gcm(&key, &nonce, aad, &mut buf));
+        });
         vg_seal(
             &mut group,
             &key,
@@ -379,21 +391,20 @@ fn open<K: KeySize>(
                     .unwrap();
             });
         });
-        for (lib, _dit) in criterion::rind_rows() {
-            group.bench_function(BenchmarkId::new(lib, size_name), |b| {
-                b.iter(|| {
-                    pt.copy_from_slice(ct);
-                    rind_key
-                        .open_in_place_separate_tag(
-                            rind::aead::Nonce::assume_unique_for_key(nonce),
-                            aad,
-                            tag,
-                            pt,
-                        )
-                        .unwrap();
-                });
+        group.bench_function(BenchmarkId::new("rind", size_name), |b| {
+            let _dit = criterion::rind_dit();
+            b.iter(|| {
+                pt.copy_from_slice(ct);
+                rind_key
+                    .open_in_place_separate_tag(
+                        rind::aead::Nonce::assume_unique_for_key(nonce),
+                        aad,
+                        tag,
+                        pt,
+                    )
+                    .unwrap();
             });
-        }
+        });
         vg_open(
             &mut group,
             key,
@@ -475,6 +486,7 @@ fn aes192_gcm(c: &mut Criterion) {
         })
     });
     group.bench_function(BenchmarkId::new("rind", "key"), |b| {
+        let _dit = criterion::rind_dit();
         b.iter(|| rind::aead::Key::new(&rind::aead::AES_192_GCM, black_box(&key)).unwrap())
     });
     group.bench_function(BenchmarkId::new("verified-garbage", "key"), |b| {
@@ -486,11 +498,10 @@ fn aes192_gcm(c: &mut Criterion) {
         group.bench_function(BenchmarkId::new("aws-lc-rs", size_name), |b| {
             b.iter(|| test_aws_aes_gcm(&aws_key, &nonce, aad, &mut buf));
         });
-        for (lib, _dit) in criterion::rind_rows() {
-            group.bench_function(BenchmarkId::new(lib, size_name), |b| {
-                b.iter(|| test_rind_aes_gcm(&rind_key, &nonce, aad, &mut buf));
-            });
-        }
+        group.bench_function(BenchmarkId::new("rind", size_name), |b| {
+            let _dit = criterion::rind_dit();
+            b.iter(|| test_rind_aes_gcm(&rind_key, &nonce, aad, &mut buf));
+        });
         vg_seal(
             &mut group,
             &key,
@@ -526,21 +537,20 @@ fn aes192_gcm(c: &mut Criterion) {
                     .unwrap();
             });
         });
-        for (lib, _dit) in criterion::rind_rows() {
-            group.bench_function(BenchmarkId::new(lib, size_name), |b| {
-                b.iter(|| {
-                    pt.copy_from_slice(ct);
-                    rind_key
-                        .open_in_place_separate_tag(
-                            rind::aead::Nonce::assume_unique_for_key(nonce),
-                            aad,
-                            tag,
-                            pt,
-                        )
-                        .unwrap();
-                });
+        group.bench_function(BenchmarkId::new("rind", size_name), |b| {
+            let _dit = criterion::rind_dit();
+            b.iter(|| {
+                pt.copy_from_slice(ct);
+                rind_key
+                    .open_in_place_separate_tag(
+                        rind::aead::Nonce::assume_unique_for_key(nonce),
+                        aad,
+                        tag,
+                        pt,
+                    )
+                    .unwrap();
             });
-        }
+        });
         vg_open(
             &mut group,
             &key,

@@ -8,7 +8,6 @@ function = "rind::low::posint::mul_word_mod"
 why = "Divides by the top word of a public RSA modulus, for `PosInt::pub_montifier`."
 [public.holds]
 "x86_64-unknown-linux-gnu" = "calls __udivti3"
-"aarch64-unknown-linux-gnu" = "calls __udivti3"
 "x86_64-unknown-linux-gnu+portable" = "calls __udivti3"
 "loongarch64-unknown-linux-gnu" = "calls __udivti3"
 "powerpc-unknown-linux-gnu" = "calls __udivti3"

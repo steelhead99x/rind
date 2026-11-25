@@ -1,24 +1,26 @@
 name: Dart release
 
-# Releases rind-dart's Dart package when its version's tag is pushed: attaches
-# the prebuilt libraries to the tag's GitHub release, pins them in the
-# package, and publishes it to pub.dev through pub.dev's automated
-# publishing, where the run's OIDC token proves its origin, so no pub.dev
-# credential is stored. pub.dev accepts only this repository, a
-# `rind-dart-v{{version}}` tag, and the `pub.dev` environment, which only
-# those tags can deploy to and which alone holds the GitHub App key that
-# creates the release.
+# Publishes rind-dart's Dart packages to pub.dev when a version's tag is
+# pushed, through pub.dev's automated publishing, where the run's OIDC token
+# proves its origin, so no pub.dev credential is stored. A
+# `rind-dart-v{{version}}` tag releases rind: it attaches the prebuilt
+# libraries to the tag's GitHub release, pins them in the package, and
+# publishes it. A `rind-cryptography-v{{version}}` tag publishes
+# rind_cryptography. pub.dev accepts each package only from this repository,
+# its tag, and the `pub.dev` environment, which only those tags can deploy to
+# and which alone holds the GitHub App key that creates rind's release.
 on:
   push:
     tags:
       - "rind-dart-v*"
+      - "rind-cryptography-v*"
 
 permissions:
   contents: read
 
 jobs:
   libraries:
-    if: ${{ github.repository_owner == 'kixel-ai' }}
+    if: ${{ github.repository_owner == 'kixel-ai' && startsWith(github.ref_name, 'rind-dart-v') }}
     permissions:
       contents: read
     uses: ./.github/workflows/dart-libraries.yml
@@ -54,7 +56,7 @@ jobs:
           toolchain: stable
 
       # Given id-token, it also fetches the token pub.dev accepts.
-      - uses: dart-lang/setup-dart@6afc89df92d6eb3834022f73cd65adc8cdfcb92d # v1.8.1
+      - uses: dart-lang/setup-dart@2286a0c042b44434fe26d292bbce8d34f7ec662b # v1.8.2
 
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -108,4 +110,52 @@ jobs:
 
       - name: Publish
         working-directory: ${{ runner.temp }}/rind-dart
+        run: dart pub publish --force
+
+  # rind_cryptography depends on rind from pub.dev, whose release carries the
+  # prebuilt libraries, so this builds nothing and tests what an app gets.
+  cryptography:
+    name: Publish rind_cryptography
+    if: ${{ github.repository_owner == 'kixel-ai' && startsWith(github.ref_name, 'rind-cryptography-v') }}
+    runs-on: ubuntu-latest
+    environment: pub.dev
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Given id-token, it also fetches the token pub.dev accepts.
+      - uses: dart-lang/setup-dart@2286a0c042b44434fe26d292bbce8d34f7ec662b # v1.8.2
+
+      # Without the override that points it at the rind beside it, or the
+      # user-define that builds that rind from source. Staged outside the
+      # checkout, as rind's package is.
+      - name: Stage the package as pub.dev receives it
+        run: |
+          cp -R rind-dart/cryptography "$RUNNER_TEMP/rind_cryptography"
+          rm "$RUNNER_TEMP/rind_cryptography/pubspec_overrides.yaml"
+          yq -i 'del(.hooks)' "$RUNNER_TEMP/rind_cryptography/pubspec.yaml"
+
+      - name: Check the tag names the package's version
+        run: |
+          version=$(yq .version "$RUNNER_TEMP/rind_cryptography/pubspec.yaml")
+          if [[ "$GITHUB_REF_NAME" != "rind-cryptography-v$version" ]]; then
+            echo "::error::tag $GITHUB_REF_NAME does not name pubspec.yaml's version $version"
+            exit 1
+          fi
+
+      # Downloads rind's prebuilt library, as an app's build does.
+      - name: Test the package
+        working-directory: ${{ runner.temp }}/rind_cryptography
+        run: |
+          dart pub get
+          dart test
+          dart run tool/upstream_test.dart
+
+      - name: Publish
+        working-directory: ${{ runner.temp }}/rind_cryptography
         run: dart pub publish --force

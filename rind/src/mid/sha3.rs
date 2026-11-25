@@ -57,6 +57,7 @@ pub(crate) type Shake256Sponge = Sponge<SHAKE_256_R_BYTES, SHAKE_PAD_BYTE>;
 /// its input.
 ///
 /// ML-KEM squeezes the sponges directly; ML-DSA reads through this.
+#[cfg(any(feature = "ml-dsa", test))]
 pub(crate) struct Shake<const R: usize> {
     sponge: SqueezingSponge<R>,
     buffer: [u8; R],
@@ -70,8 +71,10 @@ pub(crate) struct Shake<const R: usize> {
 pub(crate) type Shake128 = Shake<SHAKE_128_R_BYTES>;
 
 /// SHAKE256's reader.
+#[cfg(feature = "ml-dsa")]
 pub(crate) type Shake256 = Shake<SHAKE_256_R_BYTES>;
 
+#[cfg(any(feature = "ml-dsa", test))]
 impl<const R: usize> Shake<R> {
     /// Pads what `sponge` has absorbed, to read its output.
     pub(crate) fn new(sponge: &Sponge<R, SHAKE_PAD_BYTE>) -> Self {
@@ -215,7 +218,8 @@ pub(crate) struct Shake4x<const R: usize> {
     lanes: usize,
 }
 
-/// Four SHAKE128 instances in step.
+/// Four SHAKE128 instances in step, as ML-DSA expands its matrix.
+#[cfg(any(feature = "ml-dsa", test))]
 pub(crate) type Shake128x4 = Shake4x<SHAKE_128_R_BYTES>;
 
 /// Four SHAKE256 instances in step.
@@ -268,6 +272,7 @@ impl<const R: usize> Shake4x<R> {
 /// length, so they absorb in place, without being copied together.
 ///
 /// SLH-DSA hashes this way; unlike `Shake4x`, an input may span blocks.
+#[cfg(feature = "slh-dsa")]
 pub(crate) fn shake256_x4<const OUT: usize, const P: usize>(
     inputs: &[[&[u8]; P]],
     outputs: &mut [[u8; OUT]],
@@ -644,6 +649,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "slh-dsa")]
     #[test]
     fn shake256_x4_matches_single() {
         let _entry = Entry::new_secret();

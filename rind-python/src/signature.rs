@@ -4,7 +4,7 @@ use pyo3::types::PyBytes;
 use rind::{ecdsa, ed25519, rsa};
 
 use crate::rsa::KeySize;
-use crate::{Bytes, algorithm, bytes, constants, error, submodule};
+use crate::{Bytes, Secret, algorithm, bytes, constants, error, submodule};
 
 algorithm!(
     /// An algorithm an `EcdsaKeyPair` signs with.
@@ -189,7 +189,7 @@ impl EcdsaKeyPair {
 
     /// Loads a key pair for `algorithm` from PKCS#8 DER.
     #[staticmethod]
-    fn from_pkcs8(algorithm: &Bound<'_, EcdsaSigningAlgorithm>, der: Bytes<'_>) -> PyResult<Self> {
+    fn from_pkcs8(algorithm: &Bound<'_, EcdsaSigningAlgorithm>, der: Secret<'_>) -> PyResult<Self> {
         ecdsa::KeyPair::from_pkcs8(algorithm.get().inner, &der)
             .map(Box::new)
             .map(Self)
@@ -198,7 +198,7 @@ impl EcdsaKeyPair {
 
     /// Loads a key pair for `algorithm` from SEC1 `ECPrivateKey` DER.
     #[staticmethod]
-    fn from_sec1(algorithm: &Bound<'_, EcdsaSigningAlgorithm>, der: Bytes<'_>) -> PyResult<Self> {
+    fn from_sec1(algorithm: &Bound<'_, EcdsaSigningAlgorithm>, der: Secret<'_>) -> PyResult<Self> {
         ecdsa::KeyPair::from_sec1(algorithm.get().inner, &der)
             .map(Box::new)
             .map(Self)
@@ -211,7 +211,7 @@ impl EcdsaKeyPair {
     #[staticmethod]
     fn from_scalar_and_public_key(
         algorithm: &Bound<'_, EcdsaSigningAlgorithm>,
-        scalar: Bytes<'_>,
+        scalar: Secret<'_>,
         public_key: Bytes<'_>,
     ) -> PyResult<Self> {
         ecdsa::KeyPair::from_scalar_and_public_key(algorithm.get().inner, &scalar, &public_key)
@@ -271,7 +271,7 @@ impl Ed25519KeyPair {
     /// Loads a key pair from PKCS#8 v1 or v2 DER, refused if a v2 key's
     /// public key does not match.
     #[staticmethod]
-    fn from_pkcs8(der: Bytes<'_>) -> PyResult<Self> {
+    fn from_pkcs8(der: Secret<'_>) -> PyResult<Self> {
         ed25519::KeyPair::from_pkcs8(&der)
             .map(Box::new)
             .map(Self)
@@ -281,7 +281,7 @@ impl Ed25519KeyPair {
     /// Loads a 32-byte seed, as a JWK's `d` holds it, deriving its public
     /// key.
     #[staticmethod]
-    fn from_seed(seed: Bytes<'_>) -> PyResult<Self> {
+    fn from_seed(seed: Secret<'_>) -> PyResult<Self> {
         ed25519::KeyPair::from_seed(&seed)
             .map(Box::new)
             .map(Self)
@@ -290,7 +290,7 @@ impl Ed25519KeyPair {
 
     /// Loads a 32-byte seed, refused unless `public_key` is its public key.
     #[staticmethod]
-    fn from_seed_and_public_key(seed: Bytes<'_>, public_key: Bytes<'_>) -> PyResult<Self> {
+    fn from_seed_and_public_key(seed: Secret<'_>, public_key: Bytes<'_>) -> PyResult<Self> {
         ed25519::KeyPair::from_seed_and_public_key(&seed, &public_key)
             .map(Box::new)
             .map(Self)
@@ -347,7 +347,7 @@ impl RsaKeyPair {
 
     /// Loads a PKCS#8 RSA private key.
     #[staticmethod]
-    fn from_pkcs8(der: Bytes<'_>) -> PyResult<Self> {
+    fn from_pkcs8(der: Secret<'_>) -> PyResult<Self> {
         rsa::KeyPair::from_pkcs8(&der)
             .map(Box::new)
             .map(Self)
@@ -356,7 +356,7 @@ impl RsaKeyPair {
 
     /// Loads a PKCS#1 `RSAPrivateKey`.
     #[staticmethod]
-    fn from_pkcs1(der: Bytes<'_>) -> PyResult<Self> {
+    fn from_pkcs1(der: Secret<'_>) -> PyResult<Self> {
         rsa::KeyPair::from_pkcs1(&der)
             .map(Box::new)
             .map(Self)

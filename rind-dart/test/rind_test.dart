@@ -205,6 +205,50 @@ void main() {
       );
     });
 
+    test('AES-GCM takes IVs of any length', () {
+      // WebCrypto's seals, which the cryptography package's tests carry, and
+      // the GCM specification's test case 2 under a 12-byte IV.
+      final key = GcmKey(
+        CipherAlgorithm.aes256,
+        Uint8List(32)..fillRange(0, 32, 2),
+      );
+      final iv = GcmIv.assumeUniqueForKey(Uint8List(16)..fillRange(0, 16, 1));
+      expect(
+        key.seal(iv, Uint8List(0)),
+        hex('5d7416b36a2a3c98d340bac56cc5a449'),
+      );
+      final sealed = key.seal(iv, Uint8List.fromList([1, 2, 3]));
+      expect(sealed, hex('a31b4d 8b0891c9dd0af06b1cd1b3604042909f'));
+      expect(key.open(iv, sealed), [1, 2, 3]);
+      expect(
+        () => key.open(iv, flipped(sealed)),
+        throwsRind(RindError.decryptFailed),
+      );
+      expect(
+        () => key.open(GcmIv.assumeUniqueForKey(Uint8List(12)), sealed),
+        throwsRind(RindError.decryptFailed),
+      );
+      final nonce = Uint8List(12);
+      expect(
+        GcmKey(
+          CipherAlgorithm.aes128,
+          Uint8List(16),
+        ).seal(GcmIv.assumeUniqueForKey(nonce), Uint8List(16), aad: ascii('a')),
+        AeadKey(
+          AeadAlgorithm.aes128Gcm,
+          Uint8List(16),
+        ).seal(Nonce.assumeUniqueForKey(nonce), Uint8List(16), aad: ascii('a')),
+      );
+      expect(
+        () => key.seal(GcmIv.assumeUniqueForKey(Uint8List(0)), Uint8List(1)),
+        throwsRind(RindError.wrongLength),
+      );
+      expect(
+        () => GcmKey(CipherAlgorithm.aes192, Uint8List(16)),
+        throwsRind(RindError.wrongLength),
+      );
+    });
+
     test('a randomized nonce key picks fresh nonces', () {
       final key = RandomizedNonceKey(Uint8List(32));
       final first = key.seal(ascii('hello'), aad: ascii('a'));
@@ -578,6 +622,65 @@ void main() {
         VerificationAlgorithm.rsaPssSha256AnySalt,
         pair.toSpki(),
       ).verify(message, pair.sign(RsaSigningAlgorithm.pssSha256, message));
+
+      // A custom salt length verifies only with that length.
+      for (final (signing, verification, hash) in [
+        (
+          RsaPssSigningAlgorithm.sha256,
+          RsaVerificationAlgorithm.pssSha256,
+          RsaSigningAlgorithm.pssSha256,
+        ),
+        (
+          RsaPssSigningAlgorithm.sha384,
+          RsaVerificationAlgorithm.pssSha384,
+          RsaSigningAlgorithm.pssSha384,
+        ),
+        (
+          RsaPssSigningAlgorithm.sha512,
+          RsaVerificationAlgorithm.pssSha512,
+          RsaSigningAlgorithm.pssSha512,
+        ),
+      ]) {
+        final algorithm = signing(16);
+        expect(algorithm.saltLength, 16);
+        final signature = pair.sign(algorithm, message);
+        pair.publicKey(algorithm).verify(message, signature);
+        PublicKey.fromSpki(
+          verification(16),
+          pair.toSpki(),
+        ).verify(message, signature);
+        for (final other in [verification(17), verification(0)]) {
+          expect(
+            () => PublicKey.fromSpki(
+              other,
+              pair.toSpki(),
+            ).verify(message, signature),
+            throwsRind(RindError.badSignature),
+          );
+        }
+        expect(
+          () => pair.publicKey(hash).verify(message, signature),
+          throwsRind(RindError.badSignature),
+        );
+        // A salt of none is deterministic.
+        expect(pair.sign(signing(0), message), pair.sign(signing(0), message));
+        expect(() => signing(-1), throwsRangeError);
+        expect(() => verification(0x10000), throwsRangeError);
+      }
+      PublicKey.fromSpki(
+        VerificationAlgorithm.rsaPssSha256AnySalt,
+        pair.toSpki(),
+      ).verify(message, pair.sign(RsaPssSigningAlgorithm.sha256(16), message));
+      PublicKey.fromSpki(
+        VerificationAlgorithm.rsaPssSha256,
+        pair.toSpki(),
+      ).verify(message, pair.sign(RsaPssSigningAlgorithm.sha256(32), message));
+      // 2048 bits hold a SHA-256 salt of at most 222 bytes.
+      pair.sign(RsaPssSigningAlgorithm.sha256(222), message);
+      expect(
+        () => pair.sign(RsaPssSigningAlgorithm.sha256(223), message),
+        throwsRind(RindError.keyRejected),
+      );
 
       final reloaded = RsaKeyPair.fromPkcs8(pair.toPkcs8());
       expect(reloaded.toSpki(), pair.toSpki());

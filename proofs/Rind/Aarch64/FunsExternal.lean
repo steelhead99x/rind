@@ -324,25 +324,21 @@ opaque low.aarch64.p384_montjmixadd.p384_montjmixadd
   Array Std.U64 18#usize → Array Std.U64 18#usize → Array Std.U64 12#usize
     → Result (Array Std.U64 18#usize)
 
-/-- Whether pyca/verified-garbage's P-384 `d·G` runs on this CPU, which
-`admin/prove` leaves opaque, as it does the routines it calls: they are VG's
-assembly. -/
+/-! Whether the CPU runs pyca/verified-garbage's P-384 `d·G`, for key
+generation and ECDSA's nonces, and its ECDSA verification, which read no
+input, and its routines behind their Rust wrappers, whose contracts
+`Rind.Aarch64.VgP384` states. -/
+
 opaque low.aarch64.p384_vg.MulBase.check
   : Result (Option low.aarch64.p384_vg.MulBase)
 
-/-- pyca/verified-garbage's `d·G` for key generation and ECDSA's nonces,
-opaque as `low.aarch64.p384_vg.MulBase.check` is. -/
 opaque low.aarch64.p384_vg.MulBase.public_key
   : low.aarch64.p384_vg.MulBase → Array Std.U8 48#usize →
     Result (Option (Array Std.U8 97#usize))
 
-/-- Whether pyca/verified-garbage's P-384 ECDSA verification runs on this
-CPU, opaque as `low.aarch64.p384_vg.MulBase.check` is. -/
 opaque low.aarch64.p384_vg.Verify.check
   : Result (Option low.aarch64.p384_vg.Verify)
 
-/-- pyca/verified-garbage's P-384 ECDSA verification, opaque as
-`low.aarch64.p384_vg.MulBase.check` is. -/
 opaque low.aarch64.p384_vg.Verify.ecdsa_verify
   :
   low.aarch64.p384_vg.Verify → Array Std.U8 97#usize → Array Std.U8 48#usize →
@@ -485,6 +481,27 @@ opaque low.aarch64.chacha20poly1305.seal_neon
 opaque low.aarch64.chacha20poly1305.open_neon
   : Std.Array Std.U8 32#usize → Std.Array Std.U8 12#usize → Slice Std.U8 → Slice Std.U8 →
     Result ((Std.Array Std.U8 16#usize) × (Slice Std.U8))
+
+/-! `cipher::ChaCha20`'s routines: pyca/verified-garbage's, behind one
+wrapper each, whose contracts `Rind.Aarch64.VgChaCha20` restates, and rind's
+NEON code, whose contract it takes as the hypothesis `Neon`. -/
+
+opaque low.aarch64.chacha20.VgState.uninit : Result low.aarch64.chacha20.VgState
+
+opaque low.aarch64.chacha20.VgState.init
+  : low.aarch64.chacha20.VgState → Std.Array Std.U32 8#usize → Std.Array Std.U32 4#usize →
+    Result low.aarch64.chacha20.VgState
+
+opaque low.aarch64.chacha20.VgState.apply_neon
+  : low.aarch64.chacha20.VgState → Slice Std.U8 →
+    Result (Std.U32 × low.aarch64.chacha20.VgState × (Slice Std.U8))
+
+opaque low.aarch64.chacha20.VgState.apply_sve2
+  : low.aarch64.chacha20.VgState → low.aarch64.cpu.HaveSve2 → Slice Std.U8 →
+    Result (Std.U32 × low.aarch64.chacha20.VgState × (Slice Std.U8))
+
+opaque low.aarch64.chacha20.cipher_neon
+  : Std.Array Std.U32 8#usize → Std.Array Std.U32 4#usize → Slice Std.U8 → Result (Slice Std.U8)
 
 /-! MD5, which no proof covers. -/
 

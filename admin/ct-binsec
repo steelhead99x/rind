@@ -125,12 +125,28 @@ LIBC = ["memcpy", "memmove", "memset", "memcmp", "bcmp"]
 # ChaCha20 state with `vinsertf128` and `vpermpd`, and aws-lc's AVX2 ML-DSA
 # moves lanes with `vmovshdup` and samples with `vmovmskps`. Intel's MXCSR
 # mitigation, `rind::low::Mcdt`, runs `stmxcsr` and `ldmxcsr` on a CPU that
-# needs it. glibc's `malloc`
-# reads the thread pointer with `mrs`, vpaes and aws-lc's NEON ChaCha20 look
-# up bytes with `tbl`, and ML-KEM's rejection sampling counts bits with `cnt`.
+# needs it. glibc's `malloc` reads the thread pointer with `mrs`, vpaes and
+# aws-lc's NEON ChaCha20 look up bytes with `tbl`, and ML-KEM's rejection
+# sampling counts bits with `cnt`. Only `ctgrind.yml`'s `opt-level = "z"`
+# build needs the rest: LLVM there loads ChaCha20's state with
+# `vbroadcastf128`, stores a lane of it with `vextractps`, and permutes
+# Argon2's rows with `vpermpd` from memory.
 # See UPSTREAM.md, "BINSEC cannot decode instructions `admin/ct-binsec` stubs".
 GP = {"e" + r[1:]: r for r in ["rax", "rcx", "rdx", "rbx", "rsp", "rbp", "rsi", "rdi"]}
 GP.update(("r{}d".format(n), "r{}".format(n)) for n in range(8, 16))
+
+
+def memory(op, size):
+    """The `size` bytes at memory operand `op`, a 64-bit register plus a
+    displacement, or None for another form, such as one that is relative to
+    the instruction's own address, which a stub matched by its bytes cannot
+    know."""
+    m = re.fullmatch(r"(-?0x[0-9a-f]+)?\(%(r[a-z\d]+)\)", op)
+    if not m or m[2] == "rip":
+        return None
+    disp = int(m[1], 16) if m[1] else 0
+    addr = m[2] + (" + {:#x}".format(disp) if disp > 0 else " - {:#x}".format(-disp) if disp else "")
+    return "@[{}, {}]".format(addr, size)
 
 
 def movmskps(ops, _):
@@ -155,14 +171,35 @@ def vinsertf128(ops, _):
 
 
 def vpermpd(ops, _):
-    """Each 64-bit lane of `dst` takes the lane of `src` its two bits of the
-    immediate select."""
+    """Each 64-bit lane of `dst` takes the lane of `src`, a register or
+    memory, its two bits of the immediate select."""
     imm, src, dst = ops
-    if not imm.startswith("$") or not all(o.startswith("%ymm") for o in (src, dst)):
+    mem = memory(src, 32)
+    src = src.lstrip("%") if src.startswith("%ymm") else "({})".format(mem) if mem else None
+    if not imm.startswith("$") or not src or not dst.startswith("%ymm"):
         return None
-    imm, src, dst = int(imm[1:], 16), src.lstrip("%"), dst.lstrip("%")
+    imm, dst = int(imm[1:], 16), dst.lstrip("%")
     lanes = ("{}{{{}..{}}}".format(src, 64 * (imm >> 2 * i & 3) + 63, 64 * (imm >> 2 * i & 3)) for i in range(4))
     return "{} := {}".format(dst, " :: ".join(reversed(list(lanes))))
+
+
+def vbroadcastf128(ops, _):
+    """The 128 bits at `src`, into both halves of `dst`."""
+    src, dst = ops
+    src = memory(src, 16)
+    if not src or not dst.startswith("%ymm"):
+        return None
+    return "{} := {} :: {}".format(dst.lstrip("%"), src, src)
+
+
+def vextractps(ops, _):
+    """The 32-bit lane of `src` the immediate selects, stored to memory."""
+    imm, src, dst = ops
+    dst = memory(dst, 4)
+    if not imm.startswith("$") or not src.startswith("%xmm") or not dst:
+        return None
+    lane = int(imm[1:], 16) & 3
+    return "{} := {}{{{}..{}}}".format(dst, src.lstrip("%"), 32 * lane + 31, 32 * lane)
 
 
 def vmovshdup(ops, _):
@@ -231,12 +268,8 @@ def cnt(ops, _):
 def stmxcsr(ops, _):
     """MXCSR's default, which BINSEC does not model: Intel's mitigation then
     loads its own value, as on a CPU that needs it."""
-    m = re.fullmatch(r"(-?0x[0-9a-f]+)?\(%(r\w+)\)", ops[0]) if len(ops) == 1 else None
-    if not m:
-        return None
-    disp = int(m[1], 16) if m[1] else 0
-    addr = m[2] + (" + {:#x}".format(disp) if disp > 0 else " - {:#x}".format(-disp) if disp else "")
-    return "@[{}, 4] := 0x00001f80".format(addr)
+    dst = memory(ops[0], 4) if len(ops) == 1 else None
+    return "{} := 0x00001f80".format(dst) if dst else None
 
 
 def ldmxcsr(ops, _):
@@ -248,7 +281,8 @@ def ldmxcsr(ops, _):
 STUBS = {
     "x86_64": {"stc": lambda *_: "cf := true", "clc": lambda *_: "cf := false"}
     | {"stmxcsr": stmxcsr, "ldmxcsr": ldmxcsr}
-    | {"movmskps": movmskps, "vmovmskps": movmskps, "vinsertf128": vinsertf128, "vpermpd": vpermpd, "vmovshdup": vmovshdup},
+    | {"movmskps": movmskps, "vmovmskps": movmskps, "vinsertf128": vinsertf128, "vpermpd": vpermpd, "vmovshdup": vmovshdup}
+    | {"vbroadcastf128": vbroadcastf128, "vextractps": vextractps},
     "aarch64": {"mrs": mrs, "tbl": tbl, "cnt": cnt},
 }
 

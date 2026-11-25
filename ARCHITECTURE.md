@@ -15,7 +15,13 @@ run time. [MIGRATING.md][migrating] maps each ring and aws-lc-rs item to it.
   algorithm at run time, such as a TLS stack, holds an enum of the modules'
   public keys. One private key of unknown type, read from a key file, loads
   as `rind::KeyPair`, an enum of the modules' key pairs, whose
-  `from_pkcs8` reads the algorithm identifier and links every module.
+  `from_pkcs8` reads the algorithm identifier and links every module. Since
+  that call is the one way to link an algorithm unnamed, the two a caller
+  most often does without, ML-DSA and SLH-DSA, are the Cargo features
+  `ml-dsa` and `slh-dsa`, on by default: a build without one leaves its
+  module and `KeyPair` variants out, as the adapters that sign with neither
+  do. No other algorithm has a
+  feature, since leaving it unnamed already leaves it out of the binary.
 - Algorithms only old protocols should use sit in `legacy` submodules, such
   as `digest::legacy::SHA1`.
 - Key pairs name the DER format they load or encode (`from_pkcs8`,
@@ -106,9 +112,12 @@ rind is `no_std` with `alloc`. It uses `std` only where build.rs's `rind_std`
 says the target has an OS, and only for what needs one: aarch64's run-time CPU
 detection, the `RIND_CPU_DISABLE_*` switches (read by debug builds and by
 release ones with `--cfg rind_cpu_disable`), the debug builds' `Entry` check,
-the `Dit` guard's per-thread count on Apple's platforms, and the FIPS module.
+the `Dit` guard's per-thread count on aarch64, and the FIPS module.
 
-`low` code should not refer to `mid`, nor `mid` to `high`.
+`low` code should not refer to `mid`, nor `mid` to `high`. The one exception,
+which `admin/structure` allows by name: on x86_64, pyca/verified-garbage's
+P-256 `d·G` reads `mid`'s generator table, which Lean proves where it is,
+in place of a second copy of the same 148 KB.
 
 `low` must present the same interface irrespective of platform.  To this end,
 `low::generic` contains pure-rust polyfills for items we don't have assembler-

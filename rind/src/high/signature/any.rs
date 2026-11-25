@@ -4,11 +4,17 @@
 
 use core::fmt;
 
-use super::{ecdsa, ed25519, ml_dsa, rsa, slh_dsa};
+#[cfg(feature = "ml-dsa")]
+use super::ml_dsa;
+#[cfg(feature = "slh-dsa")]
+use super::slh_dsa;
+use super::{ecdsa, ed25519, rsa};
 use crate::error::{Error, KeyFormatError};
 use crate::high::asn1::{self, Type, oid, pkix};
 use crate::low;
+#[cfg(feature = "ml-dsa")]
 use crate::mid::mldsa::{MlDsa44, MlDsa65, MlDsa87};
+#[cfg(feature = "slh-dsa")]
 use crate::mid::slhdsa::{
     SlhDsaSha2_128f, SlhDsaSha2_128s, SlhDsaSha2_192f, SlhDsaSha2_192s, SlhDsaSha2_256f,
     SlhDsaSha2_256s, SlhDsaShake128f, SlhDsaShake128s, SlhDsaShake192f, SlhDsaShake192s,
@@ -16,9 +22,10 @@ use crate::mid::slhdsa::{
 };
 
 /// Declares [`KeyPair`] with one variant per ML-DSA and SLH-DSA parameter
-/// set, and the table that loads each by its OID.
+/// set built in, each named after its Cargo feature, and the table that loads
+/// each by its OID.
 macro_rules! key_pair {
-    ($($variant:ident($module:ident::<$set:ident>),)*) => {
+    ($($feature:literal $variant:ident($module:ident::<$set:ident>) = $oid:ident,)*) => {
         /// A signing key pair of whichever type a PKCS#8 document holds, as
         /// [`KeyPair::from_pkcs8`] loads it.
         ///
@@ -52,6 +59,7 @@ macro_rules! key_pair {
             /// An RSA key.
             Rsa(rsa::KeyPair),
             $(
+                #[cfg(feature = $feature)]
                 #[doc = concat!("A key of parameter set [`", stringify!($set), "`](crate::", stringify!($module), "::", stringify!($set), ").")]
                 $variant($module::KeyPair<$set>),
             )*
@@ -59,10 +67,19 @@ macro_rules! key_pair {
 
         /// The ML-DSA and SLH-DSA OIDs, each with its loader.
         static POST_QUANTUM: &[(&asn1::ObjectId, fn(&[u8]) -> Result<KeyPair, Error>)] = &[$(
+            #[cfg(feature = $feature)]
             (
                 $module::KeyPair::<$set>::oid(),
                 |der| $module::KeyPair::<$set>::from_pkcs8(der).map(KeyPair::$variant),
             ),
+        )*];
+
+        /// The OIDs of the parameter sets this build leaves out, each with
+        /// the Cargo feature that builds it in.
+        #[cfg(not(all(feature = "ml-dsa", feature = "slh-dsa")))]
+        static LEFT_OUT: &[(&asn1::ObjectId, &str)] = &[$(
+            #[cfg(not(feature = $feature))]
+            (&oid::$oid, $feature),
         )*];
 
         impl fmt::Debug for KeyPair {
@@ -73,7 +90,10 @@ macro_rules! key_pair {
                     Self::EcdsaP521(key) => ("EcdsaP521", key),
                     Self::Ed25519(key) => ("Ed25519", key),
                     Self::Rsa(key) => ("Rsa", key),
-                    $(Self::$variant(key) => (stringify!($variant), key),)*
+                    $(
+                        #[cfg(feature = $feature)]
+                        Self::$variant(key) => (stringify!($variant), key),
+                    )*
                 };
                 f.debug_tuple(variant).field(key).finish()
             }
@@ -82,21 +102,21 @@ macro_rules! key_pair {
 }
 
 key_pair! {
-    MlDsa44(ml_dsa::<MlDsa44>),
-    MlDsa65(ml_dsa::<MlDsa65>),
-    MlDsa87(ml_dsa::<MlDsa87>),
-    SlhDsaSha2_128s(slh_dsa::<SlhDsaSha2_128s>),
-    SlhDsaSha2_128f(slh_dsa::<SlhDsaSha2_128f>),
-    SlhDsaSha2_192s(slh_dsa::<SlhDsaSha2_192s>),
-    SlhDsaSha2_192f(slh_dsa::<SlhDsaSha2_192f>),
-    SlhDsaSha2_256s(slh_dsa::<SlhDsaSha2_256s>),
-    SlhDsaSha2_256f(slh_dsa::<SlhDsaSha2_256f>),
-    SlhDsaShake128s(slh_dsa::<SlhDsaShake128s>),
-    SlhDsaShake128f(slh_dsa::<SlhDsaShake128f>),
-    SlhDsaShake192s(slh_dsa::<SlhDsaShake192s>),
-    SlhDsaShake192f(slh_dsa::<SlhDsaShake192f>),
-    SlhDsaShake256s(slh_dsa::<SlhDsaShake256s>),
-    SlhDsaShake256f(slh_dsa::<SlhDsaShake256f>),
+    "ml-dsa" MlDsa44(ml_dsa::<MlDsa44>) = id_ml_dsa_44,
+    "ml-dsa" MlDsa65(ml_dsa::<MlDsa65>) = id_ml_dsa_65,
+    "ml-dsa" MlDsa87(ml_dsa::<MlDsa87>) = id_ml_dsa_87,
+    "slh-dsa" SlhDsaSha2_128s(slh_dsa::<SlhDsaSha2_128s>) = id_slh_dsa_sha2_128s,
+    "slh-dsa" SlhDsaSha2_128f(slh_dsa::<SlhDsaSha2_128f>) = id_slh_dsa_sha2_128f,
+    "slh-dsa" SlhDsaSha2_192s(slh_dsa::<SlhDsaSha2_192s>) = id_slh_dsa_sha2_192s,
+    "slh-dsa" SlhDsaSha2_192f(slh_dsa::<SlhDsaSha2_192f>) = id_slh_dsa_sha2_192f,
+    "slh-dsa" SlhDsaSha2_256s(slh_dsa::<SlhDsaSha2_256s>) = id_slh_dsa_sha2_256s,
+    "slh-dsa" SlhDsaSha2_256f(slh_dsa::<SlhDsaSha2_256f>) = id_slh_dsa_sha2_256f,
+    "slh-dsa" SlhDsaShake128s(slh_dsa::<SlhDsaShake128s>) = id_slh_dsa_shake_128s,
+    "slh-dsa" SlhDsaShake128f(slh_dsa::<SlhDsaShake128f>) = id_slh_dsa_shake_128f,
+    "slh-dsa" SlhDsaShake192s(slh_dsa::<SlhDsaShake192s>) = id_slh_dsa_shake_192s,
+    "slh-dsa" SlhDsaShake192f(slh_dsa::<SlhDsaShake192f>) = id_slh_dsa_shake_192f,
+    "slh-dsa" SlhDsaShake256s(slh_dsa::<SlhDsaShake256s>) = id_slh_dsa_shake_256s,
+    "slh-dsa" SlhDsaShake256f(slh_dsa::<SlhDsaShake256f>) = id_slh_dsa_shake_256f,
 }
 
 impl KeyPair {
@@ -107,9 +127,12 @@ impl KeyPair {
     /// curve picks its hash, with ASN.1 signatures, since PKCS#8 names no
     /// hash; load it with [`ecdsa::KeyPair::from_pkcs8`] to name another
     /// algorithm. A key of another algorithm, such as X25519, is refused,
-    /// naming it if rind knows it.
+    /// naming it if rind knows it, as is an ML-DSA or SLH-DSA key in a build
+    /// without its Cargo feature, naming the feature.
     ///
-    /// Calling this links every signing algorithm's code.
+    /// Calling this links every signing algorithm's code, so a program that
+    /// loads no ML-DSA or SLH-DSA keys this way shrinks by leaving out the
+    /// `ml-dsa` and `slh-dsa` features.
     pub fn from_pkcs8(der: &[u8]) -> Result<Self, Error> {
         let _entry = low::Entry::new_secret();
         let key = pkix::OneAsymmetricKey::from_bytes(der).map_err(KeyFormatError::Asn1)?;
@@ -140,6 +163,10 @@ impl KeyPair {
         if let Some((_, load)) = POST_QUANTUM.iter().find(|(oid, _)| *oid == id) {
             return load(der);
         }
+        #[cfg(not(all(feature = "ml-dsa", feature = "slh-dsa")))]
+        if let Some(&(_, feature)) = LEFT_OUT.iter().find(|(oid, _)| *oid == id) {
+            return Err(KeyFormatError::FeatureDisabled(feature).into());
+        }
         if *id == oid::id_X25519 {
             return Err(KeyFormatError::X25519CannotSign.into());
         }
@@ -147,7 +174,8 @@ impl KeyPair {
     }
 }
 
-#[cfg(test)]
+// The tests load every key type.
+#[cfg(all(test, feature = "ml-dsa", feature = "slh-dsa"))]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
@@ -424,4 +452,49 @@ mod tests {
             ));
         }
     }
+}
+
+#[cfg(all(test, not(all(feature = "ml-dsa", feature = "slh-dsa"))))]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod left_out_tests {
+    use super::*;
+    use crate::high::pkcs8;
+
+    // A key of a parameter set this build leaves out is refused by the name
+    // of its feature, and the other types still load.
+    #[test]
+    fn names_the_feature_of_a_key_left_out() {
+        for &(algorithm, feature) in LEFT_OUT {
+            let mut out = [0; 128];
+            let der = pkcs8::Key::construct(&[0x04, 0x00], None, algorithm.clone(), None)
+                .encode(&mut out)
+                .unwrap();
+            assert_eq!(
+                KeyPair::from_pkcs8(der).unwrap_err(),
+                KeyFormatError::FeatureDisabled(feature).into()
+            );
+        }
+        let sets = [("ml-dsa", 3), ("slh-dsa", 12)];
+        let left_out: usize = sets
+            .iter()
+            .filter(|(feature, _)| !POST_QUANTUM_FEATURES.contains(feature))
+            .map(|(_, sets)| sets)
+            .sum();
+        assert_eq!(LEFT_OUT.len(), left_out);
+        assert_eq!(POST_QUANTUM.len(), 15 - left_out);
+
+        let ed25519 = include_bytes!("../asn1/testdata/ed25519-p8v2.bin");
+        assert!(matches!(
+            KeyPair::from_pkcs8(ed25519),
+            Ok(KeyPair::Ed25519(_))
+        ));
+    }
+
+    /// The post-quantum features this build has.
+    const POST_QUANTUM_FEATURES: &[&str] = &[
+        #[cfg(feature = "ml-dsa")]
+        "ml-dsa",
+        #[cfg(feature = "slh-dsa")]
+        "slh-dsa",
+    ];
 }

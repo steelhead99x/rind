@@ -27,8 +27,41 @@ on:
   workflow_dispatch:
 
 jobs:
+  # The proofs gate no merge but gate a release: before a release PR's commit
+  # publishes, a prove run on main with the same inputs must have passed
+  # (sh/release-proved.sh), so this waits for that run when the release
+  # follows it closely. A job of its own, outside the `publish` environment,
+  # so the wait never outlives the App token `release` makes.
+  proofs:
+    name: Proofs
+    runs-on: ubuntu-latest
+    if: ${{ github.repository_owner == 'kixel-ai' && github.ref == 'refs/heads/main' }}
+    # GitHub's limit for a hosted job: prove's run may take 30 minutes for its
+    # keys and 150 for HOL Light aarch64, after queueing for runners.
+    timeout-minutes: 360
+    permissions:
+      contents: read
+      # To read prove's runs.
+      actions: read
+      # To find the pull request that landed each commit.
+      pull-requests: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Wait for the proofs
+        run: sh/release-proved.sh "$BEFORE"
+        env:
+          BEFORE: ${{ github.event.before }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+
   release:
     name: Plz
+    needs: proofs
     runs-on: ubuntu-latest
     if: ${{ github.repository_owner == 'kixel-ai' && github.ref == 'refs/heads/main' }}
     # The environment, which only `main` can deploy to, holds the App key, and

@@ -28,6 +28,18 @@ A dependency that turns on rustls's `aws_lc_rs` or `ring` feature still
 compiles that library; [MIGRATING.md](https://github.com/kixel-ai/rind/blob/main/MIGRATING.md#crates-with-their-own-crypto-backend)
 says which features of each such crate avoid it.
 
+## Small records on Apple silicon
+
+On Apple's platforms, rind turns data-independent timing (DIT) on and off
+around each call that handles a secret, and rustls seals or opens each record
+in its own call. On an M4 that adds about 40 ns to each seal and open, half
+again the time of sealing and opening a 64-byte record. To pay it once,
+depend on rind and hold
+[`rind::cpu::Dit::hold()`](https://docs.rs/rind/latest/rind/cpu/struct.Dit.html)
+around a batch of rustls calls, such as one pass of a connection's read and
+write loop. The guard stays on its thread, so an async task holds it only
+between `.await`s. Elsewhere rind sets no DIT and the guard does nothing.
+
 ## What rind cannot back
 
 - `kx_group::MLKEM1024`, which `ALL_KX_GROUPS` leaves out.
@@ -47,10 +59,18 @@ says which features of each such crate avoid it.
 - `Ticketer` seals tickets with XChaCha20-Poly1305, where upstream's uses
   RFC 5077's AES-256-CBC and HMAC-SHA256.
 
+## Without `std`
+
+Turn off this crate's and rustls's default features for a target without
+`std`. As in rustls, `std` gates `Ticketer`. rind still needs a global
+allocator; [PLATFORMS.md](https://github.com/kixel-ai/rind/blob/main/PLATFORMS.md)
+says what else such a target needs.
+
 ## WebAssembly
 
 rind-rustls builds for `wasm32-wasip2`, where CI runs its tests under
-wasmtime, and for `wasm32-unknown-unknown`, the browser. rustls's aws-lc-rs
+wasmtime, and for `wasm32-unknown-unknown`, the browser, where CI runs them
+in Node. rustls's aws-lc-rs
 provider builds for neither, and its ring one needs a C compiler targeting
 wasm. In the browser, turn on rind's JavaScript random source, `getrandom = {
 version = "0.4", features = ["wasm_js"] }`, and give rustls a clock, as any

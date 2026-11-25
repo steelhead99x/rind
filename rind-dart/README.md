@@ -76,7 +76,9 @@ rustup target add aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios
 Android on arm64, armv7, and x86_64; iOS on devices and the simulator;
 macOS, Linux, and Windows on arm64 and x86_64; and Linux on armv7. The build
 fails for any other target, such as Android's 32-bit x86, rather than falling
-back to slower code. There is no web build: rind has no WebAssembly backend.
+back to slower code. There is no web build: the package calls rind through
+`dart:ffi`, which Dart's web compilers lack, though rind itself builds for
+WebAssembly.
 
 rind's arm64 build enables NEON, which every Android and Apple device has; a source build for a target without NEON uses rind's portable backend.
 

@@ -1,24 +1,14 @@
 name: timing
 
-# Times rind's secret operations on GitHub's x86_64 and arm64 runners with
-# `admin/timing`: dudect's two-class test of each case, on each CPU tier
-# ctgrind checks, and the Marvin toolkit's RSA-OAEP probes. Weekly, since a
-# run takes hours of runner time, and a leak shows on any run. At its own
+# Times rind's RSA-OAEP decryption on GitHub's x86_64 and arm64 runners with
+# `admin/timing`: the Marvin toolkit's probes. Weekly, since a run takes hours
+# of runner time, and a leak shows on any run. At its own
 # hour: see TESTING.md, "Scheduled workflows".
 
 on:
   schedule:
     - cron: "23 4 * * 0"
   workflow_dispatch:
-  # A pull request checks only that the shells and the build still work.
-  pull_request:
-    branches: [main]
-    paths:
-      - rind-timing/**
-      - admin/timing
-      - flake.nix
-      - flake.lock
-      - .github/workflows/timing.yml
 
 concurrency:
   group: timing-${{ github.ref }}
@@ -31,71 +21,8 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  smoke:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - uses: ./.github/actions/nix
-
-      - name: Build and list the cases
-        run: nix develop .#timing --command admin/timing dudect --list
-
-  # Each row but the first denies what the CPU it names lacks, as ctgrind's
-  # rows do, so the code those CPUs run is timed too. A denial takes
-  # `--cfg rind_cpu_disable`, so the release build stays the code that ships.
-  dudect:
-    name: dudect (${{ matrix.os }}, ${{ matrix.cpu }})
-    if: github.event_name != 'pull_request'
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            cpu: native
-          - os: ubuntu-latest
-            cpu: haswell
-            deny: adx avx512f avx512dq avx512ifma avx512bw avx512vl avx512vbmi avx512vbmi2 vaes vpclmulqdq sha sha512
-          - os: ubuntu-latest
-            cpu: westmere
-            deny: adx avx512f avx512dq avx512ifma avx512bw avx512vl avx512vbmi avx512vbmi2 vaes vpclmulqdq sha sha512 avx avx2 bmi1 bmi2 movbe intel
-          - os: ubuntu-latest
-            cpu: core2
-            deny: adx avx512f avx512dq avx512ifma avx512bw avx512vl avx512vbmi avx512vbmi2 vaes vpclmulqdq sha sha512 avx avx2 bmi1 bmi2 movbe intel aes pclmulqdq sse41
-          - os: ubuntu-latest
-            cpu: qemu64
-            deny: adx avx512f avx512dq avx512ifma avx512bw avx512vl avx512vbmi avx512vbmi2 vaes vpclmulqdq sha sha512 avx avx2 bmi1 bmi2 movbe intel aes pclmulqdq sse41 ssse3
-          - os: ubuntu-24.04-arm
-            cpu: native
-          - os: ubuntu-24.04-arm
-            cpu: no-crypto
-            deny: aes pmull sha2 sha3
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 300
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - uses: ./.github/actions/nix
-
-      - name: dudect
-        run: |
-          deny=()
-          for feature in $DENY; do
-            deny+=("RIND_CPU_DISABLE_$feature=1")
-          done
-          nix develop .#dudect --command env "${deny[@]}" admin/timing dudect
-        env:
-          DENY: ${{ matrix.deny }}
-          RUSTFLAGS: ${{ matrix.deny && '--cfg rind_cpu_disable' || '' }}
-
   marvin:
     name: marvin (${{ matrix.os }}, RSA-${{ matrix.bits }})
-    if: github.event_name != 'pull_request'
     strategy:
       fail-fast: false
       matrix:

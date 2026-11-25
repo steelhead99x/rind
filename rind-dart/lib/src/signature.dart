@@ -28,8 +28,14 @@ enum EcdsaSigningAlgorithm {
   final int _id;
 }
 
+/// What an [RsaKeyPair] signs with: an [RsaSigningAlgorithm], or an
+/// [RsaPssSigningAlgorithm] of a salt length the caller picks.
+sealed class RsaSigningScheme {
+  int get _id;
+}
+
 /// An algorithm an [RsaKeyPair] signs with: a padding and a hash.
-enum RsaSigningAlgorithm {
+enum RsaSigningAlgorithm implements RsaSigningScheme {
   /// RSASSA-PKCS1-v1_5 with SHA-256.
   pkcs1Sha256(0),
 
@@ -50,7 +56,43 @@ enum RsaSigningAlgorithm {
 
   const RsaSigningAlgorithm(this._id);
 
+  @override
   final int _id;
+}
+
+/// RSASSA-PSS with a salt of [saltLength] bytes, beside the hash's length
+/// that [RsaSigningAlgorithm]'s PSS algorithms use. A signature verifies
+/// only with the salt length it was made with, as the
+/// [RsaVerificationAlgorithm] of the same name and length does.
+///
+/// A modulus too short for the salt refuses to sign with it.
+final class RsaPssSigningAlgorithm implements RsaSigningScheme {
+  /// RSASSA-PSS with SHA-256 and MGF1-SHA-256, throwing [RangeError] unless
+  /// [saltLength] is 0 to 65535.
+  RsaPssSigningAlgorithm.sha256(this.saltLength) : _id = _pss(3, saltLength);
+
+  /// RSASSA-PSS with SHA-384 and MGF1-SHA-384, throwing [RangeError] unless
+  /// [saltLength] is 0 to 65535.
+  RsaPssSigningAlgorithm.sha384(this.saltLength) : _id = _pss(4, saltLength);
+
+  /// RSASSA-PSS with SHA-512 and MGF1-SHA-512, throwing [RangeError] unless
+  /// [saltLength] is 0 to 65535.
+  RsaPssSigningAlgorithm.sha512(this.saltLength) : _id = _pss(5, saltLength);
+
+  /// The length of the salt, in bytes.
+  final int saltLength;
+
+  @override
+  final int _id;
+}
+
+// The id of PSS with the hash of PSS id [pss] and a salt of [saltLength]
+// bytes, as `rind_dart_rsa_sign` and the other RSA calls decode it.
+int _pss(int pss, int saltLength) {
+  if (saltLength < 0 || saltLength > 0xffff) {
+    throw RangeError.range(saltLength, 0, 0xffff, 'saltLength');
+  }
+  return 1 << 24 | saltLength << 8 | pss;
 }
 
 /// The modulus size of a generated RSA key.
@@ -208,6 +250,24 @@ final class VerificationAlgorithm {
 /// An RSA verification algorithm, which [PublicKey.fromComponents] takes.
 final class RsaVerificationAlgorithm extends VerificationAlgorithm {
   const RsaVerificationAlgorithm._(super._id, super._name) : super._();
+
+  /// RSASSA-PSS with SHA-256 and a salt of exactly [saltLength] bytes, as
+  /// [RsaPssSigningAlgorithm.sha256] signs, throwing [RangeError] unless it
+  /// is 0 to 65535.
+  RsaVerificationAlgorithm.pssSha256(int saltLength)
+    : this._(_pss(3, saltLength), 'RSA_PSS_SHA256_SALT_$saltLength');
+
+  /// RSASSA-PSS with SHA-384 and a salt of exactly [saltLength] bytes, as
+  /// [RsaPssSigningAlgorithm.sha384] signs, throwing [RangeError] unless it
+  /// is 0 to 65535.
+  RsaVerificationAlgorithm.pssSha384(int saltLength)
+    : this._(_pss(4, saltLength), 'RSA_PSS_SHA384_SALT_$saltLength');
+
+  /// RSASSA-PSS with SHA-512 and a salt of exactly [saltLength] bytes, as
+  /// [RsaPssSigningAlgorithm.sha512] signs, throwing [RangeError] unless it
+  /// is 0 to 65535.
+  RsaVerificationAlgorithm.pssSha512(int saltLength)
+    : this._(_pss(5, saltLength), 'RSA_PSS_SHA512_SALT_$saltLength');
 }
 
 /// RSASSA-PKCS1-v1_5 with SHA-1, for old signatures.
@@ -497,12 +557,12 @@ final class RsaKeyPair extends _Handle {
 
   /// The public key, which verifies the key pair's signatures made with
   /// [algorithm].
-  PublicKey publicKey(RsaSigningAlgorithm algorithm) => PublicKey._(
+  PublicKey publicKey(RsaSigningScheme algorithm) => PublicKey._(
     _newHandle((out) => _keyPairPublicKey(2, _pointer, algorithm._id, out)),
   );
 
   /// Signs [message] with [algorithm].
-  Uint8List sign(RsaSigningAlgorithm algorithm, Uint8List message) =>
+  Uint8List sign(RsaSigningScheme algorithm, Uint8List message) =>
       _native(message, (input) {
         return _native(Uint8List(_modulusLength), (out) {
           final len = _check(

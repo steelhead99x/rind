@@ -3,7 +3,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 use rind::agreement;
 
-use crate::{Bytes, algorithm, bytes, constants, error};
+use crate::{Bytes, Secret, algorithm, bytes, constants, error};
 
 algorithm!(
     /// A key agreement algorithm.
@@ -28,7 +28,7 @@ impl PrivateKey {
     /// Loads a key for `algorithm` from its big-endian scalar, or for X25519
     /// its 32 bytes.
     #[staticmethod]
-    fn from_scalar(algorithm: &Bound<'_, Algorithm>, scalar: Bytes<'_>) -> PyResult<Self> {
+    fn from_scalar(algorithm: &Bound<'_, Algorithm>, scalar: Secret<'_>) -> PyResult<Self> {
         agreement::PrivateKey::from_scalar(algorithm.get().inner, &scalar)
             .map(Box::new)
             .map(Self)
@@ -37,7 +37,7 @@ impl PrivateKey {
 
     /// Loads a key for `algorithm` from PKCS#8 DER.
     #[staticmethod]
-    fn from_pkcs8(algorithm: &Bound<'_, Algorithm>, der: Bytes<'_>) -> PyResult<Self> {
+    fn from_pkcs8(algorithm: &Bound<'_, Algorithm>, der: Secret<'_>) -> PyResult<Self> {
         agreement::PrivateKey::from_pkcs8(algorithm.get().inner, &der)
             .map(Box::new)
             .map(Self)
@@ -46,7 +46,7 @@ impl PrivateKey {
 
     /// Loads an ECDH key for `algorithm` from SEC1 `ECPrivateKey` DER.
     #[staticmethod]
-    fn from_sec1(algorithm: &Bound<'_, Algorithm>, der: Bytes<'_>) -> PyResult<Self> {
+    fn from_sec1(algorithm: &Bound<'_, Algorithm>, der: Secret<'_>) -> PyResult<Self> {
         agreement::PrivateKey::from_sec1(algorithm.get().inner, &der)
             .map(Box::new)
             .map(Self)

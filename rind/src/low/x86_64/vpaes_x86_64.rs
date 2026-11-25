@@ -62,14 +62,15 @@ impl VpaesKey {
     /// The counter blocks are `ivec`, then `ivec` with its last four bytes,
     /// a big-endian counter, incremented with 32-bit wrapping.
     pub(crate) fn ctr32(&self, ivec: &[u8; 16], inout: &mut [[u8; 16]]) {
+        let io = inout.as_mut_ptr().cast::<u8>();
         // SAFETY: `inout` is `inout.len()` readable and writable blocks, which
         // aws-lc allows to alias, and `self` an expanded key, which only a
         // `HaveSsse3` token builds. The routine returns at once for zero
         // blocks.
         unsafe {
             asm_call!(unsafe extern "sysv64" vpaes_ctr32_encrypt_blocks(
-                inout.as_ptr().cast(),
-                inout.as_mut_ptr().cast(),
+                io,
+                io,
                 inout.len(),
                 self,
                 ivec,
@@ -121,12 +122,11 @@ impl VpaesDecKey {
 
     /// Decrypts one block in place.
     pub(crate) fn decrypt_block(&self, inout: &mut [u8; 16]) {
+        let io = inout.as_mut_ptr();
         // SAFETY: `inout` is one readable and writable block, which aws-lc
         // allows to alias, and `self` an expanded decryption key, which only a
         // `HaveSsse3` token builds.
-        unsafe {
-            asm_call!(unsafe extern "sysv64" vpaes_decrypt(inout.as_ptr(), inout.as_mut_ptr(), self))
-        }
+        unsafe { asm_call!(unsafe extern "sysv64" vpaes_decrypt(io, io, self)) }
     }
 
     /// Decrypts whole blocks in place in CBC mode, the first chained from
@@ -155,12 +155,13 @@ impl low::generic::zeroise::Zeroable for VpaesDecKey {}
 unsafe fn cbc(blocks: &mut [[u8; 16]], key: *const u8, iv: &[u8; 16], enc: i32) {
     // The routine leaves the next IV here; CBC callers here start afresh.
     let mut ivec = *iv;
+    let io = blocks.as_mut_ptr().cast::<u8>();
     // SAFETY: `blocks` is `16 * blocks.len()` readable and writable bytes,
     // which aws-lc allows to alias, and the caller vouches for `key`.
     unsafe {
         asm_call!(unsafe extern "sysv64" vpaes_cbc_encrypt(
-            blocks.as_ptr().cast(),
-            blocks.as_mut_ptr().cast(),
+            io,
+            io,
             16 * blocks.len(),
             key,
             &mut ivec,

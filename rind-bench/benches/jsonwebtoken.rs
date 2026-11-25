@@ -59,8 +59,8 @@ fn keys() -> Vec<(Algorithm, EncodingKey, DecodingKey)> {
     vec![
         (
             Algorithm::HS256,
-            EncodingKey::from_secret(secret),
-            DecodingKey::from_secret(secret),
+            EncodingKey::from_secret(secret).unwrap(),
+            DecodingKey::from_secret(secret).unwrap(),
         ),
         (Algorithm::ES256, es256_private, es256_public),
         (Algorithm::ES384, es384_private, es384_public),
@@ -84,12 +84,14 @@ fn sign(c: &mut Criterion) {
 
         for (name, provider) in providers() {
             group.bench_function(format!("{name}/token"), |b| {
+                let _dit = (name == "rind").then(criterion::rind_dit);
                 b.iter(|| {
                     let signer = (provider.signer_factory)(&algorithm, &encoding).unwrap();
                     black_box(signer.try_sign(MESSAGE).unwrap());
                 })
             });
             group.bench_function(format!("{name}/load"), |b| {
+                let _dit = (name == "rind").then(criterion::rind_dit);
                 b.iter(|| black_box((provider.signer_factory)(&algorithm, &encoding).unwrap()))
             });
         }
@@ -108,12 +110,14 @@ fn verify(c: &mut Criterion) {
 
         for (name, provider) in providers() {
             group.bench_function(format!("{name}/token"), |b| {
+                let _dit = (name == "rind").then(criterion::rind_dit);
                 b.iter(|| {
                     let verifier = (provider.verifier_factory)(&algorithm, &decoding).unwrap();
                     verifier.verify(MESSAGE, &signature).unwrap();
                 })
             });
             group.bench_function(format!("{name}/load"), |b| {
+                let _dit = (name == "rind").then(criterion::rind_dit);
                 b.iter(|| black_box((provider.verifier_factory)(&algorithm, &decoding).unwrap()))
             });
         }

@@ -56,8 +56,7 @@ import sys
 import time
 import tomllib
 
-# The report's hosts, in the order they run. `jobs` caps the build: nixos2 is
-# a shared 15 GB machine that more jobs run out of memory. `ssh` is the
+# The report's hosts, in the order they run. `jobs` caps the build. `ssh` is the
 # destination where it isn't the name, and `note` describes the machine in the
 # report. Other work on a host with a `lease` holds that lock file with
 # flock(1) for its whole run, so collect holds it too, or skips the host as
@@ -66,11 +65,18 @@ VPS_NOTE = "OVH VPS in {}, 4 shared vCPUs: other tenants add noise that a dedica
 HOSTS = {
     "nixos": {"jobs": 16},
     "desktop": {"jobs": 12},
-    "nixos2": {"jobs": 3},
+    "fedora": {
+        "jobs": 16,
+        "note": "The maintainer's Fedora workstation and the report's only AVX-512 host, so the one whose table "
+        "times rind's AVX-512 AES-GCM, IFMA RSA, and 8-way ML-KEM sampler against every library. It also runs CI "
+        "runners and agent sessions, so its times are noisier than the other dedicated hosts'. Zen 5 keeps its "
+        "clock with 512-bit vectors, so this host cannot show what they cost on the Intel cores that slow down.",
+    },
     "kixtop": {
         "jobs": 4,
-        "note": "The maintainer's MacBook, in daily use. Its cores have DIT, which rind sets around each call "
-        "that handles a secret and the other libraries never set; Known gaps gives its cost.",
+        "note": "The maintainer's MacBook, in daily use. Its cores have DIT, and every rind row holds "
+        "`rind::cpu::Dit::hold()` across calls, as MoQ does, so the rustls rows run rustls' own code with DIT on "
+        "too.",
     },
     "ovh-iad": {
         "jobs": 4,
@@ -99,6 +105,10 @@ REMOTE_DIR = ".cache/rind-bench-report"
 # that a host's run takes about half an hour.
 CRITERION_ARGS = ["--noplot", "--warm-up-time", "1", "--measurement-time", "3"]
 
+# The prefix of a row rind-bench times rind alone in, without `Dit::hold()`,
+# naming the row it repeats.
+DIT_PER_CALL = "dit-per-call/"
+
 # The report's operations by section, most common first, as criterion IDs
 # with `{lib}` in the library's place. Each is timed for every library
 # rind-bench has a row for.
@@ -118,6 +128,11 @@ SECTIONS = [
             "rustls-bulk/aes128-gcm/{lib}",
             "rustls-bulk/aes256-gcm/{lib}",
             "rustls-bulk/chacha20poly1305/{lib}",
+            *(
+                f"rustls-records/{suite}/{{lib}}/{size}"
+                for suite in ["aes128-gcm", "chacha20poly1305"]
+                for size in ["64B", "256B", "1KB"]
+            ),
         ],
     ),
     (
@@ -236,6 +251,29 @@ SECTIONS = [
         [f"spake2plus-p256-{side}-{step}/{{lib}}" for step in ["start", "finish"] for side in ["prover", "verifier"]],
     ),
     ("Argon2id", ["argon2id-16MiB-t1-p1/{lib}", "argon2id-64MiB-t3-p4/{lib}"]),
+    (
+        "SLH-DSA",
+        [
+            f"slhdsa-{set}-{step}/{{lib}}"
+            for set in ["sha2-128s", "sha2-128f", "shake-128f"]
+            for step in ["keygen", "sign", "verify"]
+        ],
+    ),
+    # rind's rows again, timed without `Dit::hold()`, so they pay the DIT
+    # toggle rind makes around each call, as a caller holding no guard does.
+    # rind-bench times them on aarch64 alone.
+    (
+        "rind setting DIT around each call",
+        [
+            *(f"{DIT_PER_CALL}{aead}/{{lib}}/{size}" for aead in ["aes128-gcm", "chacha20poly1305"] for size in ["32B", "1350B"]),
+            f"{DIT_PER_CALL}x25519-ecdh/{{lib}}",
+            f"{DIT_PER_CALL}ed25519-sign/{{lib}}",
+            f"{DIT_PER_CALL}ed25519-verify/{{lib}}",
+            f"{DIT_PER_CALL}p256-ecdsa-sign/{{lib}}",
+            f"{DIT_PER_CALL}p256-ecdsa-verify/{{lib}}",
+            f"{DIT_PER_CALL}rustls-records/aes128-gcm/{{lib}}/64B",
+        ],
+    ),
 ]
 OPERATIONS = [op for _, ops in SECTIONS for op in ops]
 
@@ -243,7 +281,6 @@ OPERATIONS = [op for _, ops in SECTIONS for op in ops]
 # the history of its older benchmarks.
 LIBRARIES = {
     "rind": "rind",
-    "rind-dit-held": "rind-dit-held",
     "aws-lc-rs": "aws-lc-rs",
     "ring": "ring",
     "rustcrypto": "rustcrypto",
@@ -293,6 +330,7 @@ CRATES = {
         "vrf-rfc9381",
         "spake2plus",
         "argon2",
+        "slh-dsa",
     ],
     "graviola": ["graviola", "rustls-graviola"],
     "libcrux": [
@@ -326,10 +364,10 @@ def fail(message):
 def operation_regex(refused=()):
     """A criterion filter matching exactly the report's operations, without
     the libraries in `refused`."""
-    lib = "[^/]+"
-    if refused:
-        # The regex crate has no lookahead, so name the rest.
-        lib = "(" + "|".join(re.escape(row) for row, name in LIBRARIES.items() if name not in refused) + ")"
+    # Name the report's libraries rather than match any, so a bench's extra
+    # row (slhdsa's fips205) costs no time and ranks nothing. The regex crate
+    # has no lookahead, so `refused` drops out of the list too.
+    lib = "(" + "|".join(re.escape(row) for row, name in LIBRARIES.items() if name not in refused) + ")"
     ops = "|".join(re.escape(op).replace(re.escape("{lib}"), lib) for op in OPERATIONS)
     return f"^({ops})$"
 
@@ -339,7 +377,7 @@ def operation_of(full_id):
     for op in OPERATIONS:
         pattern = "^" + re.escape(op).replace(re.escape("{lib}"), "([^/]+)") + "$"
         m = re.match(pattern, full_id)
-        if m:
+        if m and m.group(1) in LIBRARIES:
             return op, m.group(1)
     return None
 
@@ -544,7 +582,7 @@ def run(args):
         results.append(
             {
                 "operation": op,
-                "library": LIBRARIES.get(lib, lib),
+                "library": LIBRARIES[lib],
                 "id": meta["full_id"],
                 "ns": estimate["point_estimate"],
                 "ns_low": estimate["confidence_interval"]["lower_bound"],
@@ -726,18 +764,19 @@ def summary(args):
     print()
     print("| operation | " + " | ".join(h["host"] for h in measured) + " |")
     print("|---|" + "---|" * len(measured))
+    host_times = [times(h) for h in measured]
     for op in OPERATIONS:
         cells = []
-        for h in measured:
-            times = {r["library"]: r["ns"] for r in h["results"] if r["operation"] == op}
-            others = {lib: ns for lib, ns in times.items() if lib != "rind" and lib not in VARIANTS}
-            if "rind" not in times or not others:
+        for t in host_times:
+            libs = ranked_against(t, row_name(op))
+            others = {lib: ns for lib, ns in libs.items() if lib != "rind"}
+            if "rind" not in libs or not others:
                 cells.append("-")
                 continue
             best = min(others, key=others.get)
-            ratio = times["rind"] / others[best]
-            cells.append(f"{human(times['rind'])}, {ratio:.2f}× {best}")
-        print(f"| {op.replace('/{lib}', '')} | " + " | ".join(cells) + " |")
+            ratio = libs["rind"] / others[best]
+            cells.append(f"{human(libs['rind'])}, {ratio:.2f}× {best}")
+        print(f"| {row_name(op)} | " + " | ".join(cells) + " |")
 
 
 # --- report -----------------------------------------------------------------
@@ -756,7 +795,6 @@ REPO = "kixel-ai/rind"
 # The report's columns, in order, by library.
 COLUMNS = {
     "rind": "rind",
-    "rind-dit-held": "rind (DIT held)",
     "aws-lc-rs": "aws-lc-rs",
     "ring": "ring",
     "rustcrypto": "RustCrypto + dalek",
@@ -766,16 +804,9 @@ COLUMNS = {
     "verified-garbage": "verified-garbage",
 }
 
-# Rows that time a library's own code another way, by that library. Each
-# shows beside the library, with its proofs, but never counts as the fastest
-# or as a rival in a gap. rind's DIT-held row is timed only on a CPU with DIT.
-VARIANTS = {"rind-dit-held": "rind"}
-
-
 def fastest(libs):
     """The fastest library of an operation's times by library."""
-    rivals = {lib: ns for lib, ns in libs.items() if lib not in VARIANTS}
-    return min(rivals, key=rivals.get)
+    return min(libs, key=libs.get)
 
 
 # Each operation's label, by its row name without a message size.
@@ -791,6 +822,8 @@ NAMES = {
     "rustls-bulk/aes128-gcm": "1 MB transfer, AES-128-GCM",
     "rustls-bulk/aes256-gcm": "1 MB transfer, AES-256-GCM",
     "rustls-bulk/chacha20poly1305": "1 MB transfer, ChaCha20-Poly1305",
+    "rustls-records/aes128-gcm": "one record, AES-128-GCM",
+    "rustls-records/chacha20poly1305": "one record, ChaCha20-Poly1305",
     "aes128-gcm": "AES-128-GCM seal",
     "aes128-gcm-open": "AES-128-GCM open",
     "aes256-gcm": "AES-256-GCM seal",
@@ -860,6 +893,11 @@ NAMES = {
     "spake2plus-p256-verifier-finish": "SPAKE2+ P-256 verifier key",
     "argon2id-16MiB-t1-p1": "Argon2id 16 MiB t=1 p=1",
     "argon2id-64MiB-t3-p4": "Argon2id 64 MiB t=3 p=4",
+    **{
+        f"slhdsa-{set}-{step}": f"SLH-DSA-{set.replace('sha2', 'SHA2').replace('shake', 'SHAKE')} {name}"
+        for set in ["sha2-128s", "sha2-128f", "shake-128f"]
+        for step, name in [("keygen", "key generation"), ("sign", "sign"), ("verify", "verify")]
+    },
 }
 
 # Each build of admin/build-cost, as the report names it.
@@ -912,11 +950,13 @@ ALGORITHMS = [
     ("VRF", r"vrf-"),
     ("SPAKE2+", r"spake2plus-"),
     ("Argon2id", r"argon2id-"),
+    ("SLH-DSA", r"slhdsa-"),
 ]
 
 # Rows that time an integration rather than an algorithm, which the
-# comparison leaves out: rind-bench times only some libraries through them.
-INTEGRATIONS = [r"rustls-", r"quic-header-protection/"]
+# comparison leaves out: rind-bench times only some libraries through them,
+# or, setting DIT per call, rind alone.
+INTEGRATIONS = [r"rustls-", r"quic-header-protection/", re.escape(DIT_PER_CALL)]
 
 # Algorithms rind-bench times under a library's name through something other
 # than that library's API, by library and algorithm, with what it runs.
@@ -967,8 +1007,9 @@ TIERS = [
     (("x86_64-unknown-linux-gnu", True, "generic"), "portable"),
 ]
 
-# The libraries the weekly bench times rind against.
-BASELINES = ["aws-lc-rs", "ring"]
+# The libraries the weekly bench times rind against. It times RustCrypto only
+# for Argon2id, SLH-DSA, and the protocols, which neither of the others offers.
+BASELINES = ["aws-lc-rs", "ring", "rustcrypto"]
 
 # Libraries the weekly bench also times, which the tier heatmap ranks rind
 # against like the baselines but the gate never counts: a cell where
@@ -1006,18 +1047,29 @@ TIER_ROWS = [
     ("JSON Web Tokens", r"jwt-[^/]+/\*/token$"),
     ("rind-rustls handshakes", r"rustls-(full|resumed)-"),
     ("rind-rustls 1 MB transfer", r"rustls-bulk/"),
+    ("rind-rustls small records", r"rustls-records/"),
+    ("Blind RSA", r"blind-rsa\d+-"),
+    ("OPRF, VOPRF", r"v?oprf-"),
+    ("ECVRF", r"vrf-"),
+    ("SPAKE2+", r"spake2plus-"),
+    ("Argon2id", r"argon2id-"),
+    ("SLH-DSA", r"slhdsa-"),
 ]
 
 # The weekly benchmarks no CPU-tier row ranks, and why. Every other
 # benchmark must match a row, so a new one cannot go unwatched.
 UNRANKED = [
-    (r"rsa\d+-key-generation", "RSA key generation varies too much from run to run to rank"),
-    (r"jwt-[^/]+/\*/load$", "a token's key loading, the part of `token` spent on the key"),
+    (r"rsa\d+-key-generation", "RSA key generation: its time varies too much from run to run to rank"),
     (
-        r"(blind-rsa\d+|v?oprf|vrf|spake2plus|argon2id)-",
-        "neither aws-lc-rs nor ring offers the protocol, so no baseline; the report's hosts compare it",
+        r"jwt-[^/]+/\*/load$",
+        "a JWT's `load` rows: aws-lc-rs's provider parses the key only when it signs or verifies, "
+        "so only `token`, which includes loading, compares",
     ),
-    (r"slhdsa-", "neither aws-lc-rs nor ring offers SLH-DSA, so no baseline"),
+    (
+        re.escape(DIT_PER_CALL),
+        "DIT set per call: rind's rows timed again without holding DIT, on aarch64, which only rind "
+        "is timed in, so they compare with its rows holding it",
+    ),
 ]
 
 # rind's time over the fastest library's above which benchmarks/gaps.toml
@@ -1029,7 +1081,7 @@ SPEED_BINS = [SLOWER, 1.25, 1.5, 2, 4, 8]
 SPEED_LABELS = ["fastest, or within 10%", "to 1.25×", "to 1.5×", "to 2×", "to 4×", "to 8×", "over 8×"]
 
 # The tier heatmap's title.
-TIERS_TITLE = "rind's time over the fastest of aws-lc-rs, ring, and verified-garbage, by CPU tier"
+TIERS_TITLE = "rind's time over the fastest of aws-lc-rs, ring, RustCrypto, and verified-garbage, by CPU tier"
 
 # rind's time over the fastest rival's, binned around the ~2% noise.
 TIER_BINS = [0.8, 0.9, 0.98, 1.02, 1.1, 1.25]
@@ -1063,6 +1115,8 @@ def row_name(op):
 
 
 def label(row):
+    if row.startswith(DIT_PER_CALL):
+        return f"{label(row.removeprefix(DIT_PER_CALL))}, DIT set per call"
     m = re.fullmatch(r"(.+)/(\d+)(K?B)", row)
     if m:
         return f"{NAMES[m.group(1)]}, {m.group(2)} {m.group(3)}"
@@ -1076,6 +1130,12 @@ def bin_of(value, edges):
 def host_arch(host):
     arch = host["cpu"]["arch"]
     return {"arm64": "aarch64", "amd64": "x86_64", "armv7l": "armv7", "armv8l": "armv7"}.get(arch, arch)
+
+
+def applies(host, op):
+    """Whether a host can time an operation: only aarch64 has DIT, so only it
+    times the DIT-per-call rows."""
+    return host_arch(host) == "aarch64" or not op.startswith(DIT_PER_CALL)
 
 
 def host_os(host):
@@ -1125,7 +1185,8 @@ def proof_for(verified, library, row, host, any_os=False):
             continue
         if not all(cpuid.get(f.removeprefix("!")) == (0 if f.startswith("!") else 1) for f in e.get("cpu", [])):
             continue
-        if any(fnmatch.fnmatchcase(row, p) for p in e["operations"]):
+        # A DIT-per-call row runs the same code as the row it repeats.
+        if any(fnmatch.fnmatchcase(row.removeprefix(DIT_PER_CALL), p) for p in e["operations"]):
             return e
     return None
 
@@ -1146,6 +1207,46 @@ def times(host):
     for r in host["results"]:
         out.setdefault(row_name(r["operation"]), {})[r["library"]] = r["ns"]
     return out
+
+
+def ranked_against(host_times, row):
+    """The times a host's row is ranked against: its own, and for a
+    DIT-per-call row, which only rind has, the other libraries' in the row it
+    repeats, as a caller holding no guard would compare them."""
+    libs = host_times.get(row, {})
+    if not row.startswith(DIT_PER_CALL):
+        return libs
+    held = host_times.get(row.removeprefix(DIT_PER_CALL), {})
+    return {lib: ns for lib, ns in held.items() if lib != "rind"} | libs
+
+
+# The DIT-per-call rows short enough that the toggle's tens of ns stand above
+# run-to-run noise; a signature's noise alone outweighs it.
+DIT_COST_ROWS = [
+    *(f"{aead}/{{lib}}/32B" for aead in ["aes128-gcm", "chacha20poly1305"]),
+    "rustls-records/aes128-gcm/{lib}/64B",
+]
+
+
+def dit_cost(host):
+    """What setting DIT around each call costs rind over holding it, on a
+    host that times both, as report lines. rind sets DIT only where the OS
+    reports it, so elsewhere the two rows run the same code and differ only
+    by noise."""
+    if not host.get("rind_cpu", {}).get("cpuid", {}).get("dit"):
+        return []
+    t = times(host)
+    pairs = [(t.get(row_name(DIT_PER_CALL + op), {}), t.get(row_name(op), {})) for op in DIT_COST_ROWS]
+    costs = [per_call["rind"] - held["rind"] for per_call, held in pairs if "rind" in per_call and "rind" in held]
+    if not costs:
+        return []
+    spread = human(costs[0]) if len(costs) == 1 else f"{human(min(costs))} to {human(max(costs))}"
+    rows = "the row" if len(costs) == 1 else f"the {len(costs)} rows"
+    return [
+        f"Setting DIT around each call, as rind does for a caller holding no `rind::cpu::Dit::hold()` guard, "
+        f"takes rind {spread} more a call than holding it, in {rows} timed both ways short enough to show it: 32 B AEAD calls and a 64 B rustls record.",
+        "",
+    ]
 
 
 def tier_rows(tier, rivals):
@@ -1227,8 +1328,10 @@ def gaps_of(hosts, tiers):
     (operation, host or tier), as (ratio, fastest library)."""
     out = {}
     for name, host in hosts.items():
-        for row, libs in times(host).items():
-            others = {lib: ns for lib, ns in libs.items() if lib != "rind" and lib not in VARIANTS}
+        host_times = times(host)
+        for row in host_times:
+            libs = ranked_against(host_times, row)
+            others = {lib: ns for lib, ns in libs.items() if lib != "rind"}
             if "rind" in libs and others:
                 best = min(others, key=others.get)
                 if libs["rind"] / others[best] > SLOWER:
@@ -1306,7 +1409,9 @@ def gap_table(gaps):
     lines = ["| Operation | On | rind's time over the fastest | Decision |", "|---|---|---|---|"]
     for e, covered in gaps:
         ops = ", ".join(label(op) if op in rows else f"`{op}`" for op in e["operations"])
-        on = ", ".join(f"`{p}`" if p in HOSTS else f"{p} tier" for p in e["on"])
+        # Only the places that measure a gap: an entry may also cover a tier whose run came in under 10%.
+        seen = {place for _, place in covered}
+        on = ", ".join(f"`{p}`" if p in HOSTS else f"{p} tier" for p in e["on"] if p in seen)
         ratios = [ratio for ratio, _ in covered.values()]
         spread = f"{min(ratios):.2f}×" + (f" to {max(ratios):.2f}×" if max(ratios) - min(ratios) >= 0.005 else "")
         fastest = ", ".join(sorted({COLUMNS[lib] for _, lib in covered.values()}))
@@ -1444,8 +1549,9 @@ def standing(hosts):
     ratios = [
         libs["rind"] / libs[fastest(libs)]
         for h in hosts.values()
-        for libs in times(h).values()
-        if "rind" in libs and any(lib != "rind" and lib not in VARIANTS for lib in libs)
+        for t in [times(h)]
+        for libs in (ranked_against(t, row) for row in t)
+        if "rind" in libs and any(lib != "rind" for lib in libs)
     ]
     return sum(r <= SLOWER for r in ratios), len(ratios)
 
@@ -1486,9 +1592,9 @@ def overview_svg(hosts, verified, theme):
                     libs = host_times[name].get(row, {})
                     if lib not in libs:
                         continue
-                    ratio = libs[lib] / libs[fastest(libs)]
+                    ratio = libs[lib] / min(ranked_against(host_times[name], row).values())
                     fill = svg.theme["speed"][bin_of(ratio, SPEED_BINS)]
-                    proof = proof_for(verified, VARIANTS.get(lib, lib), row, hosts[name])
+                    proof = proof_for(verified, lib, row, hosts[name])
                     title = f"{label(row)}, {COLUMNS[lib]} on {name}: {human(libs[lib])}, {ratio:.2f}× the fastest"
                     if proof:
                         title += f"; verified: {proof['proof']}"
@@ -1515,6 +1621,9 @@ def host_svg(name, host, verified, theme):
 
     y = top + 8
     for section, ops in SECTIONS:
+        ops = [op for op in ops if applies(host, op)]
+        if not ops:
+            continue
         y += SECTION
         svg.text(12, y - 8, section, weight="bold")
         svg.line(12, y - 4, width - 12, y - 4)
@@ -1526,9 +1635,9 @@ def host_svg(name, host, verified, theme):
                 x = label_width + c * cell + 2
                 if lib not in libs:
                     continue
-                ratio = libs[lib] / libs[fastest(libs)]
+                ratio = libs[lib] / min(ranked_against(host_times, row).values())
                 fill = svg.theme["speed"][bin_of(ratio, SPEED_BINS)]
-                proof = proof_for(verified, VARIANTS.get(lib, lib), row, host)
+                proof = proof_for(verified, lib, row, host)
                 title = f"{label(row)}, {COLUMNS[lib]}: {human(libs[lib])}, {ratio:.2f}× the fastest"
                 if proof:
                     title += f"; verified: {proof['proof']}"
@@ -1648,7 +1757,7 @@ def host_table(host, verified):
         "| Operation | " + " | ".join(COLUMNS[lib] for lib in libs_shown) + " |",
         "|---|" + "---|" * len(libs_shown),
     ]
-    for op in OPERATIONS:
+    for op in filter(lambda op: applies(host, op), OPERATIONS):
         row = row_name(op)
         libs = host_times.get(row, {})
         cells = []
@@ -1656,7 +1765,7 @@ def host_table(host, verified):
             if lib not in libs:
                 cells.append("-")
                 continue
-            check = " ✓" if proof_for(verified, VARIANTS.get(lib, lib), row, host) else ""
+            check = " ✓" if proof_for(verified, lib, row, host) else ""
             cells.append(f"{human(libs[lib])}{check}")
         lines.append(f"| {label(row)} | " + " | ".join(cells) + " |")
     return lines
@@ -1750,8 +1859,13 @@ def comparison_table(hosts, verified):
         ]
         lead = timings = 0
         for h in hosts.values():
-            for libs in times(h).values():
-                if lib in libs and any(other != lib and other not in VARIANTS for other in libs):
+            t = times(h)
+            for row in t:
+                # Only rind times a DIT-per-call row; the rest are the held row's.
+                if row.startswith(DIT_PER_CALL) and lib != "rind":
+                    continue
+                libs = ranked_against(t, row)
+                if lib in libs and any(other != lib for other in libs):
                     timings += 1
                     lead += libs[lib] / libs[fastest(libs)] <= SLOWER
         name = COLUMNS[lib] if lib == "rind" else f"[{COLUMNS[lib]}]({link})"
@@ -1803,7 +1917,7 @@ def site_data(hosts, tiers, verified, gaps):
 
     def cells(libraries, libs, best):
         return [
-            [human(libs[lib]), bin_of(libs[lib] / libs[best], SPEED_BINS), round(libs[lib] / libs[best], 2)]
+            [human(libs[lib]), bin_of(libs[lib] / best, SPEED_BINS), round(libs[lib] / best, 2)]
             if lib in libs
             else None
             for lib in libraries
@@ -1813,7 +1927,7 @@ def site_data(hosts, tiers, verified, gaps):
     proof_index = {id(e): i for i, e in enumerate(verified)}
     rows = {row_name(op) for op in OPERATIONS}
     # The libraries the verified page has a column for.
-    proven = [lib for lib in columns(*hosts.values()) if lib not in VARIANTS]
+    proven = columns(*hosts.values())
 
     def grid_cell(h, timed, lib, row):
         """A library's cell for an operation on a host, for the verified
@@ -1826,6 +1940,9 @@ def site_data(hosts, tiers, verified, gaps):
         its benchmark."""
         if lib in h.get("refused", {}):
             return "refused"
+        # Only rind runs a DIT-per-call row, and only where it applies.
+        if row.startswith(DIT_PER_CALL) and (lib != "rind" or not applies(h, row)):
+            return "untimed"
         if entry := proof_for(verified, lib, row, h):
             return proof_index[id(entry)]
         if entry := proof_for(verified, lib, row, h, any_os=True):
@@ -1859,19 +1976,20 @@ def site_data(hosts, tiers, verified, gaps):
             },
             "gaps": {},
         }
-        for row, libs in times(h).items():
+        host_times = times(h)
+        for row, libs in host_times.items():
             if row not in rows:
                 continue
-            others = [lib for lib in libs if lib not in VARIANTS]
-            best = fastest(libs)
-            out["times"][row] = cells(out["libraries"], libs, best)
+            against = ranked_against(host_times, row)
+            best = fastest(against)
+            out["times"][row] = cells(out["libraries"], libs, against[best])
             # One library alone has no rival, so no fastest.
-            if len(others) > 1:
+            if len(against) > 1:
                 out["fastest"][row] = best
             proofs = {
                 lib: proof_index[id(p)]
                 for lib in libs
-                if (p := proof_for(verified, VARIANTS.get(lib, lib), row, h)) is not None
+                if (p := proof_for(verified, lib, row, h)) is not None
             }
             if proofs:
                 out["proofs"][row] = proofs
@@ -1924,7 +2042,7 @@ def site_data(hosts, tiers, verified, gaps):
             if not rivals:
                 continue
             best = min(rivals, key=rivals.get)
-            out["times"][key] = cells(out["libraries"], libs, best)
+            out["times"][key] = cells(out["libraries"], libs, rivals[best])
             if len(rivals) > 1:
                 out["fastest"][key] = best
             if (key, name) in gap_of:
@@ -1952,7 +2070,7 @@ def site_data(hosts, tiers, verified, gaps):
             for edge, text, color in zip(SPEED_BINS + [None], SPEED_LABELS, SPEED)
         ],
         "standing": standing(hosts),
-        "libraries": [{"id": lib, "name": COLUMNS[lib], "variant_of": VARIANTS.get(lib)} for lib in COLUMNS],
+        "libraries": [{"id": lib, "name": COLUMNS[lib]} for lib in COLUMNS],
         "sections": [
             {"name": section, "operations": [{"id": row_name(op), "label": label(row_name(op))} for op in ops]}
             for section, ops in SECTIONS
@@ -2052,17 +2170,6 @@ def report(hosts, tiers, verified, gaps):
             "Over rustls's aws-lc-rs provider it makes 214 through Rust's allocator and about 90 more in AWS-LC's C "
             "code, which only a process-wide count such as valgrind's sees (2026-11-13).",
             "",
-            *(
-                [
-                    "rind (DIT held) times rind with `rind::cpu::Dit::hold()` held across the timed loop, as a "
-                    "caller batching calls does, so that DIT is set once rather than around each call. Only an Apple "
-                    "CPU times it, since elsewhere it runs the same code as rind's own column, and it never "
-                    "counts as the fastest library.",
-                    "",
-                ]
-                if "rind-dit-held" in columns(*hosts.values())
-                else []
-            ),
             *picture("overview", "Time over the fastest library's, by operation, library, and host"),
             "",
         ]
@@ -2072,7 +2179,7 @@ def report(hosts, tiers, verified, gaps):
         if name not in hosts:
             continue
         h = hosts[name]
-        untimed = [label(row_name(op)) for op in OPERATIONS if row_name(op) not in times(h)]
+        untimed = [label(row_name(op)) for op in OPERATIONS if row_name(op) not in times(h) and applies(h, op)]
         md += [
             f"### `{name}`: {h['cpu']['model']}",
             "",
@@ -2081,6 +2188,7 @@ def report(hosts, tiers, verified, gaps):
             *([HOSTS[name]["note"], ""] if "note" in HOSTS[name] else []),
             *([f"Not timed on `{name}`: {', '.join(untimed)}.", ""] if untimed else []),
             *scaling(h),
+            *dit_cost(h),
             *(
                 f"{COLUMNS[lib]} isn't timed on `{name}`: it requires {and_list([f.upper() for f in missing])}, "
                 "which this CPU lacks."
@@ -2144,9 +2252,14 @@ def report(hosts, tiers, verified, gaps):
             "backend, forced with `--cfg rind_portable`, against aws-lc's C built without assembly; ring has no "
             "such build, and verified-garbage runs its assembly there, so both sit that column out. Each cell is "
             "rind's time over the fastest of aws-lc-rs, ring, and verified-garbage (without ring where a feature "
-            "is denied, since ring can't be denied one), in the row's benchmark where rind trails most. A cell "
-            "verified-garbage wins gets a quest that switches rind to its proven code, not an entry under "
-            "Known gaps. An empty cell runs the same code as the one to its left, so it isn't timed.",
+            "is denied, since ring can't be denied one), in the row's benchmark where rind trails most. Argon2id, "
+            "SLH-DSA, and the protocols, which neither aws-lc-rs nor ring offers, are timed against RustCrypto "
+            "instead, on the x86_64, aarch64, and armv7 columns alone, since RustCrypto's CPU detection can't be "
+            "denied a feature. Known gaps "
+            "compares a tier against aws-lc-rs, ring, and RustCrypto only, so a cell that only verified-garbage beats gets "
+            "a quest that switches rind to its proven code, not an entry there. An empty cell isn't timed: it runs the same code as the cell to its left, or, in a row "
+            "built on other primitives such as `rustls-bulk/*` or HPKE, its tier times only those primitives, "
+            "whose own rows show the difference.",
             "",
             f"From [run {tiers['run']}]({tiers['url']}), {tiers['date'][:10]} at {commit_link(tiers['commit'])}, "
             f"on {', '.join(cpus)}.",
@@ -2171,6 +2284,10 @@ def report(hosts, tiers, verified, gaps):
         "CPU tier, and what is decided: a quest that closes it, or the reason "
         "it stays. `benchmarks/gaps.toml` holds this table, and `admin/bench-report render` refuses a gap it "
         "lacks or an entry that is no longer a gap.",
+        "",
+        "The CPU tiers rank every weekly benchmark but these, so none of them is a gap, whatever its cell:",
+        "",
+        *(f"- {why[0].upper()}{why[1:]}." for _, why in UNRANKED),
         "",
         *(gap_table(gaps) if gaps else ["None."]),
         "",

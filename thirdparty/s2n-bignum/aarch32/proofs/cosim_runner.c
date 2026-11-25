@@ -14,9 +14,12 @@
  *   20-83  the scratch buffer's 64 words
  *
  * and the reply's are the same after the instruction runs. SP points into the
- * 256-byte scratch buffer, so an instruction under test reaches memory only
- * through SP; the other registers take any value. A malformed request gets
- * ERROR, and a fault kills the executor, which the client reports. */
+ * 256-byte scratch buffer. The greeting's metadata, `slot=` and `scratch=`,
+ * give the instruction's and the buffer's addresses in decimal, so that a
+ * request can branch to a landing slot through a register or a loaded word,
+ * and the client can tell what a PC-relative operand or a literal load reads.
+ * A malformed request gets ERROR, and a fault kills the executor, which the
+ * client reports. */
 
 typedef unsigned int u32;
 
@@ -25,9 +28,10 @@ typedef unsigned int u32;
 
 extern u32 cosim_state[17];
 extern u32 cosim_slot[1];
+extern u32 cosim_scratch[SCRATCH_WORDS];
 extern void cosim_enter(void);
 
-static u32 scratch[SCRATCH_WORDS] __attribute__((aligned(256)));
+#define scratch cosim_scratch
 
 static long syscall3(long number, long a, long b, long c) {
     register long r7 __asm__("r7") = number;
@@ -146,7 +150,11 @@ static int run(u32 instruction, u32 *state) {
 int cosim_main(void) {
     static char line[2048];
     static u32 state[STATE_WORDS];
-    put("READY 1 aarch32 84\n");
+    put("READY 1 aarch32 84 slot=");
+    put_u32((u32)(unsigned long)cosim_slot);
+    put(" scratch=");
+    put_u32((u32)(unsigned long)cosim_scratch);
+    put("\n");
     flush();
     for (;;) {
         long length = read_line(line, sizeof line);

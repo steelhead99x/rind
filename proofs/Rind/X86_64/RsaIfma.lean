@@ -204,13 +204,13 @@ theorem wordsNat_set (l : List U64) (q : Nat) (v : U64) (hq : q < l.length) :
 set_option maxHeartbeats 1000000 in
 /-- `from_secret_bytes`'s loop, with the low `i` bytes read: the words hold
 the number they encode. -/
-theorem from_secret_bytes_loop1_spec {N : Usize} (bytes : Slice U8) (len : Usize) (hlen : bytes.length = len.val)
+theorem from_secret_bytes_loop2_spec {N : Usize} (bytes : Slice U8) (len : Usize) (hlen : bytes.length = len.val)
     (hN : len.val ≤ 8 * N.val) (iter : core.ops.range.Range Usize) (hend : iter.end = len)
     (hstart : iter.start.val ≤ len.val) (r : low.posint.PosInt N)
     (hinv : wordsNat r.words.val = beNat (bytes.val.drop (len.val - iter.start.val))) :
-    low.posint.PosInt.from_secret_bytes_loop1 iter bytes r len ⦃ o =>
+    low.posint.PosInt.from_secret_bytes_loop2 iter bytes r len ⦃ o =>
       o.used = r.used ∧ wordsNat o.words.val = beNat bytes.val ⦄ := by
-  unfold low.posint.PosInt.from_secret_bytes_loop1
+  unfold low.posint.PosInt.from_secret_bytes_loop2
   apply loop.spec_decr_nat (fun x => x.1.end.val - x.1.start.val)
     (fun x : core.ops.range.Range Usize × low.posint.PosInt N => x.1.end = len ∧
       x.1.start.val ≤ len.val ∧ x.2.used = r.used ∧
@@ -218,7 +218,7 @@ theorem from_secret_bytes_loop1_spec {N : Usize} (bytes : Slice U8) (len : Usize
   · rintro ⟨it, r1⟩ ⟨he, hs, hu, hv⟩
     simp only at he hs hu hv
     have hev : it.end.val = len.val := by rw [he]
-    unfold low.posint.PosInt.from_secret_bytes_loop1.body
+    unfold low.posint.PosInt.from_secret_bytes_loop2.body
     step as ⟨op, iter1, hop, hend1⟩
     cases op with
     | none =>
@@ -308,14 +308,11 @@ theorem from_secret_bytes_spec (bytes : Slice U8) (hN : bytes.length ≤ 1024) :
       p.used.val = (bytes.length + 7) / 8 ∧ wordsNat p.words.val = beNat bytes.val ⦄ := by
   unfold low.posint.PosInt.from_secret_bytes low.posint.PosInt.zero
   step as ⟨i1, hi1⟩
-  step as ⟨i2, hi2⟩
   have hbl : bytes.length = bytes.val.length := rfl
-  have hne : ¬ (Slice.len bytes = i2) := by
-    intro h; have := congrArg UScalar.val h; simp at this; omega
   have hle : ¬ (Slice.len bytes > i1) := by
     intro h; have : (Slice.len bytes).val > i1.val := h; simp at this; omega
-  simp only [hne, hle, ↓reduceIte]
-  step with from_secret_bytes_loop1_spec bytes (Slice.len bytes) (by simp) (by simp; omega)
+  simp only [hle, ↓reduceIte]
+  step with from_secret_bytes_loop2_spec bytes (Slice.len bytes) (by simp) (by simp; omega)
     { start := 0#usize, «end» := Slice.len bytes } rfl (by simp)
     { words := Array.repeat 128#usize 0#u64, used := 0#usize }
     (by rw [Array.repeat_val, wordsNat_replicate_zero]; simp [beNat, leNat]) as ⟨r1, hu, hv⟩

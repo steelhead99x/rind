@@ -6,9 +6,10 @@ open rind.x86_64
 The axioms the SHA-1, SHA-256, HMAC, and digest API theorems rest on, beyond
 Lean's own. The block functions' contracts are `Sha1Blocks` and
 `Sha256Blocks`, a hypothesis of each theorem, but for SHA-256's routines for
-the SHA extensions: its theorems rest on `sha256_compress_blocks_shaext_spec`
-and `finish_padded_spec`, rind's HOL Light proofs of them, which
-`Rind.X86_64.Sha256Shaext` restates. `Axioms` pins the theorems over every HMAC
+the SHA extensions and its AVX2 routine: its theorems rest on
+`sha256_compress_blocks_shaext_spec` and `finish_padded_spec`, which
+`Rind.X86_64.Sha256Shaext` restates, and `sha256_compress_blocks_avx2_spec`,
+which `Rind.X86_64.ShaBlocks` does, rind's HOL Light proofs of them. `Axioms` pins the theorems over every HMAC
 algorithm, which rest on SHA-512's. A change here is a change to the trust base.
 -/
 
@@ -16,6 +17,7 @@ algorithm, which rest on SHA-512's. A change here is a change to the trust base.
  Classical.choice,
  Quot.sound,
  finish_padded_spec,
+ sha256_compress_blocks_avx2_spec,
  sha256_compress_blocks_shaext_spec] -/
 #guard_msgs in
 #print axioms sha256_hash
@@ -28,6 +30,7 @@ algorithm, which rest on SHA-512's. A change here is a change to the trust base.
  Classical.choice,
  Quot.sound,
  finish_padded_spec,
+ sha256_compress_blocks_avx2_spec,
  sha256_compress_blocks_shaext_spec] -/
 #guard_msgs in
 #print axioms hmac_sha256_sign
@@ -52,6 +55,7 @@ algorithm, which rest on SHA-512's. A change here is a change to the trust base.
  Classical.choice,
  Quot.sound,
  finish_padded_spec,
+ sha256_compress_blocks_avx2_spec,
  sha256_compress_blocks_shaext_spec] -/
 #guard_msgs in
 #print axioms digest_spec
@@ -64,6 +68,7 @@ algorithm, which rest on SHA-512's. A change here is a change to the trust base.
  Classical.choice,
  Quot.sound,
  finish_padded_spec,
+ sha256_compress_blocks_avx2_spec,
  sha256_compress_blocks_shaext_spec] -/
 #guard_msgs in
 #print axioms digest_ctx_update_spec
@@ -72,6 +77,7 @@ algorithm, which rest on SHA-512's. A change here is a change to the trust base.
  Classical.choice,
  Quot.sound,
  finish_padded_spec,
+ sha256_compress_blocks_avx2_spec,
  sha256_compress_blocks_shaext_spec] -/
 #guard_msgs in
 #print axioms digest_ctx_finish_spec

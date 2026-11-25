@@ -49,7 +49,6 @@ void main() {
   test('what rind lacks throws where it is constructed', () {
     final hmac = _rind.hmac(_rind.sha256());
     final constructors = <Object Function()>[
-      () => _rind.aesGcm(nonceLength: 16),
       () => _rind.argon2id(
         memory: 1,
         parallelism: 1,
@@ -237,6 +236,9 @@ void main() {
       _rind.aesGcm(secretKeyLength: 16): DartAesGcm.with128bits(),
       _rind.aesGcm(secretKeyLength: 24): DartAesGcm.with192bits(),
       _rind.aesGcm(): DartAesGcm.with256bits(),
+      _rind.aesGcm(nonceLength: 8): DartAesGcm.with256bits(nonceLength: 8),
+      _rind.aesGcm(secretKeyLength: 16, nonceLength: 16):
+          DartAesGcm.with128bits(nonceLength: 16),
       _rind.chacha20Poly1305Aead(): const DartChacha20.poly1305Aead(),
     };
 
@@ -306,9 +308,37 @@ void main() {
         throwsArgumentError,
       );
       await expectLater(
-        cipher.encrypt([1], secretKey: SecretKey(_bytes(32)), nonce: [1]),
+        cipher.encrypt([1], secretKey: SecretKey(_bytes(32)), nonce: []),
         throwsArgumentError,
       );
+      expect(() => _rind.aesGcm(nonceLength: 0), throwsRangeError);
+      final chacha = _rind.chacha20Poly1305Aead();
+      await expectLater(
+        chacha.encrypt([1], secretKey: SecretKey(_bytes(32)), nonce: [1]),
+        throwsArgumentError,
+      );
+    });
+
+    test('AES-GCM takes a nonce of any length, as Dart does', () async {
+      final cipher = _rind.aesGcm();
+      final secretKey = await cipher.newSecretKey();
+      for (final length in [1, 8, 11, 13, 16, 64]) {
+        final nonce = _bytes(length, 3);
+        final box = await cipher.encrypt(
+          [1, 2, 3],
+          secretKey: secretKey,
+          nonce: nonce,
+        );
+        expect(
+          box,
+          await DartAesGcm.with256bits().encrypt(
+            [1, 2, 3],
+            secretKey: secretKey,
+            nonce: nonce,
+          ),
+        );
+        expect(await cipher.decrypt(box, secretKey: secretKey), [1, 2, 3]);
+      }
     });
 
     test('ChaCha20-Poly1305 refuses a key stream index', () async {
@@ -942,24 +972,44 @@ void main() {
       }
     });
 
-    test('PSS signs with a salt as long as the hash', () async {
+    test('PSS signs and verifies with its salt length', () async {
       final message = _bytes(100);
-      final pss = _rind.rsaPss(_rind.sha256(), nonceLengthInBytes: 32);
-      final signature = await pss.sign(message, keyPair: data);
-      expect(await pss.verify(message, signature: signature), isTrue);
-      rind.PublicKey.fromComponents(
-        rind.VerificationAlgorithm.rsaPssSha256,
-        n: Uint8List.fromList(data.n),
-        e: Uint8List.fromList(data.e),
-      ).verify(message, Uint8List.fromList(signature.bytes));
+      for (final (hash, verification) in [
+        (_rind.sha256(), rind.RsaVerificationAlgorithm.pssSha256),
+        (_rind.sha384(), rind.RsaVerificationAlgorithm.pssSha384),
+        (_rind.sha512(), rind.RsaVerificationAlgorithm.pssSha512),
+      ]) {
+        for (final salt in [0, 16, hash.hashLengthInBytes]) {
+          final pss = _rind.rsaPss(hash, nonceLengthInBytes: salt);
+          final signature = await pss.sign(message, keyPair: data);
+          expect(await pss.verify(message, signature: signature), isTrue);
+          expect(
+            await pss.verify([...message, 0], signature: signature),
+            isFalse,
+          );
+          rind.PublicKey.fromComponents(
+            verification(salt),
+            n: Uint8List.fromList(data.n),
+            e: Uint8List.fromList(data.e),
+          ).verify(message, Uint8List.fromList(signature.bytes));
 
-      // Another salt length verifies any salt, and signs nothing.
-      final salted = _rind.rsaPss(_rind.sha256(), nonceLengthInBytes: 16);
-      expect(await salted.verify(message, signature: signature), isTrue);
-      await expectLater(
-        salted.sign(message, keyPair: data),
-        _throwsUnsupported,
-      );
+          // Another salt length refuses it, as WebCrypto's does.
+          final other = _rind.rsaPss(hash, nonceLengthInBytes: salt + 1);
+          expect(await other.verify(message, signature: signature), isFalse);
+        }
+      }
+      for (final salt in [-1, 65536]) {
+        expect(
+          () => _rind.rsaPss(_rind.sha256(), nonceLengthInBytes: salt),
+          throwsA(
+            isA<RangeError>().having(
+              (e) => e.name,
+              'name',
+              'nonceLengthInBytes',
+            ),
+          ),
+        );
+      }
     });
 
     test('SHA-1 PKCS#1 v1.5 verifies and signs nothing', () async {

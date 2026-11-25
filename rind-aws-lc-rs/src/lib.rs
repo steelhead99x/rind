@@ -1,4 +1,5 @@
 #![doc = include_str!("../README.md")]
+#![no_std]
 // aws-lc-rs's API has these shapes, which a drop-in keeps.
 #![allow(clippy::len_without_is_empty, clippy::new_without_default)]
 #![warn(missing_docs, unreachable_pub)]
@@ -8,6 +9,8 @@
 use core::fmt;
 
 extern crate alloc;
+#[cfg(test)]
+extern crate std;
 
 pub mod aead;
 pub mod agreement;

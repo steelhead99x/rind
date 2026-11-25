@@ -28,3 +28,9 @@ globs = ["Rind.+"]
 # Lean's default 512 is too shallow for `Array.make`'s length proof of the
 # 256-word rows of P-256's generator table in the translation.
 leanOptions = { maxRecDepth = 1024 }
+
+# The specs, compiled, which `admin/spec-tests` runs against the vectors and
+# rind: `Rind.SpecTest.Server`.
+[[lean_exe]]
+name = "spec-server"
+root = "Rind.SpecTest.Server"

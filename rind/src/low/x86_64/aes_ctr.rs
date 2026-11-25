@@ -41,14 +41,15 @@ impl Ctr32 for NohwKey {
 /// The counter blocks are `ivec`, then `ivec` with its last four bytes, a
 /// big-endian counter, incremented with 32-bit wrapping.
 fn hw_ctr32(key: &HwKey, ivec: &[u8; 16], inout: &mut [[u8; 16]]) {
+    let io = inout.as_mut_ptr().cast::<u8>();
     // SAFETY: `inout` is `inout.len()` readable and writable blocks, which
     // aws-lc allows to alias, and `key` an `AES_KEY`. Only a `HaveAesHardware`
     // token builds `key`, proving the AES-NI and SSE4.1 the routine uses. It
     // returns at once for zero blocks.
     unsafe {
         asm_call!(unsafe extern "sysv64" aes_hw_ctr32_encrypt_blocks(
-            inout.as_ptr().cast(),
-            inout.as_mut_ptr().cast(),
+            io,
+            io,
             inout.len(),
             key.as_aes_key(),
             ivec,

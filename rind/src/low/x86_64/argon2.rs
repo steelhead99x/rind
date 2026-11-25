@@ -14,35 +14,57 @@
 
 use core::arch::x86_64::*;
 
-use super::super::generic::argon2::{Argon2Block, argon2_compress as portable};
+use super::super::generic::argon2::{Argon2Block, Argon2Out, argon2_compress as portable};
 use super::cpu::HaveAvx2;
 
-/// Argon2's compression function, as `low::generic::argon2` defines it.
-pub(crate) fn argon2_compress(x: &Argon2Block, y: &Argon2Block, out: &mut Argon2Block, xor: bool) {
-    match HaveAvx2::check() {
-        // SAFETY: the token proves AVX2
-        Some(_) => unsafe { compress_avx2(x, y, out, xor) },
-        None => portable(x, y, out, xor),
+/// Argon2's compression function, as `low::generic::argon2` defines it, on
+/// the fastest code this CPU runs.
+#[derive(Clone, Copy)]
+pub(crate) enum Argon2Kernel {
+    Avx2(HaveAvx2),
+    Portable,
+}
+
+impl Argon2Kernel {
+    /// The fastest G this CPU runs, picked once so no block checks again.
+    pub(crate) fn new() -> Self {
+        match HaveAvx2::check() {
+            Some(token) => Self::Avx2(token),
+            None => Self::Portable,
+        }
+    }
+
+    /// Writes G(`x`, `y`) to `out`.
+    #[inline(always)]
+    pub(in crate::low) fn compress(self, x: &Argon2Block, y: &Argon2Block, out: Argon2Out<'_>) {
+        match self {
+            // SAFETY: the token proves AVX2
+            Self::Avx2(_) => unsafe { compress_avx2(x, y, out) },
+            Self::Portable => portable(x, y, out),
+        }
     }
 }
 
 #[target_feature(enable = "avx2")]
-fn compress_avx2(x: &Argon2Block, y: &Argon2Block, out: &mut Argon2Block, xor: bool) {
-    let load = |block: &Argon2Block, i: usize| {
-        // SAFETY: `i` is below 32, so the 32 bytes read lie in the block,
-        // whose 64-byte alignment aligns them.
-        unsafe { _mm256_load_si256(block.0.as_ptr().cast::<__m256i>().add(i)) }
+fn compress_avx2(x: &Argon2Block, y: &Argon2Block, out: Argon2Out<'_>) {
+    // SAFETY: `i` is below 32, so the 32 bytes read lie in the block, whose
+    // 64-byte alignment aligns them.
+    let load = |block: *const Argon2Block, i: usize| unsafe {
+        _mm256_load_si256(block.cast::<__m256i>().add(i))
+    };
+    let (out, xor) = match out {
+        Argon2Out::Set(out) => (out.as_mut_ptr(), false),
+        Argon2Out::Xor(out) => (core::ptr::from_mut(out), true),
     };
 
-    let mut state = [_mm256_setzero_si256(); 32];
-    let mut r = [_mm256_setzero_si256(); 32];
-    for i in 0..32 {
-        state[i] = _mm256_xor_si256(load(x, i), load(y, i));
-        r[i] = match xor {
-            true => _mm256_xor_si256(state[i], load(out, i)),
-            false => state[i],
-        };
-    }
+    // Built without zeroing first: every vector is written before it is read.
+    let mut state: [__m256i; 32] =
+        core::array::from_fn(|i| _mm256_xor_si256(load(x, i), load(y, i)));
+    // Only an `Xor` block is read, and it holds a whole initialized block.
+    let r: [__m256i; 32] = core::array::from_fn(|i| match xor {
+        true => _mm256_xor_si256(state[i], load(out, i)),
+        false => state[i],
+    });
 
     for i in 0..4 {
         let [a0, b0, c0, d0, a1, b1, c1, d1] = rows(&mut state, 8 * i);
@@ -56,7 +78,7 @@ fn compress_avx2(x: &Argon2Block, y: &Argon2Block, out: &mut Argon2Block, xor: b
     for i in 0..32 {
         let word = _mm256_xor_si256(state[i], r[i]);
         // SAFETY: as `load`, writing.
-        unsafe { _mm256_store_si256(out.0.as_mut_ptr().cast::<__m256i>().add(i), word) };
+        unsafe { _mm256_store_si256(out.cast::<__m256i>().add(i), word) };
     }
 }
 
@@ -167,6 +189,8 @@ fn fbla(x: __m256i, y: __m256i) -> __m256i {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use core::mem::MaybeUninit;
+
     use super::*;
 
     #[test]
@@ -183,13 +207,19 @@ mod tests {
             }
             b
         };
-        for xor in [false, true] {
-            let (x, y, old) = (block(), block(), block());
-            let (mut ours, mut theirs) = (old.clone(), old);
-            // SAFETY: AVX2 checked above
-            unsafe { compress_avx2(&x, &y, &mut ours, xor) };
-            portable(&x, &y, &mut theirs, xor);
-            assert_eq!(ours.0, theirs.0);
-        }
+        let (x, y, old) = (block(), block(), block());
+        let (mut ours, mut theirs) = (old.clone(), old);
+        // SAFETY: AVX2 checked above
+        unsafe { compress_avx2(&x, &y, Argon2Out::Xor(&mut ours)) };
+        portable(&x, &y, Argon2Out::Xor(&mut theirs));
+        assert_eq!(ours.0, theirs.0);
+
+        let (mut ours, mut theirs) = (MaybeUninit::uninit(), MaybeUninit::uninit());
+        // SAFETY: AVX2 checked above
+        unsafe { compress_avx2(&x, &y, Argon2Out::Set(&mut ours)) };
+        portable(&x, &y, Argon2Out::Set(&mut theirs));
+        // SAFETY: each `Set` wrote its whole block.
+        let (ours, theirs) = unsafe { (ours.assume_init(), theirs.assume_init()) };
+        assert_eq!(ours.0, theirs.0);
     }
 }

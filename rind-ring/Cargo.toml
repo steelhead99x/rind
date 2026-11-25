@@ -1,6 +1,6 @@
 [package]
 name = "rind-ring"
-version = "0.17.5"
+version = "0.17.4"
 edition = "2024"
 repository = "https://github.com/kixel-ai/rind"
 homepage = "https://rind.kixel.ai"
@@ -24,12 +24,9 @@ module = ""
 # Items rind cannot back, which the README names.
 omitted = [
   "aead::chacha20_poly1305_openssh",
-  "io",
   "test",
   "deprecated_test",
   "test_file",
-  "rsa::KeyPair::from_components",
-  "rsa::KeyPairComponents",
   "signature::RsaEncoding::encode",
 ]
 
@@ -54,7 +51,7 @@ wasm32_unknown_unknown_js = ["dep:getrandom", "getrandom/wasm_js"]
 [dependencies]
 # rind's own, named here only to turn on its JavaScript source.
 getrandom = { version = "0.4", optional = true }
-rind = { version = "0.3.2", path = "../rind" }
+rind = { version = "0.3.2", path = "../rind", default-features = false }
 untrusted = "0.9"
 
 [dev-dependencies]
@@ -72,3 +69,8 @@ aws-lc-rs = { version = "1.16", default-features = false, features = ["alloc", "
 proptest = "1.5.0"
 # ring's own values, for the accessors and `Debug` aws-lc-rs has since changed.
 ring = "0.17.14"
+
+# ring's own tests run in a JavaScript host on the browser's target, as ring's
+# do.
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dev-dependencies]
+wasm-bindgen-test = "0.3"
