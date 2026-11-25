@@ -21,7 +21,7 @@ use crate::error::{KeyRejected, Unspecified, unspecified};
 use crate::io;
 use crate::signature::{self, ParsedKey, ParsedPublicKey, private};
 use crate::wipe::Wiped;
-use crate::{der, rand, sealed};
+use crate::{der, pqdsa, rand, sealed};
 
 /// An RSA key size.
 #[non_exhaustive]
@@ -66,6 +66,25 @@ fn check_bits(bits: usize) -> Result<(), KeyRejected> {
         0..=2047 => Err(KeyRejected::too_small()),
         _ => Err(KeyRejected::too_large()),
     }
+}
+
+/// RFC 8017 `rsaEncryption`.
+const RSA_ENCRYPTION: &[u8] = &[0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01];
+/// RFC 4055 `id-RSAES-OAEP`.
+const RSAES_OAEP: &[u8] = &[0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x07];
+/// RFC 4055 `id-RSASSA-PSS`.
+const RSASSA_PSS: &[u8] = &[0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x0a];
+/// X.509's `id-ea-rsa`.
+const ID_EA_RSA: &[u8] = &[0x55, 0x08, 0x01, 0x01];
+
+/// Whether a public key's modulus and exponent pass AWS-LC's
+/// `is_public_component_of_rsa_key_good` (`crypto/fipsmodule/rsa/rsa.c`),
+/// which `RSA_parse_public_key` runs before aws-lc-rs checks the size: an
+/// odd modulus of at most 16384 bits and an odd exponent of 2 to 33 bits.
+/// Both are minimal big-endian magnitudes, so neither is empty.
+fn public_components_ok(n: &[u8], e: &[u8]) -> bool {
+    let odd = |v: &[u8]| v.last().is_some_and(|low| low & 1 == 1);
+    odd(n) && der::bits(n) <= 16384 && odd(e) && (2..=33).contains(&der::bits(e))
 }
 
 /// An RSA private key and its public key, for signing.
@@ -928,16 +947,31 @@ impl PublicEncryptingKey {
         })))
     }
 
-    /// Parses an `rsaEncryption` `SubjectPublicKeyInfo`.
+    /// Parses an RSA `SubjectPublicKeyInfo`.
     pub fn from_der(value: &[u8]) -> Result<Self, KeyRejected> {
-        if !der::is_spki(value) {
+        // aws-lc-rs parses the key as RSA, then as RSA-PSS, and only then
+        // checks its size (`decode_public_key_der` and `validate_rsa_key` in
+        // aws-lc-rs 1.19.0 `src/rsa/`), so the framing, the algorithm, and
+        // the key's encoding each pick their refusal before the size does.
+        let spki = der::spki_parts(value).ok_or_else(KeyRejected::invalid_encoding)?;
+        let rsa = match spki.oid {
+            // `rsa_pub_decode` (`p_rsa_asn1.c`) ignores the parameters.
+            RSA_ENCRYPTION | RSAES_OAEP | ID_EA_RSA => true,
+            RSASSA_PSS => pqdsa::pss_parameters_ok(spki.parameters),
+            _ => false,
+        };
+        if !rsa {
+            return Err(match pqdsa::parses_as_other_public_key(value, &spki) {
+                true => KeyRejected::wrong_algorithm(),
+                false => KeyRejected::invalid_encoding(),
+            });
+        }
+        let (n, e) = der::rsa_public_key(spki.key).or(Err(KeyRejected::invalid_encoding()))?;
+        if !public_components_ok(n, e) {
             return Err(KeyRejected::invalid_encoding());
         }
-        // aws-lc-rs refuses a parsed key by its size before rind would.
-        if let Some(bits) = der::spki_rsa_modulus_bits(value) {
-            check_bits(bits)?;
-        }
-        let key = rind::rsa::EncryptingKey::from_spki(&rind::rsa::OAEP_SHA256, value)
+        check_bits(der::bits(n))?;
+        let key = rind::rsa::EncryptingKey::new(&rind::rsa::OAEP_SHA256, spki.key)
             .map_err(KeyRejected::rind)?;
         Self::new(key.as_ref())
     }

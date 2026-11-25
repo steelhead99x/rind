@@ -173,21 +173,37 @@ pub(crate) fn is_spki(der: &[u8]) -> bool {
         .unwrap_or(false)
 }
 
-/// The modulus's bit length in an RSA `SubjectPublicKeyInfo`, or `None` if
-/// its framing is not one. The algorithm identifier is not checked.
-pub(crate) fn spki_rsa_modulus_bits(der: &[u8]) -> Option<usize> {
-    untrusted::Input::from(der)
-        .read_all(Unspecified, |input| {
-            read(input, SEQUENCE)?.read_all(Unspecified, |input| {
-                read(input, SEQUENCE)?;
-                let key = read(input, BIT_STRING)?.as_slice_less_safe();
-                match key {
-                    [0, pkcs1 @ ..] => Ok(bits(rsa_public_key(pkcs1)?.0)),
-                    _ => Err(Unspecified),
-                }
-            })
+/// A `SubjectPublicKeyInfo`'s algorithm and key.
+pub(crate) struct SpkiParts<'a> {
+    /// The algorithm's object identifier's contents.
+    pub(crate) oid: &'a [u8],
+    /// Whatever follows the object identifier in the algorithm identifier.
+    pub(crate) parameters: &'a [u8],
+    /// The key's BIT STRING contents after its unused-bits byte.
+    pub(crate) key: &'a [u8],
+}
+
+/// Splits the `SubjectPublicKeyInfo` at the start of `der` as aws-lc's
+/// `EVP_parse_public_key` (`crypto/evp_extra/evp_asn1.c`) does: bytes after
+/// it are ignored, and the key's BIT STRING has no unused bits.
+pub(crate) fn spki_parts(der: &[u8]) -> Option<SpkiParts<'_>> {
+    let mut outer = untrusted::Reader::new(untrusted::Input::from(der));
+    let (algorithm, key) = read(&mut outer, SEQUENCE)
+        .ok()?
+        .read_all(Unspecified, |body| {
+            Ok((read(body, SEQUENCE)?, read(body, BIT_STRING)?))
         })
-        .ok()
+        .ok()?;
+    let mut algorithm = untrusted::Reader::new(algorithm);
+    let oid = read(&mut algorithm, OBJECT_IDENTIFIER).ok()?;
+    let [0, key @ ..] = key.as_slice_less_safe() else {
+        return None;
+    };
+    Some(SpkiParts {
+        oid: oid.as_slice_less_safe(),
+        parameters: algorithm.read_bytes_to_end().as_slice_less_safe(),
+        key,
+    })
 }
 
 /// The bit length of a big-endian magnitude without leading zero bytes; 0

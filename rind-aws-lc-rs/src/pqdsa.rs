@@ -552,6 +552,52 @@ fn rsa_pss_private_key(pkcs8: &[u8]) -> bool {
         || unbacked_rsa_size(parts.private_key)
 }
 
+/// Whether `spki`, split from `der`, is a public key of a type aws-lc
+/// parses that is neither RSA nor RSA-PSS, which aws-lc-rs refuses as
+/// `WrongAlgorithm` (`parse_rfc5280_public_key` in aws-lc-rs 1.19.0
+/// `aws-lc-rs/src/evp_pkey.rs`). Each `*_pub_decode` in aws-lc's
+/// `crypto/evp_extra` is followed: Ed25519, X25519, ML-DSA, and ML-KEM
+/// check only that the parameters are absent and the key's length; a NIST
+/// curve's point must lie on it, which rind checks; P-224, secp256k1, DSA,
+/// and DH, which rind cannot back, are decided from their framing.
+pub(crate) fn parses_as_other_public_key(der: &[u8], spki: &der::SpkiParts<'_>) -> bool {
+    use rind::ecdsa::verify::{P256_SHA256_ASN1, P384_SHA384_ASN1, P521_SHA512_ASN1};
+    let len = |expected: usize| spki.parameters.is_empty() && spki.key.len() == expected;
+    match spki.oid {
+        // RFC 8410 Ed25519 and X25519.
+        [0x2b, 0x65, 0x70] | [0x2b, 0x65, 0x6e] => len(32),
+        // FIPS 204 ML-DSA-44, ML-DSA-65, and ML-DSA-87.
+        [0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x03, 0x11] => len(1312),
+        [0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x03, 0x12] => len(1952),
+        [0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x03, 0x13] => len(2592),
+        // FIPS 203 ML-KEM-512, ML-KEM-768, and ML-KEM-1024.
+        [0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x04, 0x01] => len(800),
+        [0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x04, 0x02] => len(1184),
+        [0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x04, 0x03] => len(1568),
+        // RFC 5480 `id-ecPublicKey`, naming its curve.
+        [0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01] => {
+            let algorithm = match curve_oid(spki.parameters) {
+                Some([0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07]) => &P256_SHA256_ASN1,
+                Some([0x2b, 0x81, 0x04, 0x00, 0x22]) => &P384_SHA384_ASN1,
+                Some([0x2b, 0x81, 0x04, 0x00, 0x23]) => &P521_SHA512_ASN1,
+                Some([0x2b, 0x81, 0x04, 0x00, 0x21] | [0x2b, 0x81, 0x04, 0x00, 0x0a]) => {
+                    return !spki.key.is_empty();
+                }
+                _ => return false,
+            };
+            der::sequence_prefix(der).is_some_and(|document| {
+                rind::ecdsa::PublicKey::from_spki(algorithm, document).is_ok()
+            })
+        }
+        // X9.57 `id-dsa` and PKCS #3 `dhKeyAgreement`.
+        [0x2a, 0x86, 0x48, 0xce, 0x38, 0x04, 0x01]
+        | [0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x03, 0x01] => {
+            !spki.parameters.is_empty() && !spki.key.is_empty()
+        }
+        _ => false,
+    }
+}
+
 /// `rsa_priv_decode`: NULL parameters, no v2 public key, and components that
 /// agree, which rind checks for a modulus of 2048 to 8192 bits.
 fn rsa_private_key(pkcs8: &[u8]) -> bool {
@@ -713,7 +759,7 @@ fn curve_oid(parameters: &[u8]) -> Option<&[u8]> {
 
 /// Absent parameters, an empty `RSASSA-PSS-params`, or one explicit hash
 /// `RSASSA_PSS_parse_params` accepts (`crypto/rsa_extra/rsassa_pss_asn1.c`).
-fn pss_parameters_ok(parameters: &[u8]) -> bool {
+pub(crate) fn pss_parameters_ok(parameters: &[u8]) -> bool {
     if parameters.is_empty() || parameters == [0x30, 0x00] {
         return true;
     }
