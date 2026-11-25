@@ -20,6 +20,8 @@ Done on the PR branch:
 
 x86_64 campaigns, none missed once the two fixes above are in: `rind-rustls` 281 mutants, `rind-dimpl` 91, `rind-ring` 331, `rind-str0m` 59, `rind-rcgen` 113, `rind-openmls` 98. Their sources and mutant lists are the same on the PR head as where the hosted campaigns ran.
 
+`rind-aws-lc-rs`, x86_64: on main at `7c3158d5`, 24 of the 35 mutants its hosted campaign at `1a2a68c` missed still survived, besides the nine `Debug` and `Display` ones. The PR branch kills 20 with tests against aws-lc-rs and excludes the equivalent or feature-gated rest. One test found a divergence, now fixed: `PublicEncryptingKey::from_der` refused a 1024-bit key as `InvalidEncoding` where aws-lc-rs says `TooSmall`. Those mutants ran locally (cargo-mutants, no CPU-masked rows, which only add tests).
+
 Left:
-- `rind-aws-lc-rs`: its hosted campaign at `1a2a68c` missed 35 mutants that no exclusion ever covered, and the crate has since gained about 3,000 lines of tests. Rerun it on the current head, as `gh workflow run mutants.yml --ref <branch> -f campaign=x86_64 -f package=rind-aws-lc-rs`, and kill or exclude what survives.
+- A whole `rind-aws-lc-rs` x86_64 campaign on the current head, for mutants added since `1a2a68c`: `gh workflow run mutants.yml --ref <branch> -f campaign=x86_64 -f package=rind-aws-lc-rs` (960 mutants; Actions does not run on the fork's account right now).
 - The aarch64 campaigns.

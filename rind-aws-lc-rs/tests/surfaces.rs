@@ -86,7 +86,7 @@ fn slices_compare() {
 #[test]
 fn randomized_nonces_differ() {
     let key = ours::aead::RandomizedNonceKey::new(&ours::aead::AES_128_GCM, &[7; 16]).unwrap();
-    let mut seal = || {
+    let seal = || {
         let mut in_out = b"message".to_vec();
         *key.seal_in_place_append_tag(ours::aead::Aad::empty(), &mut in_out)
             .unwrap()
