@@ -14,11 +14,13 @@ pub(crate) fn leave_cpu_state(_old: u32) {}
 /// There must be `len` writable bytes at `ptr`; with no alignment
 /// requirement.
 pub(in crate::low) unsafe fn zero_bytes(ptr: *mut u8, len: usize) {
-    #[cfg(target_arch = "xtensa")]
+    #[cfg(any(target_arch = "xtensa", target_arch = "riscv32"))]
     {
-        // Xtensa puts a `memw` before each volatile store. Write the buffer
-        // in one memset and expose its address to assembly that can read
-        // memory, so the compiler must retain the stores.
+        // Xtensa puts a `memw` before each volatile store, and riscv32 stores
+        // a byte at a time, three instructions a byte (an AEAD key's wipe is
+        // 520 bytes or more). Write the buffer in one memset and expose its
+        // address to assembly that can read memory, so the compiler must
+        // retain the stores.
         // SAFETY: the caller guarantees `len` writable bytes at `ptr`.
         // The assembly emits only a comment and touches no memory or stack.
         unsafe {
@@ -26,7 +28,7 @@ pub(in crate::low) unsafe fn zero_bytes(ptr: *mut u8, len: usize) {
             core::arch::asm!("/* {ptr} */", ptr = in(reg) ptr, options(readonly, nostack));
         }
     }
-    #[cfg(not(target_arch = "xtensa"))]
+    #[cfg(not(any(target_arch = "xtensa", target_arch = "riscv32")))]
     for i in 0..len {
         // SAFETY: the caller guarantees `len` writable bytes at `ptr`, and a
         // volatile write is one the compiler must keep.
