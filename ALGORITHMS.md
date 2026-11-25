@@ -1020,7 +1020,8 @@ targets is rind's own arrangement of `gcm_nohw.c`'s idea: Karatsuba three
 levels down to 27 products of 16-bit halves, each nine `mul`s of operands
 masked to every third bit, whose whole product fits a 32-bit word, so
 riscv32imac runs no `mulhu`, with the key's halves masked once at key
-setup. The seal then took 222k instructions, against RustCrypto's
+setup; riscv32 without the M extension, whose `mul` is a library call that
+branches on its operands, forms each product by shifts and masks instead. The seal then took 222k instructions, against RustCrypto's
 `aes-gcm` 286k, and none of them `mulhu`, against 12k. Other 32-bit
 targets keep the `aes_nohw.c` port until the fixsliced code is measured on
 them. On x86_64
