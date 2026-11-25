@@ -171,8 +171,8 @@ pub mod agreement {
 /// ```
 pub mod kem {
     pub use crate::high::kem::{
-        Algorithm, Ciphertext, DecapsulationKey, EncapsulationKey, MlKem512, MlKem768, MlKem1024,
-        SharedSecret,
+        Algorithm, Ciphertext, DecapsulationKey, EncapsulationKey, Message, MlKem512, MlKem768,
+        MlKem1024, SharedSecret,
     };
 }
 
