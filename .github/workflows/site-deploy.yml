@@ -54,8 +54,8 @@ jobs:
         with:
           bun-version-file: site/package.json
 
-      # Site's pull request job (site.yml) and the merge queue already ran the
-      # tests and browser check; the build still checks every page and link.
+      # The merge queue's `just ci` already ran sh/site.sh's tests and browser
+      # check; the build still checks every page and link.
       - name: Build
         timeout-minutes: 3
         working-directory: site

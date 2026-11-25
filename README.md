@@ -37,11 +37,11 @@
 </picture>
 
 Each row is an operation and each column a library, with one square per
-machine: x86_64 from Haswell to Zen 3 and Arrow Lake, and an Apple M4.
+machine: x86_64 from Haswell to Zen 5 and Arrow Lake, and an Apple M4.
 Green is the fastest library on that machine, or within 10% of it, and
 red is over 8× slower. A shield marks formally verified code. Where
-another library leads, mostly at short messages on Apple silicon, where
-rind alone sets DIT around each call, [Known gaps][gaps] says why and what
+another library leads, mostly pyca/verified-garbage's proven code on a
+routine rind has not switched to, [Known gaps][gaps] says why and what
 closes it. [BENCHMARKS.md][benchmarks] has every time, build time, and
 binary size.
 
@@ -55,10 +55,10 @@ per library on how to move it to rind.
 <!-- comparison: `admin/bench-report render` writes this table -->
 | Library | Build tools beyond rustc | Lacks, of the 22 algorithms benchmarked | Formally verified | Fastest, or within 10% |
 |---|---|---|---|---|
-| rind | [none](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#build-cost) | none | [aarch64: SHA-256 (some CPUs), SHA-512, SHA-3, HMAC (some CPUs), HKDF (some CPUs), X25519 (some CPUs), Ed25519 (some CPUs, some operations), P-256, P-384; x86_64: AES-GCM (some CPUs), SHA-256 (some CPUs), SHA-512 (some CPUs), SHA-3, HMAC (some CPUs), HKDF (some CPUs), X25519, Ed25519 (some CPUs), P-256 (some CPUs), P-384, RSA (some CPUs, some operations)](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#verified-code) | [495 of its 527 times](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#speed) |
-| [aws-lc-rs](https://github.com/aws/aws-lc-rs) | [cc](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#build-cost) | XChaCha20-Poly1305 (aws-lc has it, through aws-lc-sys), Blind RSA, OPRF, VRF, SPAKE2+, Argon2id | [x86_64: SHA-512 (some CPUs)](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#verified-code) | [136 of its 451 times](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#speed) |
-| [ring](https://github.com/briansmith/ring) | [cc](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#build-cost) | XChaCha20-Poly1305, SHA-3, P-521, ML-KEM, ML-DSA, HPKE, Blind RSA, OPRF, VRF, SPAKE2+, Argon2id | [none](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#verified-code) | [69 of its 302 times](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#speed) |
-| [RustCrypto + dalek](https://github.com/RustCrypto) | [none](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#build-cost) | none | [none](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#verified-code) | [40 of its 427 times](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#speed) |
+| rind | [none](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#build-cost) | none | [aarch64: SHA-256 (some CPUs), SHA-512, SHA-3, HMAC (some CPUs), HKDF (some CPUs), X25519 (some CPUs), Ed25519 (some CPUs, some operations), P-256, P-384; x86_64: AES-GCM (some CPUs), SHA-256 (some CPUs), SHA-512 (some CPUs), SHA-3, HMAC (some CPUs), HKDF (some CPUs), X25519, Ed25519 (some CPUs), P-256 (some CPUs), P-384, RSA (some CPUs, some operations)](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#verified-code) | [538 of its 560 times](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#speed) |
+| [aws-lc-rs](https://github.com/aws/aws-lc-rs) | [cc](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#build-cost) | XChaCha20-Poly1305 (aws-lc has it, through aws-lc-sys), Blind RSA, OPRF, VRF, SPAKE2+, Argon2id | [x86_64: SHA-512 (some CPUs)](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#verified-code) | [126 of its 464 times](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#speed) |
+| [ring](https://github.com/briansmith/ring) | [cc](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#build-cost) | XChaCha20-Poly1305, SHA-3, P-521, ML-KEM, ML-DSA, HPKE, Blind RSA, OPRF, VRF, SPAKE2+, Argon2id | [none](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#verified-code) | [75 of its 304 times](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#speed) |
+| [RustCrypto + dalek](https://github.com/RustCrypto) | [none](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#build-cost) | none | [none](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#verified-code) | [39 of its 452 times](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#speed) |
 <!-- end comparison -->
 
 Build tools are what a minimal binary needs, algorithms count only what
@@ -97,7 +97,7 @@ ring = { package = "rind-ring", version = "0.17" }
 aws-lc-rs = { package = "rind-aws-lc-rs", version = "1" }
 
 # Or use rind's own API.
-rind = "0.3"
+rind = "0.4"
 ```
 
 ### With rustls
@@ -147,6 +147,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 [docs.rs][docs] documents every module, and [ARCHITECTURE.md][architecture]
 describes the API's shape.
 
+The linker keeps only the algorithms a program names, but loading a key of
+any kind (`rind::KeyPair::from_pkcs8`) names them all. Its default features,
+`ml-dsa` and `slh-dsa`, keep the two post-quantum signatures; build with
+`default-features = false` to leave them out, as the adapters for Rust crates
+do (rind-aws-lc-rs keeps `ml-dsa`, which it offers), and a key of theirs is
+then refused. Cargo unifies features, so any crate in the build that keeps
+one turns it on for all.
+
 ## Adapters
 
 Each crate's README shows its setup.
@@ -191,14 +199,16 @@ rind-aws-lc-rs's PKCS#8 documents.
 
 ## Data-independent timing
 
-On Apple silicon, each rind call that handles a secret turns on DIT
-(data-independent timing) at entry and back off on return. From the M3, DIT
-turns off the data memory-dependent prefetcher that
-[GoFetch](https://gofetch.fail/) leaks keys from constant-time code through,
-and clearing it on return leaves the rest of the thread as the application
-set it. The M1 and M2 have no such switch, so they pay the toggle's cost
-without that protection. Arm says DIT changes nothing on its current cores, so rind sets it
-only on Apple's platforms; aws-lc-rs and ring never set it.
+On every aarch64 CPU with DIT (data-independent timing), each rind call that
+handles a secret turns it on at entry and back off on return, which leaves
+the rest of the thread as the application set it. Arm
+[says](https://developer.arm.com/documentation/ka005181/1-0/) some of its
+cores with DIT, such as Neoverse V1, may run the instructions DIT covers in
+data-dependent time without it, and strongly recommends that software set
+it. On Apple silicon from the M3, DIT also turns off the data
+memory-dependent prefetcher that [GoFetch](https://gofetch.fail/) leaks keys
+from constant-time code through; the M1 and M2 have no such switch.
+aws-lc-rs and ring never set DIT.
 
 DIT is a second layer, not the constant-time guarantee: on every platform,
 rind's secret-handling code avoids branches, memory indices, and
@@ -206,7 +216,8 @@ variable-time instructions that depend on a secret, and [TESTING.md][testing]
 lists the check each primitive gets.
 
 Turning DIT on and off costs about 45-60 ns a call on Apple's M1 and M4, a
-fifth of sealing a 1350-byte packet. A loop of small calls, such as sealing
+fifth of sealing a 1350-byte packet, and about 1.6 ns on Neoverse N2. A
+loop of small calls, such as sealing
 a batch of QUIC packets, holds a guard around the batch to pay it once:
 
 ```rust
@@ -214,7 +225,7 @@ let _dit = rind::cpu::Dit::hold();
 ```
 
 The guard covers every rind call its thread makes, including those through
-rind-rustls and the other adapters, and does nothing off Apple's platforms.
+rind-rustls and the other adapters, and does nothing off aarch64.
 
 ## Platforms
 

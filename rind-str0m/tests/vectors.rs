@@ -242,3 +242,14 @@ fn short_buffers_are_errors() {
     let mut cm = srtp().aes_128_cm_sha1_80().create_cipher([0; 16], true);
     assert!(cm.encrypt(&[0; 16], &[0; 17], &mut [0; 16]).is_err());
 }
+
+/// str0m requires `Debug` of each cipher, which names it but no key.
+#[test]
+fn debug_names_ciphers_without_their_keys() {
+    let cm = srtp().aes_128_cm_sha1_80().create_cipher([7; 16], true);
+    assert_eq!(format!("{cm:?}"), "Cm { .. }");
+    let gcm = srtp().aead_aes_128_gcm().create_cipher([7; 16], true);
+    assert_eq!(format!("{gcm:?}"), "Gcm { .. }");
+    let gcm = srtp().aead_aes_256_gcm().create_cipher([7; 32], true);
+    assert_eq!(format!("{gcm:?}"), "Gcm { .. }");
+}

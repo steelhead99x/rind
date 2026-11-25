@@ -9,13 +9,12 @@ import concurrent.futures
 # Usage:
 #   admin/x86-cpu sde-scan
 #   admin/x86-cpu markdown-table
-#   admin/x86-cpu matrix [--pull-request]
+#   admin/x86-cpu matrix
 #   admin/x86-cpu archive
 #   admin/x86-cpu test SDE_MODEL [TEST_ARGS...]
 #   admin/x86-cpu all
 #
-# `matrix` prints MODELS as x86-cpu.yml's `check` matrix, or with
-# `--pull-request` only PULL_REQUEST's. `archive` builds the
+# `matrix` prints MODELS as x86-cpu.yml's `check` matrix. `archive` builds the
 # release tests into ARCHIVE, and `test` runs them under `sde SDE_MODEL --`,
 # passing each binary TEST_ARGS, so every model's job runs one build. `all`
 # builds them in place and runs them under every model, many at once, for the
@@ -37,7 +36,7 @@ SKIP = ["--skip", "large_digest"]
 # crosschecks' 1413 seconds under Diamond Rapids on a Zen 3 host, mostly
 # RustCrypto and fips205 signing as oracles. The fast sets run the same hash
 # kernels, `mid::slhdsa`'s ACVP tests check every set's signatures byte for
-# byte on each model, and these run natively on every pull request.
+# byte on each model, and these run natively in every merge queue build.
 for _hash in ["sha2", "shake"]:
     for _bits in [128, 192, 256]:
         SKIP += ["--skip", f"slh_dsa_{_hash}_{_bits}s::sign_verify"]
@@ -133,16 +132,6 @@ MODELS = [
     # instructions, which rind does not run.
     ("Diamond Rapids", "dmr", _AVX512 + ["MCDT"]),
 ]
-
-# The models a pull request runs; the merge queue runs every path set, and
-# the weekly run every model. Prescott takes every slowest path, and Diamond
-# Rapids every fastest. Skylake server is the AVX2 tier: its BMI2 and ADX
-# routines, AVX AES-GCM, and AVX2 SHA-256 and SHA-512 are what Broadwell to
-# Cooper Lake run. Of the paths Haswell takes instead, Prescott runs
-# s2n-bignum's `_alt` routines and aws-lc's Montgomery multiplication; only
-# aws-lc's AVX2 RSAZ for RSA-2048, which no CPU with ADX takes, waits for the
-# merge queue.
-PULL_REQUEST = ["p4p", "skx", "dmr"]
 
 # excludes 32-bit only parts
 KNOWN_CPUS = [
@@ -307,15 +296,13 @@ elif mode == "markdown-table":
             )
         )
 elif mode == "matrix":
-    flags = sys.argv[2:]
-    if flags not in ([], ["--pull-request"]):
-        sys.exit("usage: admin/x86-cpu matrix [--pull-request]")
+    if sys.argv[2:]:
+        sys.exit("usage: admin/x86-cpu matrix")
     print(
         json.dumps(
             [
                 dict(model=name, sde=sde)
                 for name, sde, _ in MODELS
-                if not flags or sde in PULL_REQUEST
             ]
         )
     )

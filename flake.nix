@@ -11,7 +11,7 @@
     # The quest CLI, which also serves the quest guide and skills the stubs in
     # .claude/skills call. Bump the rev to upgrade them.
     quest = {
-      url = "github:moq-dev/quest";
+      url = "github:kixel-ai/quest";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.flake-utils.follows = "flake-utils";
     };
@@ -558,6 +558,8 @@
                   # git already brings this one.
                   perl
                   cargo-deny
+                  # `just powerset` and the quality lints workflow.
+                  cargo-hack
                   # admin/mutants and the mutants workflow.
                   cargo-mutants
                   cargo-nextest
@@ -688,10 +690,16 @@
             };
 
             # `coverage.yml` runs `admin/coverage` in it. On x86_64 Linux it
-            # adds `sde`, for the pass that covers the AVX-512 paths.
+            # adds `sde`, for the pass that covers the AVX-512 paths, and on
+            # Linux the armv7 shell's toolchain, for the armv7 tier.
             coverage = mkDevShell {
               packages = [
-                (rust-stable.minimal.override { extensions = [ "llvm-tools" ]; })
+                (rust-stable.minimal.override {
+                  extensions = [ "llvm-tools" ];
+                  targets = pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [
+                    "armv7-unknown-linux-gnueabihf"
+                  ];
+                })
                 pkgs.cargo-llvm-cov
                 # aws-lc-rs builds C.
                 pkgs.cmake
@@ -702,9 +710,16 @@
                 pkgs.git
               ]
               ++ python-shell.packages
+              # The armv7 compiler stays off PATH, where its setup hook would
+              # make it every build's `cc`; the armv7 shell's variables name it
+              # by path.
+              ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [
+                pkgs.qemu-user
+                pkgs.util-linux
+              ]
               ++ pkgs.lib.optionals (system == "x86_64-linux") [ sde ];
 
-              inherit (python-shell) env;
+              env = python-shell.env // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux armv7-shell.env;
 
               shellHook = pkgs.lib.optionalString (system == "x86_64-linux") sde-certs;
             };
@@ -840,12 +855,27 @@
             # `just wasm` runs the portable backend's tests on wasm32-wasip2
             # in it, under wasmtime. The toolchain is the default shell's,
             # which already carries the target.
-            wasm = mkDevShell {
-              packages = [
-                rust-toolchain
-                pkgs.wasmtime
-              ];
-            };
+            # `just wasm` runs in it: wasmtime for WASI, and for the browser's
+            # target wasm-bindgen's test runner in Node. The runner must be
+            # the one wasm-bindgen release Cargo.lock pins.
+            wasm =
+              let
+                lock = builtins.fromTOML (builtins.readFile ./Cargo.lock);
+                pinned = builtins.filter (p: p.name == "wasm-bindgen") lock.package;
+                wasm-bindgen =
+                  if builtins.length pinned == 1 then
+                    builtins.head pinned
+                  else
+                    throw "Cargo.lock pins ${toString (builtins.length pinned)} wasm-bindgen releases; the wasm shell's test runner must match exactly one";
+              in
+              mkDevShell {
+                packages = [
+                  rust-toolchain
+                  pkgs.wasmtime
+                  pkgs."wasm-bindgen-cli_${builtins.replaceStrings [ "." ] [ "_" ] wasm-bindgen.version}"
+                  pkgs.nodejs
+                ];
+              };
 
             # `just miri` and the miri workflow run in it: Charon's nightly,
             # which already carries Miri, rather than a second nightly.

@@ -167,6 +167,7 @@ pub(crate) mod vg_mlkem_sample_tbl;
 pub(crate) mod vg_mlkem_yconsts;
 #[rustfmt::skip]
 pub(crate) mod vg_p256_check_point_adx;
+#[cfg(test)]
 #[rustfmt::skip]
 pub(crate) mod vg_p256_comb;
 #[rustfmt::skip]

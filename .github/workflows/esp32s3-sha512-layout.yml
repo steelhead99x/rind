@@ -7,24 +7,10 @@ name: ESP32-S3 SHA-512 layout
 # build leaves `.flash.text`, records the IRAM block's size against its
 # ceiling, and runs the message load and FIPS 180-4 "abc" through both
 # builds on QEMU. The toolchain is the one the board image uses (espup rustc 1.97.0.0).
+# Weekly, at its own hour: see TESTING.md, "Scheduled workflows".
 on:
-  pull_request:
-    # A draft skips every job until it is marked ready, and turning a PR back
-    # into a draft cancels its ready run: see CONTRIBUTING.md.
-    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
-    paths:
-      - rind/src/low/generic/sha512.rs
-      - rind/src/low/generic/sha512_rolled.rs
-      - rind/src/low/portable/sha.rs
-      - rind/src/lib.rs
-      - rind/Cargo.toml
-      # `rind_esp32s3` is set here. The probe copies this file, so a
-      # triple-test change has to rerun the placement check.
-      - rind/build.rs
-      - admin/esp32s3-sha512-layout
-      - .github/workflows/esp32s3-sha512-layout.yml
-      - .github/actions/esp32s3-toolchain/action.yml
-      - admin/esp32s3-toolchain.sh
+  schedule:
+    - cron: "23 10 * * 0"
   workflow_dispatch:
 
 permissions:
@@ -36,7 +22,6 @@ concurrency:
 
 jobs:
   layout:
-    if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:

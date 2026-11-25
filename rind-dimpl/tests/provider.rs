@@ -1222,3 +1222,31 @@ fn random_fill_replaces_the_buffer() {
     rind().secure_random.fill(&mut buf).unwrap();
     assert_ne!(buf, [0x5a; 32]);
 }
+
+/// dimpl requires `Debug` of each object, which names it and its parameters
+/// but no key.
+#[test]
+fn debug_names_objects_without_their_keys() {
+    let provider = rind();
+    let hash = provider.hash_provider.create_hash(HashAlgorithm::SHA256);
+    assert_eq!(format!("{hash:?}"), "Running { .. }");
+
+    let kx = provider
+        .kx_groups
+        .iter()
+        .find(|kx| kx.name() == NamedGroup::X25519)
+        .unwrap();
+    let exchange = kx.start_exchange(Buf::new()).unwrap();
+    assert_eq!(format!("{exchange:?}"), "Exchange { group: X25519, .. }");
+
+    let (_, key) = certificate(&rcgen::PKCS_ECDSA_P256_SHA256);
+    let key = provider.key_provider.load_private_key(&key).unwrap();
+    assert_eq!(
+        format!("{key:?}"),
+        "Key { group: Secp256r1, hash: SHA256, .. }"
+    );
+
+    let suite = provider.dtls13_cipher_suites[0];
+    let cipher = suite.create_cipher(&vec![7; suite.key_len()]).unwrap();
+    assert_eq!(format!("{cipher:?}"), "Aead");
+}

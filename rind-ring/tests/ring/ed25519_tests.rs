@@ -19,13 +19,10 @@ use ring::{
     signature::{self, Ed25519KeyPair, KeyPair},
 };
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
-use wasm_bindgen_test::{wasm_bindgen_test as test, wasm_bindgen_test_configure};
+use wasm_bindgen_test::wasm_bindgen_test as test;
 
 #[allow(deprecated)]
 use crate::{test, test_file};
-
-#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
-wasm_bindgen_test_configure!(run_in_browser);
 
 /// Test vectors from BoringSSL.
 #[test]

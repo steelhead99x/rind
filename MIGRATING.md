@@ -305,7 +305,7 @@ encryption.
 | OpenSSL's `RSA_PSS_SALTLEN_AUTO`, pyca's `PSS.AUTO` (not in aws-lc-rs) | `rsa::verify::PSS_SHA256_ANY_SALT` and so on |
 | `RsaParameters::{public_modulus_len, min_modulus_len, max_modulus_len}` | none |
 | `RsaKeyPair::from_der` | `rsa::KeyPair::from_pkcs1` |
-| `RsaKeyPair::from_components`, `KeyPairComponents` | none: load the key as PKCS#1 or PKCS#8 |
+| `RsaKeyPair::from_components(&KeyPairComponents { public_key, d, p, q, dP, dQ, qInv })` | `rsa::KeyPair::from_components(&rsa::KeyPairComponents { public_key, d, p, q, dp, dq, qi })`, whose fields take JWK's names |
 | `RsaKeyPair::sign(alg, rng, m, &mut sig)` | `sign(&alg, m)`, which takes no random source and returns an `rsa::Signature` |
 | `verify_digest` and `sign_digest` for RSA | none |
 | `rsa::KeySize`, `RsaKeyPair::generate(size)` | the same; `KeySize` adds `Rsa6144` |
@@ -471,11 +471,12 @@ as its cipher suite order.
 
 ### rind-rcgen
 
-`rind_rcgen::KeyPair` offers `rcgen::KeyPair`'s API as rcgen's default `ring`
+`rind_rcgen::KeyPair` offers `rcgen::KeyPair`'s API as rcgen's `aws_lc_rs`
 backend builds it, so code swaps the type in unchanged. It signs with ECDSA
-P-256 and P-384, Ed25519, and RSA with PKCS#1 v1.5, loading only PKCS#8 keys
-and generating no RSA keys. Its [README](rind-rcgen/README.md) lists what it
-leaves out, such as P-521, which rcgen names only with its `aws_lc_rs` feature.
+P-256 and P-384, Ed25519, and RSA with PKCS#1 v1.5, generates RSA keys, and
+loads PKCS#8, SEC1 ECDSA, and PKCS#1 RSA keys. Its
+[README](rind-rcgen/README.md) lists what it leaves out, such as P-521, which
+rcgen names only with its `aws_lc_rs` feature.
 
 Without rcgen's `crypto` feature, rcgen needs each certificate's
 `serial_number` set, and writes key identifiers only when
@@ -589,13 +590,13 @@ install ring's if nothing is installed first.
 | Crate | What ties it | On rind |
 |---|---|---|
 | hickory-proto, hickory-net, hickory-resolver 0.26 | TLS, HTTPS, and QUIC need a `*-ring` or `*-aws-lc-rs` feature; DNSSEC validation calls them internally | **Patch**: the `*-ring` features. Plain DNS is unaffected |
-| domain 0.12 | DNSSEC and TSIG need ring or OpenSSL | **Patch**: `ring`, `tsig`, and `unstable-validator`. `unstable-sign` builds RSA keys from components, which rind-ring leaves out |
+| domain 0.12 | DNSSEC and TSIG need ring or OpenSSL | **Patch**: `ring`, `tsig`, `unstable-validator`, and `unstable-sign` |
 
 ### Certificates, ACME, and tokens
 
 | Crate | What ties it | On rind |
 |---|---|---|
-| rcgen 0.14 | default `ring`, or `aws_lc_rs`, gates `KeyPair` | **rind-rcgen**: ECDSA P-256 and P-384, Ed25519, and loaded RSA keys. Without rcgen's `crypto` feature, set each certificate's serial number, and its `key_identifier_method` or the key identifiers are empty |
+| rcgen 0.14 | default `ring`, or `aws_lc_rs`, gates `KeyPair` | **rind-rcgen**: ECDSA P-256 and P-384, Ed25519, and RSA. Without rcgen's `crypto` feature, set each certificate's serial number, and its `key_identifier_method` or the key identifiers are empty |
 | instant-acme | 0.8 calls aws-lc-rs or ring; the unreleased 0.9 takes a `CryptoProvider` | Unsupported: 0.8 has no provider hook, and 0.9 is unreleased |
 | rustls-acme 0.15, tokio-rustls-acme 0.9 | account keys and CSRs call ring or aws-lc-rs | **Patch**: rustls-acme's `ring` without its default `aws-lc-rs` |
 | x509-parser 0.18 | `verify` is ring, `verify-aws` aws-lc-rs | **Patch**: `verify`, or verify `tbs_certificate` with the key's module, such as `rind::ecdsa::PublicKey::verify` |

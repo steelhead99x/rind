@@ -16,9 +16,10 @@
 //! rind does no floating-point arithmetic, as `admin/ct-vartime` checks, which
 //! also checks that every instruction Intel lists runs under an `Mcdt`.
 //!
-//! A function holding an `Mcdt` enters it first, holds it to its end, and is
-//! `#[inline(never)]` or `target_feature`: the scan counts all of a function
-//! that calls [`enter`] as covered, so it must not inline into a caller.
+//! The scan follows each function that calls [`enter`] through its control
+//! flow, and counts an instruction covered only when every path to it calls
+//! [`enter`] and no [`leave`] since, so both are always called, even on a CPU
+//! that needs no mitigation, where each returns at once.
 
 #[cfg(target_arch = "x86")]
 use core::arch::x86::{__cpuid, __cpuid_count};
@@ -41,7 +42,7 @@ impl Mcdt {
     // `admin/ct-vartime` looks for, even from a `target_feature` function.
     #[inline(always)]
     pub(crate) fn enter() -> Self {
-        Self(if needed() { enter() } else { None })
+        Self(enter())
     }
 
     /// As [`Mcdt::enter`], for code that may change MXCSR itself, such as
@@ -51,30 +52,31 @@ impl Mcdt {
     #[cfg(rind_backend = "x86_64")]
     #[inline(always)]
     pub(crate) fn enter_restoring() -> Self {
-        Self(Some(if needed() {
-            enter().unwrap_or(MITIGATED)
-        } else {
-            mxcsr()
-        }))
+        // `enter` returns nothing where the CPU needs no mitigation or MXCSR
+        // already holds it, and either way MXCSR is still what to restore.
+        Self(Some(enter().unwrap_or_else(mxcsr)))
     }
 }
 
 impl Drop for Mcdt {
     #[inline]
     fn drop(&mut self) {
-        if let Some(saved) = self.0
-            && mxcsr() != saved
-        {
-            leave(saved);
-        }
+        leave(self.0);
     }
 }
 
-/// Loads the mitigating value, unless MXCSR already holds it, returning what
-/// it replaced. `admin/ct-vartime` finds the functions that call this by
-/// name, so it is never inlined.
+/// Loads the mitigating value, where the CPU needs it and MXCSR does not
+/// already hold it, returning what it replaced. `admin/ct-vartime` finds the
+/// calls to this by name, so it is never inlined.
 #[inline(never)]
 fn enter() -> Option<u32> {
+    if needed() { load() } else { None }
+}
+
+/// Loads the mitigating value, unless MXCSR already holds it, returning what
+/// it replaced.
+#[inline]
+fn load() -> Option<u32> {
     let saved = mxcsr();
     if saved == MITIGATED {
         return None;
@@ -92,9 +94,15 @@ fn enter() -> Option<u32> {
     Some(saved)
 }
 
-/// Restores what [`enter`] replaced.
+/// Restores what [`enter`] replaced, if MXCSR no longer holds it. Never
+/// inlined, as [`enter`] is not, so `admin/ct-vartime` finds where the
+/// mitigation ends.
 #[inline(never)]
-fn leave(saved: u32) {
+fn leave(saved: Option<u32>) {
+    let Some(saved) = saved else { return };
+    if mxcsr() == saved {
+        return;
+    }
     // SAFETY: loads MXCSR from the value `stmxcsr` stored.
     unsafe {
         core::arch::asm!(
@@ -186,11 +194,11 @@ mod tests {
         let before = mxcsr();
         assert_ne!(before, MITIGATED);
         // Held whether or not this CPU needs it.
-        let guard = Mcdt(enter());
+        let guard = Mcdt(load());
         assert_eq!(guard.0, Some(before));
         assert_eq!(mxcsr(), MITIGATED);
         // An inner guard leaves the outer one's value alone.
-        assert_eq!(enter(), None);
+        assert_eq!(load(), None);
         assert_eq!(mxcsr(), MITIGATED);
         drop(guard);
         assert_eq!(mxcsr(), before);

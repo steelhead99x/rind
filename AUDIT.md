@@ -64,7 +64,8 @@ Outside the model:
 - Speculative execution beyond what the constant-time rule gives: only
   secret-independent control flow and addresses stand against it. The one
   speculation barrier rind adds follows setting DIT on Apple's platforms, as
-  Apple asks, so no instruction after it runs speculatively without DIT.
+  Apple asks, so no instruction after it runs speculatively without DIT;
+  rind sets DIT on other aarch64 cores too, where Arm asks for no barrier.
 - A compromised toolchain, build machine, or dependency. `cargo deny`
   checks crates against RustSec's advisories, licenses, and sources; nothing
   checks a release's build is reproducible.
@@ -200,8 +201,9 @@ establishes, and what it does not:
 - **`admin/ct-vartime`**, in `just ci`, scans the release builds of every
   Linux target rind builds for divisions and floating point, against an
   allowlist of public operands. On the x86_64 backend it also fails on a
-  multiply whose timing depends on MXCSR that an export reaches outside
-  `rind::low::Mcdt`, the mitigation; on 32-bit x86 and the portable backend,
+  multiply whose timing depends on MXCSR that an export reaches on a path
+  that has not entered `rind::low::Mcdt`, the mitigation, or has left it; on
+  32-bit x86 and the portable backend,
   that every call enters it is unchecked. It takes the integer multiplier to
   run in constant time, and on x86 it refuses `vsha512*`.
 - **s2n-bignum's `_SAFE` theorems** prove the routines
@@ -224,29 +226,38 @@ establishes, and what it does not:
   compiled from HACL\*'s verified C by an unverified step.
 - **Zeroing**: `rind/tests/zeroing.rs` drops each value holding a secret and
   fails on any byte left nonzero, and `rind/tests/heap_scratch.rs` fails on a
-  freed heap block that differs between two keys. Both see only the value
+  freed heap block that differs between two keys, or, for a randomized
+  protocol step, that holds one of its secrets. Both see only the value
   itself and the heap blocks it frees.
 - **Bounds**: `low::guard_pages` runs each kernel that takes a caller's
   slice against `PROT_NONE` pages, at lengths up to 1100 bytes and, for the
   AEADs, 2000 to 2600, on Unix. It is the only bounds check on the assembly
-  valgrind cannot run, since AddressSanitizer, nightly in `asan`, does not
+  valgrind cannot run, since AddressSanitizer, nightly in `sanitizers`, does not
   instrument assembly.
 - **Calling convention**: `low::abi` calls every assembly routine through a
   trampoline that fails when a register its ABI preserves, the stack
   pointer, or x86_64's direction flag comes back changed, and
   `admin/prove-bytes clobbers` checks each s2n-bignum block declares what
   its proof says it may change.
-- **Miri**, weekly, runs the portable backend's unit tests on x86_64 and
-  big-endian s390x, failing on undefined behavior. It runs no assembly, and
-  skips the slow tests `sh/miri.sh` lists.
+- **Miri**, weekly, runs the portable backend's unit tests on x86_64,
+  big-endian s390x, and 32-bit i686, failing on undefined behavior. It runs
+  no assembly, and skips the slow tests `sh/miri.sh` lists.
+- **Sanitizers**, nightly in `sanitizers`: AddressSanitizer and
+  ThreadSanitizer run the native backends' tests and rind-fips's module,
+  failing on an out-of-bounds or freed access or a data race in Rust code.
 - **Mutation testing** (`admin/mutants`) fails on a mutant of rind's Rust
   that no test catches. Weekly, on native x86_64 and aarch64 Linux runners
   and the portable backend, it mutates only the Rust that changed in the
   last week; a campaign over the whole workspace runs only when dispatched.
   It skips generated assembly, which proofs and differential tests own.
-- **Coverage** (`admin/coverage`, nightly on Linux and macOS) reports the
-  published functions no test runs, under `cargo test`, `dart test`, and
-  pyrind's tests, on each runner's tiers, but not under fuzzing.
+- **Coverage** (`admin/coverage`, nightly on x86_64 and aarch64 Linux,
+  macOS, the portable backend, and armv7) fails on a published function no
+  test runs on any tier, under `cargo test`, `dart test`, and pyrind's tests,
+  unless `admin/coverage.allow` says why, and on a file whose uncovered
+  regions, branches, or monomorphization gaps rise past
+  `admin/coverage.baseline`, which leaves out the regions and branches of
+  rind's backends (`rind/src/low/`), as they vary with the runner's CPU;
+  fuzzing doesn't count.
 - **Adapter fuzz targets**, for rind-rustls, rind-dimpl, and rind-str0m,
   feed a hostile peer's bytes and whole handshakes edited in flight, against
   upstream's aws-lc-rs provider, and rind-openssl's calls its C ABI as

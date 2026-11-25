@@ -288,41 +288,53 @@ trait Parts {
 
     /// Encrypts (if `ENC`) or decrypts `inout` in place under `iv`, of any
     /// length, and returns its tag.
+    #[allow(clippy::needless_range_loop)]
     fn tagged<const ENC: bool>(&self, iv: &[u8], aad: &[u8], inout: &mut [u8]) -> [u8; 16] {
         let table = self.table();
-        let mut y0 = [0u8; 16];
-        match iv.try_into() {
-            Ok(nonce) => {
-                let nonce: &[u8; 12] = nonce;
-                y0[..12].copy_from_slice(nonce);
-                y0[15] = 1;
-            }
-            Err(_) => {
-                ghash(table, &mut y0, iv);
-                table.ghash(&mut y0, &[lengths(0, iv.len())]);
-            }
-        }
+        let y0 = initial_counter(table, iv);
 
         let mut xi = [0u8; 16];
         ghash(table, &mut xi, aad);
         let mut counter = add32(&y0, 1);
-        for chunk in inout.chunks_mut(CHUNK) {
-            if !ENC {
-                ghash(table, &mut xi, chunk);
-            }
-            counter = self.ctr(&counter, chunk);
-            if ENC {
-                ghash(table, &mut xi, chunk);
-            }
+        // By index, whole chunks and then the rest: Aeneas translates no
+        // loop that writes through an iterator's references.
+        let len = inout.len();
+        let (chunks, tail) = inout.as_chunks_mut::<CHUNK>();
+        for i in 0..chunks.len() {
+            counter = self.pass::<ENC>(&mut xi, &counter, &mut chunks[i]);
+        }
+        if !tail.is_empty() {
+            self.pass::<ENC>(&mut xi, &counter, tail);
         }
 
         // Finishes GHASH with the bit lengths, then masks it with the first
         // counter block's keystream.
-        table.ghash(&mut xi, &[lengths(aad.len(), inout.len())]);
-        for (x, e) in xi.iter_mut().zip(self.encrypt_block(&y0)) {
-            *x ^= e;
+        table.ghash(&mut xi, &[lengths(aad.len(), len)]);
+        let mask = self.encrypt_block(&y0);
+        for i in 0..16 {
+            xi[i] ^= mask[i];
         }
         xi
+    }
+
+    /// Encrypts (if `ENC`) or decrypts `chunk` in place from counter block
+    /// `counter`, folding its ciphertext into `xi`, and returns the next
+    /// counter block.
+    fn pass<const ENC: bool>(
+        &self,
+        xi: &mut [u8; 16],
+        counter: &[u8; 16],
+        chunk: &mut [u8],
+    ) -> [u8; 16] {
+        let table = self.table();
+        if !ENC {
+            ghash(table, xi, chunk);
+        }
+        let next = self.ctr(counter, chunk);
+        if ENC {
+            ghash(table, xi, chunk);
+        }
+        next
     }
 }
 
@@ -371,8 +383,9 @@ impl<K: BlocksKey, T: Ghash> Parts for Arm<K, T> {
             return ivec;
         }
 
-        for (b, k) in tail.iter_mut().zip(self.key.encrypt_block(&ivec)) {
-            *b ^= k;
+        let stream = self.key.encrypt_block(&ivec);
+        for i in 0..tail.len() {
+            tail[i] ^= stream[i];
         }
         add32(&ivec, 1)
     }
@@ -394,6 +407,19 @@ impl Parts for Portable {
         self.key.ctr32(ivec, inout);
         add32(ivec, inout.len().div_ceil(16) as u32)
     }
+}
+
+/// GCM's first counter block for `iv`, of any length.
+fn initial_counter(table: &impl Ghash, iv: &[u8]) -> [u8; 16] {
+    let mut y0 = [0u8; 16];
+    if iv.len() == 12 {
+        y0[..12].copy_from_slice(iv);
+        y0[15] = 1;
+    } else {
+        ghash(table, &mut y0, iv);
+        table.ghash(&mut y0, &[lengths(0, iv.len())]);
+    }
+    y0
 }
 
 /// Folds `data` into `xi`, padding its last block with zeroes.

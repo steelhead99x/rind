@@ -402,6 +402,29 @@ fn threaded_handshake(c: &mut Criterion) {
     }
 }
 
+/// Sends `data` from `server` to `client` in one record, which `client` reads
+/// into `out`, of the same length.
+#[cfg(not(target_arch = "xtensa"))]
+fn record(
+    server: &mut Connection,
+    client: &mut Connection,
+    data: &[u8],
+    out: &mut [u8],
+    buf: &mut Vec<u8>,
+) {
+    server.writer().write_all(data).unwrap();
+    transfer(server, client, buf);
+    client.reader().read_exact(out).unwrap();
+}
+
+/// A connection pair over `name`'s provider, offering only the TLS 1.3 `suite`,
+/// past its handshake.
+#[cfg(not(target_arch = "xtensa"))]
+fn connected(name: &str, suite: CipherSuite) -> (Connection, Connection) {
+    let (client, server) = configs(with_suite(name, suite), "ecdsa-p256", false).unwrap();
+    handshake(&client, &server)
+}
+
 /// 1 MB from server to client in full records, per TLS 1.3 cipher suite:
 /// each byte is sealed once and opened once.
 #[cfg(not(target_arch = "xtensa"))]
@@ -421,20 +444,75 @@ fn bulk(c: &mut Criterion) {
         ),
     ] {
         for name in providers() {
-            let (client, server) = configs(with_suite(name, suite), "ecdsa-p256", false).unwrap();
-            let (mut client, mut server) = handshake(&client, &server);
+            let (mut client, mut server) = connected(name, suite);
             let mut buf = Vec::new();
             group.bench_function(format!("{suite_name}/{name}"), |b| {
                 let _dit = (name == "rind").then(criterion::rind_dit);
                 b.iter(|| {
                     for _ in 0..LEN / RECORD {
-                        server.writer().write_all(&data).unwrap();
-                        transfer(&mut server, &mut client, &mut buf);
-                        client.reader().read_exact(&mut out).unwrap();
+                        record(&mut server, &mut client, &data, &mut out, &mut buf);
                     }
                 })
             });
         }
+    }
+}
+
+/// One small record from server to client, per TLS 1.3 cipher suite and
+/// size, as chat messages, game state, and MoQ's control messages send them:
+/// what rustls and each provider add per record, which bulk's full records
+/// spread over 16 KB.
+#[cfg(not(target_arch = "xtensa"))]
+fn records(c: &mut Criterion) {
+    const SIZES: [(usize, &str); 3] = [(64, "64B"), (256, "256B"), (1024, "1KB")];
+    const AES128: CipherSuite = CipherSuite::TLS13_AES_128_GCM_SHA256;
+    let mut group = c.benchmark_group("rustls-records");
+    let data = [0x5a; 1024];
+    let mut out = [0; 1024];
+    let mut buf = Vec::new();
+    for (suite_name, suite) in [
+        ("aes128-gcm", AES128),
+        (
+            "chacha20poly1305",
+            CipherSuite::TLS13_CHACHA20_POLY1305_SHA256,
+        ),
+    ] {
+        for name in providers() {
+            let (mut client, mut server) = connected(name, suite);
+            for (size, size_name) in SIZES {
+                group.throughput(Throughput::Bytes(size as u64));
+                group.bench_function(format!("{suite_name}/{name}/{size_name}"), |b| {
+                    let _dit = (name == "rind").then(criterion::rind_dit);
+                    b.iter(|| {
+                        record(
+                            &mut server,
+                            &mut client,
+                            &data[..size],
+                            &mut out[..size],
+                            &mut buf,
+                        )
+                    })
+                });
+            }
+        }
+    }
+    group.finish();
+
+    // The smallest, where the toggle is the largest share of a record.
+    if let Some(mut group) = criterion::dit_per_call(c, "rustls-records") {
+        let (mut client, mut server) = connected("rind", AES128);
+        group.throughput(Throughput::Bytes(64));
+        group.bench_function("aes128-gcm/rind/64B", |b| {
+            b.iter(|| {
+                record(
+                    &mut server,
+                    &mut client,
+                    &data[..64],
+                    &mut out[..64],
+                    &mut buf,
+                )
+            })
+        });
     }
 }
 
@@ -445,7 +523,8 @@ criterion_group!(
     full_handshake_by_key,
     resumed_handshake,
     threaded_handshake,
-    bulk
+    bulk,
+    records
 );
 #[cfg(not(target_arch = "xtensa"))]
 criterion_main!(benches);

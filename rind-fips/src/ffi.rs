@@ -131,6 +131,8 @@ unsafe extern "C" {
     pub(crate) fn rind_fips_rand_fill(out: *mut u8, len: usize) -> Status;
     pub(crate) fn rind_fips_cpu_check(len: *mut usize) -> *const u8;
     pub(crate) fn rind_fips_has_aes_hardware() -> bool;
+    pub(crate) fn rind_fips_dit_hold();
+    pub(crate) fn rind_fips_dit_release();
     pub(crate) fn rind_fips_constant_time_verify(
         a: *const u8,
         a_len: usize,

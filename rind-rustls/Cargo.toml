@@ -22,10 +22,8 @@ omitted = [
 ]
 
 [dependencies]
-rind = { version = "0.3.2", path = "../rind" }
-# rind-rustls needs the standard library, as does how it reports HPKE errors
-# through rustls's `OtherError`, whose fields depend on rustls's `std`.
-rustls = { version = "0.23.20", default-features = false, features = ["std"] }
+rind = { version = "0.3.2", path = "../rind", default-features = false }
+rustls = { version = "0.23.20", default-features = false }
 
 [dev-dependencies]
 env_logger = "0.11"
@@ -47,9 +45,15 @@ rustls = { version = "0.23.36", default-features = false, features = ["aws-lc-rs
 tokio = { version = "1.0", features = ["io-std", "macros", "net", "rt-multi-thread"] }
 tokio-rustls = { version = "0.26", default-features = false }
 
+# The browser's target runs the tests in Node with what a browser caller adds:
+# rind's random source and rustls's clock from JavaScript.
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dev-dependencies]
+getrandom = { version = "0.4", features = ["wasm_js"] }
+rustls-pki-types = { version = "1", features = ["web"] }
+wasm-bindgen-test = "0.3"
+
 # rustls's: as there, `std` gates `Ticketer` and `tls12` the TLS 1.2 suites.
-# rustls's `std` is always on, since rind-rustls needs it.
 [features]
 default = ["std", "tls12"]
-std = []
+std = ["rustls/std"]
 tls12 = ["rustls/tls12"]

@@ -6,14 +6,25 @@ open Aeneas Aeneas.Std Result rind.spec
 # SHA-1 and SHA-256's block functions on x86_64
 
 SHA-256's routines on the SHA extensions are proven: `Rind.X86_64.Sha256Shaext`
-restates their HOL Light proofs as axioms and proves the finish's padding. No
-proof covers x86_64's other SHA-1 and SHA-256 block functions, so the theorems
-over them take `Sha1Blocks` or `Sha256Blocks` as a hypothesis instead of an
-axiom: each routine's contract, FIPS 180-4's block function over every whole
-block it is given, and that rind's checks pass. On the SHA extensions, SHA-1
-pads its last block in registers, so that routine's contract covers the padding
-too. Once a routine's published proof lands, an axiom restating it under the
-composition rule discharges its field.
+restates their HOL Light proofs as axioms and proves the finish's padding. So is
+OpenSSL's AVX2 routine, `sha256_block_data_order_avx2`, which rind runs on CPUs
+with AVX2, BMI1, and BMI2 but not the SHA extensions: its HOL Light proof
+`SHA256_AVX2_SUBROUTINE_CORRECT`, in
+`proofs/hol-light/x86_64/sha256_block_data_order_avx2.ml` at rind's commit, that
+rind's naked function, as rind's Linux build emits it, computes s2n-bignum's
+`sha256_hash_blocks`, from awslabs/s2n-bignum#415 as rind's fork carries it, is
+restated below as an axiom about the Rust function `sha256_compress_blocks_avx2`
+around it, which this model translates for `x86_64-unknown-linux-gnu`. Apple's
+build assembles its own copy, `sha256_block_data_order_avx2.apple.s`, which no
+check compares, so nothing here covers macOS. No proof covers x86_64's other SHA-1 and SHA-256 block functions, so
+the theorems over them take `Sha1Blocks` or `Sha256Blocks` as a hypothesis
+instead of an axiom: each routine's contract, FIPS 180-4's block function over
+every whole block it is given, and that rind's checks pass. On the SHA
+extensions, SHA-1 pads its last block in registers, so that routine's contract
+covers the padding too. `Sha256Blocks` asks this only of the routine the CPU
+runs, so on one that runs a proven routine it holds without any. Once a
+routine's published proof lands, an axiom restating it under the composition
+rule discharges its field, or its case of `Sha256Routine`.
 -/
 
 namespace rind.x86_64
@@ -36,32 +47,65 @@ structure Sha1Blocks : Prop where
   -- After `sha1_shaext`, whose `sha1.compress` would otherwise name this field.
   sha1 : Compresses sha1.compress low.x86_64.sha1_mux.sha1_compress_blocks
 
+/-- `SHA256_AVX2_SUBROUTINE_CORRECT`: for `n` blocks, at least one, whose `i`th
+block's `j`th word, read big-endian, is the `j`th word of `m i`, the state's
+eight words, read little-endian, become `sha256_hash_blocks m state n`; for none,
+the function returns before the routine. The theorem's hypotheses hold for every
+call the function allows: `state` and `blocks` are distinct allocations, neither
+overlapping the code, the table, or the 1656 bytes from the 1648 below the stack
+pointer, where the routine keeps its frame, through the return address; `blocks`
+and the 64 bytes after it end below 2^64, as x86_64's user addresses do; the
+stack pointer is at least 1648, as page zero is never mapped; the linker places
+the table, which `K256`'s type aligns to 64 bytes, within the reach of the
+instructions that address it. The restatement, and that the function passes the
+pointers and block count the theorem names, are trusted. -/
+axiom sha256_compress_blocks_avx2_spec (t : low.x86_64.cpu.HaveAvx2)
+    (state : Std.Array U32 8#usize) (blocks : Slice U8) (hm : blocks.length % 64 = 0) :
+    low.x86_64.sha256.sha256_compress_blocks_avx2 state blocks t ⦃ r =>
+      words r.val = s2n.hashBlocks (fun i => rind.spec.words (((bv blocks.val).drop (64 * i)).take 64))
+        (words state.val) (blocks.length / 64) ⦄
+
+/-- The AVX2 block function compresses every whole block. -/
+theorem sha256_compress_blocks_avx2_compresses (t : low.x86_64.cpu.HaveAvx2) :
+    Compresses sha256.compress fun h b => low.x86_64.sha256.sha256_compress_blocks_avx2 h b t := by
+  intro h b hl
+  apply WP.spec_mono (sha256_compress_blocks_avx2_spec t h b hl)
+  intro r hr
+  rw [hr]
+  simpa [bv] using s2n.hashBlocks_eq (words h.val) (by simp [words]) (bv b.val)
+
+/-- What the SHA-256 theorems assume of the routine `p` names: nothing for the
+proven ones, the SHA extensions', which `Rind.X86_64.Sha256Shaext` proves, and
+the AVX2 one, and FIPS 180-4's block function over every whole block for the
+rest. -/
+def Sha256Routine : low.x86_64.sha256_mux.Path → Prop
+  | .Shaext _ | .Avx2 _ => True
+  | .Avx t => Compresses sha256.compress fun h b => low.x86_64.sha256.sha256_compress_blocks_avx h b t
+  | .Ssse3 t => Compresses sha256.compress fun h b =>
+    low.x86_64.sha256.sha256_compress_blocks_ssse3 h b t
+  | .Nohw => Compresses sha256.compress low.x86_64.sha256.sha256_compress_blocks_nohw
+
 /-- What the SHA-256 theorems assume of the code below rind's padding on
-x86_64, as `Sha1Blocks` does for SHA-1's, but for the SHA extensions' routines,
-which `Rind.X86_64.Sha256Shaext` proves. -/
+x86_64, as `Sha1Blocks` does for SHA-1's: rind's checks pass, and the routine
+this CPU runs meets `Sha256Routine`, so on a CPU that runs a proven one they
+assume nothing of any routine. -/
 structure Sha256Blocks : Prop where
   entry : ∃ e, low.entry.Entry.new_secret = ok e
   held : low.entry.Entry.assert_held = ok ()
-  path : ∃ p, low.x86_64.sha256_mux.path = ok p
-  avx : ∀ t, Compresses sha256.compress fun h b => low.x86_64.sha256.sha256_compress_blocks_avx h b t
-  avx2 : ∀ t, Compresses sha256.compress fun h b =>
-    low.x86_64.sha256.sha256_compress_blocks_avx2 h b t
-  ssse3 : ∀ t, Compresses sha256.compress fun h b =>
-    low.x86_64.sha256.sha256_compress_blocks_ssse3 h b t
-  nohw : Compresses sha256.compress low.x86_64.sha256.sha256_compress_blocks_nohw
+  path : ∃ p, low.x86_64.sha256_mux.path = ok p ∧ Sha256Routine p
 
 theorem sha256_compress_blocks_spec (hb : Sha256Blocks) :
     Compresses sha256.compress low.x86_64.sha256_mux.sha256_compress_blocks := by
   intro h b hl
-  obtain ⟨p, hp⟩ := hb.path
+  obtain ⟨p, hp, hr⟩ := hb.path
   unfold low.x86_64.sha256_mux.sha256_compress_blocks
   rw [hp]
   cases p with
   | Shaext t => exact (by simpa using sha256_compress_blocks_shaext_compresses t h b hl)
-  | Avx t => exact (by simpa using hb.avx t h b hl)
-  | Avx2 t => exact (by simpa using hb.avx2 t h b hl)
-  | Ssse3 t => exact (by simpa using hb.ssse3 t h b hl)
-  | Nohw => exact (by simpa using hb.nohw h b hl)
+  | Avx t => exact (by simpa using hr h b hl)
+  | Avx2 t => exact (by simpa using sha256_compress_blocks_avx2_compresses t h b hl)
+  | Ssse3 t => exact (by simpa using hr h b hl)
+  | Nohw => exact (by simpa using hr h b hl)
 
 /-- SHA-256's block function as `Sha256State` calls it. -/
 theorem sha256_block_spec (hb : Sha256Blocks) : Compresses sha256.compress mid.sha2.Sha256State.compress := by
@@ -189,7 +233,7 @@ theorem sha256_finish_spec (hb : Sha256Blocks) (P : List U8) (state : Std.Array 
     (hR : Absorbed sha256.compress sha256.H0 P state) :
     low.x86_64.sha256_mux.sha256_finish state message length ⦃ r =>
       bv r.val = sha256Finished P message.val length.val ⦄ := by
-  obtain ⟨p, hp⟩ := hb.path
+  obtain ⟨p, hp, -⟩ := hb.path
   unfold low.x86_64.sha256_mux.sha256_finish
   rw [hp]
   cases p with

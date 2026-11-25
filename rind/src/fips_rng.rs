@@ -253,19 +253,31 @@ mod tests {
         assert!(out[out.len() - 64..].iter().any(|&b| b != 0));
     }
 
+    /// Threads draw independently, and threads that instantiate, draw, and
+    /// exit while others draw contend for the registry: Miri and
+    /// ThreadSanitizer fail an access to an instance that races its
+    /// registration, a draw, or its thread's exit.
     #[cfg(not(target_family = "wasm"))]
     #[test]
-    fn threads_draw_independently() {
-        let mut ours = [0u8; 32];
-        fill(&mut ours).unwrap();
-        let theirs = std::thread::spawn(|| {
-            let mut out = [0u8; 32];
-            fill(&mut out).unwrap();
-            out
-        })
-        .join()
-        .unwrap();
-        assert_ne!(ours, theirs);
+    fn threads_come_and_go() {
+        std::thread::scope(|s| {
+            for _ in 0..4 {
+                s.spawn(|| {
+                    for _ in 0..2 {
+                        let mut ours = [0u8; 32];
+                        fill(&mut ours).unwrap();
+                        let theirs = std::thread::spawn(|| {
+                            let mut out = [0u8; 32];
+                            fill(&mut out).unwrap();
+                            out
+                        })
+                        .join()
+                        .unwrap();
+                        assert_ne!(ours, theirs);
+                    }
+                });
+            }
+        });
     }
 
     /// Set by the fork test, so a thread inside the self-test waits there

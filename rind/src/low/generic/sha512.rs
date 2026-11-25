@@ -95,12 +95,9 @@ pub(crate) fn sha512_compress_blocks(state: &mut [u64; 8], blocks: &[u8]) {
     }
 }
 
-// FIPS 180-4 §4.2.3. On the ESP32-S3 ESP-IDF placement of
-// [`sha512_rolled`](sha512_rolled.rs)'s unrolled body, internal DRAM rather
-// than flash `.rodata`: `.iram1` code is expected not to touch flash while
-// the cache is off. Without `esp32s3-sha512-unrolled`, `K` stays in flash
-// `.rodata`. `admin/esp32s3-sha512-layout` copies this item, from this
-// comment's first line to its closing bracket.
+// FIPS 180-4 §4.2.3. With `esp32s3-sha512-unrolled` on ESP-IDF, in internal
+// DRAM rather than flash `.rodata`, for `sha512_esp32s3`'s IRAM body: `.iram1`
+// code is expected not to touch flash while the cache is off.
 //
 // SAFETY: the attribute only selects the output section. The bytes are these
 // constants, and ESP-IDF maps `.dram1` into internal DRAM.

@@ -24,8 +24,8 @@ let ct_compare_bytes_mc = define_assert_word_list "ct_compare_bytes_mc"
 [
   0xe2522001;       (* aarch32_SUBS R2 R2 (rvalue (word 1)) *)
   0x3a000004;       (* aarch32_B (word 3) (word 24) *)
-  0xe4d0c001;       (* aarch32_LDRB R12 R0 (word 1) F T *)
-  0xe4d1e001;       (* aarch32_LDRB LR R1 (word 1) F T *)
+  0xe4d0c001;       (* aarch32_LDRB (word 14) R12 R0 (rvalue (word 1)) F T *)
+  0xe4d1e001;       (* aarch32_LDRB (word 14) LR R1 (rvalue (word 1)) F T *)
   0xe02cc00e;       (* aarch32_EOR R12 R12 LR *)
   0xe183300c;       (* aarch32_ORR R3 R3 R12 *)
   0xeafffff8        (* aarch32_B (word 14) (word 4294967272) *)
