@@ -12,12 +12,13 @@
 pub(crate) mod aes;
 pub(crate) mod aes_cbc;
 pub(crate) mod aes_ctr;
-// Fixsliced AES on 32-bit portable targets, aws-lc's bitsliced AES
-// elsewhere; tests build both, to check one against the other.
-#[cfg(any(all(rind_backend = "portable", target_pointer_width = "32"), test))]
+// Fixsliced AES on portable riscv32 targets (measured on the ESP32-C6),
+// aws-lc's bitsliced AES elsewhere; tests build both, to check one against the
+// other.
+#[cfg(any(all(rind_backend = "portable", target_arch = "riscv32"), test))]
 #[path = "../generic/aes_fixslice32.rs"]
 mod aes_fixslice32;
-#[cfg(any(not(all(rind_backend = "portable", target_pointer_width = "32")), test))]
+#[cfg(any(not(all(rind_backend = "portable", target_arch = "riscv32")), test))]
 #[path = "../generic/aes_nohw.rs"]
 mod aes_nohw;
 pub(crate) mod bignum_eq;
@@ -33,6 +34,6 @@ pub(crate) mod keccak;
 pub(crate) mod poly1305;
 #[cfg(rind_backend = "portable")]
 pub(crate) mod sha;
-#[cfg(any(all(rind_backend = "portable", target_pointer_width = "32"), test))]
+#[cfg(any(all(rind_backend = "portable", target_arch = "riscv32"), test))]
 #[path = "../generic/words32.rs"]
 mod words32;
