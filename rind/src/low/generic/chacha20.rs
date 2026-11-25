@@ -62,7 +62,8 @@ fn double_round(st: &mut [u32]) {
     quarter_round(st, 3u32, 4u32, 9u32, 14u32)
 }
 
-// Xtensa's portable ChaCha20 (`portable::chacha20`) runs these rounds too.
+// riscv32's portable ChaCha20 (`portable::chacha20`) runs these rounds too,
+// and Xtensa's tests check its own against them.
 #[inline]
 pub(crate) fn rounds(st: &mut [u32]) {
     double_round(st);
@@ -198,13 +199,16 @@ fn keystream(input: &[u32; 16]) -> [u8; 64] {
 
 /// XORs the ChaCha20 keystream for `key` and `counter_nonce`, the block
 /// counter then the 96-bit nonce, into `buffer`, one block at a time.
-/// aarch64 tests, and Xtensa's portable ChaCha20's, check their routines
-/// against it.
+/// aarch64 tests, and Xtensa's and riscv32's portable ChaCha20's, check
+/// their routines against it.
 //
 // Indexes, as `state` does, so `proofs/` can prove it.
 #[cfg(any(
     rind_backend = "x86_64",
-    all(rind_backend = "portable", any(not(target_arch = "xtensa"), test)),
+    all(
+        rind_backend = "portable",
+        any(not(any(target_arch = "xtensa", target_arch = "riscv32")), test)
+    ),
     all(test, rind_backend = "aarch64")
 ))]
 pub(crate) fn cipher(key: &[u32; 8], counter_nonce: &[u32; 4], buffer: &mut [u8]) {

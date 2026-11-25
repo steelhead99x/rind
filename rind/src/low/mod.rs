@@ -157,10 +157,16 @@ mod generic {
         all(rind_backend = "aarch64", test)
     ))]
     pub(crate) mod poly1305;
-    // Xtensa's Poly1305, also built in other tests to check it against the
-    // 64-bit one and HACL*'s.
+    // The Poly1305 of Xtensa and of riscv32 with the M extension, also built
+    // in other tests to check it against the 64-bit one and HACL*'s.
     #[cfg(any(
-        all(rind_backend = "portable", target_arch = "xtensa"),
+        all(
+            rind_backend = "portable",
+            any(
+                target_arch = "xtensa",
+                all(target_arch = "riscv32", target_feature = "m")
+            )
+        ),
         all(test, not(rind_backend = "arm"))
     ))]
     pub(crate) mod poly1305_32;

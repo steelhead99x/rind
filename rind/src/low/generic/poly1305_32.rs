@@ -1,11 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
 //! Poly1305 in five 26-bit limbs held in `u32`s, for the portable backend
-//! on Xtensa (the ESP32-S3). Each limb product is one 32x32->64-bit multiply,
-//! `mull` and `muluh` on Xtensa, where HACL*'s 26-bit limbs, which libcrux
-//! keeps in `u64`s, take a full 64x64-bit multiply each and 64-bit carries.
-//! Other targets build it only in tests, which check it against HACL*'s and
-//! the 64-bit Poly1305; 32-bit ones keep HACL*'s.
+//! on Xtensa (the ESP32-S3) and riscv32 with the M extension (the ESP32-C6).
+//! Each limb product is one 32x32->64-bit multiply, `mull` and `muluh` on Xtensa and `mul` and
+//! `mulhu` on riscv32imac, where HACL*'s 26-bit limbs, which libcrux keeps in
+//! `u64`s, take a full 64x64-bit multiply each and 64-bit carries. Other
+//! targets build it only in tests, which check it against HACL*'s and the
+//! 64-bit Poly1305; other 32-bit ones keep HACL*'s.
+//!
+//! Xtensa sums in `u32` halves (`reduce_split`, `add_s_split`), since LLVM
+//! adds two `u64`s there with a branch on the carry. riscv32 sums in `u64`s
+//! (`reduce_wide`, `add_s_wide`), which it adds with `sltu` and no branch.
 //!
 //! The radix and the carry chain are Andrew Moon's poly1305-donna-32 (public
 //! domain or MIT), as the fork's 26-bit Poly1305 line (steelhead99x/rind#191)
@@ -227,13 +232,15 @@ impl Blocks {
 }
 
 /// `words` plus `s` mod 2^128, as the tag's bytes. Xtensa takes `add_s_split`;
-/// host tests take `add_s_wide`, or the split form when they force it. The two
-/// agree on every input, which a test checks.
+/// riscv32 takes `add_s_wide`; host tests take `add_s_wide`, or the split form
+/// when they force it. The two agree on every input, which a test checks.
 #[inline(always)]
 fn add_s(words: [u32; 4], s: [u32; 4]) -> [u8; 16] {
     #[cfg(target_arch = "xtensa")]
     return add_s_split(words, s);
-    #[cfg(not(target_arch = "xtensa"))]
+    #[cfg(all(not(target_arch = "xtensa"), not(test)))]
+    return add_s_wide(words, s);
+    #[cfg(all(not(target_arch = "xtensa"), test))]
     return if tests::FORCE_SPLIT.with(|f| f.get()) {
         add_s_split(words, s)
     } else {
@@ -276,16 +283,18 @@ fn add_s_split(words: [u32; 4], s: [u32; 4]) -> [u8; 16] {
 /// h * r partially reduced: the limbs of `h` times `r`, with the products at
 /// or above 2^130 folded back through `s` = 5 * r[1..], then carried so each
 /// limb is under 2^26 but the second, which is under 2^26 + 2^6. Xtensa takes
-/// `reduce_split`; host tests take `reduce_wide`, or the split form when they
-/// force it. The two agree on every input within the bounds in
-/// `Blocks::block`, which a test checks.
+/// `reduce_split`; riscv32 takes `reduce_wide`; host tests take
+/// `reduce_wide`, or the split form when they force it. The two agree on
+/// every input within the bounds in `Blocks::block`, which a test checks.
 #[inline(always)]
 fn reduce(h: [u32; 5], r: [u32; 5], s: [u32; 4]) -> [u32; 5] {
     #[cfg(target_arch = "xtensa")]
     return reduce_split(h, r, s);
+    #[cfg(all(not(target_arch = "xtensa"), not(test)))]
+    return reduce_wide(h, r, s);
     // A test can force the split form on the host, so the RFC 8439, aws-lc and
     // HACL* tests run it end to end.
-    #[cfg(not(target_arch = "xtensa"))]
+    #[cfg(all(not(target_arch = "xtensa"), test))]
     return if tests::FORCE_SPLIT.with(|f| f.get()) {
         reduce_split(h, r, s)
     } else {

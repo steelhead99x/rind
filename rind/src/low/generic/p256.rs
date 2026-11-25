@@ -144,32 +144,43 @@ pub(crate) fn p256_montjscalarmul(res: &mut [u64; 12], scalar: &[u64; 4], point_
 
 /// res := scalar * P, as affine coordinates outside the Montgomery domain,
 /// where `table` holds P's multiples in Montgomery-affine form: row i holds
-/// 2^(6i) j P for j from 1 to 32.  A result at infinity is (0, 0).
+/// 2^(b i) j P for j from 1 to 2^(b - 1), for a block size b of 2 to 7 that
+/// the row width gives.  A result at infinity is (0, 0).
 ///
-/// This is s2n-bignum's `p256_scalarmulbase` with a block size of 6.  Each
-/// 6-bit window, plus the carry from the one below, picks a row entry,
-/// negated above 32 with a carry into the next.  The accumulator then sums
-/// the windows below, a smaller integer than the entry in magnitude, so
-/// neither equals the other.
-pub(crate) fn p256_scalarmulbase(res: &mut [u64; 8], scalar: &[u64; 4], table: &[[u64; 256]; 43]) {
+/// This is s2n-bignum's `p256_scalarmulbase`, whose block size is a
+/// parameter: 6 on most targets, and 4 on portable riscv32 ones, whose table
+/// is then a third the size, so that a core that streams it from flash
+/// through a small cache reads a third as much per multiplication, for 22
+/// more additions.  Each b-bit window, plus the carry from the one below,
+/// picks a row entry, negated above 2^(b - 1) with a carry into the next.
+/// The accumulator then sums the windows below, a smaller integer than the
+/// entry in magnitude, so neither equals the other.
+pub(crate) fn p256_scalarmulbase<const W: usize, const R: usize>(
+    res: &mut [u64; 8],
+    scalar: &[u64; 4],
+    table: &[[u64; W]; R],
+) {
+    let b = (W / 8).ilog2() as usize + 1;
+    let full = 1u8 << b;
     let mut k = [0; 4];
     bignum_mod_n256(&mut k, scalar);
 
     let mut acc = [Fe([0; LIMBS]); 3];
     let mut carry = 0u8;
     for (i, row) in table.iter().enumerate() {
-        // Window i spans bits 6i to 6i + 5, within a 64-bit word or across
-        // two, and the last only to bit 255.
-        let bit = 6 * i;
+        // Window i spans bits b i to b i + b - 1, within a 64-bit word or
+        // across two, or above the top bit, where it is the carry alone.
+        let bit = b * i;
         let (word, shift) = (bit / 64, bit % 64);
-        let mut window = k[word] >> shift;
-        if shift > 58 && word < 3 {
+        let mut window = k.get(word).map_or(0, |w| w >> shift);
+        if shift > 64 - b && word < 3 {
             window |= k[word + 1] << (64 - shift);
         }
-        let bf = ((window & 0x3f) as u8).wrapping_add(carry);
-        // bf is at most 64; above 32, add 64 - bf negated and carry 64.
-        carry = opaque(32u8.wrapping_sub(bf) >> 7);
-        let digit = select_u8(carry, bf, 64u8.wrapping_sub(bf));
+        let bf = ((window as u8) & (full - 1)).wrapping_add(carry);
+        // bf is at most 2^b; above 2^(b - 1), add 2^b - bf negated and
+        // carry 2^b.
+        carry = opaque((full >> 1).wrapping_sub(bf) >> 7);
+        let digit = select_u8(carry, bf, full.wrapping_sub(bf));
 
         let mut entry = [0; 8];
         row_select(&mut entry, row, digit);
@@ -754,10 +765,12 @@ mod tests {
         r
     }
 
-    /// `p256_scalarmulbase`'s table for G: row i holds 2^(6i) j G for j
-    /// from 1 to 32, Montgomery-affine.
-    fn generator_table() -> Box<[[u64; 256]; 43]> {
-        let mut table = Box::new([[0; 256]; 43]);
+    /// `p256_scalarmulbase`'s table for G with block size b, from the row
+    /// width: row i holds 2^(b i) j G for j from 1 to 2^(b - 1),
+    /// Montgomery-affine.
+    fn generator_table<const W: usize, const R: usize>() -> Box<[[u64; W]; R]> {
+        let b = (W / 8).ilog2() + 1;
+        let mut table = Box::new([[0; W]; R]);
         let mut base = GENERATOR;
         for row in table.iter_mut() {
             let mut multiple = base;
@@ -770,7 +783,7 @@ mod tests {
                     _ => low::p256_montjadd(&mut multiple, &sum, &base),
                 }
             }
-            for _ in 0..6 {
+            for _ in 0..b {
                 let b = base;
                 low::p256_montjdouble(&mut base, &b);
             }
@@ -928,20 +941,21 @@ mod tests {
         }
     }
 
-    #[test]
-    fn base_multiply() {
-        // Every window value at every position, with and without the carry
-        // from below: k's 6-bit windows run through 0 to 63, shifted along,
-        // plus the edges.
-        let table = generator_table();
+    // Every window value at every position, with and without the carry
+    // from below: k's b-bit windows run through 0 to 2^b - 1, shifted along,
+    // plus the edges.
+    fn base_multiply_by<const W: usize, const R: usize>() {
+        let table = generator_table::<W, R>();
+        let b = (W / 8).ilog2() as usize + 1;
+        let mask = (1u64 << b) - 1;
         let mut scalars = vec![[0; 4], [1, 0, 0, 0], add_small(N, -1), N, [u64::MAX; 4]];
-        for v in 0..64u64 {
+        for v in 0..=mask {
             let mut k = [0u64; 4];
-            for i in 0..43 {
-                let bit = 6 * i;
-                k[bit / 64] |= ((v + i as u64) & 0x3f) << (bit % 64);
-                if bit % 64 > 58 && bit / 64 < 3 {
-                    k[bit / 64 + 1] |= ((v + i as u64) & 0x3f) >> (64 - bit % 64);
+            for i in 0..256usize.div_ceil(b) {
+                let bit = b * i;
+                k[bit / 64] |= ((v + i as u64) & mask) << (bit % 64);
+                if bit % 64 > 64 - b && bit / 64 < 3 {
+                    k[bit / 64 + 1] |= ((v + i as u64) & mask) >> (64 - bit % 64);
                 }
             }
             scalars.push(k);
@@ -954,9 +968,15 @@ mod tests {
             assert_eq!(
                 into_public(ours),
                 into_public(s2n_multiply(&k, &GENERATOR)),
-                "{k:x?}"
+                "block size {b}, {k:x?}"
             );
         }
+    }
+
+    #[test]
+    fn base_multiply() {
+        base_multiply_by::<256, 43>();
+        base_multiply_by::<64, 65>();
     }
 
     #[test]

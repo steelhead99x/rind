@@ -7,30 +7,81 @@
 //! targets run rind's 64-bit limbs in `generic::poly1305` instead, as x86_64
 //! does without SSE4.1, since AEAD messages there can be longer.
 //!
-//! Xtensa runs rind's 26-bit limbs in `u32`s, `generic::poly1305_32`: HACL*'s
-//! limbs in `u64`s take a 64x64-bit multiply each there, and LLVM adds two
-//! `u64`s as an `add` and a branch on the carry, a branch on the secret.
+//! Xtensa and riscv32 with the M extension run rind's 26-bit limbs in
+//! `u32`s, `generic::poly1305_32`: HACL*'s limbs in `u64`s take a 64x64-bit
+//! multiply each there (three `mul`s and a `mulhu` on riscv32imac), and on
+//! Xtensa LLVM adds two `u64`s as an `add` and a branch on the carry, a branch
+//! on the secret. Its limb products are 32x32->64-bit multiplies, fixed-time
+//! on riscv32imac's `mul` and `mulhu` and Xtensa's `mull` and `muluh`, but a
+//! `__muldi3` call, which branches on its operands, on riscv32 without M; there
+//! and on every other 32-bit portable target HACL*'s Poly1305 stays, whose limb
+//! products are the same multiplies, until one is measured.
 
 #[cfg(all(
     rind_backend = "portable",
     target_pointer_width = "32",
-    not(target_arch = "xtensa")
+    not(any(
+        target_arch = "xtensa",
+        all(target_arch = "riscv32", target_feature = "m")
+    ))
 ))]
 pub(crate) use Hacl as Poly1305;
-#[cfg(any(all(target_pointer_width = "32", not(target_arch = "xtensa")), test))]
+#[cfg(any(
+    all(
+        target_pointer_width = "32",
+        not(any(
+            target_arch = "xtensa",
+            all(target_arch = "riscv32", target_feature = "m")
+        ))
+    ),
+    test
+))]
 use libcrux_hacl_rs::streaming_types::error_code;
-#[cfg(any(all(target_pointer_width = "32", not(target_arch = "xtensa")), test))]
+#[cfg(any(
+    all(
+        target_pointer_width = "32",
+        not(any(
+            target_arch = "xtensa",
+            all(target_arch = "riscv32", target_feature = "m")
+        ))
+    ),
+    test
+))]
 use libcrux_poly1305::hacl::mac_poly1305::{self, state_t};
 
 #[cfg(all(rind_backend = "portable", target_pointer_width = "64"))]
 pub(crate) use crate::low::generic::poly1305::Poly1305;
-#[cfg(all(rind_backend = "portable", target_arch = "xtensa"))]
+#[cfg(all(
+    rind_backend = "portable",
+    any(
+        target_arch = "xtensa",
+        all(target_arch = "riscv32", target_feature = "m")
+    )
+))]
 pub(crate) use crate::low::generic::poly1305_32::Poly1305;
 
-#[cfg(any(all(target_pointer_width = "32", not(target_arch = "xtensa")), test))]
+#[cfg(any(
+    all(
+        target_pointer_width = "32",
+        not(any(
+            target_arch = "xtensa",
+            all(target_arch = "riscv32", target_feature = "m")
+        ))
+    ),
+    test
+))]
 pub(crate) struct Hacl([state_t; 1]);
 
-#[cfg(any(all(target_pointer_width = "32", not(target_arch = "xtensa")), test))]
+#[cfg(any(
+    all(
+        target_pointer_width = "32",
+        not(any(
+            target_arch = "xtensa",
+            all(target_arch = "riscv32", target_feature = "m")
+        ))
+    ),
+    test
+))]
 impl Hacl {
     pub(crate) fn new(key: &[u8; 32]) -> Self {
         let mut state = [state_t {
