@@ -198,13 +198,17 @@ with portable Rust in place of the assembly armv7 runs regardless.
   check its Rust fallbacks against FIPS 180-4, `generic::sha256`, and
   aws-lc, and `admin/esp32s3-sha256-layout` checks the linked placement.
 - portable: ChaCha20-Poly1305's Poly1305 is Graviola's on 64-bit targets,
-  rind's on Xtensa, in poly1305-donna-32's five 26-bit limbs held in
-  `u32`s, so each limb product is one `mull` and `muluh` and each sum adds
-  `u32` halves, where LLVM branches on a `u64` add's carry, and HACL*'s ✓ on
-  other 32-bit ones, whose streaming state counts its input in a 32-bit
-  length that a 64-bit AEAD can overflow. HACL*'s also has 26-bit limbs but
-  keeps them in `u64`s. Nothing proves rind's; its tests check it against
-  HACL*'s and Graviola's. SHA-3's, ML-KEM's, and
+  rind's on Xtensa and on riscv32 with the M extension, in
+  poly1305-donna-32's five 26-bit limbs held in `u32`s, so each limb product
+  is one `mull` and `muluh`, or `mul` and `mulhu`, and on Xtensa each sum
+  adds `u32` halves, where LLVM branches on a `u64` add's carry; and HACL*'s
+  ✓ on other 32-bit ones, which nobody has measured and whose long multiply
+  may not be fixed-time (riscv32 without M calls `__mulsi3`), so rind's
+  limbs would gain nothing there: HACL*'s products are the same multiplies.
+  HACL*'s
+  streaming state counts its input in a 32-bit length that a 64-bit AEAD can
+  overflow; it also has 26-bit limbs but keeps them in `u64`s. Nothing
+  proves rind's; its tests check it against HACL*'s and Graviola's. SHA-3's, ML-KEM's, and
   ML-DSA's Keccak-f is rind's, s2n-bignum's Keccak spec in Rust, which
   [`proofs/`](proofs/README.md) proves is FIPS 202's KECCAK-f[1600]; it
   measured as fast as RustCrypto's and libcrux-sha3's, which nothing proves.
@@ -1135,13 +1139,13 @@ switching from its integer routine to its NEON one at 192 bytes as aws-lc
 does, where `AT_HWCAP` reports NEON. Poly1305 runs aws-lc's NEON code there too, and
 HACL*'s verified Poly1305 without NEON.
 
-The portable backend runs HACL*'s ChaCha20 rounds a block at a time, but on
-Xtensa, where rind's own schedule of the same rounds takes four quarter
+The portable backend runs HACL*'s ChaCha20 rounds a block at a time. On
+Xtensa it runs rind's own schedule of the same rounds instead, four quarter
 rounds at once, so each rotate distance is one `ssai` and each rotate one
-`src`, and XORs the keystream into the buffer from registers a word at a
-time, shifting it where the buffer is misaligned. Nothing proves that
-schedule; host tests check it against HACL*'s rounds and the word XOR
-against `generic::chacha20::cipher`.
+`src`. On Xtensa and riscv32 it XORs the keystream into the buffer from
+registers a word at a time, shifting it where the buffer is misaligned.
+Nothing proves that schedule or the word XOR; host tests check them against
+HACL*'s rounds and against `generic::chacha20::cipher`.
 
 [Graviola]: https://github.com/ctz/graviola
 [cifra]: https://github.com/ctz/cifra
