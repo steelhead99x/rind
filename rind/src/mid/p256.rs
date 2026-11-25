@@ -847,8 +847,8 @@ impl JacobianMontPoint {
     ///
     /// One chain of doublings serves both: P's digits are a NAF over its odd
     /// multiples, width 5 without `more` and 6 with it, and G's a width-6 NAF
-    /// over G to at least 32G: the generator table's first row, or on 32-bit
-    /// portable targets, whose rows stop at 8G, `CURVE_GENERATOR_MULTIPLES`.
+    /// over G to at least 32G: the generator table's first row, or on portable
+    /// riscv32 targets, whose rows stop at 8G, `CURVE_GENERATOR_MULTIPLES`.
     ///
     /// The rows are two arguments, and the digits indexed rather than zipped,
     /// as Aeneas cannot translate a slice of borrowed rows or the zip.
@@ -863,10 +863,10 @@ impl JacobianMontPoint {
             None => p.public_naf::<5>(),
             Some(_) => p.public_naf::<6>(),
         };
-        #[cfg(not(all(rind_backend = "portable", target_pointer_width = "32")))]
+        #[cfg(not(all(rind_backend = "portable", target_arch = "riscv32")))]
         let g_multiples = &precomp::CURVE_GENERATOR_PRECOMP[0][..];
         // The 4-bit table's first row stops at 8G.
-        #[cfg(all(rind_backend = "portable", target_pointer_width = "32"))]
+        #[cfg(all(rind_backend = "portable", target_arch = "riscv32"))]
         let g_multiples = &precomp::CURVE_GENERATOR_MULTIPLES[..];
 
         let mut result = Self::infinity();
@@ -1465,7 +1465,7 @@ type AffineMontPointTable = [[u64; 512]; 37];
 /// 43 := 256 / 6 + 1, as Booth recoding carries into a window above the top bit.
 #[cfg(not(any(
     rind_backend = "x86_64",
-    all(rind_backend = "portable", target_pointer_width = "32")
+    all(rind_backend = "portable", target_arch = "riscv32")
 )))]
 type AffineMontPointTable = [[u64; 256]; 43];
 
@@ -1475,7 +1475,7 @@ type AffineMontPointTable = [[u64; 256]; 43];
 /// signature reads all of it, so its size bounds what each one fetches.
 ///
 /// 65 := 256 / 4 + 1, as Booth recoding carries into a window above the top bit.
-#[cfg(all(rind_backend = "portable", target_pointer_width = "32"))]
+#[cfg(all(rind_backend = "portable", target_arch = "riscv32"))]
 type AffineMontPointTable = [[u64; 64]; 65];
 
 const CURVE_A_MONT: FieldElement = FieldElement([
@@ -1823,7 +1823,7 @@ mod tests {
             let window = row.as_chunks::<8>().0.len().ilog2() + 1;
             base.double_inplace_n(window as usize);
         }
-        #[cfg(all(rind_backend = "portable", target_pointer_width = "32"))]
+        #[cfg(all(rind_backend = "portable", target_arch = "riscv32"))]
         {
             let base = JacobianMontPoint::from_affine(&CURVE_GENERATOR);
             let mut multiple = base;
