@@ -1,6 +1,8 @@
-# Apple aarch64 (iPad) optimisation leads for fork issues #260 to #263
+# Apple aarch64 (iPad) optimisation leads
 
-Checkout: `/home/kdouglas/.cache/rind-dit-m` at `856e12f3e`; paths below are relative to it.
+For [steelhead99x/rind#260](https://github.com/steelhead99x/rind/issues/260) to
+[#263](https://github.com/steelhead99x/rind/issues/263).
+Read at `856e12f3e` (the DIT bench matrix branch, not `main`); every `file:line` below is at that commit.
 Code reading only: nothing was built or measured, and nothing here claims a speedup.
 Every lead is a hypothesis to measure on the iPad Pro M4 and the iPad mini A17 Pro.
 
