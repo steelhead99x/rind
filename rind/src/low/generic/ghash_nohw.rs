@@ -27,12 +27,13 @@
 //! same time for every operand.
 //!
 //! That holds where a 32-bit `mul` is fixed-time: riscv32imac, i686, and
-//! Arm cores whose `MUL` is single-cycle. It does not hold where `mul` is a
-//! library call (riscv32i without the M extension calls `__mulsi3`, which
-//! branches on its operands) or the core has the small, slow multiplier
-//! option (Cortex-M0). Only riscv32imac has been measured, and the 64-bit
-//! products the old 32-bit path formed had the same dependence on those
-//! cores.
+//! Arm cores whose `MUL` is single-cycle. Where `mul` is a library call
+//! (riscv32 without the M extension calls `__mulsi3`, which branches on its
+//! operands) the 16-bit products are formed by shifts and masks instead
+//! ([`clmul16_shift`]), with no multiply at all. A core whose `MUL` itself
+//! takes an operand-dependent time (ARMv4T and ARMv5TE end it early) is not
+//! covered; only riscv32imac has been measured, and the 64-bit products the
+//! old 32-bit path formed had the same dependence on those cores.
 
 use crate::low;
 
@@ -248,9 +249,16 @@ fn key_leaves(hi: u64, lo: u64) -> Leaves {
 /// into the next bit of the same residue mod 3, the only one kept. Both
 /// operands below 2^16 keep the product within 32 bits, so the low-word
 /// `mul` gives all of it, with no `mulhu`.
-#[cfg(any(all(rind_backend = "portable", target_pointer_width = "32"), test))]
+#[cfg(any(
+    all(
+        rind_backend = "portable",
+        target_pointer_width = "32",
+        not(all(target_arch = "riscv32", not(target_feature = "m")))
+    ),
+    test
+))]
 #[inline(always)]
-fn clmul16(x: u32, y: &[u32; 3]) -> u32 {
+fn clmul16_mul(x: u32, y: &[u32; 3]) -> u32 {
     let (x0, x1, x2) = (x & M0, x & M1, x & M2);
     let [y0, y1, y2] = *y;
     let m = |a: u32, b: u32| a.wrapping_mul(b);
@@ -259,6 +267,50 @@ fn clmul16(x: u32, y: &[u32; 3]) -> u32 {
     let z2 = m(x0, y2) ^ m(x1, y1) ^ m(x2, y0);
     (z0 & M0) | (z1 & M1) | (z2 & M2)
 }
+
+/// [`clmul16_mul`]'s product by shifts and masks, with no multiply, for
+/// riscv32 without the M extension.
+///
+/// There `mul` is a call to `__mulsi3`, whose loop branches on its operands'
+/// bits, so a product of secret operands would leak their values through its
+/// timing. This adds `y` shifted by `i` under a mask of all ones or all zeroes
+/// made from bit `i` of `x`, for each of `x`'s 16 bits: a fixed count of
+/// shifts, ANDs, and XORs, with no branch or index on either operand. The
+/// leaves of `y` were masked to every third bit; together they are `y`.
+#[cfg(any(
+    all(
+        rind_backend = "portable",
+        target_arch = "riscv32",
+        not(target_feature = "m")
+    ),
+    test
+))]
+#[inline(always)]
+fn clmul16_shift(x: u32, y: &[u32; 3]) -> u32 {
+    let y = y[0] | y[1] | y[2];
+    let mut z = 0u32;
+    for i in 0..16 {
+        z ^= (y << i) & 0u32.wrapping_sub((x >> i) & 1);
+    }
+    z
+}
+
+#[cfg(all(
+    rind_backend = "portable",
+    target_pointer_width = "32",
+    not(all(target_arch = "riscv32", not(target_feature = "m")))
+))]
+use clmul16_mul as clmul16;
+// Tests run [`polyval_k16`] on the multiply, and check the two products
+// against each other.
+#[cfg(all(test, not(all(rind_backend = "portable", target_pointer_width = "32"))))]
+use clmul16_mul as clmul16;
+#[cfg(all(
+    rind_backend = "portable",
+    target_arch = "riscv32",
+    not(target_feature = "m")
+))]
+use clmul16_shift as clmul16;
 
 /// The carry-less product of `w` and the key's 32-bit operand whose
 /// leaves are `h`, as its low and high words.
@@ -485,6 +537,34 @@ mod tests {
                     break;
                 }
             }
+        }
+    }
+
+    // The multiply-free product riscv32 without the M extension runs agrees
+    // with the multiply's, under pseudo-random and all-ones 16-bit operands,
+    // whose products carry furthest within a residue class. Under ctgrind,
+    // with both operands secret, neither has a branch or index on them.
+    #[test]
+    fn clmul16_shift_matches_mul() {
+        use crate::low::ct::{into_public, into_secret};
+        let mut s = 0x9e37_79b9u32;
+        let mut next = || {
+            s ^= s << 13;
+            s ^= s >> 17;
+            s ^= s << 5;
+            s & 0xffff
+        };
+        let mut cases: Vec<(u32, u32)> = (0..2000).map(|_| (next(), next())).collect();
+        cases.extend([(0xffff, 0xffff), (0, 0xffff), (0xffff, 0), (1, 0x8000)]);
+        for (x, y) in cases {
+            let y = [y & M0, y & M1, y & M2];
+            let want = clmul16_mul(x, &y);
+            let got = into_public(clmul16_shift(into_secret(x), &into_secret(y)));
+            assert_eq!(got, want, "{x:x} {y:x?}");
+            assert_eq!(
+                into_public(clmul16_mul(into_secret(x), &into_secret(y))),
+                want
+            );
         }
     }
 
