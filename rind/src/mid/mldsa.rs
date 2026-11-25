@@ -1667,6 +1667,41 @@ mod tests {
         assert_eq!(kib::<MlDsa87>(), [79, 64]);
     }
 
+    /// VG's signing routine signs as rind's does, byte for byte, at every
+    /// parameter set, for random and zero `rnd`, and many keys and `mu`s, so
+    /// many attempt counts.
+    #[cfg(rind_backend = "x86_64")]
+    #[test]
+    fn vg_sign_matches_rind() {
+        fn check<P: Params>() {
+            for i in 0..64u8 {
+                let mut seed = [i; SEED_LEN];
+                SystemRandom.fill(&mut seed).unwrap();
+                let (key, _) = KeyPair::<P>::from_seed(&seed);
+                let mut mu = [0u8; MU_LEN];
+                SystemRandom.fill(&mut mu).unwrap();
+                let mut rnd = [0u8; RND_LEN];
+                if i % 2 == 1 {
+                    SystemRandom.fill(&mut rnd).unwrap();
+                }
+                let expected = key.sign_internal(&mu, &rnd).unwrap();
+                let mut sig = P::Signature::zeroed();
+                low::mldsa_vg::sign(key.secret_key().as_ref(), &mu, &rnd, sig.as_mut()).unwrap();
+                assert_eq!(sig.as_ref(), expected.as_ref());
+            }
+            // A length that is no parameter set's is refused.
+            let (key, _) = KeyPair::<P>::from_seed(&[0; SEED_LEN]);
+            let mut short = [0u8; 16];
+            assert!(
+                low::mldsa_vg::sign(key.secret_key().as_ref(), &[0; 64], &[0; 32], &mut short)
+                    .is_none()
+            );
+        }
+        check::<MlDsa44>();
+        check::<MlDsa65>();
+        check::<MlDsa87>();
+    }
+
     #[test]
     fn sign_verify_round_trip() {
         fn check<P: Params>() {

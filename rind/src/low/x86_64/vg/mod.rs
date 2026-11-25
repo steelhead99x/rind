@@ -74,6 +74,62 @@ pub(crate) mod vg_keccak_pad_scratch;
 #[rustfmt::skip]
 pub(crate) mod vg_keccak_squeeze_scratch;
 #[rustfmt::skip]
+pub(crate) mod vg_mldsa44_sign;
+#[rustfmt::skip]
+pub(crate) mod vg_mldsa44_sign_with_cache;
+#[rustfmt::skip]
+pub(crate) mod vg_mldsa65_sign;
+#[rustfmt::skip]
+pub(crate) mod vg_mldsa65_sign_with_cache;
+#[rustfmt::skip]
+pub(crate) mod vg_mldsa87_sign;
+#[rustfmt::skip]
+pub(crate) mod vg_mldsa87_sign_with_cache;
+#[rustfmt::skip]
+pub(crate) mod vg_mldsa_add;
+#[rustfmt::skip]
+pub(crate) mod vg_mldsa_bit_pack;
+#[rustfmt::skip]
+pub(crate) mod vg_mldsa_bit_unpack;
+#[rustfmt::skip]
+pub(crate) mod vg_mldsa_dot_inverse4;
+#[rustfmt::skip]
+pub(crate) mod vg_mldsa_dot_inverse5;
+#[rustfmt::skip]
+pub(crate) mod vg_mldsa_dot_inverse7;
+#[rustfmt::skip]
+pub(crate) mod vg_mldsa_expand_mask_poly;
+#[rustfmt::skip]
+pub(crate) mod vg_mldsa_expand_mask_poly4;
+#[rustfmt::skip]
+pub(crate) mod vg_mldsa_high_bits;
+#[rustfmt::skip]
+pub(crate) mod vg_mldsa_hint_bit_pack;
+#[rustfmt::skip]
+pub(crate) mod vg_mldsa_inv_ntt;
+#[rustfmt::skip]
+pub(crate) mod vg_mldsa_low_bits;
+#[rustfmt::skip]
+pub(crate) mod vg_mldsa_make_hint;
+#[rustfmt::skip]
+pub(crate) mod vg_mldsa_multiply_ntt;
+#[rustfmt::skip]
+pub(crate) mod vg_mldsa_norm_lt;
+#[rustfmt::skip]
+pub(crate) mod vg_mldsa_ntt;
+#[rustfmt::skip]
+pub(crate) mod vg_mldsa_rej_ntt_poly;
+#[rustfmt::skip]
+pub(crate) mod vg_mldsa_rej_ntt_poly4;
+#[rustfmt::skip]
+pub(crate) mod vg_mldsa_sample_in_ball;
+#[rustfmt::skip]
+pub(crate) mod vg_mldsa_simple_bit_pack;
+#[rustfmt::skip]
+pub(crate) mod vg_mldsa_sub;
+#[rustfmt::skip]
+pub(crate) mod vg_mldsa_zetas;
+#[rustfmt::skip]
 pub(crate) mod vg_mlkem16_cbd2_avx2;
 #[rustfmt::skip]
 pub(crate) mod vg_mlkem768_check_ek;

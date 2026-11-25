@@ -16,3 +16,13 @@ Cells VG won:
 - x86_64 without AVX2: signing at 0.85 to 0.87 for ML-DSA-44, -65, and -87. Key generation (1.04) and verification (1.01 to 1.09) lose there.
 - aarch64: ML-DSA-65 and -87 signing at 0.99, ML-DSA-44 1.05, so no cell. Lost with AVX2 (1.04 to 1.10) and on the Haswell VPSes (1.26).
 - VG's row signs with its plain signing key, not its pre-expanded one.
+
+Done on the PR branch: `admin/import-vg` vendors `vg_mldsa{44,65,87}_sign` (VG's plain-key routines, which need no CPU feature) at its pin, `low::mldsa_vg::sign` wraps them, and `vg_sign_matches_rind` checks they sign as rind does, byte for byte. Only that test calls the wrapper yet.
+
+Left:
+- Measure before switching: `RIND_CPU_DISABLE_avx2=1` forces the no-AVX2 path; run rind-bench's `mldsa` rows for rind and VG on the weekly bench's no-AVX2 tier and an idle host, every size. Then switch `KeyPair::sign` to VG on CPUs without AVX2 for each set that still wins, for keys generated from a seed only (VG's contract asks for a key its key generation wrote; a key loaded from its expanded form keeps rind's arithmetic, as ML-KEM's decapsulation does).
+- ctgrind: VG's routine branches on which attempt it rejects (`signLeak`) inside its assembly, where rind cannot declassify as its own signing does, so memcheck would flag it.
+
+## Waiting
+
+- Maintainer: how ctgrind checks VG's signing, whose rejection branches memcheck would flag. Options: (a) a valgrind suppression for conditional jumps inside `vg_mldsa*_sign_with_cache`, resting on VG's constant-time proof for the rest, recommended; (b) check it only under `admin/ct-sde`/`ct-qemu` trace comparison with inputs of equal attempt counts; (c) leave signing on rind's code.

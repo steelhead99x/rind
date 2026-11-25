@@ -127,6 +127,7 @@ pub(crate) mod mldsa_reduce;
 pub(crate) mod mldsa_rej_uniform_eta2_vartime;
 pub(crate) mod mldsa_rej_uniform_eta4_vartime;
 pub(crate) mod mldsa_rej_uniform_vartime;
+pub(crate) mod mldsa_vg;
 pub(crate) mod mlkem;
 pub(crate) mod mlkem768_vg;
 pub(crate) mod mlkem_basemul_k2;

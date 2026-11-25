@@ -57,6 +57,10 @@ ROOTS = {
         "vg_mlkem768_encaps_h_avx512",
         "vg_mlkem768_keygen_avx512",
         "vg_mlkem768_decaps_avx512",
+        # ML-DSA signing without AVX2, from the plain expanded key.
+        "vg_mldsa44_sign",
+        "vg_mldsa65_sign",
+        "vg_mldsa87_sign",
         # P-256's public key, ECDH, and ECDSA verification: with BMI2 and
         # ADX, and with AVX-512 IFMA for ECDH and verification.
         "vg_ec_p256_public_key_adx",
