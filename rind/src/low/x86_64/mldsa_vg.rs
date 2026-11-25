@@ -12,6 +12,7 @@
 use core::mem::MaybeUninit;
 
 use super::vg;
+use crate::low::ct;
 
 /// The working space each routine takes, the largest of the three (ML-DSA-87's
 /// 18048 words), aligned to a cache line as VG's own API aligns it. VG proves
@@ -60,5 +61,13 @@ pub(crate) fn sign(sk: &[u8], mu: &[u8; 64], rnd: &[u8; 32], sig: &mut [u8]) -> 
             _ => return None,
         }
     };
-    (ok == 1).then_some(())
+    // Whether signing finished, and the signature it wrote, are public, as
+    // rind's own signing declassifies them. What VG's routine branches on
+    // or indexes by inside (FIPS 204's rejections, each attempt's `c_tilde`,
+    // the hint: VG's `signLeak`) is suppressed in `admin/ctgrind.supp`.
+    if ct::into_public(ok) != 1 {
+        return None;
+    }
+    ct::public_slice(sig);
+    Some(())
 }

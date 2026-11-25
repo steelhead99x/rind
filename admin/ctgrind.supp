@@ -275,3 +275,17 @@
    fun:ossl_namemap_name2num
    fun:evp_generic_fetch_from_prov
 }
+
+# pyca/verified-garbage's ML-DSA signing (`low::mldsa_vg`) branches on which
+# check rejected each attempt, inside its assembly, where rind cannot
+# declassify that decision as its own signing does (`rejected` in
+# `mid/mldsa.rs`). FIPS 204's security argument makes it public, and VG's
+# constant-time theorem bounds what the routine leaks to `signLeak`, so only
+# conditional jumps whose innermost frame is the signing loop itself are
+# suppressed: a secret-dependent address there, or any finding in the
+# routines it calls or in rind's glue, still reports. Frames are v0-mangled.
+{
+   vg-mldsa-sign-rejection
+   Memcheck:Cond
+   fun:*2vg26vg_mldsa??_sign_with_cache26vg_mldsa??_sign_with_cache
+}
