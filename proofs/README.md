@@ -1073,7 +1073,7 @@ the tag on `gcm_hash` from the counter block it is given
 `gcm_encrypt_LE` and `gcm_decrypt_LE` (`tagged_seal_short_spec`,
 `tagged_open_short_spec`). The lemmas both targets' AES-GCM proofs use are in
 `Rind/GcmSpec.lean`. Longer messages, which run s2n-bignum's AES-GCM kernels,
-or for AES-192 aws-lc's stitched kernels or rind's AES-CTR and GHASH in turn,
+or for AES-192 aws-lc's eight- and four-way stitched kernels,
 and the AEAD API above `tagged` remain to prove.
 
 `aead::gcm::Key`, which takes an IV of any length and tags of any
