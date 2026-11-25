@@ -6,6 +6,7 @@
 use crate::error::{Unspecified, unspecified};
 
 const INTEGER: u8 = 0x02;
+const BIT_STRING: u8 = 0x03;
 const OBJECT_IDENTIFIER: u8 = 0x06;
 const SEQUENCE: u8 = 0x30;
 
@@ -170,6 +171,23 @@ pub(crate) fn is_spki(der: &[u8]) -> bool {
     read(&mut input, SEQUENCE)
         .map(|body| body.as_slice_less_safe().first() == Some(&SEQUENCE))
         .unwrap_or(false)
+}
+
+/// The modulus's bit length in an RSA `SubjectPublicKeyInfo`, or `None` if
+/// its framing is not one. The algorithm identifier is not checked.
+pub(crate) fn spki_rsa_modulus_bits(der: &[u8]) -> Option<usize> {
+    untrusted::Input::from(der)
+        .read_all(Unspecified, |input| {
+            read(input, SEQUENCE)?.read_all(Unspecified, |input| {
+                read(input, SEQUENCE)?;
+                let key = read(input, BIT_STRING)?.as_slice_less_safe();
+                match key {
+                    [0, pkcs1 @ ..] => Ok(bits(rsa_public_key(pkcs1)?.0)),
+                    _ => Err(Unspecified),
+                }
+            })
+        })
+        .ok()
 }
 
 /// The bit length of a big-endian magnitude without leading zero bytes; 0

@@ -968,3 +968,87 @@ fn rsa_public_keys() {
             .is_err()
     );
 }
+
+/// An RSA public key's accessors match aws-lc-rs's, components with a
+/// leading zero byte are refused by both, and an OAEP output buffer larger
+/// than the minimum is fine.
+#[test]
+fn rsa_surfaces() {
+    let ours_pair = ours::rsa::KeyPair::from_pkcs8(rsa_pkcs8()).unwrap();
+    let theirs_pair = theirs::rsa::KeyPair::from_pkcs8(rsa_pkcs8()).unwrap();
+    #[cfg(feature = "ring-io")]
+    {
+        let (o, t) = (ours_pair.public_key(), theirs_pair.public_key());
+        assert_eq!(o.modulus_len(), t.modulus_len());
+        assert_eq!(o.modulus().first_byte(), t.modulus().first_byte());
+        assert_eq!(o.exponent().first_byte(), t.exponent().first_byte());
+    }
+
+    let message = b"message";
+    let mut signature = vec![0; ours_pair.public_modulus_len()];
+    ours_pair
+        .sign(
+            &ours::signature::RSA_PKCS1_SHA256,
+            &ours::rand::SystemRandom::new(),
+            message,
+            &mut signature,
+        )
+        .unwrap();
+    let components: ours::rsa::PublicKeyComponents<Vec<u8>> = ours_pair.public_key().into();
+    let (n, e) = (components.n.clone(), components.e.clone());
+    let padded = |v: &[u8]| [&[0][..], v].concat();
+    for (n, e, ok) in [
+        (n.clone(), e.clone(), true),
+        (padded(&n), e.clone(), false),
+        (n.clone(), padded(&e), false),
+    ] {
+        let ours = ours::signature::RsaPublicKeyComponents { n: &n, e: &e }.verify(
+            &ours::signature::RSA_PKCS1_2048_8192_SHA256,
+            message,
+            &signature,
+        );
+        let theirs = theirs::signature::RsaPublicKeyComponents { n: &n, e: &e }.verify(
+            &theirs::signature::RSA_PKCS1_2048_8192_SHA256,
+            message,
+            &signature,
+        );
+        assert_eq!(ours.is_ok(), ok);
+        assert_eq!(theirs.is_ok(), ok);
+    }
+
+    let private = ours::rsa::PrivateDecryptingKey::from_pkcs8(rsa_pkcs8()).unwrap();
+    let public = ours::rsa::OaepPublicEncryptingKey::new(private.public_key()).unwrap();
+    let private = ours::rsa::OaepPrivateDecryptingKey::new(private).unwrap();
+    let alg = &ours::rsa::OAEP_SHA256_MGF1SHA256;
+    let mut ciphertext = vec![0; public.ciphertext_size()];
+    let ciphertext = public.encrypt(alg, message, &mut ciphertext, None).unwrap();
+    let mut plaintext = vec![0; private.min_output_size() + 1];
+    assert_eq!(
+        private
+            .decrypt(alg, ciphertext, &mut plaintext, None)
+            .unwrap(),
+        message
+    );
+    let mut short = vec![0; private.min_output_size() - 1];
+    assert!(private.decrypt(alg, ciphertext, &mut short, None).is_err());
+}
+
+/// A 1024-bit RSA public key is too small to encrypt to, in both.
+#[test]
+fn rsa1024_encrypting_key_refused() {
+    let path = format!(
+        "{}/../thirdparty/vectors/wycheproof/testvectors_v1/rsa_pkcs1_1024_sig_gen_test.json",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let value: serde_json::Value =
+        serde_json::from_reader(std::fs::File::open(path).unwrap()).unwrap();
+    let spki = hex::decode(value["testGroups"][0]["keyDer"].as_str().unwrap()).unwrap();
+    let ours = ours::rsa::PublicEncryptingKey::from_der(&spki)
+        .err()
+        .unwrap();
+    let theirs = theirs::rsa::PublicEncryptingKey::from_der(&spki)
+        .err()
+        .unwrap();
+    assert_eq!(ours.description_(), theirs.description_());
+    assert_eq!(ours.description_(), "TooSmall");
+}

@@ -886,6 +886,10 @@ impl PublicEncryptingKey {
         if !der::is_spki(value) {
             return Err(KeyRejected::invalid_encoding());
         }
+        // aws-lc-rs refuses a parsed key by its size before rind would.
+        if let Some(bits) = der::spki_rsa_modulus_bits(value) {
+            check_bits(bits)?;
+        }
         let key = rind::rsa::EncryptingKey::from_spki(&rind::rsa::OAEP_SHA256, value)
             .map_err(KeyRejected::rind)?;
         Self::new(key.as_ref())

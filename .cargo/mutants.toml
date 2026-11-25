@@ -380,6 +380,21 @@ exclude_re = [
   'rind-rustls/src/sign\.rs:\d+:\d+: replace <impl fmt::Debug for RsaSigningKey>::fmt -> Result<\(\), fmt::Error> with Ok\(\(\)\)$',
   'rind-rustls/src/sign\.rs:\d+:\d+: replace <impl fmt::Debug for RsaSigner>::fmt -> Result<\(\), fmt::Error> with Ok\(\(\)\)$',
   'rind-rustls/src/ticketer\.rs:\d+:\d+: replace <impl fmt::Debug for XChaCha20Ticketer>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
+  'rind-aws-lc-rs/src/aead\.rs:\d+:\d+: replace <impl fmt::Debug for RandomizedNonceKey>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
+  'rind-aws-lc-rs/src/aead/quic\.rs:\d+:\d+: replace <impl fmt::Debug for Algorithm>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
+  'rind-aws-lc-rs/src/aead/tls\.rs:\d+:\d+: replace <impl fmt::Debug for TlsRecordSealingKey>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
+  'rind-aws-lc-rs/src/aead/tls\.rs:\d+:\d+: replace <impl fmt::Debug for TlsRecordOpeningKey>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
+  'rind-aws-lc-rs/src/buffer\.rs:\d+:\d+: replace <impl fmt::Debug for Buffer<\x27_, T>>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
+  'rind-aws-lc-rs/src/error\.rs:\d+:\d+: replace <impl fmt::Display for KeyRejected>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
+  'rind-aws-lc-rs/src/kem\.rs:\d+:\d+: replace <impl fmt::Debug for DecapsulationKey<Id>>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
+  'rind-aws-lc-rs/src/kem\.rs:\d+:\d+: replace <impl fmt::Debug for EncapsulationKey<Id>>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
+  'rind-aws-lc-rs/src/kem\.rs:\d+:\d+: replace <impl fmt::Debug for Algorithm<Id>>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
+  # 0x02 has no low bit, so `|` and `^` with the parity bit agree.
+  'rind-aws-lc-rs/src/agreement\.rs:\d+:\d+: replace \| with \^ in compress$',
+  # Compiled only with the `dev-tests-only` and `unstable` features, which
+  # campaigns, like aws-lc-rs's default build, leave off.
+  'rind-aws-lc-rs/src/rand\.rs:\d+:\d+: replace <impl SecureRandom for T>::mut_fill -> Result<\(\), error::Unspecified> with Ok\(\(\)\)$',
+  'rind-aws-lc-rs/src/pqdsa\.rs:\d+:\d+: replace PqdsaKeyPair::to_pkcs8 -> Result<pkcs8::Document, Unspecified> with Ok\(Default::default\(\)\)$',
   # One AAD, concatenated, is that AAD. Deleting the one-element arm still
   # feeds `open` the same bytes.
   'rind-str0m/src/srtp\.rs:\d+:\d+: delete match arm \[aad\] in Gcm::open$',
