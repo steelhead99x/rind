@@ -1667,17 +1667,23 @@ mod tests {
                     SystemRandom.fill(&mut rnd).unwrap();
                 }
                 let expected = key.sign_internal(&mu, &rnd).unwrap();
+                // VG's contract keeps `mu` and `rnd` secret too, so ctgrind
+                // checks it does.
+                low::ct::secret_slice(&mu);
+                low::ct::secret_slice(&rnd);
                 let mut sig = P::Signature::zeroed();
                 low::mldsa_vg::sign(key.secret_key().as_ref(), &mu, &rnd, sig.as_mut()).unwrap();
                 assert_eq!(sig.as_ref(), expected.as_ref());
             }
-            // A length that is no parameter set's is refused.
+            // A length that is no parameter set's is refused, leaving `sig`
+            // zero.
             let (key, _) = KeyPair::<P>::from_seed(&[0; SEED_LEN]);
-            let mut short = [0u8; 16];
+            let mut short = [0xffu8; 16];
             assert!(
                 low::mldsa_vg::sign(key.secret_key().as_ref(), &[0; 64], &[0; 32], &mut short)
                     .is_none()
             );
+            assert_eq!(short, [0; 16]);
         }
         check::<MlDsa44>();
         check::<MlDsa65>();

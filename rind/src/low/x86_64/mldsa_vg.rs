@@ -15,15 +15,19 @@ use super::vg;
 use crate::low::ct;
 
 /// The working space each routine takes, the largest of the three (ML-DSA-87's
-/// 18048 words), aligned to a cache line as VG's own API aligns it. VG proves
-/// no variant that leaves it unwiped, so rind keeps the wipe, as AGENTS.md's
-/// exception for imported routines allows.
+/// 18048 words), aligned to a cache line as VG's own API aligns it. The
+/// routines accept any initial contents and leave intermediates derived
+/// from the key there, which VG's contract asks the caller to destroy. rind
+/// leaves them: it is a stack temporary, which AGENTS.md's wipe rule leaves
+/// unwiped, as `p256_vg` and `p384_vg` leave theirs.
 #[repr(C, align(64))]
 struct Scratch(MaybeUninit<[u64; 18048]>);
 
 /// `ML-DSA.Sign_internal(sk, mu, rnd)` (FIPS 204 Algorithm 7) into `sig`, at
 /// the parameter set `sk`'s length names. `None` if VG's loop reached its
-/// bound (probability about 2^-256), or `sk` or `sig` is no set's length.
+/// bound (probability about 2^-256), or `sk` or `sig` is no set's length;
+/// `sig` is then zero, since a failed attempt may leave a rejected `z` there,
+/// which leaks the key.
 ///
 /// `sk` must be the expanded key of a key pair generated from its seed, as
 /// VG's contract asks (`sk` written by its key generation).
@@ -58,7 +62,10 @@ pub(crate) fn sign(sk: &[u8], mu: &[u8; 64], rnd: &[u8; 32], sig: &mut [u8]) -> 
                 sig.as_mut_ptr().cast(),
                 s.cast(),
             ),
-            _ => return None,
+            _ => {
+                sig.fill(0);
+                return None;
+            }
         }
     };
     // Whether signing finished, and the signature it wrote, are public, as
@@ -66,6 +73,7 @@ pub(crate) fn sign(sk: &[u8], mu: &[u8; 64], rnd: &[u8; 32], sig: &mut [u8]) -> 
     // or indexes by inside (FIPS 204's rejections, each attempt's `c_tilde`,
     // the hint: VG's `signLeak`) is suppressed in `admin/ctgrind.supp`.
     if ct::into_public(ok) != 1 {
+        sig.fill(0);
         return None;
     }
     ct::public_slice(sig);
