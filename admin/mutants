@@ -527,6 +527,8 @@ done
 case $(uname -sm) in
     "Linux x86_64") host=x86_64-unknown-linux-gnu ;;
     "Linux aarch64") host=aarch64-unknown-linux-gnu ;;
+    "Darwin arm64") host=aarch64-apple-darwin ;;
+    "Darwin x86_64") host=x86_64-apple-darwin ;;
     *) host="$(uname -sm)" ;;
 esac
 
@@ -536,6 +538,17 @@ portable=(
     rind/src/low/generic/order.rs
 )
 campaign=${target:-$host}
+# macOS has no campaign: the skipped files and CPU-feature rows below are
+# Linux's. It lists, as the self-test needs, with aarch64 Linux's rows.
+case $campaign in
+    *-apple-darwin)
+        [ -n "$listing" ] || {
+            echo "admin/mutants: macOS has no campaign; it only lists" >&2
+            exit 1
+        }
+        campaign=aarch64-unknown-linux-gnu
+        ;;
+esac
 if [ -n "$portable_backend" ]; then
     [ -z "$target" ] && [ "$campaign" = x86_64-unknown-linux-gnu ] || {
         echo "admin/mutants: --portable runs only on Linux x86_64, without --target" >&2

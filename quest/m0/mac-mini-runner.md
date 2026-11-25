@@ -12,6 +12,8 @@ Planned with the maintainer on 2026-11-10, after [kixel-ai/rind#583](https://git
 - aarch64 Linux: a lightweight VM (for example Lima or the nix-darwin Linux builder) running the same `just ci` the x86_64 host runs. Pick whichever keeps the queue's added time smallest, and record it.
 - The agent workstation role is configured in the maintainer's machine configuration, not in this repo. Keep the runner's work under `quest gate` so agents and the queue share the machine as they share this host.
 - If the merge-group build on the Mac mini adds more than a few minutes to landing, say so in the PR and propose trimming it to what catches aarch64-only breakage.
+- Mutation testing: `admin/mutants` has campaigns for x86_64 and aarch64 Linux only, whose skipped files and CPU-feature rows name those hosts, and a whole campaign runs only on GitHub-hosted runners, so macOS has none. On a Mac `sh/dispatch.sh` therefore needs only python3 for its `mutants` module, runs the self-test, and runs the pin check (`admin/mutants --pins`, which needs cargo-mutants but no campaign) only when cargo-mutants is on `PATH`, saying so when it skips. A macOS campaign needs its own skip list and Apple-core feature rows; add one if a run finds what the Linux campaigns miss.
+- A Mac without Nix runs the gate with `ALLOW_HOST_TOOLCHAIN=1` and rustup's stable toolchain; each tool `CI_STRICT` names must be on `PATH` (`cargo-nextest`, `shellcheck`, `actionlint`, `yq`, and the rest), and the cross checks need `rustup target add` for the targets they build.
 
 ## Waiting
 
