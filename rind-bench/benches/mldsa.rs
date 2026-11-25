@@ -123,6 +123,7 @@ macro_rules! ml_dsa {
             });
 
             group.bench_function("rind", |b| {
+                let _dit = criterion::rind_dit();
                 use rind::ml_dsa::{KeyPair, $rind};
 
                 b.iter(|| {
@@ -220,6 +221,7 @@ macro_rules! ml_dsa {
             });
 
             group.bench_function("rind", |b| {
+                let _dit = criterion::rind_dit();
                 use rind::ml_dsa::{KeyPair, $rind};
                 let key = KeyPair::<$rind>::generate().unwrap();
 
@@ -320,6 +322,7 @@ macro_rules! ml_dsa {
             });
 
             group.bench_function("rind", |b| {
+                let _dit = criterion::rind_dit();
                 use rind::ml_dsa::{PublicKey, $rind};
                 let key = PublicKey::<$rind>::new(&public_key).unwrap();
 
@@ -403,6 +406,7 @@ macro_rules! ml_dsa {
             });
 
             group.bench_function("rind", |b| {
+                let _dit = criterion::rind_dit();
                 use rind::ml_dsa::{PublicKey, $rind};
 
                 b.iter(|| {

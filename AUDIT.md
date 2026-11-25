@@ -64,7 +64,13 @@ Outside the model:
 - Speculative execution beyond what the constant-time rule gives: only
   secret-independent control flow and addresses stand against it. The one
   speculation barrier rind adds follows setting DIT on Apple's platforms, as
-  Apple asks, so no instruction after it runs speculatively without DIT.
+  Apple asks, so no instruction after it runs speculatively without DIT. On
+  other aarch64 cores, where rind sets DIT too, it adds none and relies on
+  the Arm architecture (Arm ARM DDI 0487 M.d, C5.1.3.3 and B1.5.6),
+  untested on hardware. The FIPS module's code keeps Apple's barrier on
+  every target, its glibc Linux cores included. `admin/dit-disasm` checks
+  the emitted sequence per target; benchmarks/apple-dit-barrier.md collects
+  the sources.
 - A compromised toolchain, build machine, or dependency. `cargo deny`
   checks crates against RustSec's advisories, licenses, and sources; nothing
   checks a release's build is reproducible.
@@ -126,7 +132,6 @@ The pins, as `admin/audit` renders them from the files that hold them, so
 | libcrux-hacl-rs | 0.0.6 | `Cargo.lock` | the runtime of the HACL\* ChaCha20 rounds rind copied |
 | libcrux-macros | 0.0.4 | `Cargo.lock` | the same |
 | libcrux-poly1305 | 0.0.7 | `Cargo.lock` | HACL\*'s Poly1305, on 32-bit portable targets |
-| libcrux-sha2 | 0.0.9 | `Cargo.lock` | HACL\*'s SHA-2 block functions, on the portable backend |
 <!-- admin/audit pins: end -->
 
 Code taken once, with no importer to rerun, carries no machine-readable pin:
@@ -170,17 +175,19 @@ establishes, and what it does not:
   [TESTING.md's tier table](TESTING.md#tiers) names. They check only the
   cases published, and each tier only where CI runs it, natively, under
   Intel SDE, or under qemu.
-- **Differential tests** against aws-lc-rs, or a Rust crate where aws-lc-rs
-  lacks the primitive, on the same tiers. Where rind runs aws-lc's own
-  routine, as for ChaCha20-Poly1305 on x86_64 and aarch64 or RSA's RSAZ
-  exponentiation, the test compares that routine with itself, so it
-  checks rind's glue around it, and only vectors check the routine. wasm runs
-  none, since aws-lc does not build for it.
+- **Differential tests** against aws-lc-rs, where it has the primitive, and
+  against the independent oracle [TESTING.md's primitives
+  table](TESTING.md#primitives) names, a Rust implementation that shares no
+  code with the path rind runs, on the same tiers. Where rind runs aws-lc's
+  own routine, as for ChaCha20-Poly1305 on x86_64 and aarch64 or RSA's RSAZ
+  exponentiation, aws-lc-rs compares that routine with itself, so it checks
+  rind's glue around it, and the oracle checks the routine. wasm runs none,
+  since aws-lc does not build for it.
 - **Fuzz targets**, weekly for twenty minutes each against aws-lc-rs,
   replayed on every tier and against the portable backend. The ECVRF, OPRF,
   and blind RSA targets compare rind with itself, so they find panics and
   hangs, not wrong answers. Coverage does not measure what fuzzing reaches.
-  [OSS-Fuzz](/quest/m4/oss-fuzz.md) is not running yet.
+  [OSS-Fuzz](/quest/m2/confidence/oss-fuzz.md) is not running yet.
 - **ctgrind** (`admin/ctgrind`, weekly, in release and debug builds, armv7's
   included) runs the unit tests under valgrind, failing on a branch or address
   that depends on a marked secret. It sees only the paths the tests take,
@@ -199,18 +206,19 @@ establishes, and what it does not:
 - **`admin/ct-vartime`**, in `just ci`, scans the release builds of every
   Linux target rind builds for divisions and floating point, against an
   allowlist of public operands. On the x86_64 backend it also fails on a
-  multiply whose timing depends on MXCSR that an export reaches outside
-  `rind::low::Mcdt`, the mitigation; on 32-bit x86 and the portable backend,
+  multiply whose timing depends on MXCSR that an export reaches on a path
+  that has not entered `rind::low::Mcdt`, the mitigation, or has left it; on
+  32-bit x86 and the portable backend,
   that every call enters it is unchecked. It takes the integer multiplier to
   run in constant time, and on x86 it refuses `vsha512*`.
 - **s2n-bignum's `_SAFE` theorems** prove the routines
   [ALGORITHMS.md](ALGORITHMS.md#s2n-bignums-constant-time-theorems) lists
   constant time for every input, variable-time instructions included, but
   not the Rust that calls them.
-- **Timing tests** (`admin/timing`, weekly on GitHub's runners) run dudect
-  over each secret the API lets them set, and the Marvin toolkit against
-  RSA-OAEP decryption. They are statistical, on shared hardware, and cannot
-  time key generation or encapsulation.
+- **The Marvin timing test** (`admin/timing`, weekly on GitHub's runners) runs
+  the Marvin toolkit against RSA-OAEP decryption. It is statistical, on shared
+  hardware, and times nothing else: rind runs no dudect, whose noise on
+  shared runners outweighed what the constant-time checks above leave.
 - **Proofs**: s2n-bignum's, HACL\*'s, Vale's, fiat-crypto's, and
   aws-lc-verification's published proofs, and rind's own HOL Light and Lean
   proofs in [`proofs/`](proofs/README.md), checked nightly by `admin/prove`.
@@ -223,29 +231,38 @@ establishes, and what it does not:
   compiled from HACL\*'s verified C by an unverified step.
 - **Zeroing**: `rind/tests/zeroing.rs` drops each value holding a secret and
   fails on any byte left nonzero, and `rind/tests/heap_scratch.rs` fails on a
-  freed heap block that differs between two keys. Both see only the value
+  freed heap block that differs between two keys, or, for a randomized
+  protocol step, that holds one of its secrets. Both see only the value
   itself and the heap blocks it frees.
 - **Bounds**: `low::guard_pages` runs each kernel that takes a caller's
   slice against `PROT_NONE` pages, at lengths up to 1100 bytes and, for the
   AEADs, 2000 to 2600, on Unix. It is the only bounds check on the assembly
-  valgrind cannot run, since AddressSanitizer, nightly in `asan`, does not
+  valgrind cannot run, since AddressSanitizer, nightly in `sanitizers`, does not
   instrument assembly.
 - **Calling convention**: `low::abi` calls every assembly routine through a
   trampoline that fails when a register its ABI preserves, the stack
   pointer, or x86_64's direction flag comes back changed, and
   `admin/prove-bytes clobbers` checks each s2n-bignum block declares what
   its proof says it may change.
-- **Miri**, weekly, runs the portable backend's unit tests on x86_64 and
-  big-endian s390x, failing on undefined behavior. It runs no assembly, and
-  skips the slow tests `sh/miri.sh` lists.
+- **Miri**, weekly, runs the portable backend's unit tests on x86_64,
+  big-endian s390x, and 32-bit i686, failing on undefined behavior. It runs
+  no assembly, and skips the slow tests `sh/miri.sh` lists.
+- **Sanitizers**, nightly in `sanitizers`: AddressSanitizer and
+  ThreadSanitizer run the native backends' tests and rind-fips's module,
+  failing on an out-of-bounds or freed access or a data race in Rust code.
 - **Mutation testing** (`admin/mutants`) fails on a mutant of rind's Rust
   that no test catches. Weekly, on native x86_64 and aarch64 Linux runners
   and the portable backend, it mutates only the Rust that changed in the
   last week; a campaign over the whole workspace runs only when dispatched.
   It skips generated assembly, which proofs and differential tests own.
-- **Coverage** (`admin/coverage`, nightly on Linux and macOS) reports the
-  published functions no test runs, under `cargo test`, `dart test`, and
-  pyrind's tests, on each runner's tiers, but not under fuzzing.
+- **Coverage** (`admin/coverage`, nightly on x86_64 and aarch64 Linux,
+  macOS, the portable backend, and armv7) fails on a published function no
+  test runs on any tier, under `cargo test`, `dart test`, and pyrind's tests,
+  unless `admin/coverage.allow` says why, and on a file whose uncovered
+  regions, branches, or monomorphization gaps rise past
+  `admin/coverage.baseline`, which leaves out the regions and branches of
+  rind's backends (`rind/src/low/`), as they vary with the runner's CPU;
+  fuzzing doesn't count.
 - **Adapter fuzz targets**, for rind-rustls, rind-dimpl, and rind-str0m,
   feed a hostile peer's bytes and whole handshakes edited in flight, against
   upstream's aws-lc-rs provider, and rind-openssl's calls its C ABI as
@@ -267,7 +284,8 @@ Hand-written arithmetic no proof covers, by where it came from:
   ✓, such as ChaCha20-Poly1305 on x86_64 and aarch64, RSAZ, Montgomery
   multiplication off ADX, the AVX2 and SHA512-instruction SHA-2, VAES
   AES-GCM, and all of armv7's. Vectors and fuzzing reach each on its tier;
-  the differential test, which runs aws-lc's code too, checks only the glue.
+  aws-lc-rs, which runs that code too, checks only the glue, and the
+  independent oracle checks the routine.
 - **Graviola's** code under AES, GHASH, SHA-256, HMAC, P-256, P-384,
   ML-KEM, and RSA, wherever ALGORITHMS.md names it. Vectors, differential
   tests independent of it, and fuzzing reach each.
@@ -279,13 +297,14 @@ Hand-written arithmetic no proof covers, by where it came from:
   [TESTING.md](TESTING.md#vector-suites) describes.
 - **Ports to Rust**: mlkem-native's and mldsa-native's C, outside their CBMC
   proofs; curve25519-dalek's AVX2 backend, for Ed25519 verification on
-  x86_64 without ADX; and aws-lc's constant-time SSE2 AES and integer GHASH.
+  x86_64 without ADX; aws-lc's constant-time SSE2 AES and integer GHASH; and
+  aws-lc's C SHA-256 and SHA-384/512, the portable backend's.
   `low::generic::mldsa_poly::backend_matches_port` checks the ML-DSA port
   against the AVX2 and Neon routines.
 - **curve25519-dalek's serial backend**, X25519, Ed25519, and ristretto255
   on armv7 and the portable backend. There ristretto255's differential test
-  compares dalek with itself, so only RFC 9496's and RFC 9497's vectors
-  check it.
+  compares dalek with itself, so beside RFC 9496's and RFC 9497's vectors
+  only the textbook reference in `rind/src/test/reference.rs` checks it.
 - **x86_64 P-256's mixed addition on macOS**, aws-lc's: rind's HOL Light
   proofs check the Linux build's object, and Apple's text can place the
   routines' helpers at other offsets.

@@ -1,7 +1,24 @@
 // Records the rind commit, target, rustc and the compared crates' versions.
 include!("src/ops.rs");
+include!("src/deny.rs");
 use std::process::Command;
 fn main() {
+    // RIND_DEVBENCH_DENY: refuse a list that would leave a feature enabled that
+    // the report calls denied, and hand the library the checked ids.
+    println!("cargo:rerun-if-env-changed=RIND_DEVBENCH_DENY");
+    let deny = std::env::var("RIND_DEVBENCH_DENY").unwrap_or_default();
+    let ids = if deny.is_empty() {
+        vec![]
+    } else {
+        let arch = std::env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
+        let ids = parse_denies(&deny, &arch).unwrap_or_else(|e| panic!("{e}"));
+        let flags = std::env::var("CARGO_ENCODED_RUSTFLAGS").unwrap_or_default();
+        if !denies_take_effect(&flags) {
+            panic!("RIND_DEVBENCH_DENY is set but rind is built without --cfg rind_cpu_disable, so it may deny nothing (build-ios.sh adds the flag)");
+        }
+        ids
+    };
+    println!("cargo:rustc-env=DEVBENCH_DENY_IDS={}", ids.join(","));
     let out = |c: &mut Command| c.output().ok().filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
     let mut commit = out(Command::new("git").args(["-C", "..", "rev-parse", "HEAD"])).unwrap_or_else(|| "unknown".into());
     // rind or the bench files changed from the commit: say so.
@@ -37,5 +54,5 @@ fn main() {
     println!("cargo:rustc-env=DEVBENCH_CRATE_VERSIONS={j}");
     println!("cargo:rerun-if-changed=Cargo.lock");
     println!("cargo:rerun-if-changed=../.git/HEAD");
-    let _ = (OPERATIONS, LIBRARIES, REQUIRED);
+    let _ = (OPERATIONS, LIBRARIES, REQUIRED, deny_ids);
 }

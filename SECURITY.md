@@ -44,6 +44,12 @@ Out of scope:
 model, where its code came from, what each check establishes, and where the
 checks are thinnest.
 
+DIT (data-independent timing) is a second layer beside the constant-time
+promise. [Data-independent timing](README.md#data-independent-timing) says
+what it rests on: Apple's documented barrier on Apple's cores, and on any
+other aarch64 core only the Arm architecture's rule (Arm ARM DDI 0487 M.d,
+C5.1.3.3 and B1.5.6), which we have not tested on hardware.
+
 ## Supported versions
 
 Only the latest release of each package rind publishes gets fixes: the

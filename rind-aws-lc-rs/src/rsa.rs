@@ -1,20 +1,17 @@
 //! RSA signatures and RSA-OAEP encryption.
 //!
-//! `KeyPair::from_components` and `KeyPairComponents` are not offered:
-//! building a key from big-endian private components means encoding them as
-//! DER here, which branches on their secret leading bytes. Load the key as
-//! PKCS#1 or PKCS#8 instead. Nor is PKCS#1 v1.5 encryption
-//! (`Pkcs1PublicEncryptingKey`, `Pkcs1PrivateDecryptingKey`), which invites
-//! padding-oracle attacks and rind refuses, or `KeyPair::sign_digest`, since
-//! rind signs only digests it computed.
+//! PKCS#1 v1.5 encryption (`Pkcs1PublicEncryptingKey`,
+//! `Pkcs1PrivateDecryptingKey`) is not offered, since it invites
+//! padding-oracle attacks and rind refuses it, nor is `KeyPair::sign_digest`,
+//! since rind signs only digests it computed.
 
 use alloc::boxed::Box;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::fmt;
 use core::ops::RangeInclusive;
-use std::sync::OnceLock;
 
+use once_cell::race::OnceBox;
 use signing::RsaEncoding;
 
 use crate::digest::{self, Digest};
@@ -82,8 +79,9 @@ impl sealed::Sealed for KeyPair {}
 
 impl KeyPair {
     fn new(key: rind::rsa::KeyPair) -> Result<Self, KeyRejected> {
+        // rind's encoding of a key it loaded always parses.
         let public = PublicKey::from_pkcs1(key.public_key().as_ref())
-            .map_err(|_| KeyRejected::unexpected_error())?;
+            .or(Err(KeyRejected::unexpected_error()))?;
         check_bits(der::bits(&public.n))?;
         Ok(Self {
             key: Arc::new(key),
@@ -107,6 +105,33 @@ impl KeyPair {
     /// Loads a PKCS#1 `RSAPrivateKey`.
     pub fn from_der(input: &[u8]) -> Result<Self, KeyRejected> {
         rind::rsa::KeyPair::from_pkcs1(input)
+            .map_err(KeyRejected::rind)
+            .and_then(Self::new)
+    }
+
+    /// Loads a private key from its big-endian integers, refusing one whose
+    /// integers disagree.
+    pub fn from_components<Public, Private>(
+        components: &KeyPairComponents<Public, Private>,
+    ) -> Result<Self, KeyRejected>
+    where
+        Public: AsRef<[u8]>,
+        Private: AsRef<[u8]>,
+    {
+        let public_key = &components.public_key;
+        let components = rind::rsa::KeyPairComponents {
+            public_key: rind::rsa::PublicKeyComponents {
+                n: public_key.n.as_ref(),
+                e: public_key.e.as_ref(),
+            },
+            d: components.d.as_ref(),
+            p: components.p.as_ref(),
+            q: components.q.as_ref(),
+            dp: components.dP.as_ref(),
+            dq: components.dQ.as_ref(),
+            qi: components.qInv.as_ref(),
+        };
+        rind::rsa::KeyPair::from_components(&components)
             .map_err(KeyRejected::rind)
             .and_then(Self::new)
     }
@@ -162,6 +187,38 @@ impl fmt::Debug for KeyPair {
 impl AsDer<Pkcs8V1Der<'static>> for KeyPair {
     fn as_der(&self) -> Result<Pkcs8V1Der<'static>, Unspecified> {
         Ok(Pkcs8V1Der::new(self.key.to_pkcs8().as_ref().to_vec()))
+    }
+}
+
+/// An RSA private key as its big-endian integers.
+#[allow(non_snake_case)]
+#[derive(Clone, Copy)]
+pub struct KeyPairComponents<Public, Private = Public> {
+    /// The modulus and public exponent.
+    pub public_key: PublicKeyComponents<Public>,
+    /// The private exponent.
+    pub d: Private,
+    /// The first prime factor of the modulus.
+    pub p: Private,
+    /// The second prime factor of the modulus.
+    pub q: Private,
+    /// `d` mod `p - 1`.
+    pub dP: Private,
+    /// `d` mod `q - 1`.
+    pub dQ: Private,
+    /// The inverse of `q` mod `p`.
+    pub qInv: Private,
+}
+
+impl<Public, Private> fmt::Debug for KeyPairComponents<Public, Private>
+where
+    PublicKeyComponents<Public>: fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // As aws-lc-rs, leaving out the private integers.
+        f.debug_struct("KeyPairComponents")
+            .field("public_key", &self.public_key)
+            .finish()
     }
 }
 
@@ -765,23 +822,11 @@ pub const OAEP_SHA512_MGF1SHA512: OaepAlgorithm = OaepAlgorithm {
     hash: &digest::SHA512,
 };
 
-/// Fills `cell` with `load`'s key once, returning it.
-fn cached<K>(
-    cell: &OnceLock<K>,
-    load: impl FnOnce() -> Result<K, rind::Error>,
-) -> Result<&K, Unspecified> {
-    if let Some(key) = cell.get() {
-        return Ok(key);
-    }
-    let _ = cell.set(load().map_err(unspecified)?);
-    cell.get().ok_or(Unspecified)
-}
-
 struct DecryptingInner {
     /// The key as PKCS#8, from which each algorithm's key is loaded.
     pkcs8: Wiped<Vec<u8>>,
     /// The key loaded for each algorithm, by [`OaepAlgorithm::index`].
-    keys: [OnceLock<rind::rsa::DecryptingKey>; 4],
+    keys: [OnceBox<rind::rsa::DecryptingKey>; 4],
     public: PublicEncryptingKey,
 }
 
@@ -795,9 +840,9 @@ pub struct PrivateDecryptingKey(Arc<DecryptingInner>);
 impl PrivateDecryptingKey {
     fn new(key: rind::rsa::DecryptingKey) -> Result<Self, KeyRejected> {
         let public = PublicEncryptingKey::new(key.public_key().as_ref())?;
-        let keys = [const { OnceLock::new() }; 4];
+        let keys = [const { OnceBox::new() }; 4];
         let pkcs8 = Wiped::new(key.to_pkcs8().as_ref().to_vec());
-        let _ = keys[OAEP_SHA256_MGF1SHA256.index()].set(key);
+        let _ = keys[OAEP_SHA256_MGF1SHA256.index()].set(Box::new(key));
         Ok(Self(Arc::new(DecryptingInner {
             pkcs8,
             keys,
@@ -838,8 +883,10 @@ impl PrivateDecryptingKey {
     }
 
     fn key(&self, algorithm: &OaepAlgorithm) -> Result<&rind::rsa::DecryptingKey, Unspecified> {
-        cached(&self.0.keys[algorithm.index()], || {
+        self.0.keys[algorithm.index()].get_or_try_init(|| {
             rind::rsa::DecryptingKey::from_pkcs8(algorithm.rind(), &self.0.pkcs8)
+                .map(Box::new)
+                .map_err(unspecified)
         })
     }
 }
@@ -861,7 +908,7 @@ struct EncryptingInner {
     der: Box<[u8]>,
     bits: usize,
     /// The key parsed for each algorithm, by [`OaepAlgorithm::index`].
-    keys: [OnceLock<rind::rsa::EncryptingKey>; 4],
+    keys: [OnceBox<rind::rsa::EncryptingKey>; 4],
 }
 
 /// An RSA public key for encryption, with a modulus of 2048 to 8192 bits.
@@ -871,13 +918,13 @@ pub struct PublicEncryptingKey(Arc<EncryptingInner>);
 impl PublicEncryptingKey {
     /// Wraps a PKCS#1 `RSAPublicKey` that rind has already parsed.
     fn new(pkcs1: &[u8]) -> Result<Self, KeyRejected> {
-        let (n, _) = der::rsa_public_key(pkcs1).map_err(|_| KeyRejected::invalid_encoding())?;
+        let (n, _) = der::rsa_public_key(pkcs1).or(Err(KeyRejected::invalid_encoding()))?;
         let bits = der::bits(n);
         check_bits(bits)?;
         Ok(Self(Arc::new(EncryptingInner {
             der: pkcs1.into(),
             bits,
-            keys: [const { OnceLock::new() }; 4],
+            keys: [const { OnceBox::new() }; 4],
         })))
     }
 
@@ -904,8 +951,10 @@ impl PublicEncryptingKey {
     }
 
     fn key(&self, algorithm: &OaepAlgorithm) -> Result<&rind::rsa::EncryptingKey, Unspecified> {
-        cached(&self.0.keys[algorithm.index()], || {
+        self.0.keys[algorithm.index()].get_or_try_init(|| {
             rind::rsa::EncryptingKey::new(algorithm.rind(), &self.0.der)
+                .map(Box::new)
+                .map_err(unspecified)
         })
     }
 }

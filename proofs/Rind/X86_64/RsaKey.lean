@@ -5,9 +5,11 @@ open Aeneas Aeneas.Std Result rind.spec rind.spec.rsa
 # RSA public key loading on x86_64
 
 `RsaPublicKey::new` checks the modulus and exponent and computes the
-Montgomery constants the public operation takes: `pub_montifier`'s
-`2^(128k) mod n`, by `k + 1` steps of Knuth's algorithm D in
-`mul_word_mod`, and `mont_neg_inverse`'s `-n⁻¹ mod 2^64`. A key it returns
+Montgomery constants the public operation takes: `2^(128k) mod n`, by
+pyca/verified-garbage's `vg_rsa_public_precompute_adx`, which
+`Rind.X86_64.VgRsa` states, where `Precompute::check` gives a token, and
+otherwise by `pub_montifier`'s `k + 1` steps of Knuth's algorithm D in
+`mul_word_mod`; and `mont_neg_inverse`'s `-n⁻¹ mod 2^64`. A key it returns
 meets `PubKeyInv`.
 -/
 
@@ -1035,6 +1037,163 @@ theorem pub_montifier_spec (self : RsaInt) (hk2 : 2 ≤ self.used.val) (hk : sel
   exact Nat.eq_of_mul_eq_mul_right (by positivity) hr'
 
 
+/-- A list whose words are `toWords x` holds `x` modulo its width. -/
+theorem wordsNat_of_toWords (l : List U64) (x : Nat)
+    (h : l.map (·.bv) = VG.Spec.Rsa.toWords x l.length) : wordsNat l = x % 2 ^ (64 * l.length) := by
+  induction l generalizing x with
+  | nil => simp [wordsNat_nil, Nat.mod_one]
+  | cons a l ih =>
+    simp only [VG.Spec.Rsa.toWords, List.length_cons, List.range_succ_eq_map, List.map_cons, List.map_map,
+      List.cons.injEq] at h
+    obtain ⟨ha, hl⟩ := h
+    have hl' : l.map (·.bv) = VG.Spec.Rsa.toWords (x / 2 ^ 64) l.length := by
+      rw [hl]
+      unfold VG.Spec.Rsa.toWords
+      refine List.map_congr_left fun i _ => ?_
+      simp only [Function.comp_apply]
+      congr 1
+      rw [Nat.div_div_eq_div_mul, ← pow_add]
+      congr 2
+      simp only [Nat.succ_eq_add_one]
+      omega
+    have ha' : a.val = x % 2 ^ 64 := by
+      have := congrArg BitVec.toNat ha
+      simpa [UScalar.bv_toNat] using this
+    rw [wordsNat_cons, ih _ hl', ha', List.length_cons,
+      show 64 * (l.length + 1) = 64 + 64 * l.length by ring, pow_add, Nat.mod_mul]
+
+/-- `Precompute::check` returns, on a CPU whose BMI2 and ADX check returns. -/
+theorem precompute_check_spec (hcpu : ∃ t, low.x86_64.cpu.HaveBmi2Adx.check = ok t) (n : Slice U64) :
+    low.x86_64.rsa_vg.Precompute.check n ⦃ _ => True ⦄ := by
+  obtain ⟨t, ht⟩ := hcpu
+  unfold low.x86_64.rsa_vg.Precompute.check
+  dsimp only
+  split
+  · simp
+  · step*
+    simp only [ht, bind_ok]
+    cases t <;> simp [core.option.Option.Insts.CoreOpsTry_traitTry.branch,
+      core.option.Option.Insts.CoreOpsTry_traitFromResidualOptionNever.from_residual]
+
+/-- `montifier_of` returns `2^(128k) mod n` for an odd `k`-word modulus `n`
+of 1024 to 8192 bits whose top word is nonzero: by pyca/verified-garbage's
+routine where `Precompute::check` gives a token, and otherwise by
+`pub_montifier`. -/
+theorem montifier_of_spec (hcpu : ∃ t, low.x86_64.cpu.HaveBmi2Adx.check = ok t) (n : RsaInt)
+    (hk : n.used.val ≤ 128)
+    (hodd : wordsNat (lowWords n n.used) % 2 = 1)
+    (hsz : 1024 ≤ (wordsNat (lowWords n n.used)).size)
+    (htop : 2 ^ (64 * (n.used.val - 1)) ≤ wordsNat (lowWords n n.used)) :
+    mid.rsa_pub.RsaPublicKey.montifier_of n ⦃ r => ∃ m, r = .Ok m ∧ m.used = n.used ∧
+      wordsNat (lowWords m n.used) = 2 ^ (128 * n.used.val) % wordsNat (lowWords n n.used) ⦄ := by
+  generalize hN : wordsNat (lowWords n n.used) = N at *
+  have hNw : N < 2 ^ (64 * n.used.val) := by
+    have := wordsNat_lt' (lowWords n n.used); rwa [lowWords_length _ hk, hN] at this
+  have hs1 := Nat.size_le.mpr hNw
+  have hs2 := Nat.lt_size.mpr htop
+  have hk16 : 16 ≤ n.used.val := by omega
+  unfold mid.rsa_pub.RsaPublicKey.montifier_of low.posint.PosInt.as_words
+  step as ⟨s, s_post, s_post1⟩
+  have hsv : s.val = lowWords n n.used := by
+    rw [s_post]; simp [lowWords, List.slice, Array.val_to_slice]
+  step with precompute_check_spec hcpu s as ⟨o⟩
+  split
+  · step with pub_montifier_spec n (by omega) hk (by rw [hN]; exact hodd) (by rw [hN]; exact htop)
+      as ⟨m, hmu, hm⟩
+    exact ⟨m, rfl, hmu, by rw [hm, hN]⟩
+  rename_i vg
+  unfold low.posint.PosInt.len_bytes
+  step with len_bits_spec n hk as ⟨b, hb⟩
+  rw [hN] at hb
+  step as ⟨x, x_post⟩
+  step as ⟨k, k_post⟩
+  have hkv : k.val = octetLen N := by
+    rw [k_post, x_post, core.num.Usize.wrapping_add_val_eq, hb, octetLen]
+    congr 1
+    rw [Nat.mod_eq_of_lt]
+    · rfl
+    have : (7#usize).val = 7 := rfl
+    have : 2 ^ 32 ≤ UScalar.size UScalarTy.Usize := by
+      simp only [UScalar.size, UScalarTy.numBits]
+      cases System.Platform.numBits_eq <;> simp_all
+    omega
+  have hw : (k.val + 7) / 8 = n.used.val := by rw [hkv, octetLen]; omega
+  have hNk : N < 256 ^ k.val := by
+    rw [hkv]
+    calc N < 2 ^ N.size := Nat.lt_size_self N
+      _ ≤ 2 ^ (8 * octetLen N) := Nat.pow_le_pow_right (by norm_num) (by unfold octetLen; omega)
+      _ = 256 ^ octetLen N := by rw [pow_mul]; norm_num
+  step*
+  have h128 : (128#usize).val = 128 := rfl
+  step with to_bytes_fixed_spec n s1 (by rw [s1_post1, h128]; omega) as ⟨s2, hs2l, hs2v⟩
+  rw [s1_post1] at hs2l hs2v
+  -- The bytes are `N`'s `k`, as `k` bytes hold the words `N` fills.
+  have hs2N : beNat s2.val = N := by
+    have hdvd : 256 ^ k.val ∣ 2 ^ (64 * n.used.val) := by
+      rw [show (256 : Nat) = 2 ^ 8 by rfl, ← pow_mul]
+      exact Nat.pow_dvd_pow 2 (by omega)
+    rw [hs2v, ← Nat.mod_mod_of_dvd _ hdvd, ← wordsNat_take_mod, ← lowWords, hN, Nat.mod_eq_of_lt hNk]
+  step as ⟨i, i_post⟩
+  step as ⟨s3, index_mut_back1, s3_post, s3_post1, s3_post2⟩
+  step as ⟨s4, s4_post, s4_post1⟩
+  have hk1024 : k.val ≤ 1024 := by rw [hkv]; unfold octetLen; omega
+  have hs2l' : s2.val.length = k.val := hs2l
+  have hs4 : s4.val = s2.val := by
+    have hr : (Array.repeat 1024#usize 0#u8).val.length = 1024 := by
+      rw [Array.repeat_val, List.length_replicate]; rfl
+    have := take_setSlice! (Array.repeat 1024#usize 0#u8).val s2.val 0 (by omega)
+    rw [List.take_zero, List.nil_append, zero_add] at this
+    rw [s4_post, Array.val_to_slice, s1_post2, List.slice, Nat.sub_zero, List.drop_zero, ← hs2l, this]
+  have hw' : (Slice.len s).val = n.used.val := by rw [Slice.len_val]; exact s_post1
+  have hmv : VG.Spec.Rsa.modulusValid N k.val = true := by
+    simp only [VG.Spec.Rsa.modulusValid, Bool.and_eq_true, beq_iff_eq, decide_eq_true_eq]
+    refine ⟨⟨⟨hodd, Nat.lt_size.mp (by omega)⟩, Nat.size_le.mp (by omega)⟩, ?_⟩
+    rw [show (256 : Nat) = 2 ^ 8 by rfl, ← pow_mul]
+    exact Nat.lt_size.mp (by rw [hkv]; unfold octetLen; omega)
+  have hpc : VG.Spec.Rsa.publicPrecompute (s4.val.map (·.bv)) =
+      some (VG.Spec.Rsa.toWords N n.used.val ++ VG.Spec.Rsa.toWords (2 ^ (128 * n.used.val) % N) n.used.val) := by
+    unfold VG.Spec.Rsa.publicPrecompute
+    have hl : (s2.val.map (·.bv)).length = k.val := by rw [List.length_map]; exact hs2l'
+    have hmw : VG.Spec.Rsa.modulusWords k.val = n.used.val := by unfold VG.Spec.Rsa.modulusWords; omega
+    simp only [vg_os2ip_map_bv, hs4, hs2N, hl, hmv, hmw, ↓reduceIte]
+  have hk' : VG.Spec.Rsa.lenValid s4.length := by
+    unfold VG.Spec.Rsa.lenValid; rw [s4_post1, hkv]; unfold octetLen; omega
+  have hpre : s3.length = VG.Spec.Rsa.precomputedWords s4.length := by
+    unfold VG.Spec.Rsa.precomputedWords VG.Spec.Rsa.modulusWords
+    rw [s3_post1, s4_post1, i_post, hw']; omega
+  step with rsa_vg_precompute_spec vg s3 s4 hk' hpre as ⟨b, s5, hs5l, hW⟩
+  rw [hpc] at hW
+  obtain ⟨rfl, hs5⟩ := hW
+  simp only [↓reduceIte]
+  step as ⟨s6, s6_post, s6_post1⟩
+  -- The words after `N`'s are `R² mod N`'s.
+  have hs6 : s6.val.map (·.bv) = VG.Spec.Rsa.toWords (2 ^ (128 * n.used.val) % N) n.used.val := by
+    have hr : (Array.repeat 256#usize 0#u64).val.length = 256 := by
+      rw [Array.repeat_val, List.length_replicate]; rfl
+    have h5l : s5.val.length = 2 * n.used.val := by
+      have := hs5l; rw [s3_post1, i_post, hw'] at this; exact this
+    have := take_setSlice! (Array.repeat 256#usize 0#u64).val s5.val 0 (by omega)
+    rw [List.take_zero, List.nil_append, zero_add] at this
+    have hv : (index_mut_back1 s5).val.take (2 * n.used.val) = s5.val := by
+      rw [s3_post2, ← h5l, this]
+    have hs6v : s6.val = s5.val.drop n.used.val := by
+      rw [s6_post, Array.val_to_slice, List.slice, i_post, hw', ← hv, List.drop_take]
+    rw [hs6v, List.map_drop, hs5, List.drop_left' (by simp [VG.Spec.Rsa.toWords])]
+  have hs6l : s6.val.length = n.used.val := by
+    have := congrArg List.length hs6; simpa [VG.Spec.Rsa.toWords] using this
+  have hs6N : wordsNat s6.val = 2 ^ (128 * n.used.val) % N := by
+    rw [wordsNat_of_toWords s6.val _ (by rw [hs6, hs6l]), hs6l,
+      Nat.mod_eq_of_lt (lt_trans (Nat.mod_lt _ (by omega)) hNw)]
+  unfold low.posint.PosInt.from_words low.posint.PosInt.zero
+  step*
+  have hlen : (Slice.len s6).val = n.used.val := by rw [Slice.len_val]; exact hs6l
+  refine ⟨_, rfl, by rw [UScalar.eq_equiv, hlen], ?_⟩
+  have hr : (Array.repeat 128#usize 0#u64).val.length = 128 := by
+    rw [Array.repeat_val, List.length_replicate]; rfl
+  have := take_setSlice! (Array.repeat 128#usize 0#u64).val s6.val 0 (by omega)
+  rw [List.take_zero, List.nil_append, zero_add, hs6l] at this
+  rw [lowWords, s_post2, s1_post, this, hs6N]
+
 /-- What `RsaPublicKey::new` accepts: an odd modulus of 1024 to 8192 bits
 and an odd exponent above one and below `2^33`. -/
 def PubKeyOk (n : RsaInt) (e : U64) : Prop :=
@@ -1043,7 +1202,7 @@ def PubKeyOk (n : RsaInt) (e : U64) : Prop :=
 
 /-- `RsaPublicKey::new` returns a key meeting `PubKeyInv` for the modulus
 and exponent it was given, or refuses them when `PubKeyOk` fails. -/
-theorem rsa_public_key_new_spec (h : low.entry.Entry.assert_held = ok ()) (n : RsaInt) (e : U64)
+theorem rsa_public_key_new_spec (hrun : Runs) (h : low.entry.Entry.assert_held = ok ()) (n : RsaInt) (e : U64)
     (hk : n.used.val ≤ 128)
     (htight : n.used.val = 0 ∨ 2 ^ (64 * (n.used.val - 1)) ≤ wordsNat (lowWords n n.used)) :
     mid.rsa_pub.RsaPublicKey.new n e ⦃ r => match r with
@@ -1132,8 +1291,10 @@ theorem rsa_public_key_new_spec (h : low.entry.Entry.assert_held = ok ()) (n : R
           intro h0; apply hodd; simp only [decide_eq_true_eq]; rw [UScalar.eq_equiv]; exact h0
         rw [hw0and] at h0; omega
       have htop : 2 ^ (64 * (n.used.val - 1)) ≤ N := by rcases htight with h | h <;> [omega; exact h]
-      step with pub_montifier_spec n (by omega) hk (by rw [hN]; exact hodd') (by rw [hN]; exact htop)
-        as ⟨m, hmu, hm⟩
+      step with montifier_of_spec hrun.2.2.1 n hk (by rw [hN]; exact hodd') (by rw [hN]; exact hsz.1)
+        (by rw [hN]; exact htop) as ⟨r, m, hrm, hmu, hm⟩
+      subst hrm
+      simp only [core.result.Result.Insts.CoreOpsTry.branch, bind_ok]
       step with mont_neg_inverse_spec n (by omega) hk (by rw [hN]; exact hodd') as ⟨n0, hn0⟩
       rw [hN] at hn0 hm
       -- The modulus fills its words: `64(k - 1) < N.size ≤ 64k`.
@@ -1236,7 +1397,7 @@ def KeyLoaded (key : mid.rsa_pub.RsaPublicKey) (N E : Nat) : Prop :=
 /-- `VerifyingKey::from_unsigned` loads the key its big-endian modulus and
 exponent encode, or refuses them when `KeyOk` fails or the exponent takes
 more than eight bytes. -/
-theorem from_unsigned_spec (hheld : low.entry.Entry.assert_held = ok ()) (n e : Slice U8) :
+theorem from_unsigned_spec (h : Runs) (hheld : low.entry.Entry.assert_held = ok ()) (n e : Slice U8) :
     high.rsa.VerifyingKey.from_unsigned n e ⦃ r => match r with
       | .Ok key => KeyLoaded key (beNat n.val) (beNat e.val)
       | .Err _ => ¬ (e.length ≤ 8 ∧ KeyOk (beNat n.val) (beNat e.val)) ⦄ := by
@@ -1249,7 +1410,7 @@ theorem from_unsigned_spec (hheld : low.entry.Entry.assert_held = ok ()) (n e : 
     by_cases he : e.length ≤ 8
     · obtain ⟨v, rfl, hv⟩ := hr2a he
       simp only [bind_ok]
-      step with rsa_public_key_new_spec hheld p v hpu (by rw [hpv]; exact hpt) as ⟨r3, hr3⟩
+      step with rsa_public_key_new_spec h hheld p v hpu (by rw [hpv]; exact hpt) as ⟨r3, hr3⟩
       split at hr3
       · obtain ⟨rfl, rfl, hinv, hused⟩ := hr3
         simp only [bind_ok, WP.spec_ok]
@@ -1311,7 +1472,7 @@ theorem from_components_spec (h : Runs) (hheld : low.entry.Entry.assert_held = o
     simp [error.Error.Insts.CoreConvertFromKeyFormatError.from]
     intro _ he; exact absurd (hb1.mp hb2) he
   rename_i hb1' 
-  step with from_unsigned_spec hheld n e as ⟨r, hr⟩
+  step with from_unsigned_spec h hheld n e as ⟨r, hr⟩
   split at hr
   · exact hr
   · rintro ⟨-, he0, hk⟩

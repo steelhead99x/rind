@@ -10,6 +10,8 @@ use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::quic::{self, Connection, DirectionalKeys, KeyChange, PacketKey, Version};
 use rustls::{CipherSuite, ClientConfig, RootCertStore, ServerConfig, Side, SupportedCipherSuite};
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+use wasm_bindgen_test::wasm_bindgen_test as test;
 
 /// The providers rind runs against.
 #[cfg(not(target_family = "wasm"))]
@@ -240,18 +242,12 @@ fn seal_open_for_path(send: &dyn PacketKey, recv: &dyn PacketKey) {
 }
 
 fn server_config(provider: Arc<CryptoProvider>) -> Arc<ServerConfig> {
-    let cert_chain = CertificateDer::pem_file_iter(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/keys/ecdsa-p256/end.fullchain"
-    ))
-    .unwrap()
-    .collect::<Result<Vec<_>, _>>()
-    .unwrap();
-    let key = PrivateKeyDer::from_pem_file(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/keys/ecdsa-p256/end.key"
-    ))
-    .unwrap();
+    // Compiled in, since the browser's target has no file system.
+    let cert_chain =
+        CertificateDer::pem_slice_iter(include_bytes!("keys/ecdsa-p256/end.fullchain"))
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+    let key = PrivateKeyDer::from_pem_slice(include_bytes!("keys/ecdsa-p256/end.key")).unwrap();
     ServerConfig::builder_with_provider(provider)
         .with_protocol_versions(&[&rustls::version::TLS13])
         .unwrap()
@@ -264,13 +260,7 @@ fn server_config(provider: Arc<CryptoProvider>) -> Arc<ServerConfig> {
 fn client_config(provider: Arc<CryptoProvider>) -> Arc<ClientConfig> {
     let mut roots = RootCertStore::empty();
     roots
-        .add(
-            CertificateDer::from_pem_file(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/tests/keys/ecdsa-p256/ca.cert"
-            ))
-            .unwrap(),
-        )
+        .add(CertificateDer::from_pem_slice(include_bytes!("keys/ecdsa-p256/ca.cert")).unwrap())
         .unwrap();
     ClientConfig::builder_with_provider(provider)
         .with_protocol_versions(&[&rustls::version::TLS13])

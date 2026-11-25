@@ -15,11 +15,14 @@ which `admin/prove` writes from x86_64's, uses these names, which
 namespace rind.aarch64
 
 /-- rind's SHA-3 runs on this CPU: its entry guard, the debug build's check
-that one is held, and its check of whether Keccak-f runs on the SHA3
-instructions pass. None reads an input. -/
+that one is held, its check of whether Keccak-f runs on the SHA3 instructions
+alone, its check of whether the CPU has them, and its check of whether one
+state runs `_alt2` pass. None reads an input. -/
 def RunsSha3 : Prop :=
   (∃ e, low.entry.Entry.new_secret = ok e) ∧ low.entry.Entry.assert_held = ok () ∧
-    ∃ t, low.aarch64.cpu.HaveSha3.check_keccak = ok t
+    (∃ t, low.aarch64.cpu.HaveSha3.check_keccak = ok t) ∧
+    (∃ t, low.aarch64.cpu.HaveSha3.check = ok t) ∧
+    ∃ b, low.aarch64.cpu.keccak_alt2 = ok b
 
 theorem sha3_new_secret_spec (h : RunsSha3) : low.entry.Entry.new_secret ⦃ _ => True ⦄ := by
   obtain ⟨⟨e, he⟩, -⟩ := h
@@ -36,15 +39,19 @@ theorem rc_bv : mid.sha3.RC.val.map (·.bv) = keccakRoundConstants := by
 theorem keccak_f1600_spec (h : RunsSha3) (a : Std.Array U64 25#usize) :
     low.aarch64.sha3_keccak_f1600_mux.sha3_keccak_f1600 a mid.sha3.RC ⦃ r =>
       lanes r = keccak 24 (lanes a) ⦄ := by
-  obtain ⟨-, -, t, ht⟩ := h
+  obtain ⟨-, -, ⟨t, ht⟩, -, ⟨b, hb⟩⟩ := h
   unfold low.aarch64.sha3_keccak_f1600_mux.sha3_keccak_f1600
   rw [ht, bind_ok]
   cases t
-  · exact sha3_keccak_f1600_spec a _ rc_bv
+  · simp only
+    rw [hb, bind_ok]
+    cases b
+    · exact sha3_keccak_f1600_spec a _ rc_bv
+    · exact sha3_keccak_f1600_alt2_spec a _ rc_bv
   · exact sha3_keccak_f1600_alt_spec a _ rc_bv
 
 /-- The fallback permutes states `iter.start` to `N - 1` in turn. -/
-theorem keccak_loop_spec (S : List (List (BitVec 64))) (N : Nat) (hN : N ≤ 4)
+theorem keccak_loop_spec (h : RunsSha3) (S : List (List (BitVec 64))) (N : Nat) (hN : N ≤ 4)
     (iter : core.ops.range.Range Usize) (a : Std.Array (Std.Array U64 25#usize) 4#usize)
     (hs : iter.start.val ≤ N) (he : iter.end.val = N)
     (ha : states a = (S.take iter.start.val).map (keccak 24) ++ S.drop iter.start.val) :
@@ -61,11 +68,11 @@ theorem keccak_loop_spec (S : List (List (BitVec 64))) (N : Nat) (hN : N ≤ 4)
     · step with core.iter.range.IteratorRange.next_Usize_some_spec as ⟨o, it', ho, hst', hen⟩
       subst ho
       step with Array.index_mut_usize_spec st it.start (by simp; omega) as ⟨x, back, hx, hback⟩
-      step with sha3_keccak_f1600_spec x _ rc_bv as ⟨y, hy⟩
+      step with keccak_f1600_spec h x as ⟨y, hy⟩
       have hen' : it'.end.val = it.end.val := by rw [hen]
       refine ⟨by omega, by omega, ?_, by omega⟩
       rw [hback, hst', states_set S st it.start (by omega) hst y (by
-        rw [lanes, hy, hx, getElem!_pos st.val it.start.val (by simp; omega)])]
+        rw [hy, hx, getElem!_pos st.val it.start.val (by simp; omega)])]
     · step with core.iter.range.IteratorRange.next_Usize_none_spec as ⟨o, it', ho, hit⟩
       subst ho
       have hN' : it.start.val = N := by omega
@@ -153,14 +160,30 @@ theorem keccak_nof4_f1600_spec (h : RunsSha3) (N : Usize) (hN : 1 ≤ N.val ∧ 
     low.aarch64.sha3_keccak_nof4_f1600.sha3_keccak_nof4_f1600 N a mid.sha3.RC ⦃ r =>
       (states r).take N.val = ((states a).take N.val).map (keccak 24) ⦄ := by
   have hl : (states a).length = 4 := by simp
-  obtain ⟨-, -, t, ht⟩ := id h
+  obtain ⟨-, -, ⟨t, ht⟩, ⟨u, hu⟩, -⟩ := id h
   unfold low.aarch64.sha3_keccak_nof4_f1600.sha3_keccak_nof4_f1600
   rw [ht, bind_ok]
   cases t with
   | none =>
-    apply WP.spec_mono (keccak_loop_spec (states a) N.val hN.2 _ a (by simp) rfl (by simp))
-    intro r hr
-    rw [hr, take_loop _ _ (by omega)]
+    simp only
+    split
+    · -- Four states run on one of the hybrids, which permute all four.
+      rename_i hN4
+      have hN4' : N.val = 4 := by rw [hN4]; rfl
+      have hfour : ∀ r : Std.Array (Std.Array U64 25#usize) 4#usize,
+          r.val.map (·.val.map (·.bv)) = (a.val.map (·.val.map (·.bv))).map (keccak 24) →
+          (states r).take N.val = ((states a).take N.val).map (keccak 24) := by
+        intro r hr
+        have hr4 : (states r).length = 4 := by simp
+        rw [hN4', List.take_of_length_le (by omega), List.take_of_length_le (by omega)]
+        exact hr
+      rw [hu, bind_ok]
+      cases u
+      · exact WP.spec_mono (sha3_keccak4_f1600_alt_spec a _ rc_bv) hfour
+      · exact WP.spec_mono (sha3_keccak4_f1600_spec a _ rc_bv) hfour
+    · apply WP.spec_mono (keccak_loop_spec h (states a) N.val hN.2 _ a (by simp) rfl (by simp))
+      intro r hr
+      rw [hr, take_loop _ _ (by omega)]
   | some t =>
     simp only
     step with Std.Array.to_slice_mut_spec a as ⟨s, back, hs, hback⟩

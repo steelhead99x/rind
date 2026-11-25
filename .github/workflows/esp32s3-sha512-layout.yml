@@ -1,0 +1,56 @@
+name: ESP32-S3 SHA-512 layout
+
+# Checks that the default ESP32-S3 SHA-512 compressor is the small rolled
+# loop in flash, with its size under a ceiling. With the
+# `esp32s3-sha512-unrolled` feature it links the unrolled body the way
+# ESP-IDF places `.iram1` and `.dram1`, checks that only that ESP-IDF
+# build leaves `.flash.text`, records the IRAM block's size against its
+# ceiling, and runs the message load and FIPS 180-4 "abc" through both
+# builds on QEMU. The toolchain is the one the board image uses (espup rustc 1.97.0.0).
+# Weekly, at its own hour: see TESTING.md, "Scheduled workflows".
+on:
+  schedule:
+    - cron: "23 10 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: esp32s3-sha512-layout-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  layout:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/esp32s3-toolchain
+
+      - name: Install QEMU for the message load
+        run: |
+          set -eu
+          sudo apt-get update
+          # gcc is the host compiler that checks the pinned core-isa.h headers.
+          # Espressif's QEMU links SDL2 and slirp even with -nographic.
+          sudo apt-get install --yes libsdl2-2.0-0 libslirp0 gcc
+          root="$HOME/.espressif"
+          mkdir -p "$root"
+          curl -fsSL -o /tmp/qemu-xtensa.tar.xz \
+            https://github.com/espressif/qemu/releases/download/esp-develop-9.2.2-20261109/qemu-xtensa-softmmu-esp_develop_9.2.2_20261109-x86_64-linux-gnu.tar.xz
+          # SHA-256 of that release asset, from its published checksum file.
+          sha256sum -c << 'EOF'
+          fbc3bffa9fa71192847969a627a584aabe2e86d85bed4902a096ff06c2b8a815  /tmp/qemu-xtensa.tar.xz
+          EOF
+          tar -xJf /tmp/qemu-xtensa.tar.xz -C "$root"
+          test -x "$root/qemu/bin/qemu-system-xtensa"
+          if ldd "$root/qemu/bin/qemu-system-xtensa" | grep 'not found'; then
+            exit 1
+          fi
+
+      - name: Check placement
+        run: admin/esp32s3-sha512-layout

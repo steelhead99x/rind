@@ -74,19 +74,18 @@ fn bench<V: verified_garbage::hmac::HmacHash>(
             black_box(out)
         })
     });
-    for (lib, _dit) in criterion::rind_rows() {
-        group.bench_function(format!("extract-expand/{lib}"), |b| {
-            b.iter(|| {
-                let mut out = [0u8; 32];
-                rind::hkdf::Salt::new(ours, b"salt")
-                    .extract(&secret)
-                    .unwrap()
-                    .fill(&info, &mut out)
-                    .unwrap();
-                black_box(out)
-            })
-        });
-    }
+    group.bench_function("extract-expand/rind", |b| {
+        let _dit = criterion::rind_dit();
+        b.iter(|| {
+            let mut out = [0u8; 32];
+            rind::hkdf::Salt::new(ours, b"salt")
+                .extract(&secret)
+                .unwrap()
+                .fill(&info, &mut out)
+                .unwrap();
+            black_box(out)
+        })
+    });
 
     let prk = ring::hkdf::Salt::new(ring, b"salt").extract(&secret);
     group.bench_function("expand/ring", |b| {
@@ -134,16 +133,16 @@ fn bench<V: verified_garbage::hmac::HmacHash>(
     let prk = rind::hkdf::Salt::new(ours, b"salt")
         .extract(&secret)
         .unwrap();
-    for (lib, _dit) in criterion::rind_rows() {
-        group.bench_function(format!("expand/{lib}"), |b| {
-            b.iter(|| {
-                let mut out = [0u8; 32];
-                prk.fill(&info, &mut out).unwrap();
-                black_box(out)
-            })
-        });
-    }
+    group.bench_function("expand/rind", |b| {
+        let _dit = criterion::rind_dit();
+        b.iter(|| {
+            let mut out = [0u8; 32];
+            prk.fill(&info, &mut out).unwrap();
+            black_box(out)
+        })
+    });
     group.bench_function("expand-aes-256-gcm-key/rind", |b| {
+        let _dit = criterion::rind_dit();
         b.iter(|| {
             black_box(rind::aead::Key::from(
                 prk.expand(&info, &rind::aead::AES_256_GCM).unwrap(),
@@ -240,21 +239,33 @@ fn vg<V: verified_garbage::hmac::HmacHash>(
     extract_expand(&mut out);
     assert_eq!(out, expected);
 
-    group.bench_function("extract-expand/verified-garbage", |b| {
-        b.iter(|| {
-            let mut out = [0u8; 32];
-            extract_expand(&mut out);
-            black_box(out)
-        })
-    });
+    // Each HMAC this glue runs sets DIT on its own, so the held row saves
+    // a toggle per HMAC, not per HKDF call.
+    for (lib, held) in criterion::vg_rows() {
+        group.bench_function(format!("extract-expand/{lib}"), |b| {
+            vg_scope!(
+                held,
+                b.iter(|| {
+                    let mut out = [0u8; 32];
+                    extract_expand(&mut out);
+                    black_box(out)
+                })
+            )
+        });
+    }
     let prk = verified_garbage::hmac::Hmac::<V>::mac(b"salt", secret);
-    group.bench_function("expand/verified-garbage", |b| {
-        b.iter(|| {
-            let mut out = [0u8; 32];
-            vg_expand::<V>(prk.as_ref(), info, &mut out);
-            black_box(out)
-        })
-    });
+    for (lib, held) in criterion::vg_rows() {
+        group.bench_function(format!("expand/{lib}"), |b| {
+            vg_scope!(
+                held,
+                b.iter(|| {
+                    let mut out = [0u8; 32];
+                    vg_expand::<V>(prk.as_ref(), info, &mut out);
+                    black_box(out)
+                })
+            )
+        });
+    }
 }
 
 #[cfg(not(target_arch = "xtensa"))]

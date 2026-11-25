@@ -1,0 +1,5 @@
+# Bytes of rind's and rind-rustls's functions and tables in each program of
+# admin/build-cost-fixtures, built in release with one codegen unit, by
+# target. `admin/binary-size` checks them, and `just fix` records a change.
+x86_64-unknown-linux-gnu rind 893228
+x86_64-unknown-linux-gnu rustls 3863811

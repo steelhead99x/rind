@@ -129,6 +129,7 @@ fn setup_sender(c: &mut Criterion) {
     group.throughput(Throughput::Elements(1));
 
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         use rind::hpke::{DHKEM_X25519_HKDF_SHA256, PrivateKey, Sender};
         let private_key = PrivateKey::generate(&DHKEM_X25519_HKDF_SHA256).unwrap();
         let public_key = private_key.public_key();
@@ -170,6 +171,7 @@ fn setup_recipient(c: &mut Criterion) {
     group.throughput(Throughput::Elements(1));
 
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         use rind::hpke::{DHKEM_X25519_HKDF_SHA256, PrivateKey, Recipient, Sender};
         let private_key = PrivateKey::generate(&DHKEM_X25519_HKDF_SHA256).unwrap();
         let (enc, _) = Sender::new(rind_suite(), private_key.public_key(), INFO).unwrap();
@@ -226,6 +228,7 @@ fn seal(c: &mut Criterion) {
     group.throughput(Throughput::Bytes(MESSAGE.len() as u64));
 
     group.bench_function("rind/1350B", |b| {
+        let _dit = criterion::rind_dit();
         use rind::hpke::{DHKEM_X25519_HKDF_SHA256, PrivateKey, Sender};
         let private_key = PrivateKey::generate(&DHKEM_X25519_HKDF_SHA256).unwrap();
         let public_key = private_key.public_key();
@@ -280,6 +283,7 @@ fn open(c: &mut Criterion) {
     group.throughput(Throughput::Bytes(MESSAGE.len() as u64));
 
     group.bench_function("rind/1350B", |b| {
+        let _dit = criterion::rind_dit();
         use rind::hpke::{DHKEM_X25519_HKDF_SHA256, PrivateKey, Recipient, Sender};
         let private_key = PrivateKey::generate(&DHKEM_X25519_HKDF_SHA256).unwrap();
         let public_key = private_key.public_key();

@@ -7,7 +7,7 @@ mod criterion;
 use std::hint::black_box;
 
 #[cfg(not(target_arch = "xtensa"))]
-use criterion::{Criterion, Throughput, criterion_group, criterion_main};
+use criterion::{Bencher, Criterion, Throughput, criterion_group, criterion_main};
 
 #[cfg(not(target_arch = "xtensa"))]
 const PUBLIC_KEY: &[u8; 32] = b"\xe6\xdb\x68\x67\x58\x30\x30\xdb\x35\x94\xc1\xa4\x24\xb1\x5f\x7c\x72\x66\x24\xec\x26\xb3\x35\x3b\x10\xa9\x03\xa6\xd0\xab\x1c\x4c";
@@ -91,7 +91,7 @@ fn x25519(c: &mut Criterion) {
         });
     });
 
-    group.bench_function("rind", |b| {
+    let rind = |b: &mut Bencher<'_>| {
         b.iter(|| {
             use rind::agreement::*;
             let our_private_key = PrivateKey::generate(&X25519).unwrap();
@@ -101,6 +101,10 @@ fn x25519(c: &mut Criterion) {
             let secret = our_private_key.agree(PUBLIC_KEY).unwrap();
             black_box(secret);
         })
+    };
+    group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
+        rind(b)
     });
 
     group.bench_function("verified-garbage", |b| {
@@ -140,6 +144,12 @@ fn x25519(c: &mut Criterion) {
             black_box(x25519_derive(&peer, &our_private_key).unwrap());
         })
     });
+    group.finish();
+
+    if let Some(mut group) = criterion::dit_per_call(c, "x25519-ecdh") {
+        group.throughput(Throughput::Elements(1));
+        group.bench_function("rind", rind);
+    }
 }
 
 // Generate a key and its public key: the fixed-base multiplication alone,
@@ -178,6 +188,7 @@ fn keygen(c: &mut Criterion) {
     });
 
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         b.iter(|| {
             use rind::agreement::*;
             let key = PrivateKey::generate(&X25519).unwrap();
@@ -243,6 +254,7 @@ fn stored(c: &mut Criterion) {
     });
 
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         use rind::agreement::*;
         let key = PrivateKey::from_scalar(&X25519, &scalar).unwrap();
 

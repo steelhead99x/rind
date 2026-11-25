@@ -4,7 +4,7 @@
 // `used` first, so a context that holds its chaining value then this can
 // start the buffer on a 16-byte boundary on 64-bit targets: see
 // `copy_lanes`.
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 #[repr(C)]
 pub(crate) struct Blockwise<const N: usize> {
     used: usize,
@@ -23,6 +23,8 @@ impl<const N: usize> Blockwise<N> {
     /// holding the rest: what is short of a whole block, or the last whole
     /// block until more follows, so a hash can compress it with its padding
     /// in one call.
+    // Inlined for the reason `high::hash::HashContext::update` gives.
+    #[inline(always)]
     pub(crate) fn update(&mut self, bytes: &[u8], state: &mut impl UpdateBlocks) {
         let used = self.used;
         // A short update, such as a one-byte one, only copies. Storing

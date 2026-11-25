@@ -14,15 +14,11 @@
 
 #![allow(missing_docs)]
 
-#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
-use wasm_bindgen_test::{wasm_bindgen_test as test, wasm_bindgen_test_configure};
-
-#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
-wasm_bindgen_test_configure!(run_in_browser);
-
 use core::ops::RangeFrom;
 
 use ring::{aead, error};
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+use wasm_bindgen_test::wasm_bindgen_test as test;
 
 #[allow(deprecated)]
 use crate::{test, test_file};

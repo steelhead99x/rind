@@ -89,26 +89,26 @@ fn bench<V: verified_garbage::hmac::HmacHash>(
                 b.iter(|| mac(key, input))
             });
         }
-        for (lib, _dit) in criterion::rind_rows() {
-            group.bench_with_input(BenchmarkId::new(lib, size_name), &input, |b, input| {
-                b.iter(|| black_box(rind::hmac::sign(&rind::hmac::Key::new(ours, key), input)))
-            });
-        }
+        group.bench_with_input(BenchmarkId::new("rind", size_name), &input, |b, input| {
+            let _dit = criterion::rind_dit();
+            b.iter(|| black_box(rind::hmac::sign(&rind::hmac::Key::new(ours, key), input)))
+        });
         assert_eq!(
             verified_garbage::hmac::Hmac::<V>::mac(key, &input).as_ref(),
             rind::hmac::sign(&rind::hmac::Key::new(ours, key), &input).as_ref()
         );
-        group.bench_with_input(
-            BenchmarkId::new("verified-garbage", size_name),
-            &input,
-            |b, input| {
-                b.iter(|| {
-                    let mut ctx = verified_garbage::hmac::Hmac::<V>::new(key);
-                    ctx.update(input);
-                    black_box(ctx.finalize())
-                })
-            },
-        );
+        for (lib, held) in criterion::vg_rows() {
+            group.bench_with_input(BenchmarkId::new(lib, size_name), &input, |b, input| {
+                vg_scope!(
+                    held,
+                    b.iter(|| {
+                        let mut ctx = verified_garbage::hmac::Hmac::<V>::new(key);
+                        ctx.update(input);
+                        black_box(ctx.finalize())
+                    })
+                )
+            });
+        }
 
         let ring_key = ring::hmac::Key::new(ring, key);
         group.bench_with_input(
@@ -128,7 +128,10 @@ fn bench<V: verified_garbage::hmac::HmacHash>(
         group.bench_with_input(
             BenchmarkId::new("rind/reused-key", size_name),
             &input,
-            |b, input| b.iter(|| black_box(rind::hmac::sign(&rind_key, input))),
+            |b, input| {
+                let _dit = criterion::rind_dit();
+                b.iter(|| black_box(rind::hmac::sign(&rind_key, input)))
+            },
         );
         // Its keyed state, cloned per message, is the key schedule reused.
         let vg_key = verified_garbage::hmac::Hmac::<V>::new(key);

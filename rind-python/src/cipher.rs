@@ -6,8 +6,9 @@ use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 use rind::cipher::{self, CbcIv};
 use rind::key_wrap::{AesKek, Mode};
+use zeroize::Zeroizing;
 
-use crate::{Bytes, WrongLength, algorithm, bytes, bytes_with, constants, error};
+use crate::{Bytes, Secret, WrongLength, algorithm, bytes, bytes_with, constants, error};
 
 algorithm!(
     /// An AES key size.
@@ -27,7 +28,7 @@ struct AesCbcEncryptingKey(Box<cipher::AesCbcEncryptingKey>);
 impl AesCbcEncryptingKey {
     /// Expands `key` for `algorithm`; raises `WrongLength` unless it is that size.
     #[new]
-    fn new(algorithm: &Bound<'_, Algorithm>, key: Bytes<'_>) -> PyResult<Self> {
+    fn new(algorithm: &Bound<'_, Algorithm>, key: Secret<'_>) -> PyResult<Self> {
         cipher::AesCbcEncryptingKey::new(algorithm.get().inner, &key)
             .map(Box::new)
             .map(Self)
@@ -59,7 +60,7 @@ struct AesCbcDecryptingKey(Box<cipher::AesCbcDecryptingKey>);
 impl AesCbcDecryptingKey {
     /// Expands `key` for `algorithm`; raises `WrongLength` unless it is that size.
     #[new]
-    fn new(algorithm: &Bound<'_, Algorithm>, key: Bytes<'_>) -> PyResult<Self> {
+    fn new(algorithm: &Bound<'_, Algorithm>, key: Secret<'_>) -> PyResult<Self> {
         cipher::AesCbcDecryptingKey::new(algorithm.get().inner, &key)
             .map(Box::new)
             .map(Self)
@@ -118,7 +119,7 @@ struct Kek(Box<AesKek>);
 impl Kek {
     /// Expands `key` for `algorithm`; raises `WrongLength` unless it is that size.
     #[new]
-    fn new(algorithm: &Bound<'_, Algorithm>, key: Bytes<'_>) -> PyResult<Self> {
+    fn new(algorithm: &Bound<'_, Algorithm>, key: Secret<'_>) -> PyResult<Self> {
         AesKek::new(algorithm.get().inner, &key)
             .map(Box::new)
             .map(Self)
@@ -131,7 +132,7 @@ impl Kek {
         &self,
         py: Python<'py>,
         mode: KeyWrapMode,
-        key: Bytes<'_>,
+        key: Secret<'_>,
     ) -> PyResult<Bound<'py, PyBytes>> {
         // Both modes' wrapped length, as KW takes only a multiple of 8.
         let len = key.len().next_multiple_of(8) + 8;
@@ -149,8 +150,9 @@ impl Kek {
         wrapped: Bytes<'_>,
     ) -> PyResult<Bound<'py, PyBytes>> {
         // rind refuses a `wrapped` too short for `mode` before it reads the
-        // buffer, and KWP's key may be shorter than it, so it is copied out.
-        let mut key = vec![0; wrapped.len().saturating_sub(8)];
+        // buffer, and KWP's key may be shorter than it, so it is copied out,
+        // to scratch that is wiped before it is freed.
+        let mut key = Zeroizing::new(vec![0; wrapped.len().saturating_sub(8)]);
         let len = self
             .0
             .unwrap_key(mode.into(), &wrapped, &mut key)

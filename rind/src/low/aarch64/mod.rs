@@ -81,6 +81,7 @@ pub(crate) mod chacha20;
 pub(crate) mod chacha20poly1305;
 pub(crate) mod cpu;
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[path = "../arm/ct_qemu.rs"]
 pub(crate) mod ct_qemu;
 pub(crate) mod curve25519_ifma;
@@ -100,23 +101,41 @@ pub(crate) mod edwards25519_scalarmulbase;
 pub(crate) mod edwards25519_scalarmulbase_narrow;
 pub(crate) mod ghash;
 pub(crate) mod ghash_neon_armv8;
+#[cfg(feature = "ml-dsa")]
 pub(crate) mod mldsa;
+#[cfg(feature = "ml-dsa")]
 pub(crate) mod mldsa_caddq;
+#[cfg(feature = "ml-dsa")]
 pub(crate) mod mldsa_chknorm;
+#[cfg(feature = "ml-dsa")]
 pub(crate) mod mldsa_decompose_32;
+#[cfg(feature = "ml-dsa")]
 pub(crate) mod mldsa_decompose_88;
+#[cfg(feature = "ml-dsa")]
 pub(crate) mod mldsa_intt;
+#[cfg(feature = "ml-dsa")]
 pub(crate) mod mldsa_ntt;
+#[cfg(feature = "ml-dsa")]
 pub(crate) mod mldsa_pointwise;
+#[cfg(feature = "ml-dsa")]
 pub(crate) mod mldsa_pointwise_acc_l4;
+#[cfg(feature = "ml-dsa")]
 pub(crate) mod mldsa_pointwise_acc_l5;
+#[cfg(feature = "ml-dsa")]
 pub(crate) mod mldsa_pointwise_acc_l7;
+#[cfg(feature = "ml-dsa")]
 pub(crate) mod mldsa_poly_use_hint_32;
+#[cfg(feature = "ml-dsa")]
 pub(crate) mod mldsa_poly_use_hint_88;
+#[cfg(feature = "ml-dsa")]
 pub(crate) mod mldsa_polyz_unpack_17;
+#[cfg(feature = "ml-dsa")]
 pub(crate) mod mldsa_polyz_unpack_19;
+#[cfg(feature = "ml-dsa")]
 pub(crate) mod mldsa_rej_uniform_eta2_vartime;
+#[cfg(feature = "ml-dsa")]
 pub(crate) mod mldsa_rej_uniform_eta4_vartime;
+#[cfg(feature = "ml-dsa")]
 pub(crate) mod mldsa_rej_uniform_vartime;
 pub(crate) mod mlkem;
 pub(crate) mod mlkem768_vg;
@@ -146,6 +165,7 @@ pub(crate) mod p384_montjmixadd;
 pub(crate) mod p384_montjmixadd_narrow;
 pub(crate) mod p384_montjscalarmul;
 pub(crate) mod p384_montjscalarmul_narrow;
+pub(crate) mod p384_vg;
 pub(crate) mod p521_jadd;
 pub(crate) mod p521_jadd_narrow;
 pub(crate) mod p521_jdouble;
@@ -155,14 +175,18 @@ pub(crate) mod p521_jmixadd_narrow;
 pub(crate) mod p521_jscalarmul;
 pub(crate) mod p521_jscalarmul_narrow;
 pub(crate) mod pbkdf2_vg;
+pub(crate) mod rsa_vg;
 #[cfg(test)]
 mod schedules;
 pub(crate) mod sha1;
 pub(crate) mod sha256;
 pub(crate) mod sha3_keccak2_f1600;
+pub(crate) mod sha3_keccak4_f1600;
+pub(crate) mod sha3_keccak4_f1600_alt;
 pub(crate) mod sha3_keccak4_f1600_mux;
 pub(crate) mod sha3_keccak_f1600;
 pub(crate) mod sha3_keccak_f1600_alt;
+pub(crate) mod sha3_keccak_f1600_alt2;
 pub(crate) mod sha3_keccak_f1600_mux;
 pub(crate) mod sha3_keccak_nof4_f1600;
 pub(crate) mod sha512;

@@ -29,7 +29,7 @@ MARKS = ["52430001:repeat", "52430002:repeat"]
 # Rapids. Each test asserts that its model takes the path it checks.
 MODELS = {
     "vaes_avx2": "-adl",  # Alder Lake: VAES without AVX-512.
-    "hmac": "-arl",  # Arrow Lake: the SHA extensions. SHA-384/512 take AVX2.
+    "hmac": "-arl",  # Arrow Lake: the SHA extensions, for HMAC-SHA1 and -SHA256.
     "_ifma_": "-icx",  # Ice Lake server: AVX-512 IFMA without AVX512_FP16.
 }
 # Far below where the program maps its thread stacks and heaps.

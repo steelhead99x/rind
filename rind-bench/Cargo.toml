@@ -28,7 +28,7 @@ hex = { version = "0.4", features = ["serde"] }
 hmac = "0.13"
 hpke = { version = "0.15", features = ["aes", "hkdfsha2"] }
 hpke-rs = { version = "0.8", features = ["libcrux"] }
-jsonwebtoken = { version = "11.1", default-features = false }
+jsonwebtoken = { version = "12", default-features = false }
 libcrux-aes = "0.0.10"
 libcrux-chacha20poly1305 = "0.0.10"
 libcrux-ecdh = "0.0.9"
@@ -76,7 +76,7 @@ rustls = { version = "0.23.36", default-features = false, features = ["ring", "s
 aws-lc-rs = { version = "1.19", features = ["non-fips"], default-features = false }
 # For XChaCha20-Poly1305, which aws-lc-rs does not expose.
 aws-lc-sys = { version = "0.47", default-features = false }
-jsonwebtoken = { version = "11.1", default-features = false, features = ["aws_lc_rs"] }
+jsonwebtoken = { version = "12", default-features = false, features = ["aws_lc_rs"] }
 rustls = { version = "0.23.36", default-features = false, features = ["aws-lc-rs"] }
 
 # Graviola supports only these.
@@ -130,6 +130,10 @@ harness = false
 
 [[bench]]
 name = "sha3"
+harness = false
+
+[[bench]]
+name = "dit_toggle"
 harness = false
 
 [[bench]]
