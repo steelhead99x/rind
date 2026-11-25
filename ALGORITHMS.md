@@ -197,9 +197,14 @@ with portable Rust in place of the assembly armv7 runs regardless.
   0.76 of HACL* placed in IRAM, for 4,516 more bytes of IRAM. Host tests
   check its Rust fallbacks against FIPS 180-4, `generic::sha256`, and
   aws-lc, and `admin/esp32s3-sha256-layout` checks the linked placement.
-- portable: ChaCha20-Poly1305's Poly1305 is Graviola's on 64-bit targets
-  and HACL*'s ✓ on 32-bit ones, whose streaming state counts its input in a
-  32-bit length that a 64-bit AEAD can overflow. SHA-3's, ML-KEM's, and
+- portable: ChaCha20-Poly1305's Poly1305 is Graviola's on 64-bit targets,
+  rind's on Xtensa, in poly1305-donna-32's five 26-bit limbs held in
+  `u32`s, so each limb product is one `mull` and `muluh` and each sum adds
+  `u32` halves, where LLVM branches on a `u64` add's carry, and HACL*'s ✓ on
+  other 32-bit ones, whose streaming state counts its input in a 32-bit
+  length that a 64-bit AEAD can overflow. HACL*'s also has 26-bit limbs but
+  keeps them in `u64`s. Nothing proves rind's; its tests check it against
+  HACL*'s and Graviola's. SHA-3's, ML-KEM's, and
   ML-DSA's Keccak-f is rind's, s2n-bignum's Keccak spec in Rust, which
   [`proofs/`](proofs/README.md) proves is FIPS 202's KECCAK-f[1600]; it
   measured as fast as RustCrypto's and libcrux-sha3's, which nothing proves.
