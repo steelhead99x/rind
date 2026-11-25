@@ -1130,6 +1130,14 @@ switching from its integer routine to its NEON one at 192 bytes as aws-lc
 does, where `AT_HWCAP` reports NEON. Poly1305 runs aws-lc's NEON code there too, and
 HACL*'s verified Poly1305 without NEON.
 
+The portable backend runs HACL*'s ChaCha20 rounds a block at a time, but on
+Xtensa, where rind's own schedule of the same rounds takes four quarter
+rounds at once, so each rotate distance is one `ssai` and each rotate one
+`src`, and XORs the keystream into the buffer from registers a word at a
+time, shifting it where the buffer is misaligned. Nothing proves that
+schedule; host tests check it against HACL*'s rounds and the word XOR
+against `generic::chacha20::cipher`.
+
 [Graviola]: https://github.com/ctz/graviola
 [cifra]: https://github.com/ctz/cifra
 [Argon2's reference]: https://github.com/P-H-C/phc-winner-argon2
