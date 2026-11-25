@@ -172,14 +172,20 @@ Leads:
 ## 6. Correctness and constant-time notes (separate from performance)
 
 - `rej_eta` (`rind/src/low/aarch64/mldsa.rs:95-110`) marks the whole SHAKE256 buffer public (`:103`)
-  before the NEON eta sampler, on secret input (s1, s2). The comment argues the rejection pattern is
-  public, but declassifying the whole buffer also stops CT tooling checking how accepted values are
-  handled. The portable fallback (offset != 0) does not declassify, so the two paths are annotated
-  differently. Worth a reviewer confirming the intended scope.
-- `sign_internal` declassifies `c_tilde` on every attempt, rejected ones included (`mldsa.rs:829`), and
-  each `rejected()` result (`:892`). Worth confirming this follows mldsa-native's argument for rejected
+  before the NEON eta sampler, on secret input (s1, s2), where the portable fallback (offset != 0)
+  declassifies only each accept decision (`rind/src/low/generic/mldsa_poly.rs:336`). Checked: the
+  scope is intended. The kernel is s2n-bignum's `mldsa_rej_uniform_eta{2,4}_VARIABLE_TIME`, whose
+  table lookups are indexed by the accept mask, so no narrower mark fits an opaque kernel, and its
+  `_SUBROUTINE_SAFE` theorems prove memory safety but deliberately not secret independence, since
+  "the rejection decision itself is not secret"
+  (`thirdparty/s2n-bignum/arm/proofs/mldsa_rej_uniform_eta2_VARIABLE_TIME.ml:3980-3986`, citing
+  pq-code-package/mldsa-native#1160). What the declassification costs is that no tool checks the
+  kernel's handling of accepted values; only its HOL Light correctness proof covers them.
+- `sign_internal` declassifies `c_tilde` on every attempt, rejected ones included
+  (`rind/src/mid/mldsa.rs:829`), and each `rejected()` result (`:892`). Still to confirm against
+  mldsa-native's `sign.c`, which this reading did not have offline, that its argument covers rejected
   attempts' challenges.
-- `expand_a` clamps padding-lane indices with `.min(P::K * P::L - 1)` (`mldsa.rs:1110`) but only uses
-  `polys.len()` lanes, so the clamp is harmless; noted because it reads like a bug.
+- `expand_a` clamps padding-lane indices with `.min(P::K * P::L - 1)` (`rind/src/mid/mldsa.rs:1110`) but
+  only uses `polys.len()` lanes, so the clamp is harmless; noted because it reads like a bug.
 - The keccak kernels' double `d8-d15` save (section 2 lead 2) is not a correctness problem.
 - `sha3_keccak_nof4_f1600`'s N=3 split (`nof4:23-26`, pair 0 then state 2) looks correct.
