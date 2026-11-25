@@ -161,11 +161,11 @@ pub const SEAL_WINDOW: u64 = 1024;
 /// increasing order, since QUIC senders may seal packet `n + 1` before `n`:
 /// the module remembers which packet numbers it has sealed among the highest
 /// and the `SEAL_WINDOW - 1` below it (see [`SEAL_WINDOW`]), and refuses a
-/// repeat, or one `SEAL_WINDOW` or more below the highest. Any `u64` is a packet number, though QUIC's are
-/// below 2^62 (RFC 9000 section 17.1), since the XOR with the IV is
-/// one-to-one on all of them. So no nonce is used twice under a key, in
-/// whatever order the calls come (SP 800-38D section 8.2.1). Open packets with a
-/// [`super::Key`].
+/// repeat, or one `SEAL_WINDOW` or more below the highest. Any `u64` is a
+/// packet number, though QUIC's are below 2^62 (RFC 9000 section 17.1),
+/// since the XOR with the IV is one-to-one on all of them. So no nonce is
+/// used twice under a key, in whatever order the calls come (SP 800-38D
+/// section 8.2.1). Open packets with a [`super::Key`].
 ///
 /// ```
 /// use rind_fips::aead::quic::*;
@@ -227,10 +227,10 @@ impl PacketSealingKey {
     /// tag.
     ///
     /// Fails with [`Error::MessageLimitReached`] if `packet_number` was
-    /// sealed under the key already, is [`SEAL_WINDOW`] or more below the
-    /// highest sealed, and with [`Error::WrongLength`]
-    /// past the sealing limits, zeroing `in_out` in either case. The latter
-    /// still spends the packet number.
+    /// sealed under the key already or is [`SEAL_WINDOW`] or more below the
+    /// highest sealed, and with [`Error::WrongLength`] past the sealing
+    /// limits, zeroing `in_out` in either case. The latter still spends the
+    /// packet number.
     pub fn seal_in_place_separate_tag(
         &mut self,
         packet_number: u64,

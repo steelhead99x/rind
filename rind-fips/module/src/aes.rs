@@ -716,9 +716,10 @@ free!(rind_fips_tls13_sealing_key_free, Tls13SealingKey);
 /// the last [`Self::WINDOW`] packet numbers, the highest included, it has
 /// sealed and refuses a repeat, and any packet number `WINDOW` or more below
 /// the highest, which it can no longer vouch for. Under one key a nonce is
-/// therefore never used twice, whatever the order of calls: SP 800-38D section 8.2.1's requirement that
-/// the invocation field is unique, which holds for any bijective mapping
-/// from packet number to nonce, as XOR with a fixed IV is.
+/// therefore never used twice, whatever the order of calls: SP 800-38D
+/// section 8.2.1 requires the invocation field to be unique, which holds for
+/// any one-to-one mapping from packet number to nonce, as XOR with a fixed IV
+/// is.
 pub struct QuicSealingKey {
     key: aead::Key,
     iv: [u8; 12],
