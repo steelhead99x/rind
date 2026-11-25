@@ -66,7 +66,7 @@ impl<const N: usize> Blockwise<N> {
             any(
                 target_pointer_width = "64",
                 target_arch = "xtensa",
-                target_arch = "riscv32",
+                all(target_arch = "riscv32", target_feature = "m"),
                 test
             )
         ),
@@ -93,7 +93,7 @@ impl<const N: usize> Blockwise<N> {
             any(
                 target_pointer_width = "64",
                 target_arch = "xtensa",
-                target_arch = "riscv32",
+                all(target_arch = "riscv32", target_feature = "m"),
                 test
             )
         ),
@@ -116,7 +116,7 @@ impl<const N: usize> Blockwise<N> {
             any(
                 target_pointer_width = "64",
                 target_arch = "xtensa",
-                target_arch = "riscv32",
+                all(target_arch = "riscv32", target_feature = "m"),
                 test
             )
         ),
@@ -143,7 +143,7 @@ impl<const N: usize> Blockwise<N> {
             any(
                 target_pointer_width = "64",
                 target_arch = "xtensa",
-                target_arch = "riscv32",
+                all(target_arch = "riscv32", target_feature = "m"),
                 test
             )
         ),

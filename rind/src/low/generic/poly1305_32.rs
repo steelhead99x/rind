@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
 //! Poly1305 in five 26-bit limbs held in `u32`s, for the portable backend
-//! on Xtensa (the ESP32-S3) and riscv32 (the ESP32-C6). Each limb product is
-//! one 32x32->64-bit multiply, `mull` and `muluh` on Xtensa and `mul` and
+//! on Xtensa (the ESP32-S3) and riscv32 with the M extension (the ESP32-C6).
+//! Each limb product is one 32x32->64-bit multiply, `mull` and `muluh` on Xtensa and `mul` and
 //! `mulhu` on riscv32imac, where HACL*'s 26-bit limbs, which libcrux keeps in
 //! `u64`s, take a full 64x64-bit multiply each and 64-bit carries. Other
 //! targets build it only in tests, which check it against HACL*'s and the
