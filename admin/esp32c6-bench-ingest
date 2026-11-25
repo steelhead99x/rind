@@ -1,0 +1,404 @@
+#!/usr/bin/env python3
+"""Turns an ESP32-C6 serial log of the rind benchmark firmware into a scrubbed
+JSON file shaped like a `admin/bench-report` host's results.
+
+Usage:
+  admin/esp32c6-bench-ingest LOG [--out FILE] [--note TEXT]
+  admin/esp32c6-bench-ingest selftest
+
+LOG holds the lines the firmware (admin/esp32c6/firmware) prints:
+
+  RIND-FW v1 done failed=<n> cpu_mhz=<n> rounds=<n> kats=<n> rows=<n>
+  RIND-KAT v1 <algorithm> ok|FAIL
+  RIND-BENCH v1 <operation> [lib=<library>] median_ns=<n> min_ns=<n> max_ns=<n> rounds=<n> iters=<n>
+  RIND-BENCH v1 <operation> [lib=<library>] size_failure=heap|stack need=<n> have=<n>
+
+A size_failure row is an operation the board had too little heap or stack for;
+it is kept as a result with `status` `size-failure` and no time.
+
+The `kats=` and `rows=` on the done line declare how many check and benchmark
+lines follow it. A copy holding fewer (a reset, or a capture stopped between
+lines) was cut off and is discarded; a log with no whole copy is refused, so a
+log with missing measurements is never `ok`. Firmware that predates the counts
+prints a done line without them: such a log is still read, a copy shorter than
+a longer one is discarded if it is a prefix of it, but a lone cut-off copy of
+it cannot be told from a whole one, so capture at least two copies.
+
+The firmware repeats its summary every five seconds, so a log holds several
+copies; the whole ones must agree row for row, and the first is kept. The known-answer
+lines it prints once at boot, before the first summary, are accepted and must
+agree with it. A failure anywhere in the log refuses it, even in a summary cut
+off by a reset. Anything else in the log (boot messages, ROM output, a MAC address, a serial port path) is dropped, and
+the output is checked so that none of it survives. It refuses a log with a
+panic, a failed check, a malformed row, or no rows, instead of writing a file
+that looks like a result.
+
+The output's `status` is `ok` and its `results` rows have the operation IDs
+`admin/bench-report` uses, with `library` the vendor that ran it. It is not a bench-report
+host: bench-report has no ESP32-C6 host or controls yet, so `render` does not
+read it. It is the data to put in `benchmarks/esp32c6.md`.
+"""
+
+import json
+import re
+import sys
+
+# `lib=<library>` names the vendor a row measured. Older v1 firmware printed
+# rind's rows without it, so a row with none is rind's.
+ROW = re.compile(
+    r"^RIND-BENCH v1 (\S+) (?:lib=(\S+) )?median_ns=(\d+) min_ns=(\d+) max_ns=(\d+) rounds=(\d+) iters=(\d+)$"
+)
+SKIP = re.compile(r"^RIND-BENCH v1 (\S+) (?:lib=(\S+) )?size_failure=(heap|stack) need=(\d+) have=(\d+)$")
+KAT = re.compile(r"^RIND-KAT v1 (\S+) (ok|FAIL)$")
+# `kats=<n> rows=<m>` declares how many check and benchmark lines follow, so a
+# copy cut off after some rows is told from a whole one. Firmware that predates
+# it prints neither.
+DONE = re.compile(
+    r"^RIND-FW v1 done failed=(\d+) cpu_mhz=(\d+) rounds=(\d+)(?: kats=(\d+) rows=(\d+))?$"
+)
+# The start of a failure on a line a reset cut short.
+# (or `failed=` cut before its digit, whose value is unknown).
+PARTIAL_FAILURE = re.compile(
+    r"^(?:RIND-FW v1 done failed=(?:[1-9]|$)|RIND-KAT v1 \S+ F(?:A|AI)?$)"
+)
+
+# What must never reach the output: the board's MAC and its USB serial, host
+# paths and user names, and addresses, as bench-app's scrub removes.
+PRIVATE = [
+    re.compile(r"\b[0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5}\b"),
+    re.compile(r"/(?:home|Users)/[^\s\"]+"),
+    re.compile(r"/dev/tty\w+"),
+    re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b"),
+    re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+"),
+]
+
+
+class Refused(Exception):
+    pass
+
+
+def complete(blocks):
+    """The blocks that were printed whole.
+
+    A `done` line that declares `kats=<n> rows=<m>` makes a block complete only
+    when it holds exactly that many checks and rows; any other copy was cut off
+    (by a reset, or a capture stopped between lines) and is dropped. A log from
+    firmware that declares nothing has no such proof: its longest copies are
+    taken as whole, a shorter one is dropped only if it is a prefix of them,
+    and a lone cut-off copy cannot be told from a whole one.
+    """
+    declared = [b for b in blocks if b["done"][3] is not None]
+    if declared:
+        if len(declared) != len(blocks):
+            raise Refused("the log mixes summaries with and without declared counts")
+        whole = [
+            b
+            for b in blocks
+            if len(b["kat"]) == int(b["done"][3]) and len(b["rows"]) == int(b["done"][4])
+        ]
+        if not whole:
+            raise Refused("no complete summary: every copy has fewer checks or rows than it declares")
+        return whole
+    blocks = [b for b in blocks if b["rows"] and b["kat"]]
+    if not blocks:
+        raise Refused("no complete summary (checks and rows after a done line) in the log")
+    most = max((len(b["kat"]), len(b["rows"])) for b in blocks)
+    whole = [b for b in blocks if (len(b["kat"]), len(b["rows"])) == most]
+    for b in blocks:
+        if b not in whole and not (
+            b["done"] == whole[0]["done"]
+            and whole[0]["kat"][: len(b["kat"])] == b["kat"]
+            and whole[0]["rows"][: len(b["rows"])] == b["rows"]
+        ):
+            raise Refused("the log's summaries disagree: the board reset or ran different firmware")
+    return whole
+
+
+def with_lib(row):
+    """`row` with the implicit `rind` filled in for a row that names no lib."""
+    return (row[0], row[1] or "rind", *row[2:])
+
+
+def parse(text):
+    """The first complete summary in `text`, as the output dict."""
+    blocks, cur = [], None
+    # The firmware prints its known-answer lines once at boot, before its first
+    # `done` line: they belong to no block, but a failure in them counts.
+    boot_kat = {}
+    # Every FAIL the log shows, kept apart from the per-algorithm results so a
+    # later `ok` for the same check (another boot) cannot erase it.
+    failures = []
+    lines = [l.strip() for l in text.splitlines() if l.strip()]
+    for n, line in enumerate(lines):
+        if "panic" in line.lower() and line.startswith("RIND-FW"):
+            raise Refused(f"the firmware panicked: {line[:80]}")
+        if (m := DONE.match(line)):
+            if cur is not None:
+                blocks.append(cur)
+            cur = {"done": m.groups(), "kat": [], "rows": []}
+            if int(m[1]):
+                failures.append(f"failed={m[1]}")
+        elif (m := KAT.match(line)):
+            if m[2] != "ok":
+                failures.append(m[1])
+            if cur is None:
+                boot_kat[m[1]] = m[2] == "ok"
+            else:
+                cur["kat"].append((m[1], m[2] == "ok"))
+        elif (m := ROW.match(line)) or (m := SKIP.match(line)):
+            # A row before the first summary's `done` line (or after a boot
+            # marker) is the tail of a summary the capture began inside:
+            # well formed, but part of no block, so it is discarded.
+            if cur is not None:
+                cur["rows"].append(with_lib(m.groups()))
+        elif line.startswith("RIND-FW v1 start"):
+            # A new boot ends the block before it: its startup checks are the
+            # next boot's, not more of this summary.
+            if cur is not None:
+                blocks.append(cur)
+                cur = None
+        elif n == len(lines) - 1 and PARTIAL_FAILURE.match(line):
+            # A last line cut off by a reset still shows a failure it began.
+            raise Refused(f"known-answer checks failed: {line[:80]}")
+        elif line.startswith("RIND-") and n < len(lines) - 1:
+            # (the last line may be cut off by a reset)
+            raise Refused(f"malformed line: {line[:80]}")
+    if cur is not None:
+        blocks.append(cur)
+    # Every failure the log shows counts, in a block that was cut off too.
+    if failures:
+        raise Refused(f"known-answer checks failed: {failures}")
+    blocks = complete(blocks)
+    first = blocks[0]
+    for b in blocks[1:]:
+        if b != first:
+            raise Refused("the log's summaries disagree: the board reset or ran different firmware")
+    if not first["rows"]:
+        raise Refused("the summary holds no benchmark rows")
+    names = [k for k, _ in first["kat"]]
+    if len(set(names)) != len(names):
+        raise Refused("a known-answer check is repeated in one summary")
+    # A declared row count is met by a repeated row as well as by a distinct
+    # one, so a summary with a missing measurement could pass as whole. One
+    # operation is timed once per library, so the pair must be unique.
+    ops = [(r[0], r[1]) for r in first["rows"]]
+    if len(set(ops)) != len(ops):
+        raise Refused("a benchmark row is repeated in one summary")
+    first = dict(first, kat=dict(first["kat"]))
+    # Boot lines may be a copy cut off by a capture that began mid-boot, but
+    # every one that is there must agree with the summary.
+    if any(first["kat"].get(k) != v for k, v in boot_kat.items()):
+        raise Refused("the log's boot checks disagree with its summary")
+    failed, mhz, rounds = (int(x) for x in first["done"][:3])
+    results = []
+    for row in first["rows"]:
+        if len(row) == 5:
+            # The operation did not fit in the board's heap or stack: a recorded
+            # result, not a panic.
+            op, lib, which, need, have = row
+            results.append(
+                {
+                    "operation": op,
+                    "library": lib,
+                    "id": op.replace("{lib}", lib),
+                    "status": "size-failure",
+                    "limit": which,
+                    "need_bytes": int(need),
+                    "have_bytes": int(have),
+                }
+            )
+            continue
+        op, lib, med, lo, hi, r, it = row
+        if int(lo) > int(med) or int(med) > int(hi):
+            raise Refused(f"{op}: min, median and max are out of order")
+        results.append(
+            {
+                "operation": op,
+                "library": lib,
+                "id": op.replace("{lib}", lib),
+                "ns": int(med),
+                "ns_low": int(lo),
+                "ns_high": int(hi),
+                "rounds": int(r),
+                "iters": int(it),
+            }
+        )
+    return {
+        "schema": 1,
+        "host": "esp32c6",
+        "status": "ok",
+        "cpu": {"model": "ESP32-C6 (riscv32imac)", "mhz": mhz},
+        "rounds": rounds,
+        "kat": first["kat"],
+        "results": results,
+    }
+
+
+def check_scrubbed(out):
+    text = json.dumps(out)
+    for p in PRIVATE:
+        if p.search(text):
+            raise Refused(f"output still holds private data matching {p.pattern}")
+
+
+def selftest():
+    good = (
+        "ESP-ROM:esp32c6-20220919\nMAC 10:bd:a3:b4:2c:48 /dev/ttyACM1 /home/u/x\n"
+        "RIND-FW v1 start target=esp32c6\n"
+        "RIND-FW v1 done failed=0 cpu_mhz=160 rounds=7\n"
+        "RIND-KAT v1 sha256 ok\nRIND-BENCH v1 sha256/{lib}/1350B lib=rind median_ns=100 min_ns=90 max_ns=120 rounds=7 iters=8\n"
+    )
+    out = parse(good + good)
+    assert out["results"][0]["id"] == "sha256/rind/1350B" and out["cpu"]["mhz"] == 160
+    check_scrubbed(out)
+
+    def refuses(text, why):
+        try:
+            parse(text)
+        except Refused as e:
+            assert why in str(e), (why, str(e))
+        else:
+            raise AssertionError(f"accepted: {why}")
+
+    skipped = good + "RIND-BENCH v1 mldsa65-sign/{lib} lib=rind size_failure=heap need=110336 have=50000\n"
+    out2 = parse(skipped + skipped)
+    assert out2["results"][1]["status"] == "size-failure" and out2["results"][1]["limit"] == "heap"
+    assert "ns" not in out2["results"][1]
+    check_scrubbed(out2)
+    # Rows in the older format, with no `lib=`, are rind's, and read the same
+    # as the explicit form; the two may be mixed across copies.
+    old = good.replace(" lib=rind", "")
+    assert "lib=" not in old and parse(old + old) == parse(good + good)
+    assert parse(old + good) == parse(good + good)
+    old_skip = skipped.replace(" lib=rind", "")
+    assert parse(old_skip + old_skip) == parse(skipped + skipped)
+    refuses(good + "RIND-BENCH v1 x lib=rind size_failure=disk need=1 have=0\n" + good, "malformed")
+    refuses("RIND-FW v1 panic at x", "panicked")
+    refuses(good.replace("sha256 ok", "sha256 FAIL"), "failed")
+    refuses(good.replace("failed=0", "failed=1"), "failed")
+    refuses(good + "RIND-BENCH v1 junk\n" + good, "malformed")
+    refuses("boot only\n", "no complete")
+    refuses(good + good.replace("cpu_mhz=160", "cpu_mhz=80"), "disagree")
+    refuses(good.replace("min_ns=90", "min_ns=900"), "out of order")
+    # A cut-off second copy is ignored.
+    assert parse(good + "RIND-FW v1 done failed=0 cpu_mhz=160 rounds=7\nRIND-KAT v1 sha")
+    # The boot capture: known-answer lines before the first done line.
+    boot = "RIND-FW v1 start target=esp32c6\nRIND-KAT v1 sha256 ok\n"
+    assert parse(boot + good + good)["kat"] == {"sha256": True}
+    refuses(boot.replace("sha256 ok", "sha256 FAIL") + good, "failed")
+    refuses(boot.replace("sha256", "sha512") + good, "boot checks disagree")
+    # Repeated summaries must agree row for row, not only in count.
+    refuses(good + good.replace("median_ns=100", "median_ns=101"), "disagree")
+    refuses(good + good.replace("sha256/{lib}", "sha512/{lib}"), "disagree")
+    # A failure in a summary that was cut off still refuses the log.
+    refuses(good + good + "RIND-FW v1 done failed=1 cpu_mhz=160 rounds=7\n", "failed")
+    refuses(good + "RIND-FW v1 done failed=0 cpu_mhz=160 rounds=7\nRIND-KAT v1 sha256 FAIL\n", "failed")
+    refuses(good + "RIND-FW v1 done failed=1 cpu_mhz=16", "failed")
+    refuses(good + "RIND-FW v1 done failed=", "failed")
+    refuses(good + "RIND-FW v1 done failed=0 cpu_mhz=160 rounds=7\nRIND-KAT v1 sha256 FAI", "failed")
+    # A FAIL is kept when a later boot prints ok for the same check.
+    refuses(good.replace("sha256 ok", "sha256 FAIL") + good, "failed")
+    refuses("RIND-KAT v1 sha256 FAIL\nRIND-KAT v1 sha256 ok\n" + good + good, "failed")
+    refuses(good + "RIND-FW v1 done failed=0 cpu_mhz=160 rounds=7\nRIND-KAT v1 sha256 FAIL\n" + good, "failed")
+    # A failing block cut off before its first row still refuses.
+    refuses(good + "RIND-FW v1 done failed=2 cpu_mhz=160 rounds=7\n" + good, "failed")
+    refuses(good + "RIND-FW v1 done failed=0 cpu_mhz=160 rounds=7\nRIND-KAT v1 sha256 FA", "failed")
+    # Legacy firmware (no declared counts): a shorter copy that is a prefix of a
+    # longer one was cut off and is dropped, whichever comes first.
+    two = good + "RIND-BENCH v1 sha512/{lib}/1350B lib=rind median_ns=200 min_ns=190 max_ns=220 rounds=7 iters=8\n"
+    cut = good
+    assert len(parse(two + cut)["results"]) == 2
+    assert len(parse(cut + two)["results"]) == 2
+    refuses(two + good.replace("median_ns=100", "median_ns=101"), "disagree")
+    # Firmware that declares its counts: only whole copies count.
+    row1 = "RIND-BENCH v1 sha256/{lib}/1350B lib=rind median_ns=100 min_ns=90 max_ns=120 rounds=7 iters=8\n"
+    row2 = "RIND-BENCH v1 sha512/{lib}/1350B lib=rind median_ns=200 min_ns=190 max_ns=220 rounds=7 iters=8\n"
+    whole = (
+        "RIND-FW v1 done failed=0 cpu_mhz=160 rounds=7 kats=1 rows=2\n"
+        "RIND-KAT v1 sha256 ok\n" + row1 + row2
+    )
+    assert len(parse(whole + whole)["results"]) == 2
+    first_row = whole.replace(row2, "")  # a copy cut off after row one
+    assert len(parse(whole + first_row)["results"]) == 2
+    # A capture holding only the cut-off copy is no result.
+    refuses(first_row, "no complete")
+    refuses(first_row + first_row, "no complete")
+    refuses(whole.replace("kats=1", "kats=2"), "no complete")
+    refuses(whole + good, "mixes")
+    refuses("RIND-FW v1 done failed=0 cpu_mhz=160 rounds=7 kats=1 rows=0\nRIND-KAT v1 sha256 ok\n", "no benchmark rows")
+    refuses(whole + whole.replace("cpu_mhz=160", "cpu_mhz=80"), "disagree")
+    # A copy that declares more rows than it holds is cut off, not a disagreement.
+    assert len(parse(whole + whole.replace("rows=2", "rows=3"))["results"]) == 2
+    # A capture that began inside a summary: its leading valid row is dropped,
+    # genuinely malformed text still refuses.
+    assert len(parse(row1 + whole + whole)["results"]) == 2
+    assert len(parse(row1 + good + good)["results"]) == 1
+    refuses("RIND-BENCH v1 junk\n" + good + good, "malformed")
+    # A new boot's start marker ends the summary before it, so that boot's
+    # startup checks are not appended to it (which would drop it as cut off)
+    # and a later summary that disagrees is still caught.
+    one = (
+        "RIND-FW v1 done failed=0 cpu_mhz=160 rounds=7 kats=1 rows=1\n"
+        "RIND-KAT v1 sha256 ok\n" + row1
+    )
+    start = "RIND-FW v1 start target=esp32c6\nRIND-KAT v1 sha256 ok\n"
+    assert len(parse(one + start + one)["results"]) == 1
+    refuses(one + start + one.replace("median_ns=100", "median_ns=101"), "disagree")
+    # A repeated operation ID satisfies `rows=2` but measures one thing twice.
+    refuses(
+        "RIND-FW v1 done failed=0 cpu_mhz=160 rounds=7 kats=1 rows=2\n"
+        "RIND-KAT v1 sha256 ok\n" + row1 + row1,
+        "repeated",
+    )
+    refuses(good.replace(row1, row1 + row1) * 2, "repeated")
+    # The same operation for two libraries is two rows; for one library, in
+    # the older format with no `lib=` too, it is a repeat.
+    two_libs = (
+        "RIND-FW v1 done failed=0 cpu_mhz=160 rounds=7 kats=1 rows=2\n"
+        "RIND-KAT v1 sha256 ok\n" + row1 + row1.replace("lib=rind", "lib=sha2")
+    )
+    assert [r["id"] for r in parse(two_libs + two_libs)["results"]] == [
+        "sha256/rind/1350B",
+        "sha256/sha2/1350B",
+    ]
+    refuses(
+        "RIND-FW v1 done failed=0 cpu_mhz=160 rounds=7 kats=1 rows=2\n"
+        "RIND-KAT v1 sha256 ok\n" + row1 + row1.replace(" lib=rind", ""),
+        "repeated",
+    )
+    leaked = dict(out, note="10:bd:a3:b4:2c:48")
+    try:
+        check_scrubbed(leaked)
+    except Refused:
+        pass
+    else:
+        raise AssertionError("a MAC survived")
+    print("selftest ok")
+
+
+def main():
+    args = sys.argv[1:]
+    if args == ["selftest"]:
+        return selftest()
+    if not args or args[0].startswith("-"):
+        sys.exit(__doc__)
+    log = args[0]
+    out_path = args[args.index("--out") + 1] if "--out" in args else None
+    try:
+        with open(log, errors="replace") as f:
+            out = parse(f.read())
+        if "--note" in args:
+            out["note"] = args[args.index("--note") + 1]
+        check_scrubbed(out)
+    except Refused as e:
+        sys.exit(f"esp32c6-bench-ingest: refused: {e}")
+    text = json.dumps(out, indent=1) + "\n"
+    if out_path:
+        with open(out_path, "w") as f:
+            f.write(text)
+    else:
+        sys.stdout.write(text)
+
+
+if __name__ == "__main__":
+    main()
