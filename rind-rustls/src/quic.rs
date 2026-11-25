@@ -210,6 +210,8 @@ const TAG_LEN: usize = 16;
 
 #[cfg(test)]
 mod tests {
+    use alloc::vec::Vec;
+
     use rustls::Side;
     use rustls::SupportedCipherSuite;
     use rustls::quic::{Algorithm as _, DirectionalKeys, Keys, Version};
