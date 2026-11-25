@@ -26,7 +26,7 @@ Because the image links rind and RustCrypto and dalek, the first step of each mi
 
 ### Milestone 1: SHA-512 only (this quest)
 
-- Code: rind's SHA-512 block functions on `target_arch = "xtensa"`: the rolled 80-round loop over a 16-word window in `low/generic/sha512_rolled.rs`, the default on every 32-bit microcontroller and on both S3 targets, and, once [steelhead99x/rind#94](https://github.com/steelhead99x/rind/pull/94) lands, its opt-in unrolled body in `low/generic/sha512_esp32s3.rs`, which only the `esp32s3-sha512-unrolled` feature selects and only ESP-IDF places in IRAM (see below). One shared helper holds the split add so both bodies run the same arithmetic; the dispatch is by `cfg(target_arch = "xtensa")` and the host test builds both (#94's unit tests already compile the unrolled body under `cfg(test)`). HMAC-SHA-384/512, HKDF, PBKDF2 and Ed25519's hashing take it with no change of their own.
+- Code: rind's SHA-512 block functions on `target_arch = "xtensa"`: the rolled 80-round loop over a 16-word window in `low/generic/sha512_rolled.rs`, the default on every 32-bit microcontroller and on both S3 targets, and the opt-in unrolled body of [steelhead99x/rind#94](https://github.com/steelhead99x/rind/pull/94) (on main as 9066a8dc, not yet on this quest's base) in `low/generic/sha512_esp32s3.rs`, which only the `esp32s3-sha512-unrolled` feature selects and only ESP-IDF places in IRAM (see below). One shared helper holds the split add so both bodies run the same arithmetic; the dispatch is by `cfg(target_arch = "xtensa")` and the host test builds both (#94's unit tests already compile the unrolled body under `cfg(test)`). HMAC-SHA-384/512, HKDF, PBKDF2 and Ed25519's hashing take it with no change of their own.
 - Checks: the host tests of step 2, the strict gate, ctgrind of step 3 (both bodies, as #94's tests mark the block secret through each), and the disassembly counts and board A/B of step 4 (SHA-512 rows of the harness at 16 B, 243 B and 1500 B and a many-block row, rind against the control and against `sha2`), each run over this matrix, control and split alike, so a default build never stands in for the opt-in body:
 
   | Build | Body | Placement | Disassembly count | Board A/B |
@@ -36,7 +36,7 @@ Because the image links rind and RustCrypto and dalek, the first step of each mi
   | `xtensa-esp32s3-espidf`, `--features esp32s3-sha512-unrolled` | unrolled (`sha512_esp32s3.rs`) | IRAM | yes, of the `.iram1.text` symbol | yes, on an ESP-IDF image the PR builds if the harness has none |
   | `xtensa-esp32s3-none-elf`, `--features esp32s3-sha512-unrolled` | unrolled (`sha512_esp32s3.rs`) | flash | yes | no: #94 measured it equal to IRAM at 80 MHz |
 
-  The opt-in rows also run `admin/esp32s3-sha512-layout`, which builds with the feature on both targets, for its no-call, no-flash-load and 20,480-byte IRAM checks. The rows with the feature exist only after #94 lands; until then the PR says they did not run.
+  The opt-in rows also run `admin/esp32s3-sha512-layout`, which builds with the feature on both targets, for its no-call, no-flash-load and 20,480-byte IRAM checks. The rows with the feature need #94's code: the milestone's PR merges main in to get it, or, if it starts first, runs the rolled rows alone and says the others did not run.
 - Exit: digests unchanged on the host and on the board's known answers, the count of rind's carry-shaped branches at zero in every body the matrix builds, and the board time (MEASURED) no worse than the control's at every size on both board rows, else the quest records the numbers and is deleted.
 
 ### Milestone 2: Ed25519 (a follow-up quest after milestone 1 measures)
@@ -49,10 +49,10 @@ ECDSA P-256 sign and verify and ECDH on the S3: count first, since the S3 image 
 
 ### How this relates to steelhead99x/rind#94
 
-[steelhead99x/rind#94](https://github.com/steelhead99x/rind/pull/94) (at 07073374) keeps the rolled loop of `sha512_rolled.rs` as the default on both S3 targets, as on every other 32-bit target, and adds an unrolled body in `sha512_esp32s3.rs` that the `esp32s3-sha512-unrolled` feature opts into: on `xtensa-esp32s3-espidf` it goes in IRAM (`.iram1.text`, `K` in `.dram1.rodata`), on `xtensa-esp32s3-none-elf`, the target the S3 workshop firmware runs, in ordinary flash. No default build reaches it. This quest is about the arithmetic inside whichever body runs, not about which body or where it is placed, so the two compose:
+[steelhead99x/rind#94](https://github.com/steelhead99x/rind/pull/94) (merged to main as 9066a8dc from head 07073374) keeps the rolled loop of `sha512_rolled.rs` as the default on both S3 targets, as on every other 32-bit target, and adds an unrolled body in `sha512_esp32s3.rs` that the `esp32s3-sha512-unrolled` feature opts into: on `xtensa-esp32s3-espidf` it goes in IRAM (`.iram1.text`, `K` in `.dram1.rodata`), on `xtensa-esp32s3-none-elf`, the target the S3 workshop firmware runs, in ordinary flash. No default build reaches it. This quest is about the arithmetic inside whichever body runs, not about which body or where it is placed, so the two compose:
 
 - By default both targets run the rolled body: milestone 1's first target, and part of what the 522 count covers (rind's rolled body and the `sha2` crate's).
-- With `esp32s3-sha512-unrolled` on ESP-IDF the unrolled IRAM body runs, so the matrix above builds that feature explicitly: it has the same carry-shaped adds and takes the same shared helper, but code in IRAM must not reach flash, so the helper is `#[inline(always)]` and the layout check (`admin/esp32s3-sha512-layout`, which checks no call in the block and the IRAM size ceiling of 20,480 bytes) must still pass: the split adds instructions, so the ceiling is a real constraint, MEASURED by that script. Milestone 1 changes #94's body only after #94 lands, so the two PRs do not edit `sha512_esp32s3.rs` at once; until then milestone 1 starts on the rolled body.
+- With `esp32s3-sha512-unrolled` on ESP-IDF the unrolled IRAM body runs, so the matrix above builds that feature explicitly: it has the same carry-shaped adds and takes the same shared helper, but code in IRAM must not reach flash, so the helper is `#[inline(always)]` and the layout check (`admin/esp32s3-sha512-layout`, which checks no call in the block and the IRAM size ceiling of 20,480 bytes) must still pass: the split adds instructions, so the ceiling is a real constraint, MEASURED by that script. `claude/base-upstream-main-esp32s3-refresh` does not hold #94 yet, so milestone 1 changes the unrolled body only once its branch holds main's `sha512_esp32s3.rs`, and starts on the rolled body otherwise.
 - The two quests' measurements are separate: #94's is IRAM against flash placement; this one's is the same body with and without the split.
 
 ### Out of scope
@@ -64,7 +64,6 @@ ECDSA P-256 sign and verify and ECDH on the S3: count first, since the S3 image 
 
 ## Waiting
 
-- Maintainer: land [steelhead99x/rind#94](https://github.com/steelhead99x/rind/pull/94) (or say to start on the rolled body alone) before the IRAM unrolled body of milestone 1 is changed; the rolled body can start now. Check: #94 merged, or this Waiting item removed with a note.
 - steelhead99x: flash the images listed in the PR, interleaved with the control, with `run-board.sh`, and send the logs, as for [steelhead99x/rind#296](https://github.com/steelhead99x/rind/pull/296)'s board runs. Check: the PR body's table holds board medians for every image.
 
 ## Related
