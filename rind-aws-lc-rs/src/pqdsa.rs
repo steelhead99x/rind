@@ -558,8 +558,9 @@ fn rsa_pss_private_key(pkcs8: &[u8]) -> bool {
 /// `aws-lc-rs/src/evp_pkey.rs`). Each `*_pub_decode` in aws-lc's
 /// `crypto/evp_extra` is followed: Ed25519, X25519, ML-DSA, and ML-KEM
 /// check only that the parameters are absent and the key's length; a NIST
-/// curve's point must lie on it, which rind checks; P-224, secp256k1, DSA,
-/// and DH, which rind cannot back, are decided from their framing.
+/// curve's point must lie on it, which rind checks; P-224, secp256k1,
+/// brainpoolP256r1, DSA, and DH, which rind cannot back, are decided from
+/// their framing.
 pub(crate) fn parses_as_other_public_key(der: &[u8], spki: &der::SpkiParts<'_>) -> bool {
     use rind::ecdsa::verify::{P256_SHA256_ASN1, P384_SHA384_ASN1, P521_SHA512_ASN1};
     let len = |expected: usize| spki.parameters.is_empty() && spki.key.len() == expected;
@@ -580,7 +581,11 @@ pub(crate) fn parses_as_other_public_key(der: &[u8], spki: &der::SpkiParts<'_>) 
                 Some([0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07]) => &P256_SHA256_ASN1,
                 Some([0x2b, 0x81, 0x04, 0x00, 0x22]) => &P384_SHA384_ASN1,
                 Some([0x2b, 0x81, 0x04, 0x00, 0x23]) => &P521_SHA512_ASN1,
-                Some([0x2b, 0x81, 0x04, 0x00, 0x21] | [0x2b, 0x81, 0x04, 0x00, 0x0a]) => {
+                Some(
+                    [0x2b, 0x81, 0x04, 0x00, 0x21]
+                    | [0x2b, 0x81, 0x04, 0x00, 0x0a]
+                    | [0x2b, 0x24, 0x03, 0x03, 0x02, 0x08, 0x01, 0x01, 0x07],
+                ) => {
                     return !spki.key.is_empty();
                 }
                 _ => return false,

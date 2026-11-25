@@ -1141,6 +1141,16 @@ fn rsa_encrypting_key_refusals() {
         oid(&[0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07]),
     ]
     .concat();
+    // brainpoolP256r1's generator, a curve rind cannot back.
+    let bp_g = hex::decode(
+        "048bd2aeb9cb7e57cb2c4b482ffc81b7afb9de27e1e3bd23c23a4453bd9ace3262\
+         547ef835c3dac4fd97f8461a14611dc9c27745132ded8e545c1d54c72f046997",
+    )
+    .unwrap();
+    let brainpool = |point: &[u8]| {
+        let curve = oid(&[0x2b, 0x24, 0x03, 0x03, 0x02, 0x08, 0x01, 0x01, 0x07]);
+        spki(&[ec.clone(), curve].concat(), point)
+    };
     let dsa = oid(&[0x2a, 0x86, 0x48, 0xce, 0x38, 0x04, 0x01]);
     let dh = oid(&[0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x03, 0x01]);
     let ml_dsa_44 = oid(&[0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x03, 0x11]);
@@ -1175,6 +1185,11 @@ fn rsa_encrypting_key_refusals() {
         (
             "secp256k1".into(),
             hex::decode(SECP256K1_SPKI).unwrap(),
+            Some("WrongAlgorithm"),
+        ),
+        (
+            "brainpoolP256r1".into(),
+            brainpool(&bp_g),
             Some("WrongAlgorithm"),
         ),
         (
