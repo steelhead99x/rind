@@ -46,6 +46,7 @@ proofs/Rind/Portable/Sha512.lean
 proofs/Rind/Portable/ChaCha20.lean
 proofs/Rind/Portable/Blockwise.lean
 proofs/Rind/Portable/Sha.lean
+proofs/Rind/Portable/Sha3.lean
 proofs/Rind/Portable/Hmac.lean
 proofs/Rind/Portable/HmacDispatch.lean
 proofs/Rind/Portable/HkdfExpand.lean
