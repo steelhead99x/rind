@@ -3,7 +3,7 @@ mod criterion;
 mod ossl_ec;
 use std::hint::black_box;
 
-use criterion::{Criterion, Throughput, criterion_group, criterion_main};
+use criterion::{Bencher, Criterion, Throughput, criterion_group, criterion_main};
 
 // verified-garbage has no key generation: a random scalar, drawn again until
 // it is in range, and its public key.
@@ -296,8 +296,7 @@ fn ecdsa_verify(c: &mut Criterion) {
         });
     });
 
-    group.bench_function("rind", |b| {
-        let _dit = criterion::rind_dit();
+    let rind = |b: &mut Bencher<'_>| {
         use rind::ecdsa::{PublicKey, verify};
 
         b.iter(|| {
@@ -306,6 +305,10 @@ fn ecdsa_verify(c: &mut Criterion) {
                 .verify(message, signature)
                 .unwrap();
         })
+    };
+    group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
+        rind(b)
     });
 
     // verified-garbage takes the key's bytes and validates it on every verify.
@@ -357,6 +360,11 @@ fn ecdsa_verify(c: &mut Criterion) {
         b.iter(|| curve.verify(public_key, message, &signature));
     });
     group.finish();
+
+    if let Some(mut group) = criterion::dit_per_call(c, "p256-ecdsa-verify") {
+        group.throughput(Throughput::Elements(1));
+        group.bench_function("rind", rind);
+    }
 
     // A key parsed once, as a JWT verifier holds it, keeps its multiplication table.
     let mut group = c.benchmark_group("p256-ecdsa-verify-parsed");
@@ -490,14 +498,17 @@ fn ecdsa_sign(c: &mut Criterion) {
         });
     });
 
-    group.bench_function("rind", |b| {
-        let _dit = criterion::rind_dit();
+    let rind = |b: &mut Bencher<'_>| {
         use rind::ecdsa::{KeyPair, sign};
         let signing_key = KeyPair::generate(&sign::P256_SHA256_FIXED).unwrap();
 
         b.iter(|| {
             black_box(signing_key.sign(message).unwrap());
         });
+    };
+    group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
+        rind(b)
     });
 
     // verified-garbage signs deterministically (RFC 6979), where rind hedges its nonce.
@@ -555,6 +566,11 @@ fn ecdsa_sign(c: &mut Criterion) {
         b.iter(|| black_box(curve.sign(&signing_key, message)));
     });
     group.finish();
+
+    if let Some(mut group) = criterion::dit_per_call(c, "p256-ecdsa-sign") {
+        group.throughput(Throughput::Elements(1));
+        group.bench_function("rind", rind);
+    }
 
     // A digest the caller computed, as node's `createSign` holds it.
     let mut group = c.benchmark_group("p256-ecdsa-sign-digest");

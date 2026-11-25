@@ -48,6 +48,7 @@ impl Sha256State {
     /// The hashes of the input so far followed by each of `messages`, one to
     /// eight of equal length, as [`Self::finish_with`] gives them; those past
     /// `messages` are unspecified. AVX2 runs eight at once.
+    #[cfg(feature = "slh-dsa")]
     pub(crate) fn finish_x8(&self, messages: &[&[u8]]) -> [[u8; Sha256Context::OUTPUT_SZ]; 8] {
         let length = self.length(messages[0].len());
         Entry::assert_held();

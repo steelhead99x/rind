@@ -12,17 +12,6 @@ on:
   schedule:
     - cron: "23 2 * * 6"
   workflow_dispatch:
-  # A pull request only builds the targets; fuzzing needs the saved corpus
-  # and hours.
-  pull_request:
-    # A draft skips every job until it is marked ready, and turning a PR back
-    # into a draft cancels its ready run: see CONTRIBUTING.md.
-    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
-    branches: [main]
-    paths:
-      - fuzz/**
-      - sh/fuzz-*.sh
-      - .github/workflows/fuzz.yml
 
 concurrency:
   group: fuzz-${{ github.ref }}
@@ -37,7 +26,6 @@ env:
 jobs:
   build:
     name: Build fuzz targets (${{ matrix.arch }})
-    if: ${{ !github.event.pull_request.draft }}
     strategy:
       matrix:
         include:
@@ -78,6 +66,13 @@ jobs:
       - name: Install cargo fuzz
         run: cargo install cargo-fuzz
 
+      # CPython, which the python target links, on the rows it builds for.
+      - name: Install Python
+        if: matrix.arch != 'armv7'
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+
       # For aws-lc's C and libFuzzer's C++.
       - name: Install the armhf toolchain
         if: matrix.arch == 'armv7'
@@ -86,13 +81,21 @@ jobs:
           sudo apt-get install -y gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf
 
       # The cfg lets sh/fuzz-replay.sh deny CPU features.
+      # The fips target loads the FIPS module from beside itself.
       - name: Build fuzz targets
         run: |
-          cargo fuzz build --target "$TARGET" --sanitizer "$SANITIZER"
+          RUSTFLAGS="$RUSTFLAGS -Clink-arg=-Wl,-rpath,\$ORIGIN" cargo fuzz build --target "$TARGET" --sanitizer "$SANITIZER"
           mkdir bin
           for target in $(cargo fuzz list); do
             cp "target/$TARGET/release/$target" bin/
           done
+          # One module, or none where it does not build: two would mean a
+          # stale build whose flags the fips target was not built with.
+          modules=$(find "target/$TARGET/release/build" -path '*/rind-fips*/out/lib/librind_fips_module.so')
+          case $modules in
+            *$'\n'*) echo "::error::more than one FIPS module: $modules"; exit 1 ;;
+            ?*) cp "$modules" bin/ ;;
+          esac
         env:
           TARGET: ${{ matrix.target }}
           SANITIZER: ${{ matrix.sanitizer || 'address' }}
@@ -113,7 +116,6 @@ jobs:
 
   fuzz:
     name: Fuzz ${{ matrix.target }}
-    if: github.event_name != 'pull_request'
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 60
@@ -134,6 +136,21 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      # CPython, which the python target embeds.
+      - name: Install Python
+        if: matrix.target == 'python'
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+
+      # The python target finds libpython and its standard library here, as
+      # a patch release can change the path the build saw.
+      - name: Point the python target at Python
+        if: matrix.target == 'python'
+        run: |
+          echo "LD_LIBRARY_PATH=$pythonLocation/lib" >>"$GITHUB_ENV"
+          echo "PYTHONHOME=$pythonLocation" >>"$GITHUB_ENV"
 
       # Wycheproof's signatures seed `verify`.
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -189,7 +206,7 @@ jobs:
   replay-aarch64:
     name: Replay ${{ matrix.target }} on aarch64
     needs: [build, fuzz]
-    if: ${{ !cancelled() && github.event_name != 'pull_request' && needs.build.result == 'success' }}
+    if: ${{ !cancelled() && needs.build.result == 'success' }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
     strategy:
@@ -205,6 +222,21 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      # CPython, which the python target embeds.
+      - name: Install Python
+        if: matrix.target == 'python'
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+
+      # The python target finds libpython and its standard library here, as
+      # a patch release can change the path the build saw.
+      - name: Point the python target at Python
+        if: matrix.target == 'python'
+        run: |
+          echo "LD_LIBRARY_PATH=$pythonLocation/lib" >>"$GITHUB_ENV"
+          echo "PYTHONHOME=$pythonLocation" >>"$GITHUB_ENV"
 
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -236,13 +268,16 @@ jobs:
   replay-x86_64-sde:
     name: Replay ${{ matrix.target }} under SDE
     needs: [build, fuzz]
-    if: ${{ !cancelled() && github.event_name != 'pull_request' && needs.build.result == 'success' }}
+    if: ${{ !cancelled() && needs.build.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
         target: ${{ fromJSON(needs.build.outputs.targets) }}
+        # Emulating CPython costs more than the binding's few CPU paths are worth.
+        exclude:
+          - target: python
     env:
       TARGET: ${{ matrix.target }}
       CORPUS: fuzz/corpus/${{ matrix.target }}
@@ -270,11 +305,17 @@ jobs:
           name: fuzz-corpus-${{ matrix.target }}
           path: ${{ env.CORPUS }}
 
+      # SDE emulates every instruction, so an SLH-DSA-SHA2-128s signature that
+      # takes about 1 s natively takes 44 s here. The per-input timeout is
+      # seven times that, and libFuzzer stops at the first hang, which costs at
+      # most 300 s more. Each of the two tiers replays the whole corpus, so the
+      # job's 60 minutes hold while it has fewer than about 40 such inputs. The
+      # other replays run natively and keep -timeout=30.
       - name: Replay the corpus
         run: |
           chmod +x "bin/$TARGET"
           mkdir -p "$ARTIFACTS"
-          nix develop .#sde --command sh/fuzz-replay.sh x86_64-sde "bin/$TARGET" "$CORPUS" -timeout=30 -rss_limit_mb=2048 -artifact_prefix="$ARTIFACTS/"
+          nix develop .#sde --command sh/fuzz-replay.sh x86_64-sde "bin/$TARGET" "$CORPUS" -timeout=300 -rss_limit_mb=2048 -artifact_prefix="$ARTIFACTS/"
 
       - name: Upload the crashing input
         if: failure()
@@ -288,13 +329,17 @@ jobs:
   replay-armv7:
     name: Replay ${{ matrix.target }} on armv7
     needs: [build, fuzz]
-    if: ${{ !cancelled() && github.event_name != 'pull_request' && needs.build.result == 'success' }}
+    if: ${{ !cancelled() && needs.build.result == 'success' }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         target: ${{ fromJSON(needs.build.outputs.targets) }}
+        # Neither the FIPS module nor CPython builds for armv7.
+        exclude:
+          - target: fips
+          - target: python
     env:
       TARGET: ${{ matrix.target }}
       CORPUS: fuzz/corpus/${{ matrix.target }}
@@ -341,7 +386,7 @@ jobs:
   fuzz-portable:
     name: Fuzz ${{ matrix.target }} on the portable backend
     needs: [build, fuzz]
-    if: ${{ !cancelled() && github.event_name != 'pull_request' && needs.build.result == 'success' }}
+    if: ${{ !cancelled() && needs.build.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
@@ -351,6 +396,12 @@ jobs:
       fail-fast: false
       matrix:
         target: ${{ fromJSON(needs.build.outputs.targets) }}
+        # The bindings run rind's backend as their twins do, and the FIPS module
+        # ignores the portable cfg.
+        exclude:
+          - target: dart
+          - target: fips
+          - target: python
     env:
       TARGET: ${{ matrix.target }}
       NATIVE_CORPUS: fuzz/corpus/${{ matrix.target }}

@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 rust-version.workspace = true
 publish = false
-license = "(Apache-2.0 OR ISC OR MIT-0) AND (Apache-2.0 OR ISC OR MIT) AND Apache-2.0 AND ISC AND BSD-3-Clause"
+license = "(Apache-2.0 OR ISC OR MIT-0) AND (Apache-2.0 OR ISC OR MIT) AND Apache-2.0 AND ISC AND BSD-3-Clause AND MIT"
 
 [lib]
 crate-type = ["cdylib"]

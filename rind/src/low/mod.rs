@@ -31,6 +31,38 @@ macro_rules! asm_call {
     };
 }
 
+/// Sixteen rounds of SHA-2's `$round`, each with the round's index in the
+/// sixteen and the eight working variables rotated one place from the round
+/// before, so they rename instead of moving. The portable SHA-256 and
+/// SHA-512 bodies use it.
+#[cfg(any(
+    test,
+    all(
+        rind_backend = "portable",
+        not(all(target_arch = "xtensa", target_os = "espidf"))
+    )
+))]
+macro_rules! sixteen {
+    ($round:ident, $a:ident, $b:ident, $c:ident, $d:ident, $e:ident, $f:ident, $g:ident, $h:ident) => {
+        $round!(0, $a, $b, $c, $d, $e, $f, $g, $h);
+        $round!(1, $h, $a, $b, $c, $d, $e, $f, $g);
+        $round!(2, $g, $h, $a, $b, $c, $d, $e, $f);
+        $round!(3, $f, $g, $h, $a, $b, $c, $d, $e);
+        $round!(4, $e, $f, $g, $h, $a, $b, $c, $d);
+        $round!(5, $d, $e, $f, $g, $h, $a, $b, $c);
+        $round!(6, $c, $d, $e, $f, $g, $h, $a, $b);
+        $round!(7, $b, $c, $d, $e, $f, $g, $h, $a);
+        $round!(8, $a, $b, $c, $d, $e, $f, $g, $h);
+        $round!(9, $h, $a, $b, $c, $d, $e, $f, $g);
+        $round!(10, $g, $h, $a, $b, $c, $d, $e, $f);
+        $round!(11, $f, $g, $h, $a, $b, $c, $d, $e);
+        $round!(12, $e, $f, $g, $h, $a, $b, $c, $d);
+        $round!(13, $d, $e, $f, $g, $h, $a, $b, $c);
+        $round!(14, $c, $d, $e, $f, $g, $h, $a, $b);
+        $round!(15, $b, $c, $d, $e, $f, $g, $h, $a);
+    };
+}
+
 #[cfg(any(rind_backend = "x86_64", rind_backend = "aarch64"))]
 #[macro_use]
 mod macros;
@@ -89,6 +121,7 @@ mod generic {
     // ML-DSA arithmetic for the portable backend and x86_64 CPUs without
     // AVX2, and what s2n-bignum has no Neon routine for. aarch64 runs the
     // rest only in tests, to check its routines against.
+    #[cfg(feature = "ml-dsa")]
     #[cfg_attr(all(rind_backend = "aarch64", not(test)), allow(dead_code))]
     pub(crate) mod mldsa_poly;
     pub(crate) mod mlkem;
@@ -96,12 +129,14 @@ mod generic {
     // key generation and decapsulation, and every operation elsewhere.
     #[cfg(not(rind_backend = "x86_64"))]
     pub(crate) mod mlkem768_vg;
-    // pyca/verified-garbage's P-256 and P-384 where they do not run: armv7
-    // and the portable backend.
+    // pyca/verified-garbage's P-256, P-384, and RSA `R² mod n` where they do
+    // not run: armv7 and the portable backend.
     #[cfg(not(any(rind_backend = "x86_64", rind_backend = "aarch64")))]
     pub(crate) mod p256_vg;
     #[cfg(not(any(rind_backend = "x86_64", rind_backend = "aarch64")))]
     pub(crate) mod p384_vg;
+    #[cfg(not(any(rind_backend = "x86_64", rind_backend = "aarch64")))]
+    pub(crate) mod rsa_vg;
     // pyca/verified-garbage's PBKDF2 where it does not run: every backend
     // but aarch64's.
     #[cfg(not(rind_backend = "aarch64"))]
@@ -123,44 +158,41 @@ mod generic {
     ))]
     pub(crate) mod poly1305;
     pub(super) mod reuse_cache;
-    // The portable backend's SHA-1, and both hashes in armv7 and x86_64
-    // tests to check the assembly against.
+    // The portable backend's SHA-1 and SHA-256 (but ESP-IDF Xtensa's
+    // SHA-256, in `portable::sha`), and both in armv7 and x86_64 tests to
+    // check the assembly against.
     #[cfg(any(
         rind_backend = "portable",
         all(test, any(rind_backend = "arm", rind_backend = "x86_64"))
     ))]
     pub(super) mod sha1;
-    #[cfg(all(
-        test,
-        any(
-            rind_backend = "arm",
+    #[cfg(any(
+        all(
             rind_backend = "portable",
-            rind_backend = "x86_64"
-        )
+            not(all(target_arch = "xtensa", target_os = "espidf"))
+        ),
+        all(test, any(rind_backend = "arm", rind_backend = "x86_64"))
     ))]
     pub(super) mod sha256;
     // FIPS 180-4 §4.2.2, one copy. The ESP-IDF Xtensa compressor and the
-    // test compressor above both read it. aarch64 tests compile neither
-    // reader, so the table stays out: clippy denies an unused static.
+    // portable one above both read it. aarch64 tests compile neither reader,
+    // so the table stays out: clippy denies an unused static.
     #[cfg(any(
-        all(target_arch = "xtensa", target_os = "espidf"),
-        all(
-            test,
-            any(
-                rind_backend = "arm",
-                rind_backend = "portable",
-                rind_backend = "x86_64"
-            )
-        )
+        rind_backend = "portable",
+        all(test, any(rind_backend = "arm", rind_backend = "x86_64"))
     ))]
     pub(super) mod sha256_k;
     // SLH-DSA's SHA-256 lanes one at a time, which x86_64 runs with the SHA
     // extensions or without AVX2.
+    #[cfg(feature = "slh-dsa")]
     pub(super) mod sha256x8;
+    // The portable backend's SHA-512, and its round constants. Tests compile
+    // it everywhere, to check the assembly and the rolled loop against.
+    #[cfg(any(rind_backend = "portable", test))]
+    pub(super) mod sha512;
     // Rolled SHA-512 on 32-bit microcontrollers (ESP-IDF or no OS), whose
-    // small instruction cache HACL*'s ~47 KiB unrolled body misses. Hosted
-    // 32-bit targets keep HACL*, which took 0.71-0.78 of this loop's time
-    // on i686. Tests compile it everywhere and check it against FIPS 180-4.
+    // small instruction cache the unrolled body would crowd. Tests compile
+    // it everywhere and check it against FIPS 180-4.
     #[cfg(any(
         all(
             rind_backend = "portable",
@@ -169,7 +201,7 @@ mod generic {
         ),
         test
     ))]
-    pub(super) mod sha512;
+    pub(super) mod sha512_rolled;
     pub(super) mod zeroise;
 }
 
@@ -199,6 +231,20 @@ pub(crate) fn cpu_denied(_id: &str) -> bool {
     false
 }
 
+/// Whether the build reads `RIND_CPU_DISABLE_*`: where `cpu_denied` can deny.
+#[cfg_attr(any(rind_backend = "portable", rind_backend = "arm"), allow(dead_code))]
+pub(crate) const CPU_DENIABLE: bool = cfg!(all(rind_std, any(debug_assertions, rind_cpu_disable)));
+
+/// Whether the target enables every CPU feature in `wanted`, in a build that
+/// cannot deny one. Each is then on every CPU the binary runs on, so a check
+/// for them is true at compile time, and the linker drops the kernels for
+/// CPUs without them.
+#[cfg_attr(any(rind_backend = "portable", rind_backend = "arm"), allow(dead_code))]
+#[inline(always)]
+pub(crate) const fn cpu_enabled(deniable: bool, enabled: u32, wanted: u32) -> bool {
+    !deniable && wanted & !enabled == 0
+}
+
 // Intel's MXCSR mitigation, where the instructions it covers exist: on x86
 // and x86_64 targets with SSE2, outside Miri, which runs no assembly.
 #[cfg_attr(
@@ -213,9 +259,9 @@ mod mcdt;
 mod posint;
 
 pub(crate) use entry::Entry;
-pub(crate) use generic::argon2::Argon2Block;
 #[cfg(not(rind_backend = "x86_64"))]
-pub(crate) use generic::argon2::argon2_compress;
+pub(crate) use generic::argon2::Argon2Kernel;
+pub(crate) use generic::argon2::{Argon2Block, Argon2Memory};
 pub(crate) use generic::blockwise::{Blockwise, UpdateBlocks, pad, sha256_digest, split_tail};
 pub(crate) use generic::chacha20::{chacha20_block, hchacha20};
 pub(crate) use generic::ct_copy::{ct_copy, ct_select_i16};
@@ -255,16 +301,27 @@ pub(crate) mod abi;
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod guard_pages;
 
+#[cfg(feature = "ml-dsa")]
 pub(crate) use generic::mldsa_poly::MldsaPoly;
 
 // The portable backend, which armv7 builds on, and what both run alike.
 #[cfg(any(rind_backend = "arm", rind_backend = "portable"))]
 mod portable;
+#[cfg(all(
+    feature = "ml-dsa",
+    any(rind_backend = "arm", rind_backend = "portable")
+))]
+pub(crate) use generic::mldsa_poly::{
+    mldsa_caddq, mldsa_chknorm, mldsa_decompose_32, mldsa_decompose_88, mldsa_intt, mldsa_ntt,
+    mldsa_nttunpack, mldsa_pointwise, mldsa_pointwise_acc, mldsa_poly_use_hint_32,
+    mldsa_poly_use_hint_88, mldsa_polyz_unpack_17, mldsa_polyz_unpack_19, mldsa_reduce,
+    mldsa_rej_uniform_eta2_vartime, mldsa_rej_uniform_eta4_vartime, mldsa_rej_uniform_vartime,
+};
 #[cfg(any(rind_backend = "arm", rind_backend = "portable"))]
 pub(crate) use generic::{
     bignum::{
-        bignum_add, bignum_bitsize, bignum_cmp_lt, bignum_coprime, bignum_copy_row_from_table,
-        bignum_ctz, bignum_digitsize, bignum_modsub, bignum_negmodinv, bignum_optsub,
+        bignum_add, bignum_bitsize, bignum_cmp_lt, bignum_copy_row_from_table, bignum_ctz,
+        bignum_digitsize, bignum_modsub, bignum_negmodinv, bignum_optsub,
     },
     chacha20poly1305,
     limbs::mont::{bignum_montifier, bignum_montredc, bignum_mul},
@@ -284,12 +341,7 @@ pub(crate) use generic::{
         bignum_mod_n521, bignum_mul_p521, bignum_neg_p521, bignum_sqr_p521, p521_jadd,
         p521_jdouble, p521_jmixadd, p521_jscalarmul, p521_public_twin_multiply,
     },
-    mldsa_poly::{
-        mldsa_caddq, mldsa_chknorm, mldsa_decompose_32, mldsa_decompose_88, mldsa_intt, mldsa_ntt,
-        mldsa_nttunpack, mldsa_pointwise, mldsa_pointwise_acc, mldsa_poly_use_hint_32,
-        mldsa_poly_use_hint_88, mldsa_polyz_unpack_17, mldsa_polyz_unpack_19, mldsa_reduce,
-        mldsa_rej_uniform_eta2_vartime, mldsa_rej_uniform_eta4_vartime, mldsa_rej_uniform_vartime,
-    },
+    limbs::safegcd::bignum_coprime,
     mlkem::{
         mlkem_compress_d4, mlkem_compress_d5, mlkem_compress_d10, mlkem_compress_d11,
         mlkem_frombytes, mlkem_unpack,
@@ -321,7 +373,7 @@ mod x86_64;
 cfg_if::cfg_if! {
     if #[cfg(rind_backend = "x86_64")] {
         pub(in crate::low) use x86_64::cpu::{enter_cpu_state, zero_bytes, ct_compare_bytes, ct_compare_16, leave_cpu_state};
-        pub(crate) use x86_64::argon2::argon2_compress;
+        pub(crate) use x86_64::argon2::Argon2Kernel;
         #[cfg(rind_fips)]
         pub(crate) use x86_64::cpu::missing_cpu_feature;
         pub(crate) use x86_64::chacha20;
@@ -395,6 +447,7 @@ cfg_if::cfg_if! {
         pub(crate) use x86_64::adx_mux::edwards25519_scalarmulbase;
         pub(crate) use x86_64::adx_mux::edwards25519_msm;
         pub(crate) use x86_64::ghash;
+        #[cfg(feature = "ml-dsa")]
         pub(crate) use x86_64::mldsa::{
             mldsa_ntt, mldsa_intt, mldsa_nttunpack, mldsa_pointwise, mldsa_pointwise_acc,
             mldsa_reduce, mldsa_caddq, mldsa_chknorm, mldsa_decompose_32, mldsa_decompose_88,
@@ -406,6 +459,7 @@ cfg_if::cfg_if! {
         pub(crate) use x86_64::p256_vg;
         pub(crate) use generic::pbkdf2_vg;
         pub(crate) use x86_64::p384_vg;
+        pub(crate) use x86_64::rsa_vg;
         pub(crate) use x86_64::mlkem::{
             mlkem_ntt,
             mlkem_intt,
@@ -446,6 +500,7 @@ cfg_if::cfg_if! {
         pub(crate) use x86_64::adx_mux::p521_jscalarmul;
         pub(crate) use x86_64::sha1_mux::{sha1_compress_blocks, sha1_compress_padded};
         pub(crate) use x86_64::sha256_mux::{sha256_compress_blocks, sha256_finish};
+        #[cfg(feature = "slh-dsa")]
         pub(crate) use x86_64::sha256x8::sha256_finish_x8;
         pub(crate) use x86_64::sha512::sha512_compress_blocks;
         pub(crate) use x86_64::sha3_keccak_f1600::sha3_keccak_f1600;
@@ -522,6 +577,7 @@ cfg_if::cfg_if! {
         pub(crate) use aarch64::edwards25519_pdouble::edwards25519_pdouble;
         pub(crate) use aarch64::edwards25519_scalarmulbase::edwards25519_scalarmulbase;
         pub(crate) use aarch64::edwards25519_scalarmuldouble::edwards25519_scalarmuldouble;
+        #[cfg(feature = "ml-dsa")]
         pub(crate) use aarch64::mldsa::{
             mldsa_ntt, mldsa_intt, mldsa_nttunpack, mldsa_pointwise, mldsa_pointwise_acc,
             mldsa_reduce, mldsa_caddq, mldsa_chknorm, mldsa_decompose_32, mldsa_decompose_88,
@@ -533,6 +589,7 @@ cfg_if::cfg_if! {
         pub(crate) use aarch64::p256_vg;
         pub(crate) use aarch64::pbkdf2_vg;
         pub(crate) use aarch64::p384_vg;
+        pub(crate) use aarch64::rsa_vg;
         pub(crate) use aarch64::mlkem::{
             mlkem_ntt,
             mlkem_intt,
@@ -562,6 +619,7 @@ cfg_if::cfg_if! {
         pub(crate) use aarch64::p521_jscalarmul::p521_jscalarmul;
         pub(crate) use aarch64::sha1::{sha1_compress_blocks, sha1_compress_padded};
         pub(crate) use aarch64::sha256::{sha256_compress_blocks, sha256_finish};
+        #[cfg(feature = "slh-dsa")]
         pub(crate) use generic::sha256x8::sha256_finish_x8;
         pub(crate) use aarch64::sha3_keccak_f1600_mux::sha3_keccak_f1600;
         pub(crate) use aarch64::sha3_keccak4_f1600_mux::sha3_keccak4_f1600;
@@ -577,17 +635,18 @@ cfg_if::cfg_if! {
         pub(crate) use arm::aes_cbc;
         pub(crate) use arm::aes_ctr;
         pub(crate) use arm::aesv8_armx::AesHwKey;
-        pub(crate) use arm::cpu::HaveCryptoExt;
+        pub(crate) use arm::cpu::{HaveCryptoExt, HaveNeon};
         #[cfg(test)]
         pub(crate) use arm::ct_qemu;
+        pub(crate) use arm::ghash_armv4::NeonTable;
         pub(crate) use arm::ghashv8_armx::GhashTable;
+        pub(crate) use arm::vpaes_armv7::NeonKey;
         pub(crate) use arm::chacha20;
         pub(crate) use arm::poly1305;
         pub(crate) use arm::curve25519::curve25519_x25519;
         pub(crate) use arm::mont::{mont_mul, mont_sqr};
-        // SHA-1 and SHA-256 use the crypto extension where present, else rind's
-        // portable SHA, since libcrux has no SHA-1 and rind's SHA-256 is faster
-        // than libcrux's. SHA-512 is aws-lc's, NEON or scalar.
+        // SHA-1, SHA-256, and SHA-512 are aws-lc's assembly: SHA-1 and SHA-256
+        // on the crypto extension where present, else NEON or scalar.
         pub(crate) use arm::keccak1600_armv4::{
             sha3_keccak4_f1600, sha3_keccak_f1600, sha3_keccak_nof4_f1600,
         };
@@ -599,6 +658,8 @@ cfg_if::cfg_if! {
         pub(crate) use generic::p256_vg;
         pub(crate) use generic::p384_vg;
         pub(crate) use generic::pbkdf2_vg;
+        pub(crate) use generic::rsa_vg;
+        #[cfg(feature = "slh-dsa")]
         pub(crate) use generic::sha256x8::sha256_finish_x8;
     } else if #[cfg(rind_backend = "portable")] {
         pub(in crate::low) use portable::cpu::{enter_cpu_state, zero_bytes, ct_compare_bytes, ct_compare_16, leave_cpu_state};
@@ -619,6 +680,8 @@ cfg_if::cfg_if! {
         pub(crate) use generic::p256_vg;
         pub(crate) use generic::p384_vg;
         pub(crate) use generic::pbkdf2_vg;
+        pub(crate) use generic::rsa_vg;
+        #[cfg(feature = "slh-dsa")]
         pub(crate) use generic::sha256x8::sha256_finish_x8;
     } else {
         compile_error!("build.rs sets rind_backend");

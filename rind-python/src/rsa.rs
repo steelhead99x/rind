@@ -3,7 +3,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 use rind::rsa;
 
-use crate::{Bytes, algorithm, bytes, constants, error, submodule};
+use crate::{Bytes, Secret, algorithm, bytes, constants, error, submodule};
 
 /// An RSA modulus size for key generation.
 #[pyclass(frozen, eq, eq_int, from_py_object, module = "pyrind.rsa")]
@@ -61,7 +61,7 @@ impl DecryptingKey {
 
     /// Loads a PKCS#8 RSA private key for `algorithm`.
     #[staticmethod]
-    fn from_pkcs8(algorithm: &Bound<'_, OaepAlgorithm>, der: Bytes<'_>) -> PyResult<Self> {
+    fn from_pkcs8(algorithm: &Bound<'_, OaepAlgorithm>, der: Secret<'_>) -> PyResult<Self> {
         rsa::DecryptingKey::from_pkcs8(algorithm.get().inner, &der)
             .map(Box::new)
             .map(Self)
@@ -70,7 +70,7 @@ impl DecryptingKey {
 
     /// Loads a PKCS#1 `RSAPrivateKey` for `algorithm`.
     #[staticmethod]
-    fn from_pkcs1(algorithm: &Bound<'_, OaepAlgorithm>, der: Bytes<'_>) -> PyResult<Self> {
+    fn from_pkcs1(algorithm: &Bound<'_, OaepAlgorithm>, der: Secret<'_>) -> PyResult<Self> {
         rsa::DecryptingKey::from_pkcs1(algorithm.get().inner, &der)
             .map(Box::new)
             .map(Self)

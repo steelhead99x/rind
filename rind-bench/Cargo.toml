@@ -27,7 +27,7 @@ hex = { version = "0.4", features = ["serde"] }
 hmac = "0.13"
 hpke = { version = "0.15", features = ["aes", "hkdfsha2"] }
 hpke-rs = { version = "0.8", features = ["libcrux"] }
-jsonwebtoken = { version = "11.1", default-features = false, features = ["aws_lc_rs"] }
+jsonwebtoken = { version = "12", default-features = false, features = ["aws_lc_rs"] }
 libcrux-aes = "0.0.10"
 libcrux-chacha20poly1305 = "0.0.10"
 libcrux-ecdh = "0.0.9"

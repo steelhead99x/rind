@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
-import subprocess, json, os, sys, glob, tarfile
+import subprocess, json, os, re, sys, glob, tarfile, tempfile, threading, time
+import concurrent.futures
 
 # Run it at the workspace root in `nix develop .#sde`, which has the Intel SDE
 # build x86-cpu.yml runs.
@@ -8,19 +9,129 @@ import subprocess, json, os, sys, glob, tarfile
 # Usage:
 #   admin/x86-cpu sde-scan
 #   admin/x86-cpu markdown-table
+#   admin/x86-cpu matrix
 #   admin/x86-cpu archive
 #   admin/x86-cpu test SDE_MODEL [TEST_ARGS...]
+#   admin/x86-cpu all
 #
-# `archive` builds the release tests x86-cpu.yml runs into ARCHIVE, and `test`
-# runs them under `sde SDE_MODEL --`, passing each binary TEST_ARGS, so every
-# model's job runs one build. Not nextest: its process per test starts SDE,
-# and re-instruments the code, for each of the workspace's tests, which made
-# rind's library tests over three times slower under SDE than one process
-# for the binary, as `cargo test` runs it.
+# `matrix` prints MODELS as x86-cpu.yml's `check` matrix. `archive` builds the
+# release tests into ARCHIVE, and `test` runs them under `sde SDE_MODEL --`,
+# passing each binary TEST_ARGS, so every model's job runs one build. `all`
+# builds them in place and runs them under every model, many at once, for the
+# merge queue's build (`CHECK_QUEUE` in sh/dispatch.sh) and local runs. Not
+# nextest: its process per test starts SDE, and re-instruments the code, for
+# each of the workspace's tests, which made rind's library tests over three
+# times slower under SDE than one process for the binary, as `cargo test` runs
+# it.
 ARCHIVE = "target/x86-cpu-tests.tar"
 # Each test binary in ARCHIVE, a tab, and its package's directory, which
 # `cargo test` runs it in and where it finds its vector files.
 TESTS = "target/x86-cpu-tests.tsv"
+
+# Every model skips aws-lc-rs's `large_digest` tests, which hash 8 GiB per
+# hash and took 21 to 28 minutes per SHA model under SDE. They check the
+# length counter, which no CPU path changes, and run natively in build.yml.
+SKIP = ["--skip", "large_digest"]
+# And the crosschecks of SLH-DSA's small-signature sets, which took 1186 of
+# crosschecks' 1413 seconds under Diamond Rapids on a Zen 3 host, mostly
+# RustCrypto and fips205 signing as oracles. The fast sets run the same hash
+# kernels, `mid::slhdsa`'s ACVP tests check every set's signatures byte for
+# byte on each model, and these run natively in every merge queue build.
+for _hash in ["sha2", "shake"]:
+    for _bits in [128, 192, 256]:
+        SKIP += ["--skip", f"slh_dsa_{_hash}_{_bits}s::sign_verify"]
+
+# The dispatch paths `rind/src/low/x86_64/cpu.rs` and `rind/src/low/mcdt.rs`
+# pick from cpuid. Each model's run asserts which it takes through
+# `RIND_TEST_X86_<PATH>`, 1 for those it lists and 0 for the rest.
+PATHS = [
+    "SSSE3",
+    "SSE41",
+    "AES_HARDWARE",
+    "AVX",
+    "AVX2",
+    "BMI2_ADX",
+    "SHA",
+    "VAES_AES_GCM",
+    "AVX_MOVBE_AES_GCM",
+    "AVX512_AES_GCM",
+    "AVX512_ML_KEM",
+    "AVX512_RSA",
+    "MCDT",
+]
+_AVX2 = ["SSSE3", "SSE41", "AES_HARDWARE", "AVX", "AVX2", "AVX_MOVBE_AES_GCM"]
+_AVX512 = _AVX2 + ["BMI2_ADX", "SHA", "VAES_AES_GCM", "AVX512_AES_GCM"]
+_AVX512 += ["AVX512_ML_KEM", "AVX512_RSA"]
+
+# One SDE model for each distinct set of dispatch paths: its name, its SDE
+# flag, and the paths it takes. Each comment names the other models that
+# select the same set, per the scans `sde-scan` saves in `admin/x86-cpus`. SDE
+# reports no `MCDT_NO` for any model, Arrow Lake's included, so every model
+# needs `rind/src/low/mcdt.rs`'s guard.
+MODELS = [
+    # Prescott, a Pentium 4, lacks SSSE3, so it runs every slowest path:
+    # aws-lc's SSE2 AES and integer GHASH, SHA-1, and SHA-256, HACL*'s ChaCha20
+    # rounds, the portable ML-KEM arithmetic, s2n-bignum's `_alt` routines,
+    # and aws-lc's Montgomery multiplication.
+    ("Prescott", "p4p", ["MCDT"]),
+    # Merom, the first Core 2, adds SSSE3 but not SSE4.1 or AES-NI, so it runs
+    # aws-lc's vpaes and SSSE3 GHASH, ChaCha20, SHA-1, and SHA-256, beside
+    # Prescott's other paths. Saltwell selects the same paths.
+    ("Merom", "mrm", ["SSSE3", "MCDT"]),
+    # Nehalem adds SSE4.1, so ChaCha20-Poly1305 runs in one pass, but still
+    # lacks AES-NI, so it otherwise runs Merom's paths. Penryn selects the
+    # same paths.
+    ("Nehalem", "nhm", ["SSSE3", "SSE41", "MCDT"]),
+    # Westmere adds AES-NI and PCLMULQDQ without AVX, so rind's AES-GCM and
+    # GHASH intrinsics run without VEX encoding. Silvermont selects the same
+    # paths.
+    ("Westmere", "wsm", ["SSSE3", "SSE41", "AES_HARDWARE", "MCDT"]),
+    # Goldmont, an Atom, runs Westmere's paths, but SHA-1 and SHA-256 on its
+    # SHA extensions. Goldmont Plus, Tremont, and Snow Ridge select the same
+    # paths.
+    ("Goldmont", "glm", ["SSSE3", "SSE41", "AES_HARDWARE", "SHA", "MCDT"]),
+    # Sandy Bridge lacks AVX2, MOVBE, BMI2, and ADX, so rind's AES-GCM
+    # intrinsics, aws-lc's AVX SHA and SSSE3 ChaCha20 routines, the portable
+    # ML-KEM arithmetic, s2n-bignum's `_alt` routines, and aws-lc's Montgomery
+    # multiplication run. Ivy Bridge selects the same paths.
+    ("Sandy Bridge", "snb", ["SSSE3", "SSE41", "AES_HARDWARE", "AVX", "MCDT"]),
+    # Haswell lacks ADX and VAES, so s2n-bignum's `_alt` routines, aws-lc's
+    # Montgomery multiplication, its RSAZ exponentiation for RSA-2048, and its
+    # AVX AES-GCM run, beside the AVX2 kernels.
+    ("Haswell", "hsw", _AVX2 + ["MCDT"]),
+    # Skylake server has AVX-512 but neither SHA nor VAES, so it runs the AVX2
+    # kernels with s2n-bignum's BMI2 and ADX routines, aws-lc's AVX AES-GCM,
+    # and OpenSSL's AVX2 SHA-256 and SHA-512. Broadwell, Skylake, Cascade
+    # Lake, and Cooper Lake select the same paths.
+    ("Skylake server", "skx", _AVX2 + ["BMI2_ADX", "MCDT"]),
+    # Cannon Lake adds SHA and AVX-512 IFMA, but lacks VAES and AVX-512 VBMI2,
+    # so it runs Skylake server's paths with SHA-1 and SHA-256 on the SHA
+    # extensions, and RSA on pyca/verified-garbage's IFMA routines, but
+    # 3072-bit signing on aws-lc's dual AVX-512 RSAZ.
+    ("Cannon Lake", "cnl", _AVX2 + ["BMI2_ADX", "SHA", "AVX512_RSA", "MCDT"]),
+    # Alder Lake adds VAES without AVX-512, so AES-GCM runs on 256-bit
+    # vectors. Meteor and Raptor Lake, and Sierra Forest, select the same
+    # paths.
+    ("Alder Lake", "adl", _AVX2 + ["BMI2_ADX", "SHA", "VAES_AES_GCM", "MCDT"]),
+    # Arrow Lake has the SHA512 instructions, which rind does not run: SHA-384
+    # and SHA-512 take the AVX2 routine, as on Alder Lake. Lunar and Panther
+    # Lake, and Clearwater Forest, select the same paths.
+    ("Arrow Lake", "arl", _AVX2 + ["BMI2_ADX", "SHA", "VAES_AES_GCM", "MCDT"]),
+    # Granite Rapids limited to 256-bit AVX10 hides AVX-512F, so it selects
+    # Alder Lake's paths, checking that rind takes no AVX-512 path there.
+    (
+        "Granite Rapids (AVX10.1 / 256VL)",
+        "gnr256",
+        _AVX2 + ["BMI2_ADX", "SHA", "VAES_AES_GCM", "MCDT"],
+    ),
+    # Granite Rapids selects every path, including AVX-512 AES-GCM, ML-KEM,
+    # and RSA. Ice Lake, Ice Lake server, Tiger Lake, and Sapphire and Emerald
+    # Rapids select the same paths.
+    ("Granite Rapids", "gnr", _AVX512 + ["MCDT"]),
+    # Diamond Rapids selects Granite Rapids' paths. It also has the SHA512
+    # instructions, which rind does not run.
+    ("Diamond Rapids", "dmr", _AVX512 + ["MCDT"]),
+]
 
 # excludes 32-bit only parts
 KNOWN_CPUS = [
@@ -61,6 +172,74 @@ KNOWN_CPUS = [
     ("-ptl", "Panther Lake"),
     ("-cwf", "Clearwater Forest"),
 ]
+
+
+def build():
+    """Builds the release tests and lists them in TESTS.
+
+    Returns them, the libraries they load, and rind's own unit tests."""
+    # rind-fips is left out: its module refuses CPUs below its baseline, as
+    # most of SDE's models are. `cargo test` also runs the doc tests, which
+    # this leaves to the native runs: none asserts a CPU path, and each path
+    # they reach, the unit tests check on every model.
+    out = subprocess.run(
+        ["cargo", "test", "--release", "--workspace", "--exclude", "rind-fips"]
+        + ["--locked", "--no-run", "--message-format=json-render-diagnostics"],
+        stdout=subprocess.PIPE,
+        check=True,
+        encoding="utf-8",
+    ).stdout
+    tests, libraries, lib = [], [], None
+    for line in out.splitlines():
+        message = json.loads(line)
+        if message["reason"] != "compiler-artifact":
+            continue
+        if message["profile"]["test"]:
+            if message["target"]["name"] == "rind" and "lib" in message["target"]["kind"]:
+                lib = os.path.relpath(message["executable"])
+            tests.append(
+                (
+                    os.path.relpath(message["executable"]),
+                    os.path.relpath(os.path.dirname(message["manifest_path"])),
+                )
+            )
+        # A workspace crate's shared library, which its tests load from
+        # beside them, as rind-openssl's do.
+        elif (
+            message["package_id"].startswith("path+file:")
+            and "cdylib" in message["target"]["kind"]
+        ):
+            libraries += [f for f in message["filenames"] if f.endswith(".so")]
+    with open(TESTS, "w") as f:
+        f.writelines(f"{exe}\t{package}\n" for exe, package in tests)
+    return tests, libraries, lib
+
+
+def tests():
+    """Each test binary in TESTS and its package's directory."""
+    return [line.rstrip("\n").split("\t") for line in open(TESTS)]
+
+
+def run(model, exe, package, args, out):
+    """Runs one test binary under one model, and returns whether it passed."""
+    name, sde, paths = model
+    env = os.environ.copy()
+    env.update({f"RIND_TEST_X86_{p}": str(int(p in paths)) for p in PATHS})
+    # Each test's CARGO_TARGET_TMPDIR, which cargo creates before a test run.
+    target = os.environ.get("CARGO_TARGET_DIR", "target")
+    os.makedirs(os.path.join(target, "tmp"), exist_ok=True)
+    print(f"Running {exe} in {package} on {name}", file=out, flush=True)
+    return (
+        subprocess.run(
+            ["sde", "-" + sde, "--", os.path.abspath(exe)] + SKIP + args,
+            cwd=package,
+            env=env,
+            stdout=out,
+            stderr=subprocess.STDOUT,
+        ).returncode
+        == 0
+    )
+
 
 mode = sys.argv[1]
 
@@ -116,39 +295,19 @@ elif mode == "markdown-table":
                 detail(d["result"]["cpuid"]),
             )
         )
+elif mode == "matrix":
+    if sys.argv[2:]:
+        sys.exit("usage: admin/x86-cpu matrix")
+    print(
+        json.dumps(
+            [
+                dict(model=name, sde=sde)
+                for name, sde, _ in MODELS
+            ]
+        )
+    )
 elif mode == "archive":
-    # rind-fips is left out: its module refuses CPUs below its baseline, as
-    # most of SDE's models are. `cargo test` also runs the doc tests, which
-    # this leaves to the native runs: none asserts a CPU path, and each path
-    # they reach, the unit tests check on every model.
-    out = subprocess.run(
-        ["cargo", "test", "--release", "--workspace", "--exclude", "rind-fips"]
-        + ["--locked", "--no-run", "--message-format=json-render-diagnostics"],
-        stdout=subprocess.PIPE,
-        check=True,
-        encoding="utf-8",
-    ).stdout
-    tests, libraries = [], []
-    for line in out.splitlines():
-        message = json.loads(line)
-        if message["reason"] != "compiler-artifact":
-            continue
-        if message["profile"]["test"]:
-            tests.append(
-                (
-                    os.path.relpath(message["executable"]),
-                    os.path.relpath(os.path.dirname(message["manifest_path"])),
-                )
-            )
-        # A workspace crate's shared library, which its tests load from
-        # beside them, as rind-openssl's do.
-        elif (
-            message["package_id"].startswith("path+file:")
-            and "cdylib" in message["target"]["kind"]
-        ):
-            libraries += [f for f in message["filenames"] if f.endswith(".so")]
-    with open(TESTS, "w") as f:
-        f.writelines(f"{exe}\t{package}\n" for exe, package in tests)
+    tests, libraries, _ = build()
     with tarfile.open(ARCHIVE, "w") as tar:
         tar.add(TESTS)
         for path in [exe for exe, _ in tests] + libraries:
@@ -157,23 +316,104 @@ elif mode == "archive":
         f"Archived {len(tests)} test binaries and {len(libraries)} libraries in {ARCHIVE}"
     )
 elif mode == "test":
-    model, *args = sys.argv[2:]
+    flag, *args = sys.argv[2:]
+    model = next((m for m in MODELS if "-" + m[1] == flag), None)
+    if model is None:
+        sys.exit(f"{flag} is no model of MODELS: " + ", ".join("-" + m[1] for m in MODELS))
     with tarfile.open(ARCHIVE) as tar:
         tar.extractall(filter="tar")
-    # Each test's CARGO_TARGET_TMPDIR, which cargo creates before a test run.
-    # The binaries hold it and their CARGO_MANIFEST_DIR as absolute paths,
-    # which hold because x86-cpu.yml's jobs check out to the same path.
-    os.makedirs("target/tmp", exist_ok=True)
-    failed = []
-    for line in open(TESTS):
-        exe, package = line.rstrip("\n").split("\t")
-        print(f"Running {exe} in {package}", flush=True)
-        run = subprocess.run(
-            ["sde", model, "--", os.path.abspath(exe)] + args, cwd=package
-        )
-        if run.returncode != 0:
-            failed.append(exe)
+    # The binaries hold their CARGO_MANIFEST_DIR as an absolute path, which
+    # holds because x86-cpu.yml's jobs check out to the same path.
+    failed = [exe for exe, package in tests() if not run(model, exe, package, args, sys.stdout)]
     if failed:
         sys.exit("Failed: " + " ".join(failed))
+elif mode == "all":
+    if sys.argv[2:]:
+        sys.exit("usage: admin/x86-cpu all")
+    tests, _, lib = build()
+
+    def dispatch(model):
+        """The dispatch rind's unit tests report under one model."""
+        out = subprocess.run(
+            ["sde", "-" + model[1], "--", os.path.abspath(lib)]
+            + ["reports_dispatch", "--nocapture", "--test-threads", "1"],
+            cwd="rind",
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            encoding="utf-8",
+            check=True,
+        ).stdout
+        report = sorted(re.findall(r"rind dispatch: \w+ \w+", out))
+        if len(report) != 2:
+            sys.exit(f"{model[0]} reported no dispatch:\n{out}")
+        return tuple(report)
+
+    # A model that reports the same dispatch as an earlier one takes every
+    # path that one does, so it runs only rind's assertions of its own paths.
+    # The earlier model lacks instructions it has, such as Alder Lake those of
+    # Arrow Lake's SHA512 and Granite Rapids' AVX10, so its full run is the
+    # stricter. x86-cpu.yml's weekly run runs every model in full.
+    with concurrent.futures.ThreadPoolExecutor(len(MODELS)) as pool:
+        reports = list(pool.map(dispatch, MODELS))
+    first = {}
+    for model, report in zip(MODELS, reports):
+        earlier = first.setdefault(report, model)
+        if earlier is not model:
+            print(f"{model[0]} dispatches as {earlier[0]} does: {'; '.join(report)}")
+
+    # Every model's run of every binary, from one pool, so the box stays
+    # busy until the last one ends rather than idling behind the slowest
+    # model. The largest binaries come first, and within one the newest
+    # models, which run slowest under SDE: on a Zen 3 host, Granite Rapids
+    # took six times Prescott's CPU time, and crosschecks took half the
+    # total. A binary uses about one and a half CPUs under SDE, so half as
+    # many runs as CPUs keep the host busy beside the queue's other checks.
+    jobs = []
+    for exe, package in sorted(tests, key=lambda t: -os.path.getsize(t[0])):
+        for model, report in reversed(list(zip(MODELS, reports))):
+            if first[report] is model:
+                jobs.append((model, exe, package, []))
+            elif exe == lib:
+                jobs.append((model, exe, package, ["detects_the_expected_cpu"]))
+    jobs.reverse()
+    # Under CHECK_FAIL_FAST, as in the merge queue, the first failure starts
+    # no more runs: the group fails either way.
+    fail_fast = bool(os.environ.get("CHECK_FAIL_FAST"))
+    lock = threading.Lock()
+    failed = []
+    seconds = {name: 0.0 for name, _, _ in MODELS}
+
+    def worker():
+        while True:
+            with lock:
+                if not jobs or (fail_fast and failed):
+                    return
+                model, exe, package, only = jobs.pop()
+            start = time.monotonic()
+            try:
+                with tempfile.TemporaryFile("w+") as log:
+                    passed = run(model, exe, package, only, log)
+                    log.seek(0)
+                    with lock:
+                        seconds[model[0]] += time.monotonic() - start
+                        if not passed:
+                            failed.append(f"{exe} on {model[0]}")
+                            print(log.read(), flush=True)
+            except BaseException:
+                # Recorded first, so the other workers stop under fail-fast.
+                with lock:
+                    failed.append(f"{exe} on {model[0]}")
+                raise
+
+    # A worker's exception, such as SDE failing to start, re-raises here, so
+    # no run is left out with the exit status still 0.
+    workers = max(1, os.cpu_count() // 2)
+    with concurrent.futures.ThreadPoolExecutor(workers) as pool:
+        for future in [pool.submit(worker) for _ in range(workers)]:
+            future.result()
+    for name, total in seconds.items():
+        print(f"{name}: {total / 60:.1f} minutes of runs")
+    if failed:
+        sys.exit("Failed: " + "; ".join(failed))
 else:
     sys.exit(f"unknown mode {mode}")

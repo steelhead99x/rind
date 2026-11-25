@@ -94,6 +94,42 @@ fn aead() {
         }
     }
 
+    // AES-GCM under IVs of the 12 bytes `aead::Key` takes and of another
+    // length, which GCM hashes into its counter.
+    for (algorithm, iv_len) in [(0, 12), (1, 16), (2, 1), (2, 60)] {
+        let key = [7u8; 32];
+        let key = &key[..[16, 24, 32][algorithm as usize]];
+        secret(key);
+        let iv = [1u8; 60];
+        let mut in_out = *b"hello, world\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0";
+        secret(&in_out[..12]);
+        unsafe {
+            let handle = new(|out| rind_dart_gcm_key_new(algorithm, key.as_ptr(), key.len(), out));
+            ok(rind_dart_gcm_seal(
+                handle,
+                iv.as_ptr(),
+                iv_len,
+                b"aad".as_ptr(),
+                3,
+                in_out.as_mut_ptr(),
+                in_out.len(),
+            ));
+            public(&in_out);
+            let len = ok(rind_dart_gcm_open(
+                handle,
+                iv.as_ptr(),
+                iv_len,
+                b"aad".as_ptr(),
+                3,
+                in_out.as_mut_ptr(),
+                in_out.len(),
+            ));
+            public(&in_out);
+            assert_eq!(&in_out[..len], b"hello, world");
+            rind_dart_gcm_key_free(handle);
+        }
+    }
+
     let key = [7u8; 32];
     secret(&key);
     let mut in_out = [9u8; 21];
@@ -360,7 +396,9 @@ fn signatures() {
         let pkcs8 = out(|o, n| rind_dart_rsa_key_pair_export(pair, 1, o, n));
         let reloaded =
             new(|out| rind_dart_rsa_key_pair_new(1, 0, pkcs8.as_ptr(), pkcs8.len(), out));
-        for algorithm in [0, 3] {
+        // PKCS#1 v1.5, PSS with the hash's salt, and PSS with a 16-byte
+        // salt, as the Dart side packs it.
+        for algorithm in [0, 3, 1 << 24 | 16 << 8 | 3] {
             let signature =
                 out(|o, n| rind_dart_rsa_sign(reloaded, algorithm, b"msg".as_ptr(), 3, o, n));
             let public_key =

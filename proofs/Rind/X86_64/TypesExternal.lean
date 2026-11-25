@@ -50,6 +50,10 @@ opaque low.x86_64.cpu.HaveAvx2 : Type
 opaque low.x86_64.cpu.HaveSsse3 : Type
 opaque low.x86_64.cpu.HaveSse41 : Type
 
+/-- The token proving pyca/verified-garbage's AVX-512 IFMA ChaCha20-Poly1305
+runs here. -/
+opaque low.x86_64.cpu.HaveIfmaForVgChaCha20Poly1305 : Type
+
 /-- The tokens proving pyca/verified-garbage's ML-KEM-768 encapsulation, and
 its key generation and decapsulation, run here. -/
 opaque low.x86_64.mlkem768_vg.Encaps : Type

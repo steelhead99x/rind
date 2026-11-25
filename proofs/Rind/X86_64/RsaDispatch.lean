@@ -368,7 +368,7 @@ theorem from_key_ok {key : high.rsa.VerifyingKey} {N E : Nat} (hk : KeyLoaded ke
 
 /-- `PublicKey::new`: a key it returns is an `(N, E)` key of 1024 to 8192
 bits, which `der` encodes as PKCS#1 DER the ✓ leaves out. -/
-theorem rsa_signature_new_spec (hheld : low.entry.Entry.assert_held = ok ()) (der : Slice U8)
+theorem rsa_signature_new_spec (h : Runs) (hheld : low.entry.Entry.assert_held = ok ()) (der : Slice U8)
     (pk : high.signature.rsa.PublicKey) (hpk : high.signature.rsa.PublicKey.new der = ok (.Ok pk)) :
     ∃ N E, KeyLoaded pk.key N E ∧ 1024 ≤ N.size ∧ N.size ≤ 8192 := by
   unfold high.signature.rsa.PublicKey.new high.rsa.VerifyingKey.from_pkcs1_der at hpk
@@ -378,7 +378,7 @@ theorem rsa_signature_new_spec (hheld : low.entry.Entry.assert_held = ok ()) (de
   rcases x with ⟨n, e⟩ | err
   · simp only [core.result.Result.Insts.CoreOpsTry.branch, bind_ok] at hr
     change high.rsa.VerifyingKey.from_unsigned n e = ok r at hr
-    have hs := from_unsigned_spec hheld n e
+    have hs := from_unsigned_spec h hheld n e
     rw [hr, WP.spec_ok] at hs
     cases r with
     | Ok key => exact ⟨_, _, from_key_ok hs hk⟩
@@ -392,7 +392,7 @@ theorem rsa_signature_new_spec (hheld : low.entry.Entry.assert_held = ok ()) (de
 /-- `PublicKey::from_spki`: a key it returns is an `(N, E)` key of 1024 to
 8192 bits, which `der` encodes as `SubjectPublicKeyInfo` DER the ✓ leaves
 out. -/
-theorem rsa_signature_from_spki_spec (hheld : low.entry.Entry.assert_held = ok ()) (der : Slice U8)
+theorem rsa_signature_from_spki_spec (h : Runs) (hheld : low.entry.Entry.assert_held = ok ()) (der : Slice U8)
     (pk : high.signature.rsa.PublicKey) (hpk : high.signature.rsa.PublicKey.from_spki der = ok (.Ok pk)) :
     ∃ N E, KeyLoaded pk.key N E ∧ 1024 ≤ N.size ∧ N.size ≤ 8192 := by
   unfold high.signature.rsa.PublicKey.from_spki high.rsa.VerifyingKey.from_spki_der at hpk
@@ -401,7 +401,7 @@ theorem rsa_signature_from_spki_spec (hheld : low.entry.Entry.assert_held = ok (
   obtain ⟨x, -, hr⟩ := bind_eq_ok hr
   rcases x with ⟨n, e⟩ | err
   · change high.rsa.VerifyingKey.from_unsigned n e = ok r at hr
-    have hs := from_unsigned_spec hheld n e
+    have hs := from_unsigned_spec h hheld n e
     rw [hr, WP.spec_ok] at hs
     cases r with
     | Ok key => exact ⟨_, _, from_key_ok hs hk⟩

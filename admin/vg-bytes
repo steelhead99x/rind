@@ -40,6 +40,13 @@ SYM = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
 DECORATIONS = {"z", "k1"}
 # An aarch64 NOP, `HINT #0`, little-endian (DDI 0487 C6.2, "NOP").
 NOP = "1f2003d5"
+# rind's statics that stand for a table of VG's, by path: admin/import-vg's
+# `SHARED`, whose `sym` operands name them. A relocation of one compares as
+# VG's table, and rind's tests hold the bytes to VG's.
+SHARED = {
+    "x86_64": {"rind::mid::p256::precomp::CURVE_GENERATOR_PRECOMP": "VG_P256_COMB"},
+    "aarch64": {},
+}
 # The mnemonics that transfer control, which the assembler lays out.
 BRANCHES = {
     "x86_64": {"je", "jne", "jb", "jae", "jmp", "call"},
@@ -134,15 +141,16 @@ class Insn:
         self.addr, self.raw, self.text, self.relocs = addr, raw, text, []
 
 
-def disassemble(arch, obj, keep):
+def disassemble(arch, obj, keep, shared=None):
     """The instructions of each function of `obj` that `keep` takes, by the
     demangled path's last component, with the relocations at each: its offset
-    in the instruction, its type, its symbol's last component, and its
-    addend."""
+    in the instruction, its type, its symbol's last component, or the table
+    of VG's that `shared` maps its path to, and its addend."""
     flags = ["-M", "intel"] if arch == "x86_64" else ["--mattr=+all"]
     # `-z`: llvm-objdump otherwise prints a run of zero bytes as `...`.
     dis = run(["llvm-objdump", "-d", "-z", "-r", "-C", *flags, str(obj)])
     statics = section_statics(obj)
+    shared = shared or {}
     fns, names = {}, {}
     cur = None
     for line in dis.splitlines():
@@ -165,7 +173,7 @@ def disassemble(arch, obj, keep):
             # Its offset in the instruction, so a relocation of the same bytes
             # that patches other bytes of them differs.
             off = int(m.group(1), 16) - cur[-1].addr
-            cur[-1].relocs.append((off, m.group(2), *relocation_target(m.group(3), statics)))
+            cur[-1].relocs.append((off, m.group(2), *relocation_target(m.group(3), statics, shared)))
             continue
         m = re.match(r"^\s*([0-9a-f]+):\s(.*)$", line)
         if m:
@@ -199,11 +207,12 @@ def section_statics(obj):
     return statics
 
 
-def relocation_target(sym, statics):
-    """A relocation's symbol, by its name's last component, and its addend."""
+def relocation_target(sym, statics, shared):
+    """A relocation's symbol, by its name's last component, or the table of
+    VG's that `shared` maps its path to, and its addend."""
     m = re.match(r"^(.*?)([+-]0x[0-9a-f]+)?$", sym)
     name = statics.get(m.group(1), m.group(1))
-    return name.split("::")[-1], int(m.group(2) or "0", 16)
+    return shared.get(name) or name.split("::")[-1], int(m.group(2) or "0", 16)
 
 
 def is_nop(arch, insn):
@@ -410,7 +419,8 @@ def main():
     # is VG's by its name, wherever rind puts it; any function of a `vg`
     # module must be one, so a routine an older pin had fails here.
     for obj in a.rind:
-        vendored = disassemble(a.arch, obj, lambda path, name: name in text or "::vg::" in path)
+        vendored = disassemble(a.arch, obj, lambda path, name: name in text or "::vg::" in path,
+                               SHARED[a.arch])
         for name, insns in vendored.items():
             if name not in text:
                 fail(f"rind's {name} is not a routine of VG's text at this commit")

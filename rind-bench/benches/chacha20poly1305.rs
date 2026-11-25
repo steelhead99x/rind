@@ -120,6 +120,19 @@ fn bench_chacha20poly1305(c: &mut Criterion) {
             b.iter(|| key.seal(&nonce, aad, &mut buf));
         });
     }
+    group.finish();
+
+    if let Some(mut group) = criterion::dit_per_call(c, "chacha20poly1305") {
+        for (size, size_name, aad) in criterion::dit_per_call_aead_rows() {
+            let mut buf = vec![0u8; size];
+            group.throughput(Throughput::Bytes(size as u64));
+            group.bench_function(BenchmarkId::new("rind", size_name), |b| {
+                use rind::aead::{CHACHA20_POLY1305, Key};
+                let key = Key::new(&CHACHA20_POLY1305, &key).unwrap();
+                b.iter(|| test_rind_chacha(&key, &nonce, aad, &mut buf));
+            });
+        }
+    }
 }
 
 // Decrypting and verifying each size's ciphertext, as a receiver pays.

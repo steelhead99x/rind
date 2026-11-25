@@ -4,6 +4,7 @@
 //! (`AES_128_GCM_SIV`, `AES_256_GCM_SIV`) and OpenSSH's ChaCha20-Poly1305
 //! (`chacha20_poly1305_openssh`).
 
+use alloc::vec::Vec;
 use core::fmt;
 use core::ops::RangeFrom;
 

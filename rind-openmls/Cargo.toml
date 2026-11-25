@@ -37,7 +37,7 @@ test-utils = ["openmls_memory_storage/test-utils"]
 [dependencies]
 openmls_memory_storage = "0.6"
 openmls_traits = "0.6"
-rind = { version = "0.3.2", path = "../rind" }
+rind = { version = "0.3.2", path = "../rind", default-features = false }
 tls_codec = { version = "0.5", default-features = false }
 
 [dev-dependencies]

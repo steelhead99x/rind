@@ -5,32 +5,28 @@ name: prove
 # cosimulates rind's additions to s2n-bignum's x86 model against the runner's
 # CPU, cosimulates pyca/verified-garbage's models against the code rind takes
 # from it, checks that the NEON vectors the Lean proofs test their aarch64
-# intrinsic models with are what an aarch64 CPU computes, and translates
-# rind's Rust under proof to Lean and checks the proofs in `proofs/`. Too slow
-# for `just ci`, so it runs nightly and on pull requests that change rind's
-# source or build, the proofs, the checks, rind's fork of s2n-bignum, or the
-# flake that pins their tools.
+# intrinsic models with are what an aarch64 CPU computes, translates rind's
+# Rust under proof to Lean and checks the proofs in `proofs/`, and tests the
+# Lean specs those proofs trust against the published vectors and rind. It
+# all runs nightly. None of it gates a merge: a failure on main alerts.
 #
-# Each HOL Light target's proofs and the cosimulation are cached: a pull
-# request skips one that main already passed on the same inputs, which
-# `result_key` in `admin/prove` lists. The cache is a security boundary, so
-# only main writes it and its nightly and dispatched runs never read it: they
-# check everything, so a stale or planted entry never hides a failure there,
-# and save each key whose check passes. A push to main runs only those jobs,
-# looking each key up and checking and saving the ones main lacks, so a pull
-# request need not wait for the nightly to skip them. No pull request writes
-# the cache: this saves nothing from one, and GitHub keeps whatever a pull
-# request's own code saves to that pull request's ref.
+# Each HOL Light target's proofs, the Lean proofs, and the cosimulation are
+# cached under the key `result_key` in `admin/prove` computes from their
+# inputs. The nightly and dispatched runs never read the cache: they check
+# everything, so a stale or planted entry never hides a failure there, and
+# save each key whose check passes. A push to main that changes rind's source
+# or build, the proofs, the checks, the vectors, rind's fork of s2n-bignum, or
+# the flake that pins their tools runs only the cached checks, looking each
+# key up and checking and saving the ones main lacks, so a failure shows on
+# the commit that caused it. A release publishes only once such a run on its
+# inputs passed (sh/release-proved.sh).
 on:
   schedule:
     - cron: "0 18 * * *"
   workflow_dispatch:
-  pull_request:
-    # A draft skips every job until it is marked ready, and turning a PR back
-    # into a draft cancels its ready run: see CONTRIBUTING.md.
-    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
+  push:
     branches: [main]
-    paths: &paths
+    paths:
       - rind/src/**
       - rind/Cargo.toml
       - rind/build.rs
@@ -48,6 +44,8 @@ on:
       - admin/import-vg-models
       - admin/vg-bytes
       - admin/vg-cosim-runner.rs
+      - admin/spec-tests/**
+      - thirdparty/vectors/**
       - ALGORITHMS.md
       - flake.nix
       - flake.lock
@@ -55,26 +53,17 @@ on:
       - .github/workflows/prove.yml
       - .github/actions/nix/**
       - .github/actions/prove/**
-  push:
-    branches: [main]
-    paths: *paths
 
 permissions:
   contents: read
 
-# A newer push to a pull request cancels its older run. Main's runs never
-# cancel each other, since a cancelled one saves nothing.
-concurrency:
-  group: prove-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
-  cancel-in-progress: true
-
 jobs:
-  # Checks the bytes, which nothing caches, except on a push to main, and
-  # computes the key of each cached check on a pull request or a push to main,
+  # Checks the bytes, which nothing caches, on every run: a release relies on
+  # them as on the proofs (sh/release-proved.sh). On a push to main it also
+  # computes the key of each cached HOL Light check and the cosimulation,
   # looking each up without downloading anything. The jobs below skip a check
-  # whose key main saved.
+  # whose key main saved. The Lean proofs compute their own key in their job.
   keys:
-    if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     outputs:
@@ -94,12 +83,11 @@ jobs:
       - uses: ./.github/actions/nix
 
       - name: Bytes
-        if: github.event_name != 'push'
         run: nix develop .#hol-light --command admin/prove bytes
 
       - name: Keys
         id: keys
-        if: ${{ !cancelled() && (github.event_name == 'pull_request' || github.event_name == 'push') }}
+        if: ${{ !cancelled() && github.event_name == 'push' }}
         run: |
           nix develop .#hol-light --command bash -euo pipefail -c '
             admin/prove key hol-light aarch64
@@ -153,8 +141,10 @@ jobs:
   # queued next, and `admin/prove` prints each proof's time to show where it
   # goes. Each cached job runs unless `keys` found its key, even when `keys`
   # failed, so the nightly checks the proofs whether or not the bytes match.
-  # On a push to main, a job waits for any other run checking the same key,
-  # then looks it up again, so main checks each key once.
+  # No job shares a concurrency group with another run's, so no run on main is
+  # ever cancelled and its conclusion is its proofs' result, which
+  # sh/release-proved.sh reads. Two pushes that overlap and both lack a key
+  # both check it, rare now that keys change only with the proven code.
   #
   # aarch64's proofs took 2799 s on an Intel Core Ultra 7 270K, 2602 s of
   # them in `bn_mul_mont`, whose 4x path's two column-step lemmas take 930 s
@@ -163,9 +153,7 @@ jobs:
   # build.
   hol-light-aarch64:
     needs: keys
-    if: ${{ !cancelled() && !github.event.pull_request.draft && needs.keys.outputs.hit-hol-light-aarch64 != 'true' }}
-    concurrency:
-      group: prove-${{ github.event_name == 'push' && needs.keys.outputs.hol-light-aarch64 || github.run_id }}-hol-light-aarch64
+    if: ${{ !cancelled() && needs.keys.outputs.hit-hol-light-aarch64 != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 150
     steps:
@@ -180,13 +168,14 @@ jobs:
           check: hol-light aarch64
           key: ${{ needs.keys.outputs.hol-light-aarch64 }}
 
+  # x86_64's proofs took 2227 s on an Intel Core Ultra 7 270K Plus, 734 s of
+  # them in the AVX2 SHA-256, so at up to 2.1 times as long the job can run
+  # about 80 minutes with the build.
   hol-light-x86_64:
     needs: keys
-    if: ${{ !cancelled() && !github.event.pull_request.draft && needs.keys.outputs.hit-hol-light-x86_64 != 'true' }}
-    concurrency:
-      group: prove-${{ github.event_name == 'push' && needs.keys.outputs.hol-light-x86_64 || github.run_id }}-hol-light-x86_64
+    if: ${{ !cancelled() && needs.keys.outputs.hit-hol-light-x86_64 != 'true' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -201,9 +190,7 @@ jobs:
 
   hol-light-armv7:
     needs: keys
-    if: ${{ !cancelled() && !github.event.pull_request.draft && needs.keys.outputs.hit-hol-light-armv7 != 'true' }}
-    concurrency:
-      group: prove-${{ github.event_name == 'push' && needs.keys.outputs.hol-light-armv7 || github.run_id }}-hol-light-armv7
+    if: ${{ !cancelled() && needs.keys.outputs.hit-hol-light-armv7 != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -220,9 +207,7 @@ jobs:
 
   cosim:
     needs: keys
-    if: ${{ !cancelled() && !github.event.pull_request.draft && needs.keys.outputs.hit-cosim != 'true' }}
-    concurrency:
-      group: prove-${{ github.event_name == 'push' && needs.keys.outputs.cosim || github.run_id }}-cosim
+    if: ${{ !cancelled() && needs.keys.outputs.hit-cosim != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -239,10 +224,10 @@ jobs:
 
   # pyca/verified-garbage's code for each target against VG's Lean models,
   # on the runner's CPU and, for what it lacks, Intel SDE or qemu-aarch64.
-  # A pull request runs the fixed seed 1; the nightly and dispatched runs take
-  # their run ID as the seed, so each tries new cases.
+  # Each run takes its run ID as the seed, so each tries new cases; the merge
+  # queue's build runs x86_64's with a fixed seed.
   vg:
-    if: github.event_name != 'push' && !github.event.pull_request.draft
+    if: github.event_name != 'push'
     strategy:
       fail-fast: false
       matrix:
@@ -267,10 +252,10 @@ jobs:
       - name: Cosimulate
         run: nix develop .#vg --command admin/prove vg
         env:
-          VG_COSIM_SEED: ${{ github.event_name != 'pull_request' && github.run_id || 1 }}
+          VG_COSIM_SEED: ${{ github.run_id }}
 
   neon:
-    if: github.event_name != 'push' && !github.event.pull_request.draft
+    if: github.event_name != 'push'
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
     steps:
@@ -288,10 +273,12 @@ jobs:
           rustc --edition 2024 -O -o "$RUNNER_TEMP/neon-vectors" admin/neon-vectors.rs
           "$RUNNER_TEMP/neon-vectors" | diff - proofs/Rind/Aarch64/NeonVectors.lean
 
+  # On a push to main, computes its key, which needs the translation, and
+  # checks the proofs only if main saved no matching key; nightly and when
+  # dispatched, checks them outright.
   lean:
-    if: github.event_name != 'push' && !github.event.pull_request.draft
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -299,5 +286,34 @@ jobs:
 
       - uses: ./.github/actions/nix
 
-      - name: Prove
-        run: nix develop .#prove --command admin/prove lean
+      - name: Key
+        id: key
+        if: github.event_name == 'push'
+        run: echo "key=$(nix develop .#prove --command admin/prove key lean)" >>"$GITHUB_OUTPUT"
+
+      - uses: ./.github/actions/prove
+        with:
+          check: lean
+          key: ${{ steps.key.outputs.key }}
+
+  # The spec tests, on every vector the driver's filters admit and on random
+  # inputs from the run's own seed. Linking `spec-server` compiles every
+  # Mathlib module it imports to C, about 15 minutes that Mathlib's cache does
+  # not save, so this job keeps that out of the lean job's time.
+  spec-tests:
+    if: github.event_name != 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/nix
+
+      - name: Test the specs
+        run: nix develop .#prove --command admin/prove spec-tests
+        env:
+          SPEC_TESTS_FULL: 1
+          SPEC_TESTS_SEED: ${{ github.run_id }}
+          SPEC_TESTS_RANDOM: 64

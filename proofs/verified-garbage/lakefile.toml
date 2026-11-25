@@ -7,6 +7,13 @@ defaultTargets = ["vg-cosim"]
 name = "VerifiedGarbage"
 globs = ["VerifiedGarbage.+"]
 
+# rind's extension of VG's AArch64 model and the programs rind proves in
+# it, with `rind-asm`, which prints their machine code for `admin/prove lean`
+# to check against rind's build.
+[[lean_lib]]
+name = "RindIsa"
+globs = ["RindIsa.+"]
+
 [[lean_lib]]
 name = "Cosim"
 globs = ["Cosim.+"]
@@ -14,3 +21,7 @@ globs = ["Cosim.+"]
 [[lean_exe]]
 name = "vg-cosim"
 root = "Cosim.Main"
+
+[[lean_exe]]
+name = "rind-asm"
+root = "RindIsa.Main"

@@ -310,9 +310,12 @@ impl Blind {
         proof: &[u8],
         public_key: &PublicKey,
     ) -> Result<Output, Error> {
-        let mut outputs =
+        let outputs =
             Self::finalize_batch(alloc::vec![self], evaluated_element, proof, public_key)?;
-        Ok(outputs.remove(0))
+        // A copy, not a move: moving it out would leave its bytes in the
+        // vector's block, which then frees unwiped. The vector's drop wipes
+        // the output in place.
+        Ok(Output(outputs[0].0.clone()))
     }
 
     /// Verifies the server's one proof for a batch, then finalizes each
@@ -559,7 +562,11 @@ fn prove<G: Group>(
     let z = G::mul(&m, k);
     let t2 = G::mul_base(&r);
     let t3 = G::mul(&m, &r);
-    let c = challenge::<G>(public, [&m, &z, &t2, &t3])?;
+    // `c` is the proof's first half, so public, though it hashes `Z`, `t2`,
+    // and `t3`, which only secrets make. Declassifying it here also spares
+    // BINSEC a term it cannot finish (UPSTREAM.md, "BINSEC stalls on
+    // s2n-bignum's P-384 arithmetic of a hashed value").
+    let c = ct::into_public(challenge::<G>(public, [&m, &z, &t2, &t3])?);
     let s = G::mul_add(&G::neg(&c), k, &r);
 
     let mut proof = Bytes::zeroed(2 * G::SCALAR_LEN);

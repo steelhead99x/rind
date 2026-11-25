@@ -6,6 +6,8 @@ use rustls::crypto::aws_lc_rs;
 use rustls::crypto::hpke::{EncapsulatedSecret, Hpke, HpkePrivateKey, HpkePublicKey};
 use rustls::pki_types::{EchConfigListBytes, ServerName};
 use rustls::{ClientConfig, ClientConnection, RootCertStore};
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+use wasm_bindgen_test::wasm_bindgen_test as test;
 
 /// Each of our suites beside rustls's aws-lc-rs provider's same suite.
 #[cfg(not(target_family = "wasm"))]

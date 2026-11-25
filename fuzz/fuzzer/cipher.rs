@@ -1,16 +1,25 @@
 #![no_main]
 
-//! The bare ciphers against aws-lc's: the AES block, AES-CTR with any counter
-//! width, ChaCha20 from any block, and QUIC header protection.
+//! The bare ciphers against aws-lc's and RustCrypto's: the AES block, AES-CTR
+//! with any counter width, ChaCha20 from any block, and QUIC header
+//! protection.
 //!
 //! aws-lc-rs's CTR counts over the whole block, so a narrower counter's
-//! keystream is aws-lc-rs's AES on each counter block the width allows. It has
-//! no bare ChaCha20, so that calls aws-lc directly.
+//! keystream is aws-lc-rs's AES on each counter block the width allows, and
+//! RustCrypto's AES on the same blocks, beside RustCrypto's CTR for the
+//! widths it has. aws-lc-rs has no bare ChaCha20, so that calls aws-lc
+//! directly, and RustCrypto's ChaCha20 core, since its stream refuses to
+//! reach the last block.
 
+use ::aes::cipher::{BlockCipherEncrypt, KeyInit, KeyIvInit, StreamCipher, StreamCipherCore};
 use aws_lc_rs::aead::quic;
 use aws_lc_rs::cipher::{EncryptingKey, EncryptionContext, UnboundCipherKey};
 use libfuzzer_sys::{arbitrary, arbitrary::Arbitrary, fuzz_target};
 use rind::cipher::{Aes, AesCtr, ChaCha20};
+
+mod rustcrypto;
+
+use rustcrypto::rustcrypto_aes;
 
 #[derive(Arbitrary, Debug)]
 enum Input {
@@ -45,6 +54,14 @@ enum AesKey {
 }
 
 impl AesKey {
+    fn bytes(&self) -> &[u8] {
+        match self {
+            Self::Aes128(key) => key,
+            Self::Aes192(key) => key,
+            Self::Aes256(key) => key,
+        }
+    }
+
     fn ours(&self) -> (&'static rind::cipher::Algorithm, &[u8]) {
         match self {
             Self::Aes128(key) => (&rind::cipher::AES_128, key),
@@ -82,6 +99,7 @@ fuzz_target!(|input: Input| match input {
             .less_safe_encrypt(&mut theirs, EncryptionContext::None)
             .unwrap();
         assert_eq!(ours, theirs);
+        assert_eq!(&ours[..], rustcrypto_blocks(&key, &block));
     }
     Input::AesCtr {
         key,
@@ -119,6 +137,9 @@ fuzz_target!(|input: Input| match input {
             );
         }
         assert_eq!(ours, theirs);
+        let keystream = rustcrypto_chacha20(&key, &nonce, counter, message.len());
+        let independent: Vec<u8> = message.iter().zip(&keystream).map(|(m, k)| m ^ k).collect();
+        assert_eq!(ours, independent);
     }
     Input::QuicHeaderProtection {
         algorithm,
@@ -126,10 +147,10 @@ fuzz_target!(|input: Input| match input {
         sample,
     } => {
         use rind::aead::quic as ours;
-        let (algorithm, theirs) = match algorithm {
-            Quic::Aes128 => (&ours::AES_128, &quic::AES_128),
-            Quic::Aes256 => (&ours::AES_256, &quic::AES_256),
-            Quic::ChaCha20 => (&ours::CHACHA20, &quic::CHACHA20),
+        let (chacha, algorithm, theirs) = match algorithm {
+            Quic::Aes128 => (false, &ours::AES_128, &quic::AES_128),
+            Quic::Aes256 => (false, &ours::AES_256, &quic::AES_256),
+            Quic::ChaCha20 => (true, &ours::CHACHA20, &quic::CHACHA20),
         };
         let key = &key[..algorithm.key_len()];
         let mask = ours::HeaderProtectionKey::new(algorithm, key)
@@ -140,8 +161,57 @@ fuzz_target!(|input: Input| match input {
             .new_mask(&sample)
             .unwrap();
         assert_eq!(mask, wanted);
+
+        // RFC 9001 section 5.4: AES encrypts the sample, and ChaCha20 takes
+        // its first four bytes as the block counter and the rest as the
+        // nonce.
+        let independent = match chacha {
+            true => {
+                let counter = u32::from_le_bytes(sample[..4].try_into().unwrap());
+                let nonce = sample[4..].try_into().unwrap();
+                rustcrypto_chacha20(key.try_into().unwrap(), nonce, counter, 5)
+            }
+            false => rustcrypto_aes!(key, Aes => {
+                let mut block = sample.into();
+                Aes::new_from_slice(key).unwrap().encrypt_block(&mut block);
+                block[..5].to_vec()
+            }),
+        };
+        assert_eq!(&mask[..], &independent[..]);
     }
 });
+
+/// RustCrypto's AES encryption of each block of `blocks`, whole blocks.
+fn rustcrypto_blocks(key: &AesKey, blocks: &[u8]) -> Vec<u8> {
+    let key = key.bytes();
+    rustcrypto_aes!(key, Aes => {
+        let aes = Aes::new_from_slice(key).unwrap();
+        blocks
+            .chunks(16)
+            .flat_map(|block| {
+                let mut block = <[u8; 16]>::try_from(block).unwrap().into();
+                aes.encrypt_block(&mut block);
+                <[u8; 16]>::from(block)
+            })
+            .collect()
+    })
+}
+
+/// `len` bytes of RustCrypto's ChaCha20 keystream from block `counter`,
+/// through its core, which reaches the last block, as its stream does not.
+fn rustcrypto_chacha20(key: &[u8; 32], nonce: &[u8; 12], counter: u32, len: usize) -> Vec<u8> {
+    use chacha20::{ChaChaCore, R20, variants::Ietf};
+    let mut core = ChaChaCore::<R20, Ietf>::new(key.into(), nonce.into());
+    core.set_block_pos(counter);
+    let mut keystream = Vec::with_capacity(len.next_multiple_of(64));
+    for _ in 0..len.div_ceil(64) {
+        let mut block = Default::default();
+        core.write_keystream_block(&mut block);
+        keystream.extend_from_slice(&block);
+    }
+    keystream.truncate(len);
+    keystream
+}
 
 /// AES-CTR counting over the rightmost `counter_bits` bits of the counter
 /// block, which rind refuses outside 1 to 128 bits, and for a message that
@@ -170,6 +240,11 @@ fn aes_ctr(key: &AesKey, counter_bits: u8, counter_block: &[u8; 16], message: Ve
     let mut keystream: Vec<u8> = (0..blocks as u128)
         .flat_map(|i| ((start & !mask) | (start.wrapping_add(i) & mask)).to_be_bytes())
         .collect();
+    let independent: Vec<u8> = message
+        .iter()
+        .zip(rustcrypto_blocks(key, &keystream))
+        .map(|(m, k)| m ^ k)
+        .collect();
     if !keystream.is_empty() {
         key.theirs()
             .less_safe_encrypt(&mut keystream, EncryptionContext::None)
@@ -177,4 +252,21 @@ fn aes_ctr(key: &AesKey, counter_bits: u8, counter_block: &[u8; 16], message: Ve
     }
     let theirs: Vec<u8> = message.iter().zip(&keystream).map(|(m, k)| m ^ k).collect();
     assert_eq!(ours_out, theirs);
+    assert_eq!(ours_out, independent);
+
+    // RustCrypto's own CTR, for the widths it counts over.
+    let mut independent = message.clone();
+    rustcrypto_aes!(bytes, Aes => match counter_bits {
+        32 => ctr::Ctr32BE::<Aes>::new_from_slices(bytes, counter_block)
+            .unwrap()
+            .apply_keystream(&mut independent),
+        64 => ctr::Ctr64BE::<Aes>::new_from_slices(bytes, counter_block)
+            .unwrap()
+            .apply_keystream(&mut independent),
+        128 => ctr::Ctr128BE::<Aes>::new_from_slices(bytes, counter_block)
+            .unwrap()
+            .apply_keystream(&mut independent),
+        _ => return,
+    });
+    assert_eq!(ours_out, independent);
 }

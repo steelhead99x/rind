@@ -11,6 +11,8 @@ use rustls::{
     ClientConfig, ClientConnection, HandshakeKind, NamedGroup, RootCertStore, ServerConfig,
     ServerConnection,
 };
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+use wasm_bindgen_test::wasm_bindgen_test as test;
 
 #[test]
 fn all_suites() {
@@ -313,40 +315,43 @@ impl KeyType {
         }
     }
 
-    fn slug(self) -> &'static str {
+    /// This key's `ca.cert`, `end.fullchain`, and `end.key`, compiled in,
+    /// since the browser's target has no file system.
+    fn files(self) -> [&'static [u8]; 3] {
+        macro_rules! files {
+            ($slug:literal) => {
+                [
+                    include_bytes!(concat!("keys/", $slug, "/ca.cert")),
+                    include_bytes!(concat!("keys/", $slug, "/end.fullchain")),
+                    include_bytes!(concat!("keys/", $slug, "/end.key")),
+                ]
+            };
+        }
         match self {
-            Self::Rsa2048 => "rsa-2048",
-            Self::Rsa3072 => "rsa-3072",
-            Self::Rsa4096 => "rsa-4096",
-            Self::EcdsaP256 => "ecdsa-p256",
-            Self::EcdsaP384 => "ecdsa-p384",
-            Self::EcdsaP521 => "ecdsa-p521",
-            Self::Ed25519 => "ed25519",
+            Self::Rsa2048 => files!("rsa-2048"),
+            Self::Rsa3072 => files!("rsa-3072"),
+            Self::Rsa4096 => files!("rsa-4096"),
+            Self::EcdsaP256 => files!("ecdsa-p256"),
+            Self::EcdsaP384 => files!("ecdsa-p384"),
+            Self::EcdsaP521 => files!("ecdsa-p521"),
+            Self::Ed25519 => files!("ed25519"),
         }
     }
 
-    /// This key's file `name`, from any directory, as the iOS simulator runs
-    /// the tests.
-    fn file(self, name: &str) -> String {
-        let dir = env!("CARGO_MANIFEST_DIR");
-        format!("{dir}/tests/keys/{}/{name}", self.slug())
-    }
-
     fn cert_chain(self) -> Vec<CertificateDer<'static>> {
-        CertificateDer::pem_file_iter(self.file("end.fullchain"))
-            .unwrap()
+        CertificateDer::pem_slice_iter(self.files()[1])
             .collect::<Result<Vec<_>, _>>()
             .unwrap()
     }
 
     fn key(self) -> PrivateKeyDer<'static> {
-        PrivateKeyDer::from_pem_file(self.file("end.key")).unwrap()
+        PrivateKeyDer::from_pem_slice(self.files()[2]).unwrap()
     }
 
     fn ca_certs(self) -> Arc<RootCertStore> {
         let mut roots = RootCertStore::empty();
         roots
-            .add(CertificateDer::from_pem_file(self.file("ca.cert")).unwrap())
+            .add(CertificateDer::from_pem_slice(self.files()[0]).unwrap())
             .unwrap();
         roots.into()
     }

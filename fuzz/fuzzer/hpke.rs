@@ -1,10 +1,15 @@
 #![no_main]
 
 //! HPKE against rustls's aws-lc-rs provider, which builds RFC 9180 from
-//! aws-lc's primitives (aws-lc-rs exposes no HPKE of its own): each side
-//! opens what the other seals, and a tampered encapsulated key or ciphertext
-//! fails on both or opens to the same plaintext on both.
+//! aws-lc's primitives (aws-lc-rs exposes no HPKE of its own), and hpke-rs
+//! over RustCrypto, which shares no code with rind: each side opens what the
+//! others seal, and a tampered encapsulated key or ciphertext fails on both
+//! or opens to the same plaintext on both. hpke-rs's RustCrypto backend has
+//! no P-521, and it checks only what rind opens.
 
+use hpke_rs::hpke_types::{AeadAlgorithm, KdfAlgorithm, KemAlgorithm};
+use hpke_rs::rustcrypto::HpkeRustCrypto;
+use hpke_rs::{Hpke, Mode};
 use libfuzzer_sys::{arbitrary, arbitrary::Arbitrary, fuzz_target};
 use rind::hpke::*;
 use rustls::crypto::aws_lc_rs::hpke::ALL_SUPPORTED_SUITES;
@@ -32,6 +37,22 @@ const fn suite(kem: &'static Kem, kdf: &'static Kdf, aead: &'static Aead) -> (&'
     (kem, Suite { kdf, aead })
 }
 
+/// hpke-rs's suite of `SUITES[index]`, or `None` for P-521's.
+fn independent(index: usize) -> Option<Hpke<HpkeRustCrypto>> {
+    let (kem, kdf) = match index / 3 {
+        0 => (KemAlgorithm::DhKemP256, KdfAlgorithm::HkdfSha256),
+        1 => (KemAlgorithm::DhKemP384, KdfAlgorithm::HkdfSha384),
+        2 => return None,
+        _ => (KemAlgorithm::DhKem25519, KdfAlgorithm::HkdfSha256),
+    };
+    let aead = [
+        AeadAlgorithm::Aes128Gcm,
+        AeadAlgorithm::Aes256Gcm,
+        AeadAlgorithm::ChaCha20Poly1305,
+    ][index % 3];
+    Some(Hpke::new(Mode::Base, kem, kdf, aead))
+}
+
 #[derive(Arbitrary, Debug)]
 struct Input {
     suite: u8,
@@ -51,6 +72,18 @@ fuzz_target!(|input: Input| {
     let public_key = private_key.public_key();
     let their_private = || HpkePrivateKey::from(private_key.to_scalar().as_ref().to_vec());
     let their_public = HpkePublicKey(public_key.as_ref().to_vec());
+    let mut independent = independent(index);
+    let independent_private =
+        hpke_rs::HpkePrivateKey::new(private_key.to_scalar().as_ref().to_vec());
+    let independent_public = hpke_rs::HpkePublicKey::new(public_key.as_ref().to_vec());
+
+    // hpke-rs derives the same key, where it takes the IKM.
+    if let Some(Ok(pair)) = independent
+        .as_ref()
+        .map(|hpke| hpke.derive_key_pair(&input.ikm))
+    {
+        assert_eq!(pair.into_keys().1.as_slice(), public_key.as_ref());
+    }
 
     // Ours opens what theirs seals, tampered with or not, as theirs does.
     let (enc, ciphertext) = theirs
@@ -79,6 +112,12 @@ fuzz_target!(|input: Input| {
         );
     }
     let theirs_opened = theirs.open(&enc, &input.info, &input.aad, &ciphertext, &their_private());
+    if let (Ok(ours), Some(hpke)) = (&ours, &mut independent) {
+        let opened = hpke
+            .setup_receiver(&enc.0, &independent_private, &input.info, None, None, None)
+            .and_then(|mut receiver| receiver.open(&input.aad, &ciphertext));
+        assert_eq!(opened.as_ref(), Ok(ours));
+    }
     assert_eq!(ours.ok(), theirs_opened.ok());
 
     // Theirs opens what ours seals.
@@ -90,6 +129,22 @@ fuzz_target!(|input: Input| {
     let enc = EncapsulatedSecret(enc.as_ref().to_vec());
     let opened = theirs.open(&enc, &input.info, &input.aad, &sealed, &their_private());
     assert_eq!(opened.unwrap(), input.plaintext);
+
+    // Each of rind and hpke-rs opens what the other seals.
+    if let Some(hpke) = &mut independent {
+        let mut receiver = hpke
+            .setup_receiver(&enc.0, &independent_private, &input.info, None, None, None)
+            .unwrap();
+        assert_eq!(receiver.open(&input.aad, &sealed).unwrap(), input.plaintext);
+
+        let (enc, mut sender) = hpke
+            .setup_sender(&independent_public, &input.info, None, None, None)
+            .unwrap();
+        let mut sealed = sender.seal(&input.aad, &input.plaintext).unwrap();
+        let mut recipient = Recipient::new(suite, &private_key, &enc, &input.info).unwrap();
+        let opened = recipient.open_in_place(&input.aad, &mut sealed).unwrap();
+        assert_eq!(opened, &input.plaintext[..]);
+    }
 
     // Both take or refuse a peer's public key alike.
     let ours = PublicKey::new(kem, &input.peer)

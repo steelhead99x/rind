@@ -15,7 +15,7 @@ rind already has these:
 - ctgrind, `admin/ct-sde`, and `admin/ct-qemu` for secret-dependent branches and addresses;
 - `admin/ct-vartime`, in `just ci`, for variable-time instructions, which those three can't see.
 
-[OSS-Fuzz](/quest/m4/oss-fuzz.md) is planned in m4 and isn't repeated here.
+[OSS-Fuzz](/quest/m2/confidence/oss-fuzz.md) moved here from m4 on 2026-11-21 (maintainer, /quest-plan), beside the 2026-11-21 audit's new fuzzing, sanitizer, constant-time, zeroing, and coverage children. Pure-Rust adapter fuzzers and a periodic full-workspace mutation sweep were considered and left out (rejected: low risk over already-fuzzed primitives; high host cost vs. the weekly diff sweep).
 
 The 2026-11-09 audit found no exploitable bug and no panic reachable from public input, and planned the eleven children from the hostile-input fuzz target down: each is a hole it confirmed in the code that no test, fuzzer, or proof sees today.
 

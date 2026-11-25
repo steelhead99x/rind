@@ -168,6 +168,63 @@ external int _aeadOpen(
   int len,
 );
 
+@Native<_Free>(symbol: 'rind_dart_gcm_key_free')
+external void _gcmKeyFree(Pointer<Void> key);
+final _gcmKeyFinalizer = _finalizer(Native.addressOf(_gcmKeyFree));
+
+@Native<IntPtr Function(Uint32, Pointer<Uint8>, Size, Pointer<Pointer<Void>>)>(
+  symbol: 'rind_dart_gcm_key_new',
+  isLeaf: true,
+)
+external int _gcmKeyNew(
+  int algorithm,
+  Pointer<Uint8> key,
+  int keyLen,
+  Pointer<Pointer<Void>> out,
+);
+
+@Native<
+  IntPtr Function(
+    Pointer<Void>,
+    Pointer<Uint8>,
+    Size,
+    Pointer<Uint8>,
+    Size,
+    Pointer<Uint8>,
+    Size,
+  )
+>(symbol: 'rind_dart_gcm_seal', isLeaf: true)
+external int _gcmSeal(
+  Pointer<Void> key,
+  Pointer<Uint8> iv,
+  int ivLen,
+  Pointer<Uint8> aad,
+  int aadLen,
+  Pointer<Uint8> inOut,
+  int len,
+);
+
+@Native<
+  IntPtr Function(
+    Pointer<Void>,
+    Pointer<Uint8>,
+    Size,
+    Pointer<Uint8>,
+    Size,
+    Pointer<Uint8>,
+    Size,
+  )
+>(symbol: 'rind_dart_gcm_open', isLeaf: true)
+external int _gcmOpen(
+  Pointer<Void> key,
+  Pointer<Uint8> iv,
+  int ivLen,
+  Pointer<Uint8> aad,
+  int aadLen,
+  Pointer<Uint8> inOut,
+  int len,
+);
+
 @Native<_Free>(symbol: 'rind_dart_randomized_nonce_key_free')
 external void _randomizedNonceKeyFree(Pointer<Void> key);
 final _randomizedNonceKeyFinalizer = _finalizer(

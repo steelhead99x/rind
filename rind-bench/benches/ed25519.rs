@@ -1,7 +1,7 @@
 mod criterion;
 use std::hint::black_box;
 
-use criterion::{Criterion, Throughput, criterion_group, criterion_main};
+use criterion::{Bencher, Criterion, Throughput, criterion_group, criterion_main};
 
 // Generate a fresh key and make a PKCS8 document of it.
 fn keygen(c: &mut Criterion) {
@@ -139,13 +139,16 @@ fn verify(c: &mut Criterion) {
         });
     });
 
-    group.bench_function("rind", |b| {
-        let _dit = criterion::rind_dit();
+    let rind = |b: &mut Bencher<'_>| {
         let public_key = rind::ed25519::PublicKey::new(public_key).unwrap();
 
         b.iter(|| {
             public_key.verify(message, signature).unwrap();
         })
+    };
+    group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
+        rind(b)
     });
 
     #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
@@ -185,6 +188,12 @@ fn verify(c: &mut Criterion) {
             assert!(verifier.verify_oneshot(signature, message).unwrap());
         })
     });
+    group.finish();
+
+    if let Some(mut group) = criterion::dit_per_call(c, "ed25519-verify") {
+        group.throughput(Throughput::Elements(1));
+        group.bench_function("rind", rind);
+    }
 }
 
 fn sign(c: &mut Criterion) {
@@ -227,13 +236,16 @@ fn sign(c: &mut Criterion) {
         });
     });
 
-    group.bench_function("rind", |b| {
-        let _dit = criterion::rind_dit();
+    let rind = |b: &mut Bencher<'_>| {
         let signing_key = rind::ed25519::KeyPair::generate().unwrap();
 
         b.iter(|| {
             black_box(signing_key.sign(message));
         });
+    };
+    group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
+        rind(b)
     });
 
     #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
@@ -284,6 +296,12 @@ fn sign(c: &mut Criterion) {
             black_box(signer.sign_oneshot_to_vec(message).unwrap());
         });
     });
+    group.finish();
+
+    if let Some(mut group) = criterion::dit_per_call(c, "ed25519-sign") {
+        group.throughput(Throughput::Elements(1));
+        group.bench_function("rind", rind);
+    }
 }
 
 criterion_group!(benches, keygen, verify, sign);

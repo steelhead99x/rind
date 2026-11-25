@@ -171,6 +171,20 @@ mod tests {
 \x6b\x17\xd1\xf2\xe1\x2c\x42\x47\xf8\xbc\xe6\xe5\x63\xa4\x40\xf2\x77\x03\x7d\x81\x2d\xeb\x33\xa0\xf4\xa1\x39\x45\xd8\x98\xc2\x96\
 \x4f\xe3\x42\xe2\xfe\x1a\x7f\x9b\x8e\xe7\xeb\x4a\x7c\x0f\x9e\x16\x2b\xce\x33\x57\x6b\x31\x5e\xce\xcb\xb6\x40\x68\x37\xbf\x51\xf5";
 
+    // `vg_p256_mul_base_adx` reads `mid`'s generator table in place of
+    // VG's own (admin/import-vg, `SHARED`), so VG's proof is about rind's
+    // code only while the two hold the same bytes, and runs as fast only
+    // on the same alignment.
+    #[test]
+    fn generator_table_is_vgs() {
+        let rind = &crate::mid::p256::precomp::CURVE_GENERATOR_PRECOMP;
+        let words = rind.0.iter().flatten().flat_map(|word| word.to_le_bytes());
+        let vg = &vg::vg_p256_comb::VG_P256_COMB;
+        assert!(words.eq(vg.0));
+        assert_eq!(align_of_val(rind), align_of_val(vg));
+        assert_eq!(size_of_val(rind), size_of_val(vg));
+    }
+
     // The CPU's widest variant hides the narrower from every other test, so
     // each variant the CPU runs is checked against Wycheproof here.
     #[test]

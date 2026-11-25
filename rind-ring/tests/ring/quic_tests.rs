@@ -15,6 +15,8 @@
 #![allow(missing_docs)]
 
 use ring::aead::quic;
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+use wasm_bindgen_test::wasm_bindgen_test as test;
 
 #[allow(deprecated)]
 use crate::{test, test_file};

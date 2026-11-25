@@ -685,9 +685,63 @@ mod tests {
             Ok(())
         }
 
+        /// RustCrypto's ML-KEM, which shares no code with any tier rind
+        /// runs, from the same seed and message: the same keys, ciphertext,
+        /// and secret, and the same implicit-rejection secret for a
+        /// ciphertext with one byte altered.
+        macro_rules! matches_rustcrypto {
+            ($ours:ty, $theirs:ty, $seed:expr, $m:expr, $alter:expr) => {{
+                use ml_kem::{Decapsulate, KeyExport};
+
+                let (seed, m, (index, xor)): ([u8; 64], [u8; 32], (Index, u8)) =
+                    ($seed, $m, $alter);
+                let ours = DecapsulationKey::new(keygen::<$ours>(&seed));
+                let theirs = ml_kem::DecapsulationKey::<$theirs>::from_seed(seed.into());
+                let theirs_public = theirs.encapsulation_key();
+                prop_assert_eq!(ours.public_key().as_ref(), &theirs_public.to_bytes()[..]);
+
+                let (secret, ciphertext) = encaps(ours.public_key(), &m);
+                let (theirs_ciphertext, theirs_secret) =
+                    theirs_public.encapsulate_deterministic(&m.into());
+                prop_assert_eq!(ciphertext.as_ref(), &theirs_ciphertext[..]);
+                prop_assert_eq!(&secret[..], &theirs_secret[..]);
+
+                // Each decapsulates it to that secret, and an altered one to
+                // the same implicit rejection.
+                let ours_decapsulated = decapsulate(&ours, ciphertext.as_ref()).unwrap();
+                prop_assert_eq!(&ours_decapsulated[..], &secret[..]);
+                let theirs_decapsulated =
+                    theirs.decapsulate(ciphertext.as_ref().try_into().unwrap());
+                prop_assert_eq!(&theirs_decapsulated[..], &secret[..]);
+
+                let mut altered = ciphertext.as_ref().to_vec();
+                let index = index.index(altered.len());
+                altered[index] ^= xor;
+                let ours_rejected = decapsulate(&ours, &altered).unwrap();
+                let theirs_rejected = theirs.decapsulate(altered.as_slice().try_into().unwrap());
+                prop_assert_eq!(&ours_rejected[..], &theirs_rejected[..]);
+                prop_assert_ne!(ours_rejected, secret);
+            }};
+        }
+
         // Each case generates a key, which is slow under emulation.
         proptest! {
             #![proptest_config(ProptestConfig::with_cases(32))]
+
+            #[test]
+            fn matches_rustcrypto_512(seed in any::<[u8; 64]>(), m in any::<[u8; 32]>(), alter in (any::<Index>(), 1..=255u8)) {
+                matches_rustcrypto!(MlKem512, ml_kem::MlKem512, seed, m, alter);
+            }
+
+            #[test]
+            fn matches_rustcrypto_768(seed in any::<[u8; 64]>(), m in any::<[u8; 32]>(), alter in (any::<Index>(), 1..=255u8)) {
+                matches_rustcrypto!(MlKem768, ml_kem::MlKem768, seed, m, alter);
+            }
+
+            #[test]
+            fn matches_rustcrypto_1024(seed in any::<[u8; 64]>(), m in any::<[u8; 32]>(), alter in (any::<Index>(), 1..=255u8)) {
+                matches_rustcrypto!(MlKem1024, ml_kem::MlKem1024, seed, m, alter);
+            }
 
             #[test]
             fn encapsulated_by_theirs_512(alter in prop::option::of((any::<Index>(), 1..=255u8))) {

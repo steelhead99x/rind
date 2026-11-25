@@ -58,8 +58,22 @@ here: the CPU has the SHA-3 instructions. -/
 opaque low.aarch64.mlkem768_vg.Encaps : Type
 
 /-- The token proving the CPU has SVE2, on which ChaCha20-Poly1305's one pass
-runs pyca/verified-garbage's routines. -/
+and `cipher::ChaCha20` run pyca/verified-garbage's routines. -/
 opaque low.aarch64.cpu.HaveSve2 : Type
+
+/-- pyca/verified-garbage's ChaCha20 streaming state, as its routines see it:
+the 768 bytes of memory they keep it in, all that VG's spec reads of it, as
+`Rind.VgChaCha20` proves. Rust leaves it uninitialised: `init` writes the bytes
+`apply` reads on entry, and `apply` writes its scratch before reading it, so
+the model gives the rest any bytes.
+`admin/prove` fails unless this quote is still the type:
+
+```rust
+struct VgState(MaybeUninit<[u64; 96]>);
+
+```
+-/
+@[reducible] def low.aarch64.chacha20.VgState : Type := Std.Array Std.U8 768#usize
 
 /-- MD5's chaining state, which no proof covers. -/
 opaque mid.md5.Md5State : Type

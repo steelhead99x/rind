@@ -491,6 +491,32 @@ fn refused() {
             ours::agreement::UnparsedPublicKey::new(agreement_algorithms!(ours)[alg], [4u8; 5]);
         assert!(ours::agreement::agree(&ours_key, peer, (), |_| Ok(())).is_err());
     }
+    // A compressed ECDSA public key whose x is no field element, or that is
+    // too short, which both refuse to decompress.
+    for (ours_alg, theirs_alg, len) in [
+        (
+            &ours::signature::ECDSA_P256_SHA256_ASN1,
+            &theirs::signature::ECDSA_P256_SHA256_ASN1,
+            32,
+        ),
+        (
+            &ours::signature::ECDSA_P384_SHA384_ASN1,
+            &theirs::signature::ECDSA_P384_SHA384_ASN1,
+            48,
+        ),
+        (
+            &ours::signature::ECDSA_P521_SHA512_ASN1,
+            &theirs::signature::ECDSA_P521_SHA512_ASN1,
+            66,
+        ),
+    ] {
+        for prefix in [0x02, 0x03] {
+            for key in [[&[prefix][..], &vec![0xff; len]].concat(), vec![prefix, 1]] {
+                assert!(ours::signature::ParsedPublicKey::new(ours_alg, &key).is_err());
+                assert!(theirs::signature::ParsedPublicKey::new(theirs_alg, &key).is_err());
+            }
+        }
+    }
 }
 
 /// A DER element tagged `tag` holding `contents`.

@@ -523,6 +523,9 @@ pub(crate) struct Unblinder {
     m: RsaInt,
 }
 
+// Two integers, valid at zero.
+impl crate::low::Zeroable for Unblinder {}
+
 /// An integer at the width of the widest modulus.
 type RsaInt = PosInt<{ rsa_pub::MAX_PUBLIC_MODULUS_BYTES / 8 }>;
 
@@ -535,6 +538,18 @@ fn secret_int(bytes: &[u8]) -> RsaInt {
         *word = bytes.iter().fold(0, |w, b| w << 8 | u64::from(*b));
     }
     RsaInt::from_words(words).expect("no wider than the widest modulus")
+}
+
+/// An RSA private key's big-endian integers, as RFC 8017 names them.
+pub(crate) struct Components<'a> {
+    pub(crate) n: &'a [u8],
+    pub(crate) e: &'a [u8],
+    pub(crate) d: &'a [u8],
+    pub(crate) p: &'a [u8],
+    pub(crate) q: &'a [u8],
+    pub(crate) dp: &'a [u8],
+    pub(crate) dq: &'a [u8],
+    pub(crate) qi: &'a [u8],
 }
 
 /// An RSA signing private key.
@@ -594,31 +609,67 @@ impl SigningKey {
         if decoded.publicExponent.is_negative() {
             return Err(KeyFormatError::RsaExponent.into());
         }
-
-        let n =
-            PosInt::from_bytes(decoded.modulus.as_ref()).map_err(|_| KeyFormatError::RsaModulus)?;
-        let e = public_exponent(decoded.publicExponent.as_ref())?;
-
         // The private integers are secret: only whether one is negative, as
-        // aws-lc refuses, or too wide for its slot is revealed.
+        // aws-lc refuses, is revealed. Their sign bits are read without
+        // `Integer::is_negative`, whose `Option<bool>` branches on the bit.
+        let sign = |x: &asn1::Integer<'_>| x.as_ref().first().map_or(0, |b| b >> 7);
+        if ct::into_public(sign(&decoded.prime1) | sign(&decoded.prime2)) != 0 {
+            return Err(KeyFormatError::RsaPrimes.into());
+        }
+        // One that is negative cannot agree with the others.
+        let others = sign(&decoded.privateExponent)
+            | sign(&decoded.exponent1)
+            | sign(&decoded.exponent2)
+            | sign(&decoded.coefficient);
+        if ct::into_public(others) != 0 {
+            return Err(KeyFormatError::MismatchedRsaComponents.into());
+        }
+        Self::from_unsigned(&Components {
+            n: decoded.modulus.as_ref(),
+            e: decoded.publicExponent.as_ref(),
+            d: decoded.privateExponent.as_ref(),
+            p: decoded.prime1.as_ref(),
+            q: decoded.prime2.as_ref(),
+            dp: decoded.exponent1.as_ref(),
+            dq: decoded.exponent2.as_ref(),
+            qi: decoded.coefficient.as_ref(),
+        })
+    }
+
+    /// Loads an RSA signing key from its big-endian components.
+    ///
+    /// A leading zero byte in `n` or `e` is refused, as ring and aws-lc-rs
+    /// do. The private components are read at the width of their bytes, so
+    /// their leading zero bytes reveal nothing.
+    pub(crate) fn from_components(components: &Components<'_>) -> Result<Self, Error> {
+        let _entry = Entry::new_secret();
+        if components.n.first() == Some(&0) || components.e.first() == Some(&0) {
+            return Err(KeyFormatError::LeadingZero.into());
+        }
+        Self::from_unsigned(components)
+    }
+
+    /// Loads an RSA signing key from its big-endian components.
+    fn from_unsigned(c: &Components<'_>) -> Result<Self, Error> {
+        let n = PosInt::from_bytes(c.n).map_err(|_| KeyFormatError::RsaModulus)?;
+        let e = public_exponent(c.e)?;
+
+        // The private integers are secret: only whether one is too wide for
+        // its slot is revealed, read at the width of its bytes.
         fn secret<const N: usize>(
-            x: &asn1::Integer<'_>,
+            x: &[u8],
             err: KeyFormatError,
         ) -> Result<PosInt<N>, KeyFormatError> {
-            if ct::into_public(x.is_negative()) {
-                return Err(err);
-            }
-            PosInt::from_secret_bytes(x.as_ref()).map_err(|_| err)
+            PosInt::from_secret_bytes(x).map_err(|_| err)
         }
-        let p = secret(&decoded.prime1, KeyFormatError::RsaPrimes)?;
-        let q = secret(&decoded.prime2, KeyFormatError::RsaPrimes)?;
-        // A component that is negative or too wide cannot agree with the
-        // others.
+        let p = secret(c.p, KeyFormatError::RsaPrimes)?;
+        let q = secret(c.q, KeyFormatError::RsaPrimes)?;
+        // A component too wide cannot agree with the others.
         let mismatched = KeyFormatError::MismatchedRsaComponents;
-        let d = secret(&decoded.privateExponent, mismatched)?;
-        let dp = secret(&decoded.exponent1, mismatched)?;
-        let dq = secret(&decoded.exponent2, mismatched)?;
-        let iqmp = secret(&decoded.coefficient, mismatched)?;
+        let d = secret(c.d, mismatched)?;
+        let dp = secret(c.dp, mismatched)?;
+        let dq = secret(c.dq, mismatched)?;
+        let iqmp = secret(c.qi, mismatched)?;
 
         let priv_key = rsa_priv::RsaPrivateKey::new(p, q, d, dp, dq, iqmp, n, e)?;
         Ok(Self(priv_key))
@@ -859,6 +910,9 @@ impl SigningKey {
 
         let s_len = salt.len(em.len(), hash.as_ref().len());
         pkcs1::encode_pss_sig::<H>(em, em_bits, &mut SystemRandom, hash.as_ref(), s_len)?;
+        // The salt is random, but the encoding is public: the public key
+        // recovers it, salt included, from the signature.
+        ct::public_slice(em);
         let m = PosInt::from_bytes(em)?;
         let c = ct::into_public(self.0.private_op(&m)?);
         self.to_signature(&c, signature)
@@ -1758,6 +1812,41 @@ mod tests {
             let key = SigningKey::from_pkcs1_der(&der).unwrap();
             let mut buffer = [0u8; SigningKey::MAX_PKCS1_BUFFER_LEN];
             assert_eq!(key.to_pkcs1_der(&mut buffer).unwrap(), pkcs1);
+
+            // The same integers given apart, each private one without DER's
+            // sign byte and behind zero bytes, which may reach past its slot.
+            let ints = pkix::RSAPrivateKey::from_bytes(pkcs1).unwrap();
+            let unsigned = |x: &asn1::Integer<'_>| {
+                let bytes = x.as_ref();
+                bytes.strip_prefix(&[0]).unwrap_or(bytes).to_vec()
+            };
+            for pad in [0, 1, 2, 9] {
+                let private = [
+                    &ints.privateExponent,
+                    &ints.prime1,
+                    &ints.prime2,
+                    &ints.exponent1,
+                    &ints.exponent2,
+                    &ints.coefficient,
+                ]
+                .map(|x| [vec![0; pad], unsigned(x)].concat());
+                for x in &private {
+                    ct::secret_slice(x);
+                }
+                let [d, p, q, dp, dq, qi] = &private;
+                let key = SigningKey::from_components(&Components {
+                    n: &unsigned(&ints.modulus),
+                    e: &unsigned(&ints.publicExponent),
+                    d,
+                    p,
+                    q,
+                    dp,
+                    dq,
+                    qi,
+                })
+                .unwrap();
+                assert_eq!(key.to_pkcs1_der(&mut buffer).unwrap(), pkcs1);
+            }
         }
 
         let pkcs8 = include_bytes!("rsa/rsa2048.pkcs8.der");

@@ -154,6 +154,13 @@
    fun:*10rind_rcgen3pem6decode*
 }
 {
+   rind-rcgen-pem-char-boundary-debug
+   Memcheck:Cond
+   fun:*4core3str6traits*10SliceIndex*3get*
+   ...
+   fun:*10rind_rcgen3pem6decode*
+}
+{
    rind-rcgen-pem-utf8
    Memcheck:Cond
    fun:*utf8*

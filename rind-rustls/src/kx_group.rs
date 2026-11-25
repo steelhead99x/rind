@@ -1,3 +1,5 @@
+use alloc::boxed::Box;
+
 use crypto::SupportedKxGroup;
 use rind::agreement;
 use rustls::crypto;
@@ -108,8 +110,12 @@ impl crypto::ActiveKeyExchange for Active {
 
 #[cfg(test)]
 mod tests {
+    use std::vec;
+
     use rustls::NamedGroup;
     use rustls::ProtocolVersion;
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    use wasm_bindgen_test::wasm_bindgen_test as test;
 
     use super::*;
 

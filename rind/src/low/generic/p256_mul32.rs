@@ -222,6 +222,14 @@ mod fiat_tests {
     }
 
     proptest! {
+        // The arithmetic is branch-free, so a few cases run all of it under
+        // Miri, whose every case takes seconds and new addresses that a
+        // 32-bit address space runs out of.
+        #![proptest_config(ProptestConfig {
+            cases: if cfg!(miri) { 16 } else { ProptestConfig::default().cases },
+            ..ProptestConfig::default()
+        })]
+
         #[test]
         fn field(x in below(P), y in below(P)) {
             let (x, y) = (Fe(x), Fe(y));

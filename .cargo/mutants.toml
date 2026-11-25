@@ -53,7 +53,7 @@ exclude_re = [
   'rind/src/low/aarch64/aes_gcm\.rs:\d+:\d+: replace \| with \^ in (inc32|lengths)$',
   'rind/src/mid/portable/aes_gcm\.rs:\d+:\d+: replace \| with \^ in (add32|lengths)$',
   'rind/src/low/aarch64/cpu\.rs:\d+:\d+: replace \| with \^ in (detect|detect_once)$',
-  'rind/src/low/generic/bignum\.rs:\d+:\d+: replace \| with \^ in (add_masked|bignum_add|bignum_cmp_lt|bignum_modadd|gcd_step|mod_halve|sub_masked)$',
+  'rind/src/low/generic/bignum\.rs:\d+:\d+: replace \| with \^ in (add_masked|bignum_add|bignum_cmp_lt|bignum_modadd|sub_masked)$',
   'rind/src/low/generic/mont\.rs:\d+:\d+: replace \| with \^ in (cmp_lt_limbs|mod_double|mont_mul_limbs|sub_limbs_masked)$',
   'rind/src/low/generic/limb32\.rs:\d+:\d+: replace \| with \^ in join$',
   'rind/src/low/generic/chacha20\.rs:\d+:\d+: replace \| with \^ in quarter_round$',
@@ -74,9 +74,9 @@ exclude_re = [
   'rind/src/low/x86_64/chacha20poly1305\.rs:\d+:\d+: replace \| with \^$',
   # Pinned to its line: a `const` has no name to match, and only `AES`'s
   # `1 << 0` survives.
-  'rind/src/low/x86_64/cpu\.rs:433:\d+: replace << with >>$',
+  'rind/src/low/x86_64/cpu\.rs:446:\d+: replace << with >>$',
   'rind/src/low/x86_64/cpu\.rs:\d+:\d+: replace \| with \^$',
-  'rind/src/low/x86_64/cpu\.rs:\d+:\d+: replace \| with \^ in (HaveAdxForVg::check|HaveAesHardware::check|HaveAvx::check|HaveAvx512ForVgMlKem::check|HaveAvxMovbeForAesGcm::check|HaveBmi2Adx::check|HaveIfmaForCurve25519::check|HaveIfmaForVgP256::check|HaveSha1::check|HaveSha256::check|HaveSse41::check|HaveVaesAvx2ForAesGcm::check|detect|detect_once)$',
+  'rind/src/low/x86_64/cpu\.rs:\d+:\d+: replace \| with \^ in (HaveAdxForVg::check|HaveAesHardware::check|HaveAvx::check|HaveAvx512ForVgMlKem::check|HaveAvxMovbeForAesGcm::check|HaveBmi2Adx::check|HaveIfmaForCurve25519::check|HaveIfmaForVgChaCha20Poly1305::check|HaveIfmaForVgP256::check|HaveSha1::check|HaveSha256::check|HaveSse41::check|HaveVaesAvx2ForAesGcm::check|detect|detect_once)$',
   'rind/src/low/x86_64/edwards25519_msm_avx2\.rs:\d+:\d+: replace \| with \^$',
   'rind/src/low/x86_64/edwards25519_msm_avx2\.rs:\d+:\d+: replace \| with \^ in (Fe4::diff_sum|Fe4::split)$',
   'rind/src/low/x86_64/ghash\.rs:\d+:\d+: replace \| with \^ in Ghash<\x27a>::add_lengths$',
@@ -146,8 +146,7 @@ exclude_re = [
   # `(t - 16) % 16` and `(t + 16) % 16` are the same window slot. The line is
   # the subtraction: a use above it moves the pin, and pinning the `(t - 7)`
   # line instead would skip a mutant the tests can kill.
-  'rind/src/low/generic/sha256\.rs:70:\d+: replace - with \+ in sha256_compress_block$',
-  'rind/src/low/generic/sha512\.rs:83:\d+: replace - with \+ in sha512_compress_block$',
+  'rind/src/low/generic/sha512_rolled\.rs:85:\d+: replace - with \+ in sha512_compress_block$',
   'rind/src/low/posint\.rs:\d+:\d+: delete match arm 0 in PosInt<N>::mont_exp$',
   'rind/src/low/posint\.rs:\d+:21: replace % with / in PosInt<N>::mont_exp$',
   'rind/src/low/posint\.rs:\d+:21: replace % with \+ in PosInt<N>::mont_exp$',
@@ -269,17 +268,18 @@ exclude_re = [
   'rind/src/low/x86_64/aes_gcm\.rs:\d+:45: replace \* with (\+|/)$',
   'rind/src/low/posint\.rs:\d+:\d+: (replace PosInt<N>::mod_exp_pair_rsaz -> .*|.* in PosInt<N>::mod_exp_pair_rsaz)$',
   # Compiled only for armv7, which no campaign runs: the portable AES-GCM's
-  # crypto-extension half.
-  'rind/src/mid/portable/aes_gcm\.rs:\d+:\d+: (replace (<impl Ghash for GhashTable>::ghash|<impl Parts for Hw>::\w+)( -> .*)? with .*|.* in <impl Parts for Hw>::\w+)$',
+  # crypto-extension and NEON halves.
+  'rind/src/mid/portable/aes_gcm\.rs:\d+:\d+: (replace (<impl Ghash for (GhashTable|NeonTable)>::ghash|<impl BlocksKey for (AesHwKey|NeonKey)>::\w+|<impl Parts for Arm<K, T>>::\w+)( -> .*)? with .*|.* in <impl Parts for Arm<K, T>>::\w+)$',
   # Whether this CPU needs Intel's MXCSR mitigation: no campaign's runner
   # can know what it should find, since nothing outside `cpuid` reports
   # `MCDT_NO`. x86-cpu.yml's SDE rows check `needed` on every model, and
   # `reads_the_vendor` checks `is_intel` on any host.
   'rind/src/low/mcdt\.rs:\d+:\d+: (replace (needed|detect_once|reports_mcdt_no) -> bool with (true|false)|.* in (needed|detect_once|reports_mcdt_no))$',
-  # DIT, which rind sets only on Apple's cores, where no campaign runs:
-  # elsewhere `enter_cpu_state` changes nothing for `Dit`, `Entry`, and
-  # `leave_cpu_state` to restore, and `dit` compiles only for Apple.
-  # `enables_dit_whenever_the_cpu_has_it` tests it on macOS.
+  # DIT, which the aarch64 campaign's runner hides, as GitHub's arm64
+  # runners' hypervisor does: there `enter_cpu_state` changes nothing for
+  # `Dit`, `Entry`, and `leave_cpu_state` to restore.
+  # `enables_dit_whenever_the_os_reports_it` tests it where the OS reports
+  # DIT, as macOS does.
   'rind/src/low/aarch64/cpu\.rs:\d+:\d+: (replace (enter_cpu_state -> u32 with [01]|leave_cpu_state with \(\))|.* dit::\w+( -> .*)?( with .*)?)$',
   'rind/src/low/cpu\.rs:\d+:\d+: (replace (Dit::hold -> Self with .*|<impl Drop for Dit>::drop with \(\))|.* in (Dit::hold|<impl Drop for Dit>::drop))$',
   'rind/src/low/entry\.rs:\d+:\d+: replace <impl Drop for Entry>::drop with \(\)$',
@@ -295,15 +295,16 @@ exclude_re = [
   'rind/src/low/x86_64/cpu\.rs:\d+:45: replace \| with &$',
   'rind/src/low/x86_64/cpu\.rs:\d+:52: replace \| with &$',
   # Pinned to its line: `AVX2_KERNELS`'s `|` at the same column is caught.
-  'rind/src/low/x86_64/cpu\.rs:462:31: replace \| with &$',
+  'rind/src/low/x86_64/cpu\.rs:475:31: replace \| with &$',
   'rind/src/low/x86_64/cpu\.rs:\d+:72: replace \| with &$',
   'rind/src/low/x86_64/cpu\.rs:\d+:17: replace \| with & in HaveAvxMovbeForAesGcm::check$',
   'rind/src/low/x86_64/cpu\.rs:\d+:17: replace \| with & in HaveAesHardware::check$',
+  'rind/src/low/x86_64/cpu\.rs:\d+:(17|24|34): replace \| with & in HaveIfmaForVgChaCha20Poly1305::check$',
   'rind/src/low/x86_64/cpu\.rs:\d+:\d+: replace enter_cpu_state -> u32 with 1$',
   # Pinned to its line: the `cpu_denied` of a release build or one without
   # an OS, which tests never are. The debug build's, under the same name, is
   # caught.
-  'rind/src/low/mod\.rs:199:\d+: replace cpu_denied -> bool with true$',
+  'rind/src/low/mod\.rs:231:\d+: replace cpu_denied -> bool with true$',
   # The FIPS module's `SystemRandom`, compiled only under `--cfg rind_fips`,
   # which no mutation run sets; `fips_rng`'s tests cover what it calls.
   # Pinned to its line: the other `fill`, under the same name, is caught.
@@ -396,4 +397,7 @@ exclude_re = [
   # `vg_public_key_matches_comb` and `vg_verify_matches_rind` check; only the
   # time differs.
   'rind/src/low/(x86_64|aarch64)/p384_vg\.rs:\d+:\d+: replace (MulBase|Verify)::check -> Option<Self> with None$',
+  # Refusing VG's ChaCha20-Poly1305 runs aws-lc's, which computes the same
+  # result, as `paths_match` checks; only the time differs.
+  'rind/src/low/x86_64/cpu\.rs:\d+:\d+: replace HaveIfmaForVgChaCha20Poly1305::check -> Option<Self> with None$',
 ]

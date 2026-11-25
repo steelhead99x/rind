@@ -169,10 +169,24 @@ opaque low.x86_64.aes_gcm_vaes.VaesKernel.avx2
 opaque low.generic.zeroise.zeroise_value {T : Type} (ZeroableInst : low.generic.zeroise.Zeroable T) :
   T → Result T
 
-/-! ChaCha20-Poly1305's routines: aws-lc's one-pass seal and open, behind
-their Rust wrapper, whose contract `Rind.X86_64.ChaCha20Poly1305`'s `OnePass`
-states as a hypothesis, and the separate passes CPUs without SSE4.1 run,
-which no theorem is about. -/
+/-! ChaCha20-Poly1305's routines: pyca/verified-garbage's AVX-512 IFMA seal
+and open, behind one wrapper each, which no theorem is about yet; aws-lc's
+one-pass seal and open, behind their Rust wrapper, whose contract
+`Rind.X86_64.ChaCha20Poly1305`'s `OnePass` states as a hypothesis; and the
+separate passes CPUs without SSE4.1 run, which no theorem is about. -/
+
+opaque low.x86_64.cpu.HaveIfmaForVgChaCha20Poly1305.check
+  : Result (Option low.x86_64.cpu.HaveIfmaForVgChaCha20Poly1305)
+
+opaque low.x86_64.chacha20poly1305.seal_ifma
+  : low.x86_64.cpu.HaveIfmaForVgChaCha20Poly1305 → Std.Array Std.U8 32#usize →
+    Std.Array Std.U8 12#usize → Slice Std.U8 → Slice Std.U8 →
+    Result ((Std.Array Std.U8 16#usize) × (Slice Std.U8))
+
+opaque low.x86_64.chacha20poly1305.open_ifma
+  : low.x86_64.cpu.HaveIfmaForVgChaCha20Poly1305 → Std.Array Std.U8 32#usize →
+    Std.Array Std.U8 12#usize → Slice Std.U8 → Slice Std.U8 → Std.Array Std.U8 16#usize →
+    Result (Bool × (Slice Std.U8))
 
 opaque low.x86_64.chacha20poly1305.one_pass
   : low.x86_64.cpu.HaveSse41 → Option low.x86_64.cpu.HaveAvx2 → Std.Array Std.U8 32#usize →
@@ -304,6 +318,11 @@ states. -/
 opaque low.x86_64.rsa_ifma.RsaIfma.public
   : low.x86_64.rsa_ifma.RsaIfma → Slice Std.U8 → Slice Std.U64 → Slice Std.U8 → Slice Std.U8 →
     Result (Bool × Slice Std.U8)
+
+/-- pyca/verified-garbage's RSA `R² mod n`, behind the Rust that sizes its
+scratch and calls it, which `Rind.X86_64.VgRsa` states. -/
+opaque low.x86_64.rsa_vg.Precompute.precompute
+  : low.x86_64.rsa_vg.Precompute → Slice Std.U64 → Slice Std.U8 → Result (Bool × Slice Std.U64)
 
 opaque low.x86_64.rsa_ifma.IfmaCrt.crt
   : low.x86_64.rsa_ifma.IfmaCrt → Slice Std.U8 → Slice Std.U8 → Slice Std.U8 → Slice Std.U8 →
@@ -476,25 +495,21 @@ opaque low.x86_64.p384_montjmixadd_alt.p384_montjmixadd_alt
   Array Std.U64 18#usize → Array Std.U64 18#usize → Array Std.U64 12#usize
     → Result (Array Std.U64 18#usize)
 
-/-- Whether pyca/verified-garbage's P-384 `d·G` runs on this CPU, which
-`admin/prove` leaves opaque, as it does the routines it calls: they are VG's
-assembly. -/
+/-! Whether the CPU runs pyca/verified-garbage's P-384 `d·G`, for key
+generation and ECDSA's nonces, and its ECDSA verification, which read no
+input, and its routines behind their Rust wrappers, whose contracts
+`Rind.X86_64.VgP384` states. -/
+
 opaque low.x86_64.p384_vg.MulBase.check
   : Result (Option low.x86_64.p384_vg.MulBase)
 
-/-- pyca/verified-garbage's `d·G` for key generation and ECDSA's nonces,
-opaque as `low.x86_64.p384_vg.MulBase.check` is. -/
 opaque low.x86_64.p384_vg.MulBase.public_key
   : low.x86_64.p384_vg.MulBase → Array Std.U8 48#usize →
     Result (Option (Array Std.U8 97#usize))
 
-/-- Whether pyca/verified-garbage's P-384 ECDSA verification runs on this
-CPU, opaque as `low.x86_64.p384_vg.MulBase.check` is. -/
 opaque low.x86_64.p384_vg.Verify.check
   : Result (Option low.x86_64.p384_vg.Verify)
 
-/-- pyca/verified-garbage's P-384 ECDSA verification, opaque as
-`low.x86_64.p384_vg.MulBase.check` is. -/
 opaque low.x86_64.p384_vg.Verify.ecdsa_verify
   :
   low.x86_64.p384_vg.Verify → Array Std.U8 97#usize → Array Std.U8 48#usize →
