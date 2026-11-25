@@ -289,3 +289,25 @@
    Memcheck:Cond
    fun:*2vg26vg_mldsa??_sign_with_cache26vg_mldsa??_sign_with_cache
 }
+# The two routines the loop calls on each attempt's public outputs: the
+# challenge SampleInBall expands from c_tilde (branches and the loads it
+# indexes), and HintBitPack's walk over the hint. rind's own signing
+# declassifies both (`c_tilde` and the hint in `mid/mldsa.rs`), and FIPS 204
+# publishes them in the signature. Only these two innermost frames, and only
+# these findings: a secret-dependent jump or address anywhere else still
+# reports. Their callers have no unwind info, so the frame is matched alone.
+{
+   vg-mldsa-sample-in-ball-branch
+   Memcheck:Cond
+   fun:*2vg23vg_mldsa_sample_in_ball23vg_mldsa_sample_in_ball
+}
+{
+   vg-mldsa-sample-in-ball-index
+   Memcheck:Value8
+   fun:*2vg23vg_mldsa_sample_in_ball23vg_mldsa_sample_in_ball
+}
+{
+   vg-mldsa-hint-bit-pack-branch
+   Memcheck:Cond
+   fun:*2vg22vg_mldsa_hint_bit_pack22vg_mldsa_hint_bit_pack
+}
