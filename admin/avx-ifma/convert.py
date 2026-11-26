@@ -229,6 +229,29 @@ nv = 0
 LP = name[3:] + "_"
 FRAME = 32 * nslots if spills else 0
 pathlib.Path(f"spill_{name}").write_text(str(FRAME))
+# VG proves `Target.noResidue` for its routine: nothing it leaves below the caller's
+# stack pointer depends on secrets. A converted routine that spills, or calls one
+# that does, frees that frame without clearing it, so it can hold the spilled
+# intermediates, secret where the inputs are. rind leaves such stack temporaries
+# unwiped (AGENTS.md), so the contract says so instead of inheriting VG's
+# guarantee. `frames_<name>` is the routine's own frame plus every converted
+# callee's, transitively; admin/avx-ifma/generate's first pass writes them all.
+def frames(k):
+    f = pathlib.Path(f"frames_{k}")
+    return int(f.read_text()) if f.exists() else 0
+residue = FRAME + sum(frames(k) for k in syms if k in CONV)
+pathlib.Path(f"frames_{name}").write_text(str(residue))
+if residue:
+    docs = [
+        "/// Unlike VG's routine, it does not promise `Target.noResidue`: the ymm registers "
+        "spilled below the stack pointer, by it or by the converted routines it calls, are "
+        "left there uncleared when it returns, so that stack can hold intermediates derived "
+        "from its inputs, secret ones included. rind leaves stack temporaries like these "
+        "unwiped, as it does its own."
+        if "Target.noResidue" in l
+        else l
+        for l in docs
+    ]
 if FRAME:
     out.append(f"lea -{FRAME}(%rsp), %rsp")
 for i, (a, b, t) in enumerate(ins):

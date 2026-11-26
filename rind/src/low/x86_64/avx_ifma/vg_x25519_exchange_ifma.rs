@@ -13,7 +13,7 @@
 ///
 /// Contract: `VG.Spec.X25519.exchangeContract`. Constant time: only the pointers may affect timing, not the scalar or the u-coordinate; the return value depends on both.
 ///
-/// It returns without secret residue: what it leaves in the registers, the flags and the stack below the caller's stack pointer is determined by what its caller left there and by public data (`Target.noResidue`).
+/// Unlike VG's routine, it does not promise `Target.noResidue`: the ymm registers spilled below the stack pointer, by it or by the converted routines it calls, are left there uncleared when it returns, so that stack can hold intermediates derived from its inputs, secret ones included. rind leaves stack temporaries like these unwiped, as it does its own.
 ///
 /// # Safety
 ///
