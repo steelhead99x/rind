@@ -12,6 +12,7 @@ refuses any other host; `--preflight` runs only those checks.
 | `admin/hw/ristretto255-avx2.sh` | [steelhead99x/rind#256](https://github.com/steelhead99x/rind/pull/256), the `oprf` bench | idle Linux, AVX2 without ADX (Haswell) |
 | `admin/hw/ipad-dit-matrix.sh` | [steelhead99x/rind#277](https://github.com/steelhead99x/rind/pull/277), the A/B/C/D matrix | a Mac with Xcode, and the iPads |
 | `admin/hw/mldsa-sign-vg.sh` | [steelhead99x/rind#315](https://github.com/steelhead99x/rind/pull/315), ML-DSA without AVX2 against verified-garbage | idle dedicated Linux x86_64 with AVX2 |
+| `admin/hw/esp32s3-sha512-split.sh` | [steelhead99x/rind#326](https://github.com/steelhead99x/rind/pull/326), SHA-512 with no carry branch: layout check, branch count, then the board A/B by hand | Linux x86_64 with the espup toolchain; the S3 board for the A/B |
 
 The x86_64 scripts follow the A/B rules: each revision is built in its own
 checkout and target dir, binaries of different commits must not hash equal,

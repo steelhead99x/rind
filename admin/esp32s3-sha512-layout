@@ -68,7 +68,15 @@ rolled_ceiling=4096
 
 mkdir -p "$root/.tmp"
 work=$(mktemp -d "$root/.tmp/sha512-layout.XXXXXX")
-trap 'rm -rf "$work"' EXIT
+# RIND_SHA512_LAYOUT_KEEP=DIR copies every probe object to DIR before the
+# work directory goes, for admin/hw/esp32s3-sha512-split.sh's branch count.
+keep_objects() {
+  if [ -n "${RIND_SHA512_LAYOUT_KEEP:-}" ] && [ -d "$work/obj" ]; then
+    mkdir -p "$RIND_SHA512_LAYOUT_KEEP"
+    cp "$work"/obj/*.o "$RIND_SHA512_LAYOUT_KEEP"/ 2>/dev/null || true
+  fi
+}
+trap 'keep_objects; rm -rf "$work"' EXIT
 
 # ESP-IDF v5.5.1's ESP32-S3 core-isa.h, beside the QEMU run below.
 # XCHAL_UNALIGNED_LOAD_HW is the Hardware Alignment option, which covers
@@ -123,13 +131,14 @@ for tool in "$rustc" "$cargo" "$objdump" "$readelf" "$nm" "$ar" "$gcc" "$ld"; do
 done
 
 # The real compressor, plus an entry so the block is live: the ESP32-S3's
-# `sha512_esp32s3`, the rolled loop it falls back to, and `sha512`, whose
-# `K` both read, as sibling modules, as they are in rind's `generic`. The
+# `sha512_esp32s3`, the rolled loop it falls back to, `sha512`, whose `K`
+# both read, and `sum64`, through which both add, as sibling modules, as
+# they are in rind's `generic`. The
 # whole files are copied: their `tests` modules compile only the probe
 # exports here, under cfg(rind_sha512_load_probe), and nothing in the other
 # builds. The feature name matches rind's, so the cfg in the source applies.
 mkdir -p "$work/probe/src"
-for f in sha512 sha512_rolled sha512_esp32s3; do
+for f in sha512 sha512_rolled sha512_esp32s3 sum64; do
   cp "$root/rind/src/low/generic/$f.rs" "$work/probe/src/$f.rs"
 done
 
@@ -151,6 +160,7 @@ tr -d ' \n' <"$root/rind/src/lib.rs" |
 mod sha512;
 mod sha512_esp32s3;
 mod sha512_rolled;
+mod sum64;
 
 #[unsafe(no_mangle)]
 pub fn sha512_entry(state: &mut [u64; 8], blocks: &[u8]) {
