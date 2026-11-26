@@ -94,15 +94,21 @@ impl Dit {
         items.into_iter().try_for_each(&mut each)
     }
 
-    /// Whether a guard on this thread is holding DIT on: never, since the
-    /// module sets no DIT.
+    /// Whether a guard is live on this thread, as `rind::cpu::Dit::is_held`
+    /// reports it inside the module.
+    ///
+    /// `true` while a guard is live on an aarch64 target with an OS, where
+    /// the module counts guards, whether or not the core has DIT; always
+    /// `false` on x86_64, where a guard holds nothing.
     ///
     /// ```
+    /// assert!(!rind_fips::cpu::Dit::is_held());
     /// let total = rind_fips::cpu::Dit::with(|| {
-    ///     assert!(!rind_fips::cpu::Dit::is_held());
+    ///     assert_eq!(rind_fips::cpu::Dit::is_held(), cfg!(target_arch = "aarch64"));
     ///     2 + 2
     /// });
     /// assert_eq!(total, 4);
+    /// assert!(!rind_fips::cpu::Dit::is_held());
     /// assert_eq!(
     ///     rind_fips::cpu::Dit::batch([1, 2, 3], |n| if n < 3 { Ok(()) } else { Err(n) }),
     ///     Err(3)
@@ -110,7 +116,8 @@ impl Dit {
     /// ```
     #[must_use]
     pub fn is_held() -> bool {
-        false
+        // SAFETY: no arguments.
+        unsafe { ffi::rind_fips_dit_is_held() }
     }
 }
 
@@ -146,6 +153,26 @@ mod tests {
         // SAFETY: the caller checked that the core has DIT.
         unsafe { core::arch::asm!("mrs {}, S3_3_C4_C2_5", out(reg) pstate) };
         pstate & (1 << 24) != 0
+    }
+
+    // `is_held` follows this thread's guards, nested and in either drop
+    // order, and another thread's guard is not this one's.
+    #[test]
+    fn is_held_follows_guards() {
+        let held = cfg!(target_arch = "aarch64");
+        assert!(!super::Dit::is_held());
+        let first = super::Dit::hold();
+        assert_eq!(super::Dit::is_held(), held);
+        let second = super::Dit::hold();
+        drop(first);
+        assert_eq!(super::Dit::is_held(), held);
+        std::thread::spawn(|| assert!(!super::Dit::is_held()))
+            .join()
+            .unwrap();
+        drop(second);
+        assert!(!super::Dit::is_held());
+        assert_eq!(super::Dit::with(super::Dit::is_held), held);
+        assert!(!super::Dit::is_held());
     }
 
     // The module holds DIT until the last of this thread's guards drops, in
