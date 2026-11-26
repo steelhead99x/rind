@@ -20,12 +20,18 @@ for section, ops in br.SECTIONS:
 out += ["];", "", "/// rind-bench row name -> report library name.", "pub const LIBRARIES: &[(&str, &str)] = &["]
 for row, name in br.LIBRARIES.items():
     out.append(f"    ({s(row)}, {s(name)}),")
+# build.rs reads REQUIRED and CRATES through `include!`; the library does not,
+# so each carries `#[allow(dead_code)]` with that reason.
 out += ["];", "", "/// Library -> (arch, CPU features it needs, as rind-cpuid names them).",
+        "/// build.rs reads it through this file; the library does not.",
+        "#[allow(dead_code)]",
         "pub const REQUIRED: &[(&str, &str, &[&str])] = &["]
 for lib, arches in br.REQUIRED.items():
     for arch, feats in arches.items():
         out.append(f"    ({s(lib)}, {s(arch)}, &[{', '.join(s(f) for f in feats)}]),")
-out += ["];", "", "/// Library -> crates whose versions a result records.", "pub const CRATES: &[(&str, &[&str])] = &["]
+out += ["];", "", "/// Library -> crates whose versions a result records. build.rs reads it",
+        "/// through this file; the library does not.", "#[allow(dead_code)]",
+        "pub const CRATES: &[(&str, &[&str])] = &["]
 for lib, crates in br.CRATES.items():
     out.append(f"    ({s(lib)}, &[{', '.join(s(c) for c in crates)}]),")
 out += ["];", ""]
