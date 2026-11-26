@@ -415,61 +415,85 @@ def bind_statics(name, got, got_statics, want, want_statics, bound, text, checke
     build, `want_statics` for VG's, each by its last component) or one of its
     own routines (`checked`, the routines of rind's build the
     routine-by-routine comparison covers, and `want_routines`, VG's compiled
-    routines, each a path by its last component); only then are the builds
-    compared by last component. A target that is no static of either side
-    must be a routine of VG's `text` and of `checked`: a constant pool
-    section or any other symbol fails, since its bytes are bound by nothing,
-    and so does a routine of VG's text that rind's build does not hold, which
-    nothing compares, or a symbol that only shares a static's or routine's
-    last component. Adds each static to `bound`."""
+    routines, each a path by its last component). The two builds' relocations
+    are then taken in pairs, position by position, and each pair must name the
+    same last component and resolve to the same kind, both statics or both
+    routines, before any bytes are compared or a static's own relocations
+    followed: a routine of one build is never matched to a same-named static
+    of the other. A target that is no static of either side must be a routine
+    of VG's `text` and of `checked`: a constant pool section or any other
+    symbol fails, since its bytes are bound by nothing, and so does a routine
+    of VG's text that rind's build does not hold, which nothing compares, or a
+    symbol that only shares a static's or routine's last component. Adds each
+    static to `bound`."""
     if want_routines is None:
         want_routines = {n: n for n in text}
 
-    def resolve_want(insn_or_static):
-        for r, p in zip(insn_or_static.relocs, insn_or_static.paths):
-            if resolve("VG's build", name, r[2], p, want_statics, want_routines) is None:
-                fail(f"{name}: VG's build reaches {p}, which is neither its static nor "
-                     f"its routine, so nothing binds its bytes")
+    def resolved_got(relocs, paths):
+        out = []
+        for r, path in zip(relocs, paths):
+            n = r[2]
+            kind = resolve("rind's build", name, n, path, got_statics, checked)
+            if kind is None:
+                if n not in text:
+                    fail(f"{name}: reaches {path}, which is neither a static of either build "
+                         f"nor a routine of VG's text, so nothing binds its bytes")
+                fail(f"{name}: reaches {path}, the routine {n} of VG's text, which is not "
+                     f"in rind's build, so nothing compares its bytes")
+            if kind == "routine" and n not in text:
+                fail(f"{name}: reaches the routine {path}, which is not a routine of VG's "
+                     f"text, so nothing binds its bytes")
+            out.append((r, kind, path))
+        return out
 
-    for i in want:
-        resolve_want(i)
-    todo = [(r[2], p) for i in got for r, p in zip(i.relocs, i.paths)]
+    def resolved_want(relocs, paths):
+        out = []
+        for r, path in zip(relocs, paths):
+            kind = resolve("VG's build", name, r[2], path, want_statics, want_routines)
+            if kind is None:
+                fail(f"{name}: VG's build reaches {path}, which is neither its static nor "
+                     f"its routine, so nothing binds its bytes")
+            out.append((r, kind, path))
+        return out
+
+    def pair(what, g, w):
+        """`g` and `w`'s resolved relocations, which must agree in pairs."""
+        if [x[0] for x in g] != [x[0] for x in w]:
+            fail(f"{name}: {what} has relocations {[x[0] for x in g]} in rind's build but "
+                 f"{[x[0] for x in w]} in VG's")
+        for (r, gk, gp), (_, wk, wp) in zip(g, w):
+            if gk != wk:
+                fail(f"{name}: {what} relocates {r[2]} to the {gk} {gp} in rind's build but "
+                     f"to the {wk} {wp} in VG's")
+        return [(r[2], gp) for r, gk, gp in g if gk == "static"]
+
+    todo = pair("the routine",
+                resolved_got([r for i in got for r in i.relocs], [p for i in got for p in i.paths]),
+                resolved_want([r for i in want for r in i.relocs], [p for i in want for p in i.paths]))
     seen = set()
     while todo:
         n, path = todo.pop()
         if (n, path) in seen:
             continue
         seen.add((n, path))
-        kind = resolve("rind's build", name, n, path, got_statics, checked)
-        if kind != "static":
-            if n in want_statics:
-                fail(f"{name}: VG's routine reaches the static {n}, which rind's build does "
-                     f"not define, but reaches {path}")
-            if n not in text:
-                fail(f"{name}: reaches {path}, which is neither a static of either build "
-                     f"nor a routine of VG's text, so nothing binds its bytes")
-            if kind is None:
-                fail(f"{name}: reaches {path}, the routine {n} of VG's text, which is not "
-                     f"in rind's build, so nothing compares its bytes")
-            # A routine, which the routine-by-routine comparison covers.
-            continue
         if n not in want_statics:
             fail(f"{name}: rind's build reaches the static {n}, which VG's does not define")
         g, w = got_statics[n], want_statics[n]
-        if (g.size, g.data, g.relocs) != (w.size, w.data, w.relocs):
+        if (g.size, g.data) != (w.size, w.data):
             fail(f"{name}: rind's static {g.path} ({g.size} bytes) is not VG's {w.path} "
-                 f"({w.size} bytes): its bytes or relocations differ")
-        resolve_want(w)
+                 f"({w.size} bytes): its bytes differ")
+        todo += pair(f"the static {n}", resolved_got(g.relocs, g.paths),
+                     resolved_want(w.relocs, w.paths))
         bound.add(n)
-        todo += [(r[2], p) for r, p in zip(g.relocs, g.paths)]
 
 
 def self_test():
     """Fails unless `bind_statics` rejects a relocation to a symbol that is
     no static and no routine of the text, to a routine of the text that
-    rind's build does not hold, or to a static outside `vg` that shares a
-    `vg` static's name, and accepts one to a routine of both and to the `vg`
-    static VG's routine reaches."""
+    rind's build does not hold, to a static outside `vg` that shares a `vg`
+    static's name, or to a static where VG's routine relocates to a
+    same-named routine, or the reverse, and accepts one to a routine of both
+    and to the `vg` static VG's routine reaches."""
     def static(path, data="00"):
         st = Static()
         st.section, st.size, st.data, st.relocs, st.paths, st.path = \
@@ -481,25 +505,33 @@ def self_test():
         i.relocs.append((0, "R_X86_64_PLT32", target.split("::")[-1], 0))
         i.paths.append(target)
         return [i]
-    text = {"vg_a": [], "vg_b": []}
-    rind = {"vg_a": "rind::vg::vg_a", "vg_b": "rind::vg::vg_b"}
+    text = {"vg_a": [], "vg_b": [], "K": []}
+    rind = {"vg_a": "rind::vg::vg_a", "vg_b": "rind::vg::vg_b", "K": "rind::vg::K"}
+    vg = {"vg_a": "verified_garbage::vg_a", "vg_b": "verified_garbage::vg_b",
+          "K": "verified_garbage::asm::K"}
     k_rind = {"K": static("rind::low::vg::K")}
     k_vg = {"K": static("verified_garbage::K")}
-    bind_statics("vg_a", routine("rind::vg::vg_b"), {}, [], {}, set(), text, rind)
-    bind_statics("vg_a", routine("rind::low::vg::K"), k_rind, routine("verified_garbage::K"),
-                 k_vg, set(), text, rind)
-    for target, tx, checked, statics in (
-            (".rodata.cst16", {"vg_a": []}, {"vg_a": "rind::vg::vg_a"}, {}),
-            ("rind::vg::vg_b", text, {"vg_a": "rind::vg::vg_a"}, {}),
-            ("rind::low::other::K", text, rind, k_rind),
-            ("rind::other::vg_b", text, rind, {})):
+    ok = (("rind::vg::vg_b", "verified_garbage::vg_b", {}),
+          ("rind::low::vg::K", "verified_garbage::K", k_rind),
+          ("rind::vg::K", "verified_garbage::asm::K", k_rind))
+    for got, want, statics in ok:
+        bind_statics("vg_a", routine(got), statics, routine(want), k_vg, set(), text, rind, vg)
+    bad = ((".rodata.cst16", "verified_garbage::vg_b", {"vg_a": []}, {"vg_a": "rind::vg::vg_a"}, {}),
+           ("rind::vg::vg_b", "verified_garbage::vg_b", text, {"vg_a": "rind::vg::vg_a"}, {}),
+           ("rind::low::other::K", "verified_garbage::K", text, rind, k_rind),
+           ("rind::other::vg_b", "verified_garbage::vg_b", text, rind, {}),
+           # The same last component, but a static in one build and a routine
+           # in the other, both ways.
+           ("rind::low::vg::K", "verified_garbage::asm::K", text, rind, k_rind),
+           ("rind::vg::K", "verified_garbage::K", text, rind, k_rind))
+    for target, want, tx, checked, statics in bad:
         try:
-            bind_statics("vg_a", routine(target), statics, routine("verified_garbage::K"),
-                         k_vg, set(), tx, checked)
+            bind_statics("vg_a", routine(target), statics, routine(want), k_vg, set(), tx,
+                         checked, vg)
         except SystemExit as e:
             if target in str(e):
                 continue
-        fail(f"self-test: a relocation to {target} passed")
+        fail(f"self-test: a relocation to {target} against VG's {want} passed")
 
 
 def groups(arch, lines, insns):
