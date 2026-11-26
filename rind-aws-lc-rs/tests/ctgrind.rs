@@ -562,3 +562,59 @@ fn unbacked_private_keys() {
         assert_eq!(err.description_(), expected);
     }
 }
+
+/// `PqdsaKeyPair::from_pkcs8` checks that an EC key's public point on a
+/// curve rind cannot back is its scalar's, and that an RSA key below 2048
+/// bits is consistent, before refusing either: `WrongAlgorithm` when it
+/// is, `InvalidEncoding` when not. The scalar and the six RSA private
+/// INTEGERs are marked secret; framing, the public point, n, and e are
+/// public.
+#[cfg(not(any(miri, target_family = "wasm")))]
+#[test]
+fn unbacked_key_consistency() {
+    use rind_aws_lc_rs::signature::{ML_DSA_44_SIGNING, PqdsaKeyPair};
+
+    let refuse = |doc: &[u8], secrets: &[core::ops::Range<usize>], expected: &str| {
+        for range in secrets {
+            secret(&doc[range.clone()]);
+        }
+        let err = PqdsaKeyPair::from_pkcs8(&ML_DSA_44_SIGNING, doc).unwrap_err();
+        public(err.description_().as_bytes());
+        assert_eq!(err.description_(), expected);
+    };
+
+    // secp256k1 with scalar 1 and G (OpenSSL's encoding), then scalar 2.
+    let k1 = hex::decode(
+        "308184020100301006072a8648ce3d020106052b8104000a046d306b02010104200000000000000000000000000000000000000000000000000000000000000001a1440342000479be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8",
+    )
+    .unwrap();
+    let scalar = 33..65;
+    assert_eq!(k1[scalar.end - 1], 1);
+    refuse(&k1, std::slice::from_ref(&scalar), "WrongAlgorithm");
+    let mut k2 = k1.clone();
+    k2[scalar.end - 1] = 2;
+    refuse(&k2, &[scalar], "InvalidEncoding");
+
+    // RSA-1024 from Wycheproof, then with its CRT coefficient corrupted.
+    let rsa = hex::decode("30820277020100300d06092a864886f70d0101010500048202613082025d02010002818100d8917628e8923e137bea7c3e38e8b3c9f450c7a367d600e1a8c11342f058ffe805489d4d92f8588d014f18e5c27cea30fa644e71d46696447c44503bb9dc52e51422a571a85bf4a905da23f9ea59ce30b5f2eec76dab1c16944ea8b48483028202d18480d7e0e3ce78d078a6b783c33431dac86e34faf55cb3b6e0211ff2424b02030100010281807957874d04826c259e989364899e589e1f35e3a5bad83d4632b77b83560787db089ad7085000b61ccb4ef63445f4978339c859eb8d86ad4b5215349f4254205d117f98e11bb3557e3c6c2f5b2858992e43c5e07c9434f40c3852bbbd3587eb6bb3cea25cbc90a71de1ce189b83ff90daa4e3155fcc623cc5eec74a942f1c8901024100fde3a3ce09c42388577b89b51f698f0bacb8901009b5e2dabc0ffd87603827b341fc7c9a6de912f4590eebb35efc4b8639fb8b1a7a68bdb8a6e10987783a8f79024100da5e63e8305a91c2137849ae4328e6dcff7e9b617777c991340e1e11ea5d244aafeaa0c0624a1c9a41ce4e4e47b84a8b202802135aa06e7704276ce2a698dae3024100b53d8bf1c986fad6999cd6f1353b65a22fea90ece201b5aff0107a2be9c42c930ac7f32b4acad77d17164fabfc629e87735cde3048b1fcbd94639129e3e9ea0102402246b4a9ea851ce1f8ca65ce5bae5ce68d9822ed9ea207daa9f0195a388e5c36f8fbfc359678099b50ff001d9b765b05118c161f5197631f7d606edff8c47f7f024100d84310b6d51b56e7e5f32aa5f09ef77ef2aa0d13a592228c418a9794276beea194345cdf5c1003ab48a83a1dd3c99ef87e6bd8b47dd3d5e423b348ac0da5ac7b").unwrap();
+    // The six private INTEGERs' contents, after the version, n, and e.
+    let mut secrets = Vec::new();
+    let mut at = 30; // past the PKCS#8 header and the RSAPrivateKey's.
+    for field in 0..9 {
+        assert_eq!(rsa[at], 0x02);
+        let (len, header) = match rsa[at + 1] {
+            0x81 => (usize::from(rsa[at + 2]), 3),
+            0x82 => (usize::from(rsa[at + 2]) << 8 | usize::from(rsa[at + 3]), 4),
+            len => (usize::from(len), 2),
+        };
+        if field >= 3 {
+            secrets.push(at + header..at + header + len);
+        }
+        at += header + len;
+    }
+    assert_eq!(at, rsa.len());
+    refuse(&rsa, &secrets, "WrongAlgorithm");
+    let mut bad = rsa.clone();
+    *bad.last_mut().unwrap() ^= 1;
+    refuse(&bad, &secrets, "InvalidEncoding");
+}

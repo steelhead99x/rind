@@ -13,7 +13,7 @@ use crate::encoding::{AsDer, Pkcs8V1Der, PublicKeyX509Der};
 use crate::error::{KeyRejected, Unspecified, unspecified};
 use crate::signature::{KeyPair, ParsedKey, private, verification_algorithm};
 use crate::wipe::Wiped;
-use crate::{Hex, der, evp, pkcs8};
+use crate::{Hex, der, evp, pkcs8, rsa_check};
 
 /// An ML-DSA parameter set.
 #[allow(non_camel_case_types)]
@@ -602,12 +602,16 @@ fn rsa_private_key(pkcs8: &[u8]) -> bool {
     rind::rsa::KeyPair::from_pkcs8(pkcs8).is_ok() || unbacked_rsa_size(parts.private_key)
 }
 
-/// Whether a two-prime PKCS#1 `RSAPrivateKey`'s modulus is outside the 2048
-/// to 8192 bits rind signs with. rind cannot back such a key, so it is
-/// refused as another algorithm from its public framing and modulus length
-/// alone, without reading the private components.
+/// Whether a two-prime PKCS#1 `RSAPrivateKey` is outside the 2048 to 8192
+/// bits rind signs with and still parses in aws-lc: its framing, and
+/// `RSA_check_key`'s relations between its private components, checked in
+/// constant time by [`rsa_check::consistent`]. rind cannot back such a key,
+/// so a consistent one is another algorithm and an inconsistent one does not
+/// parse.
 fn unbacked_rsa_size(pkcs1: &[u8]) -> bool {
-    der::rsa_private_key_modulus_bits(pkcs1).is_some_and(|bits| !(2048..=8192).contains(&bits))
+    der::rsa_private_key_parts(pkcs1).is_some_and(|parts| {
+        !(2048..=8192).contains(&der::bits(parts.n)) && rsa_check::consistent(&parts)
+    })
 }
 
 /// An ML-KEM private key in RFC 9935's seed form or expanded form.

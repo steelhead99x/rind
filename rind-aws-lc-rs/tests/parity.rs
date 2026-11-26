@@ -3,8 +3,7 @@
 //! Each case is loaded through rind-aws-lc-rs and through the locked
 //! aws-lc-rs 1.19.0. Both must accept or both must reject. A rejection must
 //! use the same [`KeyRejected::description_()`]. An acceptance must produce
-//! the same public key. The one recorded difference, `check_unbacked`, is the
-//! one rind-aws-lc-rs's README lists: a key of a type rind cannot back.
+//! the same public key, with no recorded differences.
 
 #![cfg(not(any(miri, target_family = "wasm")))]
 
@@ -53,19 +52,6 @@ impl Report {
                 format!("rind={} aws-lc-rs={}", brief(ours), brief(theirs))
             };
             self.failures.push(format!("MISMATCH {label}: {detail}"));
-        }
-    }
-
-    /// A key of a type rind cannot back, refused from public facts: rind says
-    /// `WrongAlgorithm` and aws-lc-rs `expected`, the one difference
-    /// rind-aws-lc-rs's README lists for it.
-    fn check_unbacked(&mut self, label: &str, ours: &str, theirs: &str, expected: &str) {
-        if theirs != expected || ours != "err:WrongAlgorithm" {
-            self.failures.push(format!(
-                "UNBACKED {label}: rind={} aws-lc-rs={} expected rind=err:WrongAlgorithm aws-lc-rs={expected}",
-                brief(ours),
-                brief(theirs)
-            ));
         }
     }
 
@@ -605,11 +591,7 @@ fn pqdsa_from_pkcs8_rsa_consistency() {
         );
         let label = format!("{name} inconsistent qInv");
         let (ours, theirs) = load_pkcs8(65, &corrupt_coefficient(&doc));
-        if matches!(name, "rsa2047" | "rsa1024") {
-            report.check_unbacked(&label, &ours, &theirs, "err:InvalidEncoding");
-        } else {
-            report.check(&label, &ours, &theirs, Some("err:InvalidEncoding"));
-        }
+        report.check(&label, &ours, &theirs, Some("err:InvalidEncoding"));
     }
     check_pkcs8(
         &mut report,
@@ -838,9 +820,9 @@ fn ec_mismatched_point() {
 }
 
 /// EC keys on every curve aws-lc builds in, by name and by explicit
-/// parameters, and DSA keys, valid and not, refused with aws-lc-rs's kind;
-/// and the one recorded difference, a public key on a curve rind cannot back
-/// that is not the scalar's.
+/// parameters, and DSA keys, valid and not, refused with aws-lc-rs's kind,
+/// including a public key on a curve rind cannot back that is not the
+/// scalar's.
 #[test]
 fn unbacked_ec_and_dsa() {
     let mut report = Report::new();
@@ -848,14 +830,9 @@ fn unbacked_ec_and_dsa() {
         let fixture = fixture.map(|kind| format!("err:{kind}"));
         check_pkcs8(&mut report, &label, 44, &doc, fixture.as_deref());
     }
-    for (label, doc, expected) in unbacked::mismatched_private_keys() {
-        let (ours, theirs) = load_pkcs8(44, &doc);
-        report.check_unbacked(
-            &label,
-            &ours,
-            &theirs,
-            &format!("err:{}", expected.unwrap()),
-        );
+    for (label, doc, fixture) in unbacked::mismatched_private_keys() {
+        let fixture = fixture.map(|kind| format!("err:{kind}"));
+        check_pkcs8(&mut report, &label, 44, &doc, fixture.as_deref());
     }
     report.finish();
 }
@@ -958,11 +935,11 @@ fn pqdsa_from_pkcs8_pss_inconsistent_and_v2() {
         Some("err:WrongAlgorithm"),
     );
     let (ours, theirs) = load_pkcs8(65, &rewrap_pss(&corrupt_coefficient(&small), None, 0, &[]));
-    report.check_unbacked(
+    report.check(
         "pss 1024 inconsistent qInv",
         &ours,
         &theirs,
-        "err:InvalidEncoding",
+        Some("err:InvalidEncoding"),
     );
     check_pkcs8(
         &mut report,
@@ -979,11 +956,11 @@ fn pqdsa_from_pkcs8_pss_inconsistent_and_v2() {
         Some("err:WrongAlgorithm"),
     );
     let (ours, theirs) = load_pkcs8(65, &rewrap_pss(&corrupt_coefficient(RSA2047), None, 0, &[]));
-    report.check_unbacked(
+    report.check(
         "pss 2047 inconsistent qInv",
         &ours,
         &theirs,
-        "err:InvalidEncoding",
+        Some("err:InvalidEncoding"),
     );
     report.finish();
 }

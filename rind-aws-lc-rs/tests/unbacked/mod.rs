@@ -611,7 +611,8 @@ fn offset(order: &[u8], delta: i16) -> Vec<u8> {
     out
 }
 
-/// Every EC and DSA PKCS#8 case but [`mismatched_private_keys`].
+/// Every EC and DSA PKCS#8 case but [`mismatched_private_keys`], which
+/// shares no keys with these.
 pub fn private_keys() -> Vec<Case> {
     let mut cases = Vec::new();
     for (index, curve) in CURVES.iter().enumerate() {
@@ -904,9 +905,8 @@ pub fn private_keys() -> Vec<Case> {
 }
 
 /// Keys on curves rind cannot back whose public key is on the curve but is
-/// not the scalar's. aws-lc refuses them (`InvalidEncoding`); rind cannot
-/// compute the scalar's point on these curves, so it refuses them as
-/// another algorithm (`WrongAlgorithm`).
+/// not the scalar's. aws-lc refuses them (`InvalidEncoding`), and so does
+/// rind, which computes the scalar's point in constant time to tell.
 pub fn mismatched_private_keys() -> Vec<Case> {
     CURVES
         .iter()

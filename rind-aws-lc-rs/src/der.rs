@@ -224,12 +224,23 @@ pub(crate) fn bits(magnitude: &[u8]) -> usize {
         .map_or(0, |top| 8 * magnitude.len() - top.leading_zeros() as usize)
 }
 
-/// The modulus's bit length in a two-prime PKCS#1 `RSAPrivateKey`, or `None`
-/// if its framing is not one. Only public parts are read: the version, a
-/// positive odd modulus, a positive odd exponent of 3 to 33 bits, then six
-/// INTEGERs stepped over by their headers, without reading their secret
-/// contents, and nothing after them.
-pub(crate) fn rsa_private_key_modulus_bits(der: &[u8]) -> Option<usize> {
+/// A two-prime PKCS#1 `RSAPrivateKey`'s fields.
+pub(crate) struct RsaPrivateParts<'a> {
+    /// The modulus's magnitude, public.
+    pub(crate) n: &'a [u8],
+    /// The public exponent's magnitude.
+    pub(crate) e: &'a [u8],
+    /// The contents of `d`, `p`, `q`, `dp`, `dq`, and `qinv`, in that order,
+    /// as encoded: secret, so not checked here. A leading zero byte, if
+    /// present, is part of the contents and does not change the value.
+    pub(crate) private: [&'a [u8]; 6],
+}
+
+/// Splits a two-prime PKCS#1 `RSAPrivateKey`, or `None` if its framing is not
+/// one. Only public parts are read: the version, a positive odd modulus, a
+/// positive odd exponent of 2 to 33 bits, then six INTEGERs taken by their
+/// headers without reading their secret contents, and nothing after them.
+pub(crate) fn rsa_private_key_parts(der: &[u8]) -> Option<RsaPrivateParts<'_>> {
     untrusted::Input::from(der)
         .read_all(Unspecified, |input| {
             read(input, SEQUENCE)?.read_all(Unspecified, |input| {
@@ -242,10 +253,11 @@ pub(crate) fn rsa_private_key_modulus_bits(der: &[u8]) -> Option<usize> {
                 if !odd(n) || !odd(e) || !(2..=33).contains(&bits(e)) {
                     return Err(Unspecified);
                 }
-                for _ in 0..6 {
-                    read(input, INTEGER)?;
+                let mut private = [&[][..]; 6];
+                for field in &mut private {
+                    *field = read(input, INTEGER)?.as_slice_less_safe();
                 }
-                Ok(bits(n))
+                Ok(RsaPrivateParts { n, e, private })
             })
         })
         .ok()
