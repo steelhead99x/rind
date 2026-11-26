@@ -43,6 +43,7 @@
 ))]
 mod unrolled {
     use super::super::sha512::K;
+    use super::super::sum64::Sum64;
 
     macro_rules! CH {
         ($x:expr, $y:expr, $z:expr) => {
@@ -98,13 +99,11 @@ mod unrolled {
         g: u64,
         h: u64,
     ) -> (u64, u64, u64, u64, u64, u64, u64, u64) {
-        let t1 = h
-            .wrapping_add(BSIG1!(e))
-            .wrapping_add(CH!(e, f, g))
-            .wrapping_add(k)
-            .wrapping_add(w);
-        let t2 = BSIG0!(a).wrapping_add(MAJ!(a, b, c));
-        (t1.wrapping_add(t2), a, b, c, d.wrapping_add(t1), e, f, g)
+        // Through `Sum64`, which on Xtensa has no branch on a carry. T1,
+        // unfolded, is shared by `e` and `a`.
+        let t1 = Sum64::of(h).add(BSIG1!(e)).add(CH!(e, f, g)).add(k).add(w);
+        let a1 = t1.add(BSIG0!(a)).add(MAJ!(a, b, c)).value();
+        (a1, a, b, c, t1.add(d).value(), e, f, g)
     }
 
     // `K` at a fixed offset from `kp`. `I` is a literal, so the load is a
@@ -190,10 +189,11 @@ mod unrolled {
         // other read still holds the previous window. The write of this slot
         // happens after those reads. The indexes are constant.
         let w_t = unsafe {
-            SSIG1!(w[(SLOT + 14) & 15].assume_init())
-                .wrapping_add(w[(SLOT + 9) & 15].assume_init())
-                .wrapping_add(SSIG0!(w[(SLOT + 1) & 15].assume_init()))
-                .wrapping_add(w[SLOT].assume_init())
+            Sum64::of(SSIG1!(w[(SLOT + 14) & 15].assume_init()))
+                .add(w[(SLOT + 9) & 15].assume_init())
+                .add(SSIG0!(w[(SLOT + 1) & 15].assume_init()))
+                .add(w[SLOT].assume_init())
+                .value()
         };
         w[SLOT].write(w_t);
         w_t
@@ -293,14 +293,15 @@ mod unrolled {
             n += 1;
         }
 
-        state[0] = state[0].wrapping_add(a);
-        state[1] = state[1].wrapping_add(b);
-        state[2] = state[2].wrapping_add(c);
-        state[3] = state[3].wrapping_add(d);
-        state[4] = state[4].wrapping_add(e);
-        state[5] = state[5].wrapping_add(f);
-        state[6] = state[6].wrapping_add(g);
-        state[7] = state[7].wrapping_add(h);
+        // Constant indexes, so no iterator can outline into flash.
+        state[0] = Sum64::of(state[0]).add(a).value();
+        state[1] = Sum64::of(state[1]).add(b).value();
+        state[2] = Sum64::of(state[2]).add(c).value();
+        state[3] = Sum64::of(state[3]).add(d).value();
+        state[4] = Sum64::of(state[4]).add(e).value();
+        state[5] = Sum64::of(state[5]).add(f).value();
+        state[6] = Sum64::of(state[6]).add(g).value();
+        state[7] = Sum64::of(state[7]).add(h).value();
     }
 }
 

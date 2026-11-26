@@ -248,6 +248,19 @@ mod generic {
         test
     ))]
     pub(super) mod sha512_rolled;
+    // `u64` sums without a branch on the carry, which LLVM's Xtensa backend
+    // emits for a plain `u64` add: the two SHA-512 bodies above and below
+    // sum through it.
+    #[cfg(any(
+        all(
+            rind_backend = "portable",
+            not(target_pointer_width = "64"),
+            any(target_os = "espidf", target_os = "none")
+        ),
+        rind_sha512_load_probe,
+        test
+    ))]
+    pub(super) mod sum64;
     // The ESP32-S3's SHA-512: the rolled loop, or the unrolled IRAM body with
     // `esp32s3-sha512-unrolled`. Tests compile it everywhere.
     #[cfg(any(all(rind_backend = "portable", rind_esp32s3), test))]
