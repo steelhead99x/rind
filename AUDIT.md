@@ -63,8 +63,10 @@ Outside the model:
 - Power, electromagnetic, and acoustic analysis, and physical access.
 - Speculative execution beyond what the constant-time rule gives: only
   secret-independent control flow and addresses stand against it. The one
-  speculation barrier rind adds follows setting DIT on Apple's platforms, as
-  Apple asks, so no instruction after it runs speculatively without DIT. On
+  speculation barrier rind adds follows setting DIT on Apple's cores, as
+  Apple asks, so no instruction after it runs speculatively without DIT:
+  on Apple's platforms by target, and elsewhere where `MIDR_EL1` names an
+  Apple core (or Linux cannot read it), as Linux on Apple silicon does. On
   other aarch64 cores, where rind sets DIT too, it adds none and relies on
   the Arm architecture (Arm ARM DDI 0487 M.d, C5.1.3.3 and B1.5.6),
   untested on hardware. The FIPS module's code keeps Apple's barrier on

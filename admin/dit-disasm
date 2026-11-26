@@ -14,12 +14,13 @@
 # - Apple's targets (`aarch64-apple-darwin`): in `sb`, or in `dsb nsh` then
 #   `isb`, and both appear, since which one runs depends on FEAT_SB at run
 #   time. That is Apple's documented sequence.
-# - Other aarch64 targets (`aarch64-unknown-linux-gnu`): in no barrier at
-#   all. The Arm
-#   architecture needs none (Arm ARM DDI 0487 M.d, C5.1.3.3 and B1.5.6).
-# - `--cfg rind_dit_barrier="apple"` on Linux: Apple's sequence again. A scan
-#   that read no barrier would pass the row above for nothing; this one must
-#   find both.
+# - Other aarch64 targets (`aarch64-unknown-linux-gnu`): in Apple's sequence
+#   where `MIDR_EL1` names an Apple core (or the part cannot be read), and in
+#   no barrier at all elsewhere, all three appearing. The Arm architecture
+#   needs none (Arm ARM DDI 0487 M.d, C5.1.3.3 and B1.5.6); Apple's cores
+#   under Linux still get Apple's.
+# - `--cfg rind_dit_barrier="apple"` on Linux: Apple's sequence only, with no
+#   path that skips it.
 #
 # Each build must hold at least one `msr DIT, #1`, so a build that sets DIT
 # nowhere fails rather than passing, and each site must have at least one
@@ -32,14 +33,16 @@
 
 import json, os, re, subprocess, sys
 
-# (name, target, extra RUSTFLAGS, expected endings)
+# (name, target, extra RUSTFLAGS, expected endings). Every site must also
+# reach a barrier on some path (`site_problem`), so on Linux a site that
+# skips the `MIDR_EL1` pick and goes straight to no barrier fails.
 SB, DSB_ISB, NONE = "sb", "dsb nsh; isb", "no barrier"
 # A call to the function holding `sb`, which `check` counts as `sb` only once
 # it has seen an `sb` in that function's own instructions.
 SB_CALL = "a call to speculation_barrier"
 BUILDS = [
     ("apple", "aarch64-apple-darwin", "", {SB, DSB_ISB}),
-    ("linux", "aarch64-unknown-linux-gnu", "", {NONE}),
+    ("linux", "aarch64-unknown-linux-gnu", "", {SB, DSB_ISB, NONE}),
     (
         "linux-apple-barrier",
         "aarch64-unknown-linux-gnu",
@@ -183,6 +186,8 @@ def site_problem(found, expected):
         return "no path from it reaches an ending"
     if not found <= expected:
         return ", ".join(sorted(found))
+    if not found & {SB, DSB_ISB} and expected & {SB, DSB_ISB}:
+        return "no path reaches a barrier: " + ", ".join(sorted(found))
     return None
 
 
@@ -218,6 +223,21 @@ def self_test():
             [msr, (0x4, "ldp", "x29, x30, [sp], #0x10", None), (0x8, "ret", "", None)],
             {NONE},
             True,
+        ),
+        (
+            "Linux: the part picks sb, else dsb nsh; isb, or none",
+            [msr, (0x4, "ldrb", "w8, [x9]", None), (0x8, "cbz", "w8, 0x20 <f+0x20>", None),
+             (0xC, "tbz", "w10, #0x4, 0x18 <f+0x18>", None), (0x10, "sb", "", None),
+             (0x14, "ret", "", None), (0x18, "dsb", "nsh", None), (0x1C, "isb", "", None),
+             (0x20, "ret", "", None)],
+            {SB, DSB_ISB, NONE},
+            True,
+        ),
+        (
+            "Linux: a site that skips the part",
+            [msr, (0x4, "ldp", "x29, x30, [sp], #0x10", None), (0x8, "ret", "", None)],
+            {SB, DSB_ISB, NONE},
+            False,
         ),
     ]
     bad = []

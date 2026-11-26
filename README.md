@@ -232,8 +232,11 @@ releasing it when the closure returns or unwinds. Each rind call already
 toggles DIT at most once, however much it computes inside.
 
 After setting DIT, rind runs the speculation barrier Apple asks for on
-Apple's platforms: `sb` where the core has it, else `dsb nsh; isb sy`. On
-any other aarch64 core it runs none, which is what the Arm architecture
+Apple's cores: `sb` where the core has it, else `dsb nsh; isb sy`. That
+covers Apple's own platforms and, picked at run time from `MIDR_EL1`
+(implementer `0x61`), Linux on Apple silicon, bare or in a VM; Linux
+also runs it when the kernel hides the part. On any other aarch64 core
+it runs none, which is what the Arm architecture
 requires (Arm ARM DDI 0487 M.d, sections C5.1.3.3 and B1.5.6): a write to
 PSTATE.DIT takes effect in program order, and instructions run
 speculatively after it count as running with DIT set. There, the guarantee

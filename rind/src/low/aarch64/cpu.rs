@@ -407,9 +407,9 @@ fn detect_wide_multiplier() -> bool {
     true
 }
 
-/// `RIND_TEST_MIDR=a72|narrow|wide|none` stands in for `MIDR_EL1`: a
-/// Cortex-A72 r0p3, a Cortex-A76 r4p1, a Neoverse V1 r1p1, or a kernel
-/// without `HWCAP_CPUID`.
+/// `RIND_TEST_MIDR=a72|narrow|wide|apple|none` stands in for `MIDR_EL1`: a
+/// Cortex-A72 r0p3, a Cortex-A76 r4p1, a Neoverse V1 r1p1, an Apple M1
+/// Firestorm r1p0, or a kernel without `HWCAP_CPUID`.
 /// Not in the FIPS module, where no variable names the part.
 #[cfg(all(
     rind_std,
@@ -422,6 +422,7 @@ fn midr_fixture() -> Option<Option<u64>> {
         Some("a72") => Some(0x410f_d083),
         Some("narrow") => Some(0x414f_d0b1),
         Some("wide") => Some(0x411f_d401),
+        Some("apple") => Some(0x611f_0230),
         Some("none") => None,
         _ => return None,
     };
@@ -478,6 +479,100 @@ fn wide_from_midr(midr: u64) -> bool {
 #[cfg(any(all(rind_std, target_os = "linux"), test))]
 fn narrow_part(implementer: u64, part: u64) -> bool {
     implementer == 0x41 && matches!(part, 0xd08 | 0xd0b | 0xd0c)
+}
+
+/// Whether the barrier after setting DIT runs Apple's sequence on a target
+/// whose triple is not Apple's: when `MIDR_EL1` names Apple's cores, or
+/// on Linux when the part cannot be read.
+///
+/// Read on the first DIT entry, as [`wide_multiplier`] reads the part, so
+/// it opens no file, and then cached. Apple's chips mix core types, but
+/// every one of them reports implementer `0x61`, so the core the first
+/// call ran on decides for all of them. Under a hypervisor the guest sees
+/// whatever `MIDR_EL1` the VMM presents; Apple's Hypervisor.framework
+/// presents the host's by default, which QEMU (UTM) and OrbStack keep.
+/// An unreadable part runs the barrier, since its cost is one `sb` or a
+/// `dsb nsh; isb sy` per DIT entry and the alternative is guessing.
+///
+/// Compiled only where the barrier is not already fixed at compile time:
+/// not on Apple's targets or in the FIPS module, which always run it, and
+/// not under a measuring `rind_dit_barrier` cfg.
+#[cfg(all(
+    not(any(
+        rind_dit_barrier = "apple",
+        rind_dit_barrier = "isb",
+        rind_dit_barrier = "none"
+    )),
+    not(target_vendor = "apple"),
+    not(rind_fips)
+))]
+mod by_part {
+    use super::{AtomicU8, Ordering, PICK_OFF, PICK_ON, PICK_UNSET};
+
+    /// [`apple_core`]'s choice, cached as [`super::WIDE`] is.
+    static APPLE_CORE: AtomicU8 = AtomicU8::new(PICK_UNSET);
+
+    #[inline]
+    pub(super) fn apple_core() -> bool {
+        match APPLE_CORE.load(Ordering::Relaxed) {
+            PICK_UNSET => detect_apple_core_once(),
+            PICK_ON => true,
+            _ => false,
+        }
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn detect_apple_core_once() -> bool {
+        let apple = detect_apple_core();
+        APPLE_CORE.store(if apple { PICK_ON } else { PICK_OFF }, Ordering::Relaxed);
+        apple
+    }
+
+    /// The fixture or the register, as [`super::detect_wide_multiplier`]
+    /// reads it. No `RIND_CPU_*` toggle can turn the barrier off.
+    pub(super) fn detect_apple_core() -> bool {
+        #[cfg(all(rind_std, target_os = "linux"))]
+        {
+            #[cfg(all(any(debug_assertions, rind_cpu_disable), not(rind_fips)))]
+            if let Some(midr) = super::midr_fixture() {
+                return midr.is_none_or(super::apple_part);
+            }
+            super::read_midr().is_none_or(super::apple_part)
+        }
+        #[cfg(not(all(rind_std, target_os = "linux")))]
+        false
+    }
+}
+#[cfg(all(
+    not(any(
+        rind_dit_barrier = "apple",
+        rind_dit_barrier = "isb",
+        rind_dit_barrier = "none"
+    )),
+    not(target_vendor = "apple"),
+    not(rind_fips)
+))]
+use by_part::apple_core;
+
+/// Whether `midr` names one of Apple's cores: implementer `0x61`, any part,
+/// variant, or revision.
+#[cfg(any(
+    all(
+        rind_std,
+        target_os = "linux",
+        not(any(
+            rind_dit_barrier = "apple",
+            rind_dit_barrier = "isb",
+            rind_dit_barrier = "none"
+        )),
+        not(target_vendor = "apple"),
+        not(rind_fips)
+    ),
+    test
+))]
+fn apple_part(midr: u64) -> bool {
+    (midr >> 24) & 0xff == 0x61
 }
 
 // Set on every core whose OS reports it, which a hypervisor, Windows, or a
@@ -541,7 +636,14 @@ mod dit {
     }
 
     /// The barrier after `msr DIT, #1`: Apple's sequence on Apple's targets
-    /// (and in the FIPS module's code), none on any other aarch64 target.
+    /// (and in the FIPS module's code), and on any other aarch64 target
+    /// whose `MIDR_EL1` names Apple's cores (implementer `0x61`), as Linux
+    /// on Apple silicon does, bare or in a VM (Asahi, OrbStack, UTM). The
+    /// target triple alone would miss those: `aarch64-unknown-linux-gnu` on
+    /// an M-series core is still the core Apple's advice is for. Where the
+    /// part cannot be read on Linux (no `HWCAP_CPUID`, or valgrind), the
+    /// barrier runs too. Elsewhere (Windows, the BSDs, Android, `no_std`)
+    /// no part is read and no barrier runs; see [`super::apple_core`].
     ///
     /// The Arm architecture needs none. "Writes to PSTATE occur in program
     /// order without the need for additional synchronization" (Arm ARM DDI
@@ -587,6 +689,20 @@ mod dit {
             )
         ))]
         apple_barrier();
+        // Any other target: Apple's sequence only where `MIDR_EL1` names
+        // Apple's cores, such as Linux on Apple silicon.
+        #[cfg(all(
+            not(any(
+                rind_dit_barrier = "apple",
+                rind_dit_barrier = "isb",
+                rind_dit_barrier = "none"
+            )),
+            not(target_vendor = "apple"),
+            not(rind_fips)
+        ))]
+        if super::apple_core() {
+            apple_barrier();
+        }
         // SAFETY: an Armv8.0 barrier.
         #[cfg(rind_dit_barrier = "isb")]
         unsafe {
@@ -596,15 +712,9 @@ mod dit {
 
     /// Apple's barrier after setting DIT: `sb` where the core has FEAT_SB,
     /// else `dsb nsh; isb sy`.
-    // Only the tests run it where `barrier_after_set` does not.
+    // Only the tests run it under the measuring cfgs that drop it.
     #[cfg_attr(
-        not(any(
-            rind_dit_barrier = "apple",
-            all(
-                not(any(rind_dit_barrier = "isb", rind_dit_barrier = "none")),
-                any(target_vendor = "apple", rind_fips)
-            )
-        )),
+        any(rind_dit_barrier = "isb", rind_dit_barrier = "none"),
         allow(dead_code)
     )]
     #[inline(always)]
@@ -626,15 +736,9 @@ mod dit {
     }
 
     /// Runs nothing after it speculatively until everything before it completes.
-    // Only the tests run it where `apple_barrier` does not.
+    // Only the tests run it under the measuring cfgs that drop it.
     #[cfg_attr(
-        not(any(
-            rind_dit_barrier = "apple",
-            all(
-                not(any(rind_dit_barrier = "isb", rind_dit_barrier = "none")),
-                any(target_vendor = "apple", rind_fips)
-            )
-        )),
+        any(rind_dit_barrier = "isb", rind_dit_barrier = "none"),
         allow(dead_code)
     )]
     #[target_feature(enable = "sb")]
@@ -833,6 +937,28 @@ mod tests {
         assert!(wide_from_midr(0));
         assert!(wide_from_midr(0x4100_000b));
         assert!(wide_from_midr(0x41d0_b000));
+    }
+
+    #[test]
+    fn midr_selects_apple_cores_for_the_dit_barrier() {
+        // M1 Icestorm and Firestorm, M2 Blizzard and Avalanche, M3, M4, any
+        // variant and revision, with junk above bit 31.
+        for part in [0x022u64, 0x023, 0x032, 0x033, 0x048, 0x049, 0x052, 0x053] {
+            for vr in [0x000f_0000u64, 0x001f_0000, 0x002f_0001] {
+                let midr = (0x61 << 24) | vr | (part << 4);
+                assert!(apple_part(midr), "{midr:#x}");
+                assert!(apple_part(midr | (u64::MAX << 32)), "{midr:#x}");
+            }
+        }
+        // Arm, Qualcomm, Ampere, Microsoft, NVIDIA, and an implementer one
+        // bit away from Apple's either side.
+        for implementer in [0x41u64, 0x51, 0xc0, 0x6d, 0x4e, 0x60, 0x62, 0xe1] {
+            assert!(!apple_part((implementer << 24) | 0x000f_0230));
+        }
+        assert!(!apple_part(0));
+        // `0x61` in the part or variant fields is not the implementer.
+        assert!(!apple_part(0x4100_0610));
+        assert!(!apple_part(0x4161_0000));
     }
 
     #[test]
@@ -1117,6 +1243,16 @@ mod tests {
         if read_midr() == midr {
             assert_eq!(detected, midr.is_none_or(wide_from_midr));
             assert_eq!(alt2, midr.is_some_and(cortex_a72));
+            #[cfg(all(
+                not(any(
+                    rind_dit_barrier = "apple",
+                    rind_dit_barrier = "isb",
+                    rind_dit_barrier = "none"
+                )),
+                not(target_vendor = "apple"),
+                not(rind_fips)
+            ))]
+            assert_eq!(apple_core(), midr.is_none_or(apple_part));
         }
         // qemu-user shows the host's sysfs, which has no aarch64 registers,
         // so this part runs only on an aarch64 kernel that lists them.
@@ -1137,7 +1273,8 @@ mod tests {
     }
 
     /// `a72` is Cortex-A72, `narrow` is Cortex-A76, `wide` is Neoverse V1,
-    /// `none` has no `HWCAP_CPUID`. Only `a72` runs `_alt2`.
+    /// `apple` is an M1 core, `none` has no `HWCAP_CPUID`. Only `a72` runs
+    /// `_alt2`; `apple` and `none` run Apple's DIT barrier.
     #[cfg(all(
         target_os = "linux",
         any(debug_assertions, rind_cpu_disable),
@@ -1151,10 +1288,24 @@ mod tests {
             let wide = detect_wide_multiplier();
             assert_eq!(wide, mode != "narrow" && mode != "a72", "{mode}");
             assert_eq!(detect_keccak_alt2(), mode == "a72", "{mode}");
+            #[cfg(all(
+                not(any(
+                    rind_dit_barrier = "apple",
+                    rind_dit_barrier = "isb",
+                    rind_dit_barrier = "none"
+                )),
+                not(target_vendor = "apple"),
+                not(rind_fips)
+            ))]
+            assert_eq!(
+                by_part::detect_apple_core(),
+                mode == "apple" || mode == "none",
+                "{mode}"
+            );
             println!("{CHILD} {mode}");
             return;
         }
-        for mode in ["a72", "narrow", "wide", "none"] {
+        for mode in ["a72", "narrow", "wide", "apple", "none"] {
             let stdout = run_child(
                 concat!(module_path!(), "::midr_fixture_selects_the_schedule"),
                 &[(CHILD, "1"), ("RIND_TEST_MIDR", mode)],

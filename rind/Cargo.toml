@@ -204,9 +204,10 @@ unexpected_cfgs = { level = "warn", check-cfg = [
   # src/low/entry.rs, `leave_secret`).
   "cfg(rind_dit_sticky)",
   # Picks the barrier after setting DIT on any target, to measure its cost:
-  # "apple" (the default on Apple's targets, and in the FIPS module's code,
-  # though the module sets no DIT), "isb", or "none" (the default elsewhere;
-  # see src/low/aarch64/cpu.rs, `barrier_after_set`).
+  # "apple" (the default on Apple's targets, in the FIPS module's code,
+  # though the module sets no DIT, and on any other target whose MIDR_EL1
+  # names an Apple core), "isb", or "none" (the default on other cores; see
+  # src/low/aarch64/cpu.rs, `barrier_after_set`).
   'cfg(rind_dit_barrier, values("apple", "isb", "none"))',
   # Leaves DIT on between calls for a bounded batch, to measure coalescing
   # without a guard (see src/low/entry.rs, `autohold`).
