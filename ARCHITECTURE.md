@@ -64,6 +64,9 @@ The modules:
   finalizes the reply into the output. Its `voprf` mode adds the server's
   public key and a DLEQ proof over a batch, as Privacy Pass's privately
   verifiable tokens (RFC 9578) need; OPAQUE uses the base mode.
+- `vrf`: RFC 9381's ECVRF on edwards25519 and P-256: a key pair proves an
+  output for an input, and a public key verifies the proof and recovers the
+  same output, as key transparency maps identities to positions in its tree.
 - `ecdsa`: ECDSA on P-256, P-384, and P-521, with a signature DER-encoded
   or fixed-width, plus signing and verifying a `digest` the caller computed,
   with any SHA-2 hash. Key pairs load from and export as PKCS#8, SEC1, and a

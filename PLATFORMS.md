@@ -60,7 +60,7 @@ qemu. iOS devices' code is only built.
   the public operation of 2048-, 3072-, and 4096-bit moduli with
   e = 65537 run [verified-garbage]'s routines, and RSA-3072 signing too with `avx512fp16`, as on Intel's
   since Sapphire Rapids, and aws-lc's dual AVX-512 RSAZ without it, as
-  for the 3969- to 4032-bit keys VG's CRT does not take.
+  for the 3969- to 4032-bit keys verified-garbage's CRT does not take.
 - 32-bit `arm` from ARMv7 on (tested on `armv7-unknown-linux-gnueabihf` and
   `armv7-linux-androideabi`) runs portable Rust instead, mostly from
   [libcrux] (see [ALGORITHMS.md](ALGORITHMS.md)), and needs no CPU features. RSA's
@@ -270,15 +270,15 @@ family since 2004, and of some AMD cores.
 [aws-lc]: https://github.com/aws/aws-lc
 [BoringSSL]: https://boringssl.googlesource.com/boringssl
 [OpenSSL]: https://github.com/openssl/openssl
-[MPC603EUM]: https://www.nxp.com/docs/en/reference-manual/MPC603EUM.pdf
-[MPC604EUM]: https://www.nxp.com/docs/en/reference-manual/MPC604EUM.pdf
-[MPC750UM]: https://www.nxp.com/docs/en/reference-manual/MPC750UM.pdf
-[MPC7410UM]: https://www.nxp.com/docs/en/reference-manual/MPC7410UM.pdf
-[MPC7450UM]: https://www.nxp.com/docs/en/reference-manual/MPC7450UM.pdf
-[e300coreRM]: https://www.nxp.com/docs/en/reference-manual/e300coreRM.pdf
-[E500CORERM]: https://www.nxp.com/docs/en/reference-manual/E500CORERM.pdf
-[E500MCRM]: https://www.nxp.com/docs/en/reference-manual/E500MCRM.pdf
-[E6500RM]: https://www.nxp.com/docs/en/reference-manual/E6500RM.pdf
+[MPC603EUM]: https://web.archive.org/web/20250411163632/https://www.nxp.com/docs/en/reference-manual/MPC603EUM.pdf
+[MPC604EUM]: https://web.archive.org/web/20250805115044/https://www.nxp.com/docs/en/reference-manual/MPC604EUM.pdf
+[MPC750UM]: https://web.archive.org/web/20261108160719/https://www.nxp.com/docs/en/reference-manual/MPC750UM.pdf
+[MPC7410UM]: https://web.archive.org/web/20260122233846/https://www.nxp.com/docs/en/reference-manual/MPC7410UM.pdf
+[MPC7450UM]: https://web.archive.org/web/20260825235204/https://www.nxp.com/docs/en/reference-manual/MPC7450UM.pdf
+[e300coreRM]: https://web.archive.org/web/20250827222459/https://www.nxp.com/docs/en/reference-manual/e300coreRM.pdf
+[E500CORERM]: https://web.archive.org/web/20260725115022/https://www.nxp.com/docs/en/reference-manual/E500CORERM.pdf
+[E500MCRM]: https://web.archive.org/web/20241214074241/https://www.nxp.com/docs/en/reference-manual/E500MCRM.pdf
+[E6500RM]: https://web.archive.org/web/20261030085720/https://www.nxp.com/docs/en/reference-manual/E6500RM.pdf
 [POWER8 UM]: https://www.setphaserstostun.org/power8/POWER8_UM_v1.3_16MAR2016_pub.pdf
 [POWER9 UM]: https://wiki.raptorcs.com/w/images/c/ce/POWER9_um_OpenPOWER_v21_10OCT2019_pub.pdf
 [openc906]: https://github.com/T-head-Semi/openc906/blob/main/C906_RTL_FACTORY/gen_rtl/iu/rtl/aq_iu_mul.v

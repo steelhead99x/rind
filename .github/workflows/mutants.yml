@@ -24,7 +24,7 @@ name: mutants
 
 on:
   schedule:
-    - cron: "0 18 * * 6"
+    - cron: "23 22 * * 6"
   workflow_dispatch:
     inputs:
       campaign:
