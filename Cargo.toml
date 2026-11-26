@@ -61,7 +61,7 @@ debug-assertions = false
 # per scalar. A debug build does not inline them, so VOPRF's 65536-element
 # batch — what the no-ADX tier of `cargo test --workspace` runs — takes
 # minutes (about 50x the s2n-bignum path, which is already assembly).
-# opt-level 1 inlines that code. Overflow checks stay on, unlike the
+# opt-level 2, as set below, inlines that code. Overflow checks stay on, unlike the
 # curve25519-dalek override above, which needs release's level to fold a
 # secret-dependent iterator.
 [profile.dev.package.rind]
