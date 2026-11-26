@@ -623,6 +623,11 @@ mod dit {
         (out & DIT == DIT) as u32
     }
 
+    // Not inlined: `admin/dit-disasm` follows every path from this `msr`, and
+    // an inlined copy lets the caller's own code interleave with the barrier
+    // choice. On main, inlined at 320 sites on aarch64-apple-darwin, one in
+    // `hmac::Keying<LegacySha1>::with_key` showed a path with no barrier.
+    #[inline(never)]
     #[target_feature(enable = "dit")]
     pub(super) fn write(on: u32) {
         if on > 0 {
@@ -1234,13 +1239,19 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn detected_value_matches_midr() {
+        // A `RIND_TEST_MIDR` fixture stands in for the register, so with one
+        // set for the whole binary the picks follow it, not this host.
+        #[cfg(all(any(debug_assertions, rind_cpu_disable), not(rind_fips)))]
+        let fixture = midr_fixture().is_some();
+        #[cfg(not(all(any(debug_assertions, rind_cpu_disable), not(rind_fips))))]
+        let fixture = false;
         // On a big.LITTLE host the thread can move between cores, and each
         // core reads its own MIDR_EL1. Compare only when both reads around
         // the detection agree.
         let midr = read_midr();
         let detected = detect_wide_multiplier();
         let alt2 = detect_keccak_alt2();
-        if read_midr() == midr {
+        if !fixture && read_midr() == midr {
             assert_eq!(detected, midr.is_none_or(wide_from_midr));
             assert_eq!(alt2, midr.is_some_and(cortex_a72));
             #[cfg(all(
@@ -1252,7 +1263,7 @@ mod tests {
                 not(target_vendor = "apple"),
                 not(rind_fips)
             ))]
-            assert_eq!(apple_core(), midr.is_none_or(apple_part));
+            assert_eq!(by_part::detect_apple_core(), midr.is_none_or(apple_part));
         }
         // qemu-user shows the host's sysfs, which has no aarch64 registers,
         // so this part runs only on an aarch64 kernel that lists them.

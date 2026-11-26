@@ -21,6 +21,7 @@
 #   under Linux still get Apple's.
 # - `--cfg rind_dit_barrier="apple"` on Linux: Apple's sequence only, with no
 #   path that skips it.
+# - `--cfg rind_dit_barrier="none"` on Linux: no barrier on any path.
 #
 # Each build must hold at least one `msr DIT, #1`, so a build that sets DIT
 # nowhere fails rather than passing, and each site must have at least one
@@ -48,6 +49,13 @@ BUILDS = [
         "aarch64-unknown-linux-gnu",
         '--cfg rind_dit_barrier="apple"',
         {SB, DSB_ISB},
+    ),
+    # The measuring build that drops the barrier: none on any path.
+    (
+        "linux-no-barrier",
+        "aarch64-unknown-linux-gnu",
+        '--cfg rind_dit_barrier="none"',
+        {NONE},
     ),
 ]
 
