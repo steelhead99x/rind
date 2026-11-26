@@ -23,7 +23,9 @@ omitted = [
 
 [dependencies]
 rind = { version = "0.3.2", path = "../rind", default-features = false }
-rustls = { version = "0.23.20", default-features = false }
+# 0.23.33 added the QUIC multipath packet-key methods and `Nonce::for_path`
+# that `quic.rs` implements and calls.
+rustls = { version = "0.23.33", default-features = false }
 
 [dev-dependencies]
 env_logger = "0.11"
