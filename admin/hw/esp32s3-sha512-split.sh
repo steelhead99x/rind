@@ -14,7 +14,10 @@
 #      left in the round and schedule code.
 #   3. The board A/B is not run here: the last lines name the two commits
 #      to build harness firmware from and how to interleave the images with
-#      run-board.sh, as #296's board runs did.
+#      run-board.sh, as #296's board runs did. The harness firmware is
+#      xtensa-esp32s3-none-elf, where the unrolled body stays in flash, so
+#      it measures the rolled and flash-unrolled rows only; the IRAM-unrolled
+#      row is admin/hw/esp32s3-sha512-idf.sh's ESP-IDF image.
 #
 # Host: Linux x86_64 with the espup toolchain the board uses (rustc
 #   1.97.0.0, 8ea53bcd7) and the xtensa-esp-elf binutils under
@@ -153,6 +156,10 @@ five head images), with run-board.sh at 80 MHz, then once more at 240 MHz.
 Every capture's KAT lines must read PASS before its timing counts. Add the
 SHA-512 rows (16 B, 243 B, 1500 B, many-block) as medians per image to
 $HW_RUN/summary.md.
+
+The harness images are xtensa-esp32s3-none-elf, which keeps the unrolled
+body in flash. For the IRAM-unrolled row, run the ESP-IDF image's A/B:
+  RIND_S3_PORT=/dev/ttyACM0 HW_BASE_REV=$base HW_HEAD_REV=$head admin/hw/esp32s3-sha512-idf.sh
 EOF
 hw_follow_up 326 "$HW_RUN/summary.md"
 if ((failed)); then

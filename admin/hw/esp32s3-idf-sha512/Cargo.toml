@@ -1,0 +1,32 @@
+# ESP-IDF firmware for #326's IRAM-unrolled SHA-512 row on the ESP32-S3.
+#
+# The S3 workshop firmware is `xtensa-esp32s3-none-elf`, where
+# `esp32s3-sha512-unrolled` keeps the unrolled body in ordinary flash: only
+# `xtensa-esp32s3-espidf` puts it in IRAM (`.iram1.text`) and `K` in internal
+# DRAM (`.dram1.rodata`). So that row needs this ESP-IDF image. It runs
+# FIPS 180-4's SHA-512 known answers and times rind's SHA-512 at 16, 243,
+# 1500 and 16384 bytes, round after round, over the serial console.
+# admin/hw/esp32s3-sha512-idf.sh builds it at a PR's base and head, checks
+# the placement in each ELF, and interleaves the images on the board.
+[package]
+name = "rind-esp32s3-idf-sha512"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Not a member of rind's workspace: it builds only for xtensa-esp32s3-espidf.
+[workspace]
+
+[dependencies]
+# admin/hw/esp32s3-sha512-idf.sh points this at the revision under test.
+rind = { path = "../../../rind", default-features = false, features = ["esp32s3-sha512-unrolled"] }
+esp-idf-sys = { version = "=0.37.2", features = ["binstart"] }
+
+[build-dependencies]
+embuild = "=0.33.7"
+
+[profile.release]
+opt-level = 3
+# Symbols, so the placement check can find the compressor and K in the ELF.
+debug = true
+codegen-units = 16
