@@ -13,13 +13,16 @@
 #
 # - Apple's targets (`aarch64-apple-darwin`): in `sb`, or in `dsb nsh` then
 #   `isb`, and both appear, since which one runs depends on FEAT_SB at run
-#   time. That is Apple's documented sequence.
-# - Other aarch64 targets (`aarch64-unknown-linux-gnu`): in no barrier at
-#   all. The Arm
-#   architecture needs none (Arm ARM DDI 0487 M.d, C5.1.3.3 and B1.5.6).
-# - `--cfg rind_dit_barrier="apple"` on Linux: Apple's sequence again. A scan
-#   that read no barrier would pass the row above for nothing; this one must
-#   find both.
+#   time. That is Apple's documented sequence. Those binaries run only on
+#   Apple cores, so every path takes the barrier.
+# - Linux (`aarch64-unknown-linux-gnu`): Apple's sequence when `MIDR_EL1`
+#   names implementer `0x61`, and no barrier on any other core. Both are in
+#   the binary. The Arm architecture needs none on a core that is not
+#   Apple's (Arm ARM DDI 0487 M.d, C5.1.3.3 and B1.5.6).
+# - `--cfg rind_dit_barrier="apple"` on Linux: Apple's sequence on every
+#   path. A scan that read no barrier would pass a row that allows none;
+#   this one must find both barriers and no path that skips them.
+# - `--cfg rind_dit_barrier="none"` on Linux: no barrier on any path.
 #
 # Each build must hold at least one `msr DIT, #1`, so a build that sets DIT
 # nowhere fails rather than passing, and each site must have at least one
@@ -39,12 +42,19 @@ SB, DSB_ISB, NONE = "sb", "dsb nsh; isb", "no barrier"
 SB_CALL = "a call to speculation_barrier"
 BUILDS = [
     ("apple", "aarch64-apple-darwin", "", {SB, DSB_ISB}),
-    ("linux", "aarch64-unknown-linux-gnu", "", {NONE}),
+    # Runtime choice: an Apple core takes the barrier, any other core does not.
+    ("linux", "aarch64-unknown-linux-gnu", "", {SB, DSB_ISB, NONE}),
     (
         "linux-apple-barrier",
         "aarch64-unknown-linux-gnu",
         '--cfg rind_dit_barrier="apple"',
         {SB, DSB_ISB},
+    ),
+    (
+        "linux-no-barrier",
+        "aarch64-unknown-linux-gnu",
+        '--cfg rind_dit_barrier="none"',
+        {NONE},
     ),
 ]
 

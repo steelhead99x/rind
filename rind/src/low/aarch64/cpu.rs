@@ -248,6 +248,11 @@ static KECCAK: AtomicU8 = AtomicU8::new(PICK_UNSET);
 const PICK_UNSET: u8 = 0;
 const PICK_OFF: u8 = 1;
 const PICK_ON: u8 = 2;
+/// Whether `MIDR_EL1` names an Apple core, cached like [`KECCAK`]. `0` means
+/// the choice has not been made. Apple's own targets never read it: those
+/// binaries run only on Apple cores.
+#[cfg(all(rind_std, target_os = "linux", not(target_vendor = "apple")))]
+static APPLE_CORE: AtomicU8 = AtomicU8::new(PICK_UNSET);
 
 /// The detected features, read once. Inlined, so a check is a load and a
 /// test, with the first call's detection out of line.
@@ -407,9 +412,9 @@ fn detect_wide_multiplier() -> bool {
     true
 }
 
-/// `RIND_TEST_MIDR=a72|narrow|wide|none` stands in for `MIDR_EL1`: a
-/// Cortex-A72 r0p3, a Cortex-A76 r4p1, a Neoverse V1 r1p1, or a kernel
-/// without `HWCAP_CPUID`.
+/// `RIND_TEST_MIDR=a72|narrow|wide|apple|none` stands in for `MIDR_EL1`: a
+/// Cortex-A72 r0p3, a Cortex-A76 r4p1, a Neoverse V1 r1p1, an Apple M1, or a
+/// kernel without `HWCAP_CPUID`.
 /// Not in the FIPS module, where no variable names the part.
 #[cfg(all(
     rind_std,
@@ -422,6 +427,7 @@ fn midr_fixture() -> Option<Option<u64>> {
         Some("a72") => Some(0x410f_d083),
         Some("narrow") => Some(0x414f_d0b1),
         Some("wide") => Some(0x411f_d401),
+        Some("apple") => Some(0x610f_0230),
         Some("none") => None,
         _ => return None,
     };
@@ -480,6 +486,77 @@ fn narrow_part(implementer: u64, part: u64) -> bool {
     implementer == 0x41 && matches!(part, 0xd08 | 0xd0b | 0xd0c)
 }
 
+/// Whether `midr` names an Apple core: implementer `0x61`, any part.
+///
+/// Apple's cores are the ones whose DIT write needs a speculation barrier
+/// before later instructions run with the new timing. The part number
+/// changes across M1, M2, M3, and M4; the implementer does not.
+#[cfg(any(all(rind_std, target_os = "linux"), test))]
+#[cfg_attr(
+    any(
+        rind_dit_barrier = "apple",
+        rind_dit_barrier = "isb",
+        rind_dit_barrier = "none"
+    ),
+    allow(dead_code)
+)]
+fn apple_from_midr(midr: u64) -> bool {
+    (midr >> 24) & 0xff == 0x61
+}
+
+/// Whether the barrier after setting DIT is Apple's sequence.
+///
+/// A binary built for Apple's OS runs only on Apple's cores, and that OS
+/// does not emulate an EL0 read of `MIDR_EL1`, so those targets are Apple's
+/// without a register read. Linux reads the register, the same way
+/// [`detect_wide_multiplier`] does, and caches the answer: Asahi and a
+/// Linux VM on Apple silicon report implementer `0x61`. A core with no part
+/// to read is not treated as Apple's.
+#[cfg(all(rind_std, target_os = "linux", not(target_vendor = "apple")))]
+#[cfg_attr(
+    any(
+        rind_dit_barrier = "apple",
+        rind_dit_barrier = "isb",
+        rind_dit_barrier = "none"
+    ),
+    allow(dead_code)
+)]
+#[inline(always)]
+fn apple_core() -> bool {
+    match APPLE_CORE.load(Ordering::Relaxed) {
+        PICK_UNSET => detect_apple_core(),
+        PICK_ON => true,
+        _ => false,
+    }
+}
+
+/// Reads [`apple_core`]'s answer once. Named so `admin/dit-disasm` can step
+/// over the call: its scan treats a `bl` whose symbol contains `detect` as
+/// part of choosing the barrier, not as the barrier's end.
+#[cfg(all(rind_std, target_os = "linux", not(target_vendor = "apple")))]
+#[cfg_attr(
+    any(
+        rind_dit_barrier = "apple",
+        rind_dit_barrier = "isb",
+        rind_dit_barrier = "none"
+    ),
+    allow(dead_code)
+)]
+#[cold]
+#[inline(never)]
+fn detect_apple_core() -> bool {
+    #[cfg(all(any(debug_assertions, rind_cpu_disable), not(rind_fips)))]
+    let apple = if let Some(midr) = midr_fixture() {
+        midr.is_some_and(apple_from_midr)
+    } else {
+        read_midr().is_some_and(apple_from_midr)
+    };
+    #[cfg(not(all(any(debug_assertions, rind_cpu_disable), not(rind_fips))))]
+    let apple = read_midr().is_some_and(apple_from_midr);
+    APPLE_CORE.store(if apple { PICK_ON } else { PICK_OFF }, Ordering::Relaxed);
+    apple
+}
+
 // Set on every core whose OS reports it, which a hypervisor, Windows, or a
 // BSD may not (PLATFORMS.md): Arm says some cores with DIT, such as
 // Neoverse V1, may run the instructions it covers in data-dependent time
@@ -528,6 +605,10 @@ mod dit {
         (out & DIT == DIT) as u32
     }
 
+    // Not inlined: `admin/dit-disasm` follows every path from this `msr`, and
+    // an inlined copy interleaves the caller's frame arithmetic with the
+    // barrier choice.
+    #[inline(never)]
     #[target_feature(enable = "dit")]
     pub(super) fn write(on: u32) {
         if on > 0 {
@@ -540,17 +621,16 @@ mod dit {
         }
     }
 
-    /// The barrier after `msr DIT, #1`: Apple's sequence on Apple's targets
-    /// (and in the FIPS module's code), none on any other aarch64 target.
+    /// The barrier after `msr DIT, #1`: Apple's sequence on an Apple core,
+    /// none on any other.
     ///
     /// The Arm architecture needs none. "Writes to PSTATE occur in program
     /// order without the need for additional synchronization" (Arm ARM DDI
     /// 0487 M.d, C5.1.3.3), and "Instructions speculatively executed between
     /// the change of PSTATE.DIT from 0 to 1 and the change of PSTATE.DIT from
     /// 1 to 0 are considered part of the data-independent-time sequence of
-    /// code" (B1.5.6). So on a core that is not Apple's, rind relies on that
-    /// architectural rule alone. No core other than Apple's has been tested
-    /// for it here. The sources are in benchmarks/apple-dit-barrier.md.
+    /// code" (B1.5.6). On a core that is not Apple's, rind relies on that
+    /// architectural rule alone. The sources are in benchmarks/apple-dit-barrier.md.
     ///
     /// Apple asks for a speculation barrier after setting DIT: "To ensure
     /// that subsequent instruction timing reflects the updated DIT processor
@@ -560,14 +640,17 @@ mod dit {
     /// `dsb nsh; isb sy` where not, which is what `apple_barrier` runs.
     /// Apple's own libplatform (`src/timingsafe/arm64/timingsafe.c`) and
     /// corecrypto (`cc/src/cc_timing_safe.c`) fall back to `dsb sy; isb sy`
-    /// instead; rind follows the developer page, as Go, aws-lc, and BoringSSL
-    /// do.
+    /// instead; rind follows the developer page. On M3 and later the barrier
+    /// is also what turns off the data-memory-dependent prefetcher.
     ///
-    /// The others agree on the split: Go's runtime (go.dev/issue/77776),
-    /// aws-lc's `armv8_set_dit` (aws-lc #3751, 2026-11-17), and BoringSSL's
-    /// `ConstTimeGuard` add the barrier on Apple only, and set DIT bare
-    /// elsewhere, as graviola and the Linux kernel (`SET_PSTATE_DIT` at
-    /// `kernel_entry`, Linux 6.2) do everywhere.
+    /// Which core is Apple's is the implementer field of `MIDR_EL1` (`0x61`),
+    /// read on Linux, not the compile-time vendor. A `aarch64-unknown-linux-gnu`
+    /// binary on Apple silicon (Asahi, or a Linux VM) is that core and takes
+    /// the barrier; the same binary on a Cortex or Neoverse core does not.
+    /// Apple's own OS targets take it without the read: the binary cannot
+    /// run on any other core, and the OS does not emulate the register.
+    /// Go, aws-lc, and BoringSSL still key the barrier off the Apple target
+    /// triple, so a Linux build of those libraries misses it.
     ///
     /// The FIPS module's code keeps Apple's sequence on every target, so on
     /// its glibc Linux cores too, and refuses the measuring cfgs below.
@@ -579,6 +662,8 @@ mod dit {
     /// supported configurations.
     #[inline(always)]
     pub(super) fn barrier_after_set() {
+        // Measuring overrides, and the builds that are Apple's without a
+        // register read: Apple's OS, and the FIPS module on every target.
         #[cfg(any(
             rind_dit_barrier = "apple",
             all(
@@ -587,6 +672,22 @@ mod dit {
             )
         ))]
         apple_barrier();
+        // Linux, other than the measuring overrides and the FIPS module:
+        // Apple's sequence only when `MIDR_EL1` names implementer `0x61`.
+        #[cfg(all(
+            not(any(
+                rind_dit_barrier = "apple",
+                rind_dit_barrier = "isb",
+                rind_dit_barrier = "none",
+                target_vendor = "apple",
+                rind_fips
+            )),
+            rind_std,
+            target_os = "linux",
+        ))]
+        if super::apple_core() {
+            apple_barrier();
+        }
         // SAFETY: an Armv8.0 barrier.
         #[cfg(rind_dit_barrier = "isb")]
         unsafe {
@@ -596,15 +697,9 @@ mod dit {
 
     /// Apple's barrier after setting DIT: `sb` where the core has FEAT_SB,
     /// else `dsb nsh; isb sy`.
-    // Only the tests run it where `barrier_after_set` does not.
+    // Unused when a measuring cfg selects a different barrier.
     #[cfg_attr(
-        not(any(
-            rind_dit_barrier = "apple",
-            all(
-                not(any(rind_dit_barrier = "isb", rind_dit_barrier = "none")),
-                any(target_vendor = "apple", rind_fips)
-            )
-        )),
+        any(rind_dit_barrier = "isb", rind_dit_barrier = "none"),
         allow(dead_code)
     )]
     #[inline(always)]
@@ -626,15 +721,9 @@ mod dit {
     }
 
     /// Runs nothing after it speculatively until everything before it completes.
-    // Only the tests run it where `apple_barrier` does not.
+    // Unused when a measuring cfg selects a barrier other than Apple's.
     #[cfg_attr(
-        not(any(
-            rind_dit_barrier = "apple",
-            all(
-                not(any(rind_dit_barrier = "isb", rind_dit_barrier = "none")),
-                any(target_vendor = "apple", rind_fips)
-            )
-        )),
+        any(rind_dit_barrier = "isb", rind_dit_barrier = "none"),
         allow(dead_code)
     )]
     #[target_feature(enable = "sb")]
@@ -867,6 +956,63 @@ mod tests {
         assert!(!cortex_a72(0));
         assert!(!cortex_a72(0x4100_0d08));
         assert!(!cortex_a72(0x41d0_8000));
+    }
+
+    #[test]
+    fn midr_selects_apple_cores() {
+        // M1 (part `0x023`), and the implementer with other parts: M2, M3,
+        // M4 change the part, not the implementer.
+        for part in [0x023u64, 0x028, 0x032, 0x033, 0x034] {
+            for variant in 0..16u64 {
+                let midr = (0x61 << 24) | 0x000f_0000 | (variant << 20) | (part << 4);
+                assert!(apple_from_midr(midr), "{midr:#x}");
+                assert!(apple_from_midr(midr | (u64::MAX << 32)), "{midr:#x}");
+            }
+        }
+        // Arm, Qualcomm, and Microsoft implementers, including a narrow part
+        // number that would be an Apple core only from implementer `0x61`.
+        for implementer in [0x00u64, 0x41, 0x51, 0x6d, 0xc0] {
+            assert!(!apple_from_midr((implementer << 24) | 0x000f_0230));
+        }
+        assert!(!apple_from_midr(0));
+        assert!(!apple_from_midr(0x0061_0000));
+    }
+
+    /// `apple_core` follows the `MIDR_EL1` fixture. The answer is cached for
+    /// the process, so each case is a child.
+    #[cfg(all(
+        target_os = "linux",
+        any(debug_assertions, rind_cpu_disable),
+        not(rind_fips)
+    ))]
+    #[test]
+    fn apple_core_follows_midr() {
+        const CHILD: &str = "RIND_TEST_APPLE_CORE";
+        if let Some(mode) = std::env::var_os(CHILD) {
+            let want = mode == "apple";
+            assert_eq!(apple_core(), want, "{mode:?}");
+            // The second call reads the cache, not the register again.
+            assert_eq!(apple_core(), want);
+            println!("{CHILD} done");
+            return;
+        }
+        for mode in ["apple", "wide", "none"] {
+            let mut cmd = reexec();
+            let test = concat!(module_path!(), "::apple_core_follows_midr");
+            let test = test.split_once("::").unwrap().1;
+            let output = cmd
+                .args([test, "--exact", "--nocapture"])
+                .env(CHILD, mode)
+                .env("RIND_TEST_MIDR", mode)
+                .output()
+                .unwrap();
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            assert!(
+                output.status.success() && stdout.contains(&format!("{CHILD} done")),
+                "{mode}:\n{stdout}{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
     }
 
     // Disable wins over force, as for `wide_mul`.
