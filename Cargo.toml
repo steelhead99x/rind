@@ -57,6 +57,19 @@ overflow-checks = false
 [profile.dev.package.subtle]
 debug-assertions = false
 
+# `edwards25519_msm_avx2`'s field arithmetic is thousands of SIMD operations
+# per scalar. A debug build does not inline them, so VOPRF's 65536-element
+# batch — what the no-ADX tier of `cargo test --workspace` runs — takes
+# minutes (about 50x the s2n-bignum path, which is already assembly).
+# opt-level 1 inlines that code. Overflow checks stay on, unlike the
+# curve25519-dalek override above, which needs release's level to fold a
+# secret-dependent iterator.
+[profile.dev.package.rind]
+opt-level = 2
+
+[profile.test.package.rind]
+opt-level = 2
+
 # rind's fork, ported to rsa 0.10.0: UPSTREAM.md's "blind-rsa-signatures 0.18
 # does not build on rsa 0.10.0".
 [patch.crates-io]
