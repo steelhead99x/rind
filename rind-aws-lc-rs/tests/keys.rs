@@ -10,6 +10,8 @@ use ours::signature::KeyPair as _;
 use proptest::collection::vec;
 use proptest::prelude::*;
 use rind_aws_lc_rs as ours;
+
+mod unbacked;
 use theirs::encoding::{AsBigEndian as _, AsDer as _};
 use theirs::signature::KeyPair as _;
 
@@ -619,8 +621,10 @@ fn ml_dsa_every_refusal() {
         assert_eq!(theirs.description_(), expected, "aws-lc-rs");
         assert_eq!(ours.description_(), expected, "rind");
     };
-    // A key of a type rind cannot back is refused from its OID alone, so a
-    // malformed one is `WrongAlgorithm` where aws-lc-rs may name a parse error.
+    // An RSA key of a size rind cannot back is refused from its modulus
+    // length, and an EC key on a curve rind cannot back without checking that
+    // its public key is the scalar's, so a malformed one is `WrongAlgorithm`
+    // where aws-lc-rs names a parse error.
     let unbacked = |doc: &[u8], theirs_expected: &str| {
         let ours = ours::signature::PqdsaKeyPair::from_pkcs8(ours44, doc).unwrap_err();
         let theirs = theirs::signature::PqdsaKeyPair::from_pkcs8(theirs44, doc).unwrap_err();
@@ -783,8 +787,10 @@ fn ml_dsa_every_refusal() {
     );
     let mut off = k1_g;
     off[1] ^= 0xff;
-    unbacked(
+    kind(
         &ec_pkcs8(&[0x2b, 0x81, 0x04, 0x00, 0x0a], &[1], Some(&off)),
+        ours44,
+        theirs44,
         "InvalidEncoding",
     );
     unbacked(
@@ -832,11 +838,11 @@ fn ml_dsa_every_refusal() {
     // DSA, which rind cannot back. aws-lc checks bounds, not primality:
     // x = 0 and x = q are out of range there.
     kind(&dsa_pkcs8(&[1]), ours44, theirs44, "WrongAlgorithm");
-    unbacked(&dsa_pkcs8(&[0]), "InvalidEncoding");
+    kind(&dsa_pkcs8(&[0]), ours44, theirs44, "InvalidEncoding");
     let mut q = vec![0x00, 0x80];
     q.extend_from_slice(&[0; 18]);
     q.push(0x01);
-    unbacked(&dsa_pkcs8(&q), "InvalidEncoding");
+    kind(&dsa_pkcs8(&q), ours44, theirs44, "InvalidEncoding");
 
     // An Ed25519 document with a trailing byte still parses.
     let ed = theirs::signature::Ed25519KeyPair::from_seed_unchecked(&[3; 32])
@@ -1357,6 +1363,9 @@ fn rsa_encrypting_key_refusals() {
         cases.push((format!("{size} trailing"), trailing(der), expected));
     }
 
+    cases.extend(unbacked::public_keys());
+
+    let mut failures = Vec::new();
     for (name, input, expected) in cases {
         let ours = ours::rsa::PublicEncryptingKey::from_der(&input)
             .map(|key| key.key_size_bits())
@@ -1364,11 +1373,13 @@ fn rsa_encrypting_key_refusals() {
         let theirs = theirs::rsa::PublicEncryptingKey::from_der(&input)
             .map(|key| key.key_size_bits())
             .map_err(|e| e.description_());
-        assert_eq!(ours, theirs, "{name}");
-        if let Some(expected) = expected {
-            assert_eq!(ours, Err(expected), "{name}");
+        if ours != theirs || expected.is_some_and(|expected| theirs != Err(expected)) {
+            failures.push(format!(
+                "{name}: rind {ours:?}, aws-lc-rs {theirs:?}, expected {expected:?}"
+            ));
         }
     }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
     let ours = ours::rsa::PublicEncryptingKey::from_der(&spki(&pkcs1_oid(1), &rsa2048));
     assert_eq!(ours.unwrap().key_size_bits(), 2048);
 }

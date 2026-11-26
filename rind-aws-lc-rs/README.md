@@ -45,7 +45,7 @@ These items are left out, so code using them fails to build:
 - ECDSA and ECDH public keys in the X9.62 hybrid form are refused, and so are
   ECDSA private keys whose curve is given by explicit parameters rather than
   its name, which AWS-LC loads when they match a curve it knows.
-- rind cannot back PKCS#8 private keys on secp256k1, P-224, or brainpoolP256r1, or DSA keys. `signature::PqdsaKeyPair::from_pkcs8` refuses one as `WrongAlgorithm` from its algorithm identifier alone, so a malformed key of those types gets `WrongAlgorithm` where aws-lc-rs may report a parse error (`InvalidEncoding`).
+- rind cannot back EC keys on P-224, secp256k1, or the brainpool curves, or DSA and DH keys. A loader refusing one as another algorithm checks it as AWS-LC parses it, and names AWS-LC's reason, but for one case: a PKCS#8 EC key on such a curve whose public key is on the curve but not its scalar's. rind has no constant-time arithmetic on those curves to compute the scalar's point, so `signature::PqdsaKeyPair::from_pkcs8` refuses that key as `WrongAlgorithm` where aws-lc-rs reports `InvalidEncoding`.
 - rind signs only with an RSA modulus of 2048 to 8192 bits, so it cannot back an RSA or RSASSA-PSS private key outside that range. `signature::PqdsaKeyPair::from_pkcs8` refuses one as `WrongAlgorithm` from its modulus length alone, without checking its private components, so an inconsistent key of that size gets `WrongAlgorithm` where aws-lc-rs reports `InvalidEncoding`.
 - An RSA public key, from `rsa::PublicKey::from_der` or elsewhere, must have a modulus of 1024 to 8192 bits, the range rind verifies with.
 - `try_fips_cpu_jitter_entropy()` fails, where aws-lc-rs's default build answers `Ok`: rind seeds from the operating system, not from CPU jitter.

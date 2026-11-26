@@ -13,7 +13,7 @@ use crate::encoding::{AsDer, Pkcs8V1Der, PublicKeyX509Der};
 use crate::error::{KeyRejected, Unspecified, unspecified};
 use crate::signature::{KeyPair, ParsedKey, private, verification_algorithm};
 use crate::wipe::Wiped;
-use crate::{Hex, der, pkcs8};
+use crate::{Hex, der, evp, pkcs8};
 
 /// An ML-DSA parameter set.
 #[allow(non_camel_case_types)]
@@ -531,9 +531,13 @@ fn parses_as_other_private_key(pkcs8: &[u8]) -> bool {
         [0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x04, 0x03] => {
             ml_kem_private_key(document, 3168)
         }
-        // X9.57 `id-dsa`, which rind cannot back, decided from its OID and
-        // the document's public framing, without reading the private key.
-        [0x2a, 0x86, 0x48, 0xce, 0x38, 0x04, 0x01] => der::pkcs8_parts(document).is_some(),
+        // X9.57 `id-dsa`, which rind cannot back. `dsa_priv_decode`
+        // (`p_dsa_asn1.c`) rejects a v2 public key.
+        [0x2a, 0x86, 0x48, 0xce, 0x38, 0x04, 0x01] => {
+            der::pkcs8_parts(document).is_some_and(|parts| {
+                !parts.has_public_key && evp::dsa_private_key(parts.parameters, parts.private_key)
+            })
+        }
         _ => false,
     }
 }
@@ -552,17 +556,14 @@ fn rsa_pss_private_key(pkcs8: &[u8]) -> bool {
         || unbacked_rsa_size(parts.private_key)
 }
 
-/// Whether `spki`, split from `der`, is a public key of a type aws-lc
-/// parses that is neither RSA nor RSA-PSS, which aws-lc-rs refuses as
-/// `WrongAlgorithm` (`parse_rfc5280_public_key` in aws-lc-rs 1.19.0
+/// Whether `spki` is a public key of a type aws-lc parses that is neither
+/// RSA nor RSA-PSS, which aws-lc-rs refuses as `WrongAlgorithm`
+/// (`parse_rfc5280_public_key` in aws-lc-rs 1.19.0
 /// `aws-lc-rs/src/evp_pkey.rs`). Each `*_pub_decode` in aws-lc's
 /// `crypto/evp_extra` is followed: Ed25519, X25519, ML-DSA, and ML-KEM
-/// check only that the parameters are absent and the key's length; a NIST
-/// curve's point must lie on it, which rind checks; P-224, secp256k1,
-/// brainpoolP256r1, DSA, and DH, which rind cannot back, are decided from
-/// their framing.
-pub(crate) fn parses_as_other_public_key(der: &[u8], spki: &der::SpkiParts<'_>) -> bool {
-    use rind::ecdsa::verify::{P256_SHA256_ASN1, P384_SHA384_ASN1, P521_SHA512_ASN1};
+/// check only that the parameters are absent and the key's length; EC, DSA,
+/// and DH keys are checked as [`evp`] describes.
+pub(crate) fn parses_as_other_public_key(spki: &der::SpkiParts<'_>) -> bool {
     let len = |expected: usize| spki.parameters.is_empty() && spki.key.len() == expected;
     match spki.oid {
         // RFC 8410 Ed25519 and X25519.
@@ -575,29 +576,15 @@ pub(crate) fn parses_as_other_public_key(der: &[u8], spki: &der::SpkiParts<'_>) 
         [0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x04, 0x01] => len(800),
         [0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x04, 0x02] => len(1184),
         [0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x04, 0x03] => len(1568),
-        // RFC 5480 `id-ecPublicKey`, naming its curve.
-        [0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01] => {
-            let algorithm = match curve_oid(spki.parameters) {
-                Some([0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07]) => &P256_SHA256_ASN1,
-                Some([0x2b, 0x81, 0x04, 0x00, 0x22]) => &P384_SHA384_ASN1,
-                Some([0x2b, 0x81, 0x04, 0x00, 0x23]) => &P521_SHA512_ASN1,
-                Some(
-                    [0x2b, 0x81, 0x04, 0x00, 0x21]
-                    | [0x2b, 0x81, 0x04, 0x00, 0x0a]
-                    | [0x2b, 0x24, 0x03, 0x03, 0x02, 0x08, 0x01, 0x01, 0x07],
-                ) => {
-                    return !spki.key.is_empty();
-                }
-                _ => return false,
-            };
-            der::sequence_prefix(der).is_some_and(|document| {
-                rind::ecdsa::PublicKey::from_spki(algorithm, document).is_ok()
-            })
+        // RFC 5480 `id-ecPublicKey`.
+        [0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01] => evp::ec_public_key(spki.parameters, spki.key),
+        // X9.57 `id-dsa`.
+        [0x2a, 0x86, 0x48, 0xce, 0x38, 0x04, 0x01] => {
+            evp::dsa_public_key(spki.parameters, spki.key)
         }
-        // X9.57 `id-dsa` and PKCS #3 `dhKeyAgreement`.
-        [0x2a, 0x86, 0x48, 0xce, 0x38, 0x04, 0x01]
-        | [0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x03, 0x01] => {
-            !spki.parameters.is_empty() && !spki.key.is_empty()
+        // PKCS #3 `dhKeyAgreement`.
+        [0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x03, 0x01] => {
+            evp::dh_public_key(spki.parameters, spki.key)
         }
         _ => false,
     }
@@ -685,27 +672,56 @@ fn der_tlv(tag: u8, body: &[u8]) -> Option<Vec<u8>> {
     Some(out)
 }
 
-/// P-256, P-384, and P-521 through rind, under the one curve the parameters
-/// name, including a scalar shorter than the field. secp256k1, secp224r1, and
-/// brainpoolP256r1, which rind cannot back, are decided from their OID alone,
-/// without reading the secret scalar.
+/// `eckey_priv_decode`: no v2 public key, then parameters naming one of
+/// aws-lc's built-in curves, by name or explicitly, and an `ECPrivateKey`
+/// whose own parameters, if any, name the same curve. A P-256, P-384, or
+/// P-521 key goes through rind under the curve's name, including a scalar
+/// shorter than the field; a key on another curve through
+/// [`evp::unbacked_ec_private_key`].
 fn ec_private_key(pkcs8: &[u8]) -> bool {
     use rind::ecdsa::sign::{P256_SHA256_ASN1, P384_SHA384_ASN1, P521_SHA512_ASN1};
-    let Some(oid) = der::pkcs8_parts(pkcs8).and_then(|parts| curve_oid(parts.parameters)) else {
+    let Some(parts) = der::pkcs8_parts(pkcs8) else {
         return false;
     };
-    let algorithm = match oid {
+    let Some((curve, [])) = evp::ec_group(parts.parameters) else {
+        return false;
+    };
+    let algorithm = match curve.oid {
         [0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07] => &P256_SHA256_ASN1,
         [0x2b, 0x81, 0x04, 0x00, 0x22] => &P384_SHA384_ASN1,
         [0x2b, 0x81, 0x04, 0x00, 0x23] => &P521_SHA512_ASN1,
-        [0x2b, 0x81, 0x04, 0x00, 0x0a]
-        | [0x2b, 0x81, 0x04, 0x00, 0x21]
-        | [0x2b, 0x24, 0x03, 0x03, 0x02, 0x08, 0x01, 0x01, 0x07] => return true,
-        _ => return false,
+        _ => {
+            return !parts.has_public_key
+                && evp::sec1(parts.private_key).is_some_and(|key| {
+                    same_curve(curve, &key) && evp::unbacked_ec_private_key(curve, &key)
+                });
+        }
     };
-    rind::ecdsa::KeyPair::from_pkcs8(algorithm, pkcs8).is_ok()
-        || padded_ec_scalar(pkcs8)
-            .is_some_and(|padded| rind::ecdsa::KeyPair::from_pkcs8(algorithm, &padded).is_ok())
+    let loads = |pkcs8: &[u8]| {
+        rind::ecdsa::KeyPair::from_pkcs8(algorithm, pkcs8).is_ok()
+            || padded_ec_scalar(pkcs8)
+                .is_some_and(|padded| rind::ecdsa::KeyPair::from_pkcs8(algorithm, &padded).is_ok())
+    };
+    if loads(pkcs8) {
+        return true;
+    }
+    // aws-lc also takes explicit parameters and hybrid points, which rind's
+    // parser does not.
+    !parts.has_public_key
+        && evp::sec1(parts.private_key).is_some_and(|key| {
+            same_curve(curve, &key)
+                && evp::canonical_ec_pkcs8(curve, parts.parameters, &key)
+                    .is_some_and(|canonical| loads(&canonical))
+        })
+}
+
+/// Whether an `ECPrivateKey`'s own parameters, if any, name `curve`, as
+/// `EC_KEY_parse_private_key` requires.
+fn same_curve(curve: &evp::Curve, key: &evp::Sec1<'_>) -> bool {
+    key.parameters.is_none_or(|inner| {
+        evp::ec_group(inner)
+            .is_some_and(|(inner, rest)| core::ptr::eq(inner, curve) && rest.is_empty())
+    })
 }
 
 /// A scalar shorter than the field, left-padded with zeros, for P-256,

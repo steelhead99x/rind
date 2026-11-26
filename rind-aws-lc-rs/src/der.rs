@@ -155,6 +155,16 @@ fn element_encoding(der: &[u8], tag: u8) -> Option<&[u8]> {
     der.get(..header + len)
 }
 
+/// The first DER element in `der`: its tag, its contents, and the bytes
+/// after it.
+pub(crate) fn split(der: &[u8]) -> Option<(u8, &[u8], &[u8])> {
+    let tag = *der.first()?;
+    let mut input = untrusted::Reader::new(untrusted::Input::from(der));
+    let body = read(&mut input, tag).ok()?;
+    let rest = input.read_bytes_to_end();
+    Some((tag, body.as_slice_less_safe(), rest.as_slice_less_safe()))
+}
+
 /// The tag and body of the first DER element in `der`. Bytes after it are
 /// left unread.
 pub(crate) fn first_element(der: &[u8]) -> Option<(u8, &[u8])> {

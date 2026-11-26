@@ -34,6 +34,7 @@ pub mod signature;
 
 mod buffer;
 mod der;
+mod evp;
 mod pqdsa;
 mod wipe;
 

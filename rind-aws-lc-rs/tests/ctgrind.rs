@@ -488,3 +488,77 @@ fn pkcs8_secret_paths() {
         assert_eq!(err.description_(), "WrongAlgorithm");
     }
 }
+
+/// `PqdsaKeyPair::from_pkcs8` bounds the scalar of an EC key on a curve rind
+/// cannot back, and a DSA key's `x`, before refusing either: in range as
+/// `WrongAlgorithm`, out of range or, for `x`, not minimally encoded as
+/// `InvalidEncoding`. The secret bytes are marked; the framing is public.
+#[cfg(not(any(miri, target_family = "wasm")))]
+#[test]
+fn unbacked_private_keys() {
+    use rind_aws_lc_rs::signature::{ML_DSA_44_SIGNING, PqdsaKeyPair};
+
+    let der = |tag: u8, body: &[u8]| {
+        let mut out = vec![tag];
+        match body.len() {
+            0..0x80 => out.push(body.len() as u8),
+            0x80..0x100 => out.extend([0x81, body.len() as u8]),
+            n => out.extend([0x82, (n >> 8) as u8, n as u8]),
+        }
+        out.extend_from_slice(body);
+        out
+    };
+    let pkcs8 = |oid: &[u8], parameters: &[u8], private_key: &[u8]| {
+        let algorithm = der(0x30, &[der(0x06, oid), parameters.to_vec()].concat());
+        der(
+            0x30,
+            &[&[0x02, 0x01, 0x00][..], &algorithm, &der(0x04, private_key)].concat(),
+        )
+    };
+    // secp256k1, and its order.
+    let k1 = der(0x06, &[0x2b, 0x81, 0x04, 0x00, 0x0a]);
+    let order = [
+        0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+        0xfe, 0xba, 0xae, 0xdc, 0xe6, 0xaf, 0x48, 0xa0, 0x3b, 0xbf, 0xd2, 0x5e, 0x8c, 0xd0, 0x36,
+        0x41, 0x41,
+    ];
+    let mut below = order;
+    below[31] -= 1;
+    let ec = |scalar: &[u8]| {
+        let sec1 = der(0x30, &[der(0x02, &[1]), der(0x04, scalar)].concat());
+        let doc = pkcs8(&[0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01], &k1, &sec1);
+        let at = doc.len() - scalar.len();
+        (doc, at)
+    };
+    // DSA with a 1024-bit p, a 160-bit q, and g = 2, which aws-lc bounds
+    // without checking primality.
+    let p = [&[0x00, 0x80][..], &[0; 126], &[0x01]].concat();
+    let q = [&[0x00, 0x80][..], &[0; 18], &[0x01]].concat();
+    let params = der(
+        0x30,
+        &[der(0x02, &p), der(0x02, &q), der(0x02, &[2])].concat(),
+    );
+    let dsa = |x: &[u8]| {
+        let doc = pkcs8(
+            &[0x2a, 0x86, 0x48, 0xce, 0x38, 0x04, 0x01],
+            &params,
+            &der(0x02, x),
+        );
+        let at = doc.len() - x.len();
+        (doc, at)
+    };
+    for ((doc, at), expected) in [
+        (ec(&below), "WrongAlgorithm"),
+        (ec(&order), "InvalidEncoding"),
+        (ec(&[0; 32]), "InvalidEncoding"),
+        (dsa(&[0x5a; 19]), "WrongAlgorithm"),
+        (dsa(&q), "InvalidEncoding"),
+        (dsa(&[0x00, 0x01]), "InvalidEncoding"),
+        (dsa(&[0x00]), "InvalidEncoding"),
+    ] {
+        secret(&doc[at..]);
+        let err = PqdsaKeyPair::from_pkcs8(&ML_DSA_44_SIGNING, &doc).unwrap_err();
+        public(err.description_().as_bytes());
+        assert_eq!(err.description_(), expected);
+    }
+}

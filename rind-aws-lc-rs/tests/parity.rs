@@ -13,6 +13,8 @@ use ours::signature::KeyPair as _;
 use rind_aws_lc_rs as ours;
 use theirs::signature::KeyPair as _;
 
+mod unbacked;
+
 const ID_EC_PUBLIC_KEY: &[u8] = &[0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01];
 const P256: &[u8] = &[0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07];
 const P384: &[u8] = &[0x2b, 0x81, 0x04, 0x00, 0x22];
@@ -830,6 +832,29 @@ fn ec_mismatched_point() {
             65,
             &embedded(curve_name),
             Some("err:WrongAlgorithm"),
+        );
+    }
+    report.finish();
+}
+
+/// EC keys on every curve aws-lc builds in, by name and by explicit
+/// parameters, and DSA keys, valid and not, refused with aws-lc-rs's kind;
+/// and the one recorded difference, a public key on a curve rind cannot back
+/// that is not the scalar's.
+#[test]
+fn unbacked_ec_and_dsa() {
+    let mut report = Report::new();
+    for (label, doc, fixture) in unbacked::private_keys() {
+        let fixture = fixture.map(|kind| format!("err:{kind}"));
+        check_pkcs8(&mut report, &label, 44, &doc, fixture.as_deref());
+    }
+    for (label, doc, expected) in unbacked::mismatched_private_keys() {
+        let (ours, theirs) = load_pkcs8(44, &doc);
+        report.check_unbacked(
+            &label,
+            &ours,
+            &theirs,
+            &format!("err:{}", expected.unwrap()),
         );
     }
     report.finish();
