@@ -292,6 +292,13 @@ pub extern "C" fn rind_fips_dit_release() {
     }
 }
 
+/// Whether a `rind_fips_dit_hold` on this thread is live, as
+/// `rind::cpu::Dit::is_held` reports for the guard the module keeps.
+#[unsafe(no_mangle)]
+pub extern "C" fn rind_fips_dit_is_held() -> bool {
+    rind::cpu::Dit::is_held()
+}
+
 /// Compares the `a_len` bytes at `a` with the `b_len` at `b` in constant
 /// time.
 ///
