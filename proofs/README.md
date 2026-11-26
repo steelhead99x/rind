@@ -187,9 +187,9 @@ for this CPU's target:
   out, and an encoding that differs but disassembles the same is reported;
   each static a vendored routine reaches, through its relocations and those of
   the statics it reaches, has VG's size, bytes, and relocations;
-- on aarch64, that the text of each `Prog` the ChaCha20-Poly1305 leakage axioms
-  are about (`Cosim/Progs.lean`), and of each function it calls, which
-  `vg-print` prints, is VG's assembly for it: `admin/vg-bytes --progs`
+- that the text of each `Prog` the leakage axioms are about
+  (`Cosim/Progs.lean`: aarch64's ChaCha20-Poly1305, x86_64's P-256 ECDH with
+  AVX512_IFMA), and of each function it calls, which `vg-print` prints, is VG's assembly for it: `admin/vg-bytes --progs`
   compares them, so VG's vendored printer is trusted to print a `Prog` as the
   text of the code it builds, which is not checked;
 - that each distinct instruction of VG's code ends, from random states, in
@@ -1369,6 +1369,9 @@ proof after those.
   routines, and `Rind/Aarch64/VgChaCha20Poly1305Ct.lean`, the two axioms that
   state the leakage of those routines over `verified-garbage/Cosim/Progs.lean`
   (`Cosim/PrintMain.lean`'s `vg-print` prints them for `admin/vg-bytes`).
+- `Rind/X86_64/VgP256Ct.lean`: the axiom that pyca/verified-garbage's
+  `vg_ecdh_p256_ifma` is constant time under its contract, over
+  `Cosim.Progs.ecdhP256Ifma`, which `vg-print x86_64` prints.
 - `Rind/Rsa.lean` and `Rind/RsaLemmas.lean`: RFC 8017's verification,
   transliterated, and its lemmas; `Rind/X86_64/{RsaBytes,RsaMont,RsaPublic,RsaKey,RsaVerify,RsaPss}.lean`:
   the RSA verification proof, on x86_64 alone, and

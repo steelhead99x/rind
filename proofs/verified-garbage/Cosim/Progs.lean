@@ -1,5 +1,6 @@
 import VerifiedGarbage.Impl.ChaCha20Poly1305.AArch64.Stitched
 import VerifiedGarbage.Impl.Ecdh.P256.X86_64.Ifma
+import VerifiedGarbage.Impl.Scrub.X86_64
 import VerifiedGarbage.Impl.StackScratch.AArch64
 import VerifiedGarbage.TCB.AArch64.Target
 
@@ -28,7 +29,15 @@ def chacha20Poly1305OpenSve2 : Prog AArch64.isa :=
   StackScratch.AArch64.withStackScratchWiped 1312 .x7 96
     (ChaCha20Poly1305.AArch64.openInPlace ChaCha20.AArch64.XorCallee.sve2 true)
 
-/-- `Artifacts/EcdhP256/X86_64.lean`'s `vg_ecdh_p256_ifma`, with AVX512_IFMA. -/
-def ecdhP256Ifma : Prog X86_64.isa := Ecdh.X86_64.exchangeP256Ifma
+/-- `Artifacts/EcdhP256/X86_64.lean`'s `vg_ecdh_p256_ifma`, with AVX512_IFMA:
+`exchangeP256Ifma`, then the clearing `withScrubAllM` adds, whose arguments
+`withScrubAllF` computes for this code (`Proof/Framework/X86_64/ScrubOr.lean`):
+at level `evex`, a 32-bit result, every SSE register (the code writes vector
+registers), `r11` and every scratch register, and its 16 bytes of stack, in one
+store at offset 0, with MXCSR's flags left (`f := .avx`), as its code leaves the
+same MXCSR in two runs. `vg-print` checks it prints as VG's assembly. -/
+def ecdhP256Ifma : Prog X86_64.isa :=
+  Scrub.X86_64.scrub .evex 32 Scrub.X86_64.xregs [.r11] Scrub.X86_64.scratchRegs [0] [16]
+    Ecdh.X86_64.exchangeP256Ifma (f := .avx)
 
 end Cosim.Progs

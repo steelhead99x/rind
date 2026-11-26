@@ -20,6 +20,7 @@ import Rind.X86_64.P256Signature
 import Rind.X86_64.P384Signature
 import Rind.X86_64.PointSelect
 import Rind.X86_64.MlKemCoding
+import Rind.X86_64.VgP256Ct
 open rind.x86_64
 
 /-!
@@ -50,8 +51,10 @@ over `Rind.X86_64.Simd`'s models of the AVX2 intrinsics. The generator
 tables' point selects rest on no axiom, only on the hand model in
 `Rind.X86_64.PointSelectModel`. P-256's generator multiplication also rests
 on `p256_point_add_affine_spec` in `Rind.X86_64.S2nBignum`, which restates
-rind's HOL Light proofs of aws-lc's mixed addition. A change here is a
-change to the trust base.
+rind's HOL Light proofs of aws-lc's mixed addition. `Rind.X86_64.VgP256Ct`'s
+axiom that VG's `vg_ecdh_p256_ifma` is constant time under its contract is
+used by no theorem about rind's wrappers. A change here is a change to the
+trust base.
 -/
 
 /-- info: 'rind.x86_64.x25519_generate' depends on axioms: [propext,
@@ -1139,3 +1142,7 @@ change to the trust base.
 /-- info: 'rind.x86_64.MlKemCoding.to_message_bits_spec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
 #print axioms MlKemCoding.to_message_bits_spec
+
+/-- info: 'rind.x86_64.vg_ecdh_p256_ifma_ct' depends on axioms: [propext, Classical.choice, Quot.sound, vg_ecdh_p256_ifma_ct] -/
+#guard_msgs in
+#print axioms vg_ecdh_p256_ifma_ct

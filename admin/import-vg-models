@@ -76,8 +76,10 @@ ROOTS = [
     "VerifiedGarbage.Impl.StackScratch.AArch64",
     "VerifiedGarbage.Spec.ChaCha20Poly1305.Contract",
     # x86_64 P-256 ECDH with AVX512_IFMA: its code (`Prog`) as VG registers
-    # it, `exchangeP256Ifma`, which the leakage axiom will be about.
+    # it, `exchangeP256Ifma` and the clearing its registration adds, which
+    # proofs/Rind/X86_64/VgP256Ct.lean states `ConstantTime` of.
     "VerifiedGarbage.Impl.Ecdh.P256.X86_64.Ifma",
+    "VerifiedGarbage.Impl.Scrub.X86_64",
 ]
 
 # P-256 over its prime field, `y^2 = x^3 - 3x + b`, and its generator, for
