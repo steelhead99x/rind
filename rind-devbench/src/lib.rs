@@ -70,13 +70,19 @@ static DENIES_APPLIED: AtomicBool = AtomicBool::new(false);
 /// calls it from a worker thread: [`catalog`] and [`start`] refuse a build that
 /// denies features when it was not called.
 pub unsafe fn apply_build_denies() {
-    if DENIES_APPLIED.swap(true, Ordering::SeqCst) {
+    // The flag moves only after every variable is written. A concurrent
+    // `catalog` treats a raised flag as "the denies are in the environment"
+    // and caches that, so raising it first would publish a catalog whose
+    // denies rind has not seen yet. A second call finds the flag set and
+    // returns; the variables are idempotent if two callers overlap.
+    if DENIES_APPLIED.load(Ordering::SeqCst) {
         return;
     }
     for id in CPU_DENIED.split(',').filter(|id| !id.is_empty()) {
         // SAFETY: the caller's contract above: no other thread exists or reads the environment.
         unsafe { std::env::set_var(format!("RIND_CPU_DISABLE_{id}"), "1") };
     }
+    DENIES_APPLIED.store(true, Ordering::SeqCst);
 }
 
 /// Whether this build denies features whose variables were never set, so a
