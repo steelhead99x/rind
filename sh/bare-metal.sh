@@ -170,7 +170,8 @@ if [[ ${1:-} == xtensa ]]; then
 fi
 
 # ARMv6-M (Cortex-M0+, the RP2040) and RV32IMC (the ESP32-C3) have no
-# compare-and-swap, so they build `reuse_cache_without_cas`. ARMv7E-M
+# compare-and-swap. They cache public ECDSA tables through atomic loads and
+# stores, and use `reuse_cache_without_cas` for ML-DSA. ARMv7E-M
 # (Cortex-M4 and M7, such as the nRF52840) has it, on the portable backend.
 # A-profile `armv7a-none-eabi`, R-profile `armv7r-none-eabihf`, and
 # `aarch64-unknown-none` are on the portable backend too: their assembly makes

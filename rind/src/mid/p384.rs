@@ -59,11 +59,16 @@ impl PublicKey {
 pub(crate) struct VerifyingKey {
     point: AffineMontPoint,
     /// P, 3P, ..., 15P.
-    odd_multiples: low::ReuseCache<[AffineMontPoint; 8]>,
+    odd_multiples: VerificationTable,
     /// 17P, 19P, ..., 31P, which widen P's digits but pay for building
     /// only once a key is reused.
-    more_odd_multiples: low::ReuseCache<[AffineMontPoint; 8]>,
+    more_odd_multiples: VerificationTable,
 }
+
+#[cfg(not(rind_no_cas_cache))]
+type VerificationTable = low::ReuseCache<[AffineMontPoint; 8]>;
+#[cfg(rind_no_cas_cache)]
+type VerificationTable = low::VerificationTable<12>;
 
 impl VerifyingKey {
     /// Create a [`VerifyingKey`] as [`PublicKey::from_x962_uncompressed`] does.
@@ -72,8 +77,8 @@ impl VerifyingKey {
         let PublicKey { point } = PublicKey::from_x962_uncompressed(bytes)?;
         Ok(Self {
             point,
-            odd_multiples: low::ReuseCache::new(),
-            more_odd_multiples: low::ReuseCache::new(),
+            odd_multiples: VerificationTable::new(),
+            more_odd_multiples: VerificationTable::new(),
         })
     }
 
@@ -89,6 +94,9 @@ impl VerifyingKey {
             // On aarch64, only while the multiples are not ready:
             // `get_or_build` returns `None` on a key's first verification and
             // while another thread builds them.
+            #[cfg(rind_no_cas_cache)]
+            return self.vg_ecdsa_verify(vg, r, s, e);
+            #[cfg(not(rind_no_cas_cache))]
             if cfg!(rind_backend = "x86_64")
                 || self
                     .odd_multiples
@@ -112,12 +120,28 @@ impl VerifyingKey {
 
         // 5. Compute: R = (xR, yR) = u1 G + u2 QU
         //  If R = O, output "invalid" and stop.
+        #[cfg(not(rind_no_cas_cache))]
         let odd_multiples = self
             .odd_multiples
             .get_or_build_now(|| self.point.public_odd_multiples());
+        #[cfg(rind_no_cas_cache)]
+        let odd_multiples = self
+            .odd_multiples
+            .get_or_build_now(|| self.point.public_odd_multiples().map(|point| point.xy))
+            .map(|xy| AffineMontPoint { xy });
+        #[cfg(not(rind_no_cas_cache))]
         let more = self
             .more_odd_multiples
             .get_or_build(|| AffineMontPoint::public_more_odd_multiples(&odd_multiples));
+        #[cfg(rind_no_cas_cache)]
+        let more = self
+            .more_odd_multiples
+            .get_or_build(|| {
+                AffineMontPoint::public_more_odd_multiples(&odd_multiples).map(|point| point.xy)
+            })
+            .map(|table| table.map(|xy| AffineMontPoint { xy }));
+        #[cfg(rind_no_cas_cache)]
+        let more = more.as_ref();
         let point = JacobianMontPoint::public_twin_multiply(&u1, &u2, &odd_multiples, more);
 
         if point.public_is_infinity() {

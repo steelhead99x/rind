@@ -2,7 +2,8 @@
 
 //! The reuse cache on targets without compare-and-swap, such as ARMv6-M's
 //! `thumbv6m-none-eabi` (the RP2040) and `riscv32imc-unknown-none-elf`: it
-//! keeps nothing.
+//! keeps nothing. ECDSA uses a separate table on the targets where word
+//! loads and stores are supported without compare-and-swap.
 //!
 //! `reuse_cache.rs` lets exactly one use write the value by winning a
 //! compare-and-swap. Without one, two uses, on two cores or in a core and an
@@ -28,6 +29,7 @@ impl<T> ReuseCache<T> {
     }
 
     /// Always `None`, as on a first use: the caller does without the value.
+    #[cfg(any(not(rind_no_cas_cache), test))]
     pub(crate) fn get_or_build(&self, _build: impl FnOnce() -> T) -> Option<&T> {
         None
     }

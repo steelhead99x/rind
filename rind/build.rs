@@ -75,7 +75,15 @@ fn main() {
     println!("cargo::rustc-check-cfg=cfg(rind_mul16_top)");
     println!("cargo::rustc-check-cfg=cfg(rind_mul16_soft)");
     println!("cargo::rustc-check-cfg=cfg(rind_reg_asm)");
+    println!("cargo::rustc-check-cfg=cfg(rind_no_cas_cache)");
     println!("cargo::rerun-if-env-changed=RUST_TARGET_PATH");
+    // These targets support atomic word loads and stores without supporting CAS.
+    if matches!(
+        env::var("TARGET").as_deref(),
+        Ok("thumbv6m-none-eabi" | "riscv32imc-unknown-none-elf")
+    ) {
+        println!("cargo::rustc-cfg=rind_no_cas_cache");
+    }
 
     let os = env::var("CARGO_CFG_TARGET_OS").expect("cargo sets the target os");
     let libc = env::var("CARGO_CFG_TARGET_ENV").is_ok_and(|e| !e.is_empty());

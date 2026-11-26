@@ -55,11 +55,16 @@ impl PublicKey {
 pub(crate) struct VerifyingKey {
     point: AffinePoint,
     /// P, 3P, ..., 15P.
-    odd_multiples: low::ReuseCache<[AffinePoint; 8]>,
+    odd_multiples: VerificationTable,
     /// 17P, 19P, ..., 31P, which widen P's digits but pay for building
     /// only once a key is reused.
-    more_odd_multiples: low::ReuseCache<[AffinePoint; 8]>,
+    more_odd_multiples: VerificationTable,
 }
+
+#[cfg(not(rind_no_cas_cache))]
+type VerificationTable = low::ReuseCache<[AffinePoint; 8]>;
+#[cfg(rind_no_cas_cache)]
+type VerificationTable = low::VerificationTable<18>;
 
 impl VerifyingKey {
     /// Create a [`VerifyingKey`] as [`PublicKey::from_x962_uncompressed`] does.
@@ -68,8 +73,8 @@ impl VerifyingKey {
         let PublicKey { point } = PublicKey::from_x962_uncompressed(bytes)?;
         Ok(Self {
             point,
-            odd_multiples: low::ReuseCache::new(),
-            more_odd_multiples: low::ReuseCache::new(),
+            odd_multiples: VerificationTable::new(),
+            more_odd_multiples: VerificationTable::new(),
         })
     }
 
@@ -81,12 +86,28 @@ impl VerifyingKey {
 
         // 5. Compute: R = (xR, yR) = u1 G + u2 QU
         //  If R = O, output "invalid" and stop.
+        #[cfg(not(rind_no_cas_cache))]
         let odd_multiples = self
             .odd_multiples
             .get_or_build_now(|| self.point.public_odd_multiples());
+        #[cfg(rind_no_cas_cache)]
+        let odd_multiples = self
+            .odd_multiples
+            .get_or_build_now(|| self.point.public_odd_multiples().map(|point| point.xy))
+            .map(|xy| AffinePoint { xy });
+        #[cfg(not(rind_no_cas_cache))]
         let more = self
             .more_odd_multiples
             .get_or_build(|| AffinePoint::public_more_odd_multiples(&odd_multiples));
+        #[cfg(rind_no_cas_cache)]
+        let more = self
+            .more_odd_multiples
+            .get_or_build(|| {
+                AffinePoint::public_more_odd_multiples(&odd_multiples).map(|point| point.xy)
+            })
+            .map(|table| table.map(|xy| AffinePoint { xy }));
+        #[cfg(rind_no_cas_cache)]
+        let more = more.as_ref();
         let point = match more {
             Some(more) => JacobianPoint::public_twin_multiply(&u1, &u2, &[&odd_multiples, more]),
             None => JacobianPoint::public_twin_multiply(&u1, &u2, &[&odd_multiples]),
