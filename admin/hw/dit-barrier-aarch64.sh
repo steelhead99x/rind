@@ -25,6 +25,9 @@
 # Takes: about 15 minutes on a Pi 5 (one debug test build), 40 with HW_FULL=1.
 # Writes: .tmp/hw/dit-barrier-aarch64-<time>/ with summary.md (the comment
 #   for #325), tests.log, dit-disasm.log, and run.log.
+# Exits: 0 when every check that ran passed (dit-disasm may be skipped for
+#   missing tools), 1 when a check failed, after writing summary.md either
+#   way.
 #
 # Usage: admin/hw/dit-barrier-aarch64.sh [--preflight]
 # Pin the commit of an earlier run with HW_HEAD_REV.
@@ -64,9 +67,13 @@ hw_say "MIDR_EL1 $midr: implementer $implementer, part $part; DIT $dit, SB $sb; 
 # Step 2, and 3 with HW_FULL=1.
 filter=(low::aarch64::cpu low::entry)
 [[ -z ${HW_FULL:-} ]] || filter=()
+failed=0
 tests=pass
 (cd "$wt" && CARGO_TARGET_DIR=$target hw_gate cargo test -p rind --lib -- "${filter[@]}") \
-    >"$HW_RUN/tests.log" 2>&1 || tests="FAIL (tests.log)"
+    >"$HW_RUN/tests.log" 2>&1 || {
+    tests="FAIL (tests.log)"
+    failed=1
+}
 results=$(grep -E '^test result:' "$HW_RUN/tests.log" | tail -1 || true)
 
 # Step 4, where the tools are present.
@@ -79,6 +86,7 @@ if [[ -x $sysroot/lib/rustlib/$host/bin/llvm-objdump && -d $sysroot/lib/rustlib/
         disasm="pass: $(grep -c '^dit-disasm: .*: ok$' "$HW_RUN/dit-disasm.log") builds ok"
     else
         disasm="FAIL (dit-disasm.log)"
+        failed=1
     fi
 fi
 
@@ -97,3 +105,7 @@ fi
 } >"$HW_RUN/summary.md"
 cat "$HW_RUN/summary.md"
 hw_follow_up 325 "$HW_RUN/summary.md"
+if ((failed)); then
+    echo "dit-barrier-aarch64: a check failed; summary.md says which" >&2
+    exit 1
+fi
