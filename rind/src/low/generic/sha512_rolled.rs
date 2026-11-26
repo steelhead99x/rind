@@ -8,7 +8,10 @@
 //! about 30 times this loop's time on an ESP32-S3, streaming its code from
 //! flash. This follows Graviola's portable SHA-256: one 16-word window and
 //! an 80-round loop, a few kilobytes. The round functions are FIPS 180-4
-//! §4.1.3. Every test build compiles it, so ctgrind checks it on a host.
+//! §4.1.3. On Xtensa each 64-bit sum is two `u32` adds
+//! ([`sha512_u64`](super::sha512_u64)), because LLVM branches on the carry of
+//! a `u64` add there. Every test build compiles it, so ctgrind checks it on
+//! a host, and a host test runs the Xtensa sums against `wrapping_add`.
 
 use super::sha512::K;
 
@@ -50,7 +53,12 @@ macro_rules! SSIG1 {
 }
 
 #[inline(never)]
-fn sha512_compress_block(state: &mut [u64; 8], block: &[u8; 128]) {
+pub(super) fn sha512_compress_block<const SPLIT: bool>(state: &mut [u64; 8], block: &[u8; 128]) {
+    macro_rules! add {
+        ($x:expr, $y:expr) => {
+            super::sha512_u64::add::<SPLIT>($x, $y)
+        };
+    }
     // Sixteen big-endian words. The caller already holds a whole block, so
     // the conversion is once, ahead of the round loop, and the loop does
     // not carry a `try_into` panic path.
@@ -79,38 +87,37 @@ fn sha512_compress_block(state: &mut [u64; 8], block: &[u8; 128]) {
             w[t] = w_t;
             w_t
         } else {
-            let w_t = SSIG1!(w[(t - 2) % 16])
-                .wrapping_add(w[(t - 7) % 16])
-                .wrapping_add(SSIG0!(w[(t - 15) % 16]))
-                .wrapping_add(w[(t - 16) % 16]);
+            let w_t = add!(
+                add!(
+                    add!(SSIG1!(w[(t - 2) % 16]), w[(t - 7) % 16]),
+                    SSIG0!(w[(t - 15) % 16])
+                ),
+                w[(t - 16) % 16]
+            );
             w[t % 16] = w_t;
             w_t
         };
 
-        let t1 = h
-            .wrapping_add(BSIG1!(e))
-            .wrapping_add(CH!(e, f, g))
-            .wrapping_add(K[t])
-            .wrapping_add(w_t);
-        let t2 = BSIG0!(a).wrapping_add(MAJ!(a, b, c));
+        let t1 = add!(add!(add!(add!(h, BSIG1!(e)), CH!(e, f, g)), K[t]), w_t);
+        let t2 = add!(BSIG0!(a), MAJ!(a, b, c));
         h = g;
         g = f;
         f = e;
-        e = d.wrapping_add(t1);
+        e = add!(d, t1);
         d = c;
         c = b;
         b = a;
-        a = t1.wrapping_add(t2);
+        a = add!(t1, t2);
     }
 
-    state[0] = state[0].wrapping_add(a);
-    state[1] = state[1].wrapping_add(b);
-    state[2] = state[2].wrapping_add(c);
-    state[3] = state[3].wrapping_add(d);
-    state[4] = state[4].wrapping_add(e);
-    state[5] = state[5].wrapping_add(f);
-    state[6] = state[6].wrapping_add(g);
-    state[7] = state[7].wrapping_add(h);
+    state[0] = add!(state[0], a);
+    state[1] = add!(state[1], b);
+    state[2] = add!(state[2], c);
+    state[3] = add!(state[3], d);
+    state[4] = add!(state[4], e);
+    state[5] = add!(state[5], f);
+    state[6] = add!(state[6], g);
+    state[7] = add!(state[7], h);
 }
 
 pub(crate) fn sha512_compress_blocks(state: &mut [u64; 8], blocks: &[u8]) {
@@ -118,13 +125,15 @@ pub(crate) fn sha512_compress_blocks(state: &mut [u64; 8], blocks: &[u8]) {
 
     let (chunks, _) = blocks.as_chunks::<128>();
     for block in chunks {
-        sha512_compress_block(state, block);
+        // Xtensa only. Other 32-bit targets lower a `u64` add without a
+        // secret-dependent branch, and keep that code.
+        sha512_compress_block::<{ cfg!(target_arch = "xtensa") }>(state, block);
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::sha512_compress_blocks;
+    use super::{sha512_compress_block, sha512_compress_blocks};
 
     /// SHA-512's IV, FIPS 180-4 §5.3.5.
     const IV: [u64; 8] = [
@@ -205,6 +214,40 @@ mod tests {
             crate::low::sha512_compress_blocks(&mut state, &bytes);
             assert_eq!(hash(&message), encode(state), "{len} bytes");
         }
+    }
+
+    /// The Xtensa sums agree with `wrapping_add` on states and blocks that
+    /// carry out of both halves, and on FIPS 180-4's empty message.
+    #[test]
+    fn xtensa_sums_match_wrapping_add() {
+        let mut x = 0x9e37_79b9_7f4a_7c15u64;
+        let mut next = || {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            x
+        };
+        for _ in 0..8 {
+            let mut state = [0u64; 8];
+            for word in &mut state {
+                *word = next();
+            }
+            let mut block = [0u8; 128];
+            for word in block.as_chunks_mut::<8>().0 {
+                *word = next().to_be_bytes();
+            }
+            let mut wide = state;
+            let mut split = state;
+            sha512_compress_block::<false>(&mut wide, &block);
+            sha512_compress_block::<true>(&mut split, &block);
+            assert_eq!(wide, split);
+        }
+        let bytes = padded(b"");
+        let mut state = IV;
+        for block in bytes.as_chunks::<128>().0 {
+            sha512_compress_block::<true>(&mut state, block);
+        }
+        assert_eq!(encode(state).as_slice(), hash(b"").as_slice());
     }
 
     #[test]

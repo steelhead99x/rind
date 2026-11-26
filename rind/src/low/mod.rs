@@ -234,6 +234,18 @@ mod generic {
     // it everywhere, to check the assembly and the rolled loop against.
     #[cfg(any(rind_backend = "portable", test))]
     pub(super) mod sha512;
+    // Xtensa's branchless 64-bit add, used by the rolled and unrolled SHA-512
+    // bodies. Tests compile it everywhere and check it against wrapping_add.
+    #[cfg(any(
+        all(
+            rind_backend = "portable",
+            not(target_pointer_width = "64"),
+            any(target_os = "espidf", target_os = "none")
+        ),
+        all(rind_backend = "portable", rind_esp32s3),
+        test
+    ))]
+    pub(super) mod sha512_u64;
     // Rolled SHA-512 on 32-bit microcontrollers (ESP-IDF or no OS), whose
     // small instruction cache the unrolled body would crowd, unless the
     // ESP32-S3 asks for its unrolled body. Tests compile

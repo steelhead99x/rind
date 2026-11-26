@@ -86,7 +86,7 @@ mod unrolled {
     // One FIPS 180-4 round. Returning the working variables in rotated order
     // keeps a loop edge from moving them.
     #[inline(always)]
-    fn sha512_round(
+    fn sha512_round<const SPLIT: bool>(
         w: u64,
         k: u64,
         a: u64,
@@ -98,13 +98,17 @@ mod unrolled {
         g: u64,
         h: u64,
     ) -> (u64, u64, u64, u64, u64, u64, u64, u64) {
-        let t1 = h
-            .wrapping_add(BSIG1!(e))
-            .wrapping_add(CH!(e, f, g))
-            .wrapping_add(k)
-            .wrapping_add(w);
-        let t2 = BSIG0!(a).wrapping_add(MAJ!(a, b, c));
-        (t1.wrapping_add(t2), a, b, c, d.wrapping_add(t1), e, f, g)
+        // `add` is inlined, including into the IRAM body: a call from there
+        // would land in flash while the cache is off.
+        // A macro, not a function pointer: the IRAM body must not call out.
+        macro_rules! add {
+            ($x:expr, $y:expr) => {
+                super::super::sha512_u64::add::<SPLIT>($x, $y)
+            };
+        }
+        let t1 = add!(add!(add!(add!(h, BSIG1!(e)), CH!(e, f, g)), k), w);
+        let t2 = add!(BSIG0!(a), MAJ!(a, b, c));
+        (add!(t1, t2), a, b, c, add!(d, t1), e, f, g)
     }
 
     // `K` at a fixed offset from `kp`. `I` is a literal, so the load is a
@@ -183,17 +187,30 @@ mod unrolled {
     // `W[t] = σ1(W[t-2]) + W[t-7] + σ0(W[t-15]) + W[t-16]`, `SLOT = t mod 16`.
     // The slot is the round number, not the message.
     #[inline(always)]
-    fn schedule<const SLOT: usize>(w: &mut [core::mem::MaybeUninit<u64>; 16]) -> u64 {
+    fn schedule<const SLOT: usize, const SPLIT: bool>(
+        w: &mut [core::mem::MaybeUninit<u64>; 16],
+    ) -> u64 {
+        macro_rules! add {
+            ($x:expr, $y:expr) => {
+                super::super::sha512_u64::add::<SPLIT>($x, $y)
+            };
+        }
         // SAFETY: the message rounds write every slot before the first call.
         // `SLOT` is `0..16`. A slot already written in this group is the new
         // schedule word the formula reads (`W[t-15]` when `SLOT` is 15); every
         // other read still holds the previous window. The write of this slot
         // happens after those reads. The indexes are constant.
         let w_t = unsafe {
-            SSIG1!(w[(SLOT + 14) & 15].assume_init())
-                .wrapping_add(w[(SLOT + 9) & 15].assume_init())
-                .wrapping_add(SSIG0!(w[(SLOT + 1) & 15].assume_init()))
-                .wrapping_add(w[SLOT].assume_init())
+            add!(
+                add!(
+                    add!(
+                        SSIG1!(w[(SLOT + 14) & 15].assume_init()),
+                        w[(SLOT + 9) & 15].assume_init()
+                    ),
+                    SSIG0!(w[(SLOT + 1) & 15].assume_init())
+                ),
+                w[SLOT].assume_init()
+            )
         };
         w[SLOT].write(w_t);
         w_t
@@ -201,27 +218,27 @@ mod unrolled {
 
     // `$i` is a literal, so the word index and the constant's offset both fold.
     macro_rules! message_rounds {
-        ($w:ident, $block:ident, $kp:ident, $a:ident, $b:ident, $c:ident, $d:ident, $e:ident, $f:ident, $g:ident, $h:ident, $($i:literal),*) => {
+        ($split:ident, $w:ident, $block:ident, $kp:ident, $a:ident, $b:ident, $c:ident, $d:ident, $e:ident, $f:ident, $g:ident, $h:ident, $($i:literal),*) => {
             $(
                 {
                     let kk = round_constant::<$i>($kp);
                     let ww = message_word::<{ $i * 8 }>($block);
                     $w[$i].write(ww);
                     ($a, $b, $c, $d, $e, $f, $g, $h) =
-                        sha512_round(ww, kk, $a, $b, $c, $d, $e, $f, $g, $h);
+                        sha512_round::<$split>(ww, kk, $a, $b, $c, $d, $e, $f, $g, $h);
                 }
             )*
         };
     }
 
     macro_rules! schedule_rounds {
-        ($w:ident, $kp:ident, $a:ident, $b:ident, $c:ident, $d:ident, $e:ident, $f:ident, $g:ident, $h:ident, $($i:literal),*) => {
+        ($split:ident, $w:ident, $kp:ident, $a:ident, $b:ident, $c:ident, $d:ident, $e:ident, $f:ident, $g:ident, $h:ident, $($i:literal),*) => {
             $(
                 {
                     let kk = round_constant::<$i>($kp);
-                    let ww = schedule::<$i>(&mut $w);
+                    let ww = schedule::<$i, $split>(&mut $w);
                     ($a, $b, $c, $d, $e, $f, $g, $h) =
-                        sha512_round(ww, kk, $a, $b, $c, $d, $e, $f, $g, $h);
+                        sha512_round::<$split>(ww, kk, $a, $b, $c, $d, $e, $f, $g, $h);
                 }
             )*
         };
@@ -254,7 +271,15 @@ mod unrolled {
         ),
         unsafe(link_section = ".iram1.text")
     )]
-    pub(super) fn sha512_compress_block(state: &mut [u64; 8], block: &[u8; 128]) {
+    pub(super) fn sha512_compress_block<const SPLIT: bool>(
+        state: &mut [u64; 8],
+        block: &[u8; 128],
+    ) {
+        macro_rules! add {
+            ($x:expr, $y:expr) => {
+                super::super::sha512_u64::add::<SPLIT>($x, $y)
+            };
+        }
         let mut a = state[0];
         let mut b = state[1];
         let mut c = state[2];
@@ -274,8 +299,8 @@ mod unrolled {
         let mut w = [const { core::mem::MaybeUninit::<u64>::uninit() }; 16];
         let kp = K.as_ptr();
         message_rounds!(
-            w, block, kp, a, b, c, d, e, f, g, h, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14,
-            15
+            SPLIT, w, block, kp, a, b, c, d, e, f, g, h, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
+            13, 14, 15
         );
         // SAFETY: `K` has 80 words. The next group starts at word 16.
         let mut kp = unsafe { kp.add(16) };
@@ -284,7 +309,8 @@ mod unrolled {
         let mut n = 0u32;
         while n < 4 {
             schedule_rounds!(
-                w, kp, a, b, c, d, e, f, g, h, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
+                SPLIT, w, kp, a, b, c, d, e, f, g, h, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13,
+                14, 15
             );
             // SAFETY: the next start is word 32, 48, 64, or 80. The pointer at
             // 80 is one past the end of `K` and is not dereferenced; the loop
@@ -293,14 +319,14 @@ mod unrolled {
             n += 1;
         }
 
-        state[0] = state[0].wrapping_add(a);
-        state[1] = state[1].wrapping_add(b);
-        state[2] = state[2].wrapping_add(c);
-        state[3] = state[3].wrapping_add(d);
-        state[4] = state[4].wrapping_add(e);
-        state[5] = state[5].wrapping_add(f);
-        state[6] = state[6].wrapping_add(g);
-        state[7] = state[7].wrapping_add(h);
+        state[0] = add!(state[0], a);
+        state[1] = add!(state[1], b);
+        state[2] = add!(state[2], c);
+        state[3] = add!(state[3], d);
+        state[4] = add!(state[4], e);
+        state[5] = add!(state[5], f);
+        state[6] = add!(state[6], g);
+        state[7] = add!(state[7], h);
     }
 }
 
@@ -331,7 +357,7 @@ pub(crate) fn sha512_compress_blocks(state: &mut [u64; 8], blocks: &[u8]) {
         // reference does not outlive this call, and `blocks` is not
         // mutated through it.
         let block = unsafe { &*ptr.cast::<[u8; 128]>() };
-        unrolled::sha512_compress_block(state, block);
+        unrolled::sha512_compress_block::<{ cfg!(target_arch = "xtensa") }>(state, block);
         // SAFETY: the next step is 128 bytes later, still inside `blocks`
         // or exactly one past the last whole block.
         ptr = unsafe { ptr.add(128) };
@@ -353,6 +379,12 @@ mod tests {
     #[cfg(test)]
     fn rolled_block(state: &mut [u64; 8], block: &[u8; 128]) {
         super::super::sha512_rolled::sha512_compress_blocks(state, block);
+    }
+
+    /// The unrolled body this target ships, one block.
+    #[cfg(test)]
+    fn unrolled_block(state: &mut [u64; 8], block: &[u8; 128]) {
+        unrolled::sha512_compress_block::<{ cfg!(target_arch = "xtensa") }>(state, block);
     }
 
     /// SHA-512's IV, FIPS 180-4 §5.3.5.
@@ -569,10 +601,7 @@ mod tests {
 
     /// Both bodies, whichever this target ships.
     #[cfg(test)]
-    const BODIES: [(&str, Body); 2] = [
-        ("rolled", rolled_block),
-        ("unrolled", unrolled::sha512_compress_block),
-    ];
+    const BODIES: [(&str, Body); 2] = [("rolled", rolled_block), ("unrolled", unrolled_block)];
 
     #[cfg(test)]
     fn hash_with(body: Body, message: &[u8]) -> [u8; 64] {
@@ -634,7 +663,10 @@ mod tests {
             let mut rolled_state = state;
             let mut unrolled_state = state;
             rolled_block(&mut rolled_state, &block);
-            unrolled::sha512_compress_block(&mut unrolled_state, &block);
+            unrolled::sha512_compress_block::<{ cfg!(target_arch = "xtensa") }>(
+                &mut unrolled_state,
+                &block,
+            );
             assert_eq!(
                 crate::low::ct::into_public(rolled_state),
                 crate::low::ct::into_public(unrolled_state)
@@ -646,8 +678,47 @@ mod tests {
             let mut rolled_state = [u64::from(fill) * 0x0101_0101_0101_0101; 8];
             let mut unrolled_state = rolled_state;
             rolled_block(&mut rolled_state, &block);
-            unrolled::sha512_compress_block(&mut unrolled_state, &block);
+            unrolled::sha512_compress_block::<{ cfg!(target_arch = "xtensa") }>(
+                &mut unrolled_state,
+                &block,
+            );
             assert_eq!(rolled_state, unrolled_state, "fill {fill:#x}");
+        }
+    }
+
+    /// The Xtensa sums in the unrolled body agree with `wrapping_add`,
+    /// including a carry out of each half.
+    #[test]
+    fn xtensa_sums_match_wrapping_add() {
+        let mut x = 0x6a09_e667_f3bc_c908u64;
+        let mut next = || {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            x
+        };
+        for _ in 0..4 {
+            let mut state = [0u64; 8];
+            for word in &mut state {
+                *word = next();
+            }
+            let mut block = [0u8; 128];
+            for word in block.as_chunks_mut::<8>().0 {
+                *word = next().to_be_bytes();
+            }
+            let mut wide = state;
+            let mut split = state;
+            unrolled::sha512_compress_block::<false>(&mut wide, &block);
+            unrolled::sha512_compress_block::<true>(&mut split, &block);
+            assert_eq!(wide, split);
+        }
+        for fill in [0u8, 0xff] {
+            let block = [fill; 128];
+            let mut wide = [u64::from(fill) * 0x0101_0101_0101_0101; 8];
+            let mut split = wide;
+            unrolled::sha512_compress_block::<false>(&mut wide, &block);
+            unrolled::sha512_compress_block::<true>(&mut split, &block);
+            assert_eq!(wide, split, "fill {fill:#x}");
         }
     }
 
