@@ -25,7 +25,9 @@
 # Writes: .tmp/hw/lean-replay-<time>/ with summary.md, one log per command,
 #   and run.log.
 # Exits: 0 when every command passed, 1 when one failed, after writing
-#   summary.md either way.
+#   summary.md either way. With HW_SKIP_VG=1, #322's summary lists the VG
+#   check as skipped and reads "Partial", and the exit is 2: nothing failed,
+#   but the run does not clear the gate.
 #
 # Usage: HW_PR=323 admin/hw/lean-replay.sh [--preflight]
 # Pin the commit of an earlier run with HW_HEAD_REV.
@@ -54,13 +56,19 @@ wt=$(hw_worktree "pr$pr" "$head")
 hw_say "#$pr at $head"
 
 commands=("prove|admin/prove lean")
-if [[ $pr == 322 && -z ${HW_SKIP_VG:-} ]]; then
-    commands+=("vg|admin/prove vg")
-fi
-[[ -z ${HW_FULL:-} ]] || commands+=("prove|admin/prove")
-
 failed=0
 rows=()
+# A check the gate needs but this run left out: its row says so, and the
+# verdict is "Partial", never "Passed".
+skipped=()
+if [[ $pr == 322 ]]; then
+    if [[ -z ${HW_SKIP_VG:-} ]]; then
+        commands+=("vg|admin/prove vg")
+    else
+        skipped+=("| \`nix develop .#vg --command admin/prove vg\` | skipped | | HW_SKIP_VG=1: the VG machine-code and cosimulation check did not run |")
+    fi
+fi
+[[ -z ${HW_FULL:-} ]] || commands+=("prove|admin/prove")
 for entry in "${commands[@]}"; do
     shell=${entry%%|*}
     cmd=${entry#*|}
@@ -91,9 +99,12 @@ flake_rev=$(git -C "$wt" rev-parse HEAD)
     echo "| Command | Exit | Time | First error |"
     echo "|---|---|---|---|"
     printf '%s\n' "${rows[@]}"
+    ((${#skipped[@]} == 0)) || printf '%s\n' "${skipped[@]}"
     echo
     if ((failed)); then
         echo "**Failed.** The logs are under \`$HW_RUN\`."
+    elif ((${#skipped[@]})); then
+        echo "**Partial:** every command that ran passed, but a check this PR needs was skipped (above). This does not clear the replay."
     else
         echo "**Passed.**"
     fi
@@ -104,7 +115,11 @@ if ((failed)); then
     echo "lean-replay: a proof command failed; summary.md says which" >&2
     exit 1
 fi
-if [[ $pr == 323 ]]; then
+if ((${#skipped[@]})); then
+    echo "lean-replay: partial run (a required check was skipped); summary.md says which" >&2
+    exit 2
+fi
+if [[ $pr == 323 && ${#skipped[@]} == 0 ]]; then
     cat <<'EOF'
 
 The owner has approved merging #323 once `admin/prove lean` passes; that
