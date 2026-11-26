@@ -34,6 +34,8 @@ fn sysctl_u64(name: &str) -> Option<u64> {
     Some(if len == 4 { v & 0xffff_ffff } else { v })
 }
 
+// Only the Apple and Android hosts name themselves by a slug.
+#[cfg(any(target_vendor = "apple", target_os = "android"))]
 fn slug(s: &str) -> String {
     let mut o = String::new();
     for ch in s.to_lowercase().chars() {
