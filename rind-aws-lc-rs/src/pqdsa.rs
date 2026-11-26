@@ -487,7 +487,10 @@ fn other_parameter_set(id: &AlgorithmID, pkcs8: &[u8]) -> KeyRejected {
 /// through [`strict_mldsa_pkcs8`].
 fn load_mldsa_pkcs8(id: &AlgorithmID, pkcs8: &[u8]) -> Result<Key, rind::Error> {
     let rebuilt = strict_mldsa_pkcs8(id, pkcs8);
-    new_key!(id, from_pkcs8(rebuilt.as_deref().unwrap_or(pkcs8)))
+    new_key!(
+        id,
+        from_pkcs8(rebuilt.as_ref().map_or(pkcs8, |doc| doc.as_slice()))
+    )
 }
 
 /// Whether `pkcs8` is a private key of a type aws-lc-rs parses that is not
@@ -635,7 +638,7 @@ fn ml_kem_private_key(pkcs8: &[u8], expanded_len: usize) -> bool {
 /// already is one. aws-lc ignores bytes after the document, bytes after the
 /// single private-key element, and the v2 public key (`pqdsa_priv_decode`
 /// does not read `pubkey`).
-fn strict_mldsa_pkcs8(id: &AlgorithmID, pkcs8: &[u8]) -> Option<Vec<u8>> {
+fn strict_mldsa_pkcs8(id: &AlgorithmID, pkcs8: &[u8]) -> Option<Wiped<Vec<u8>>> {
     let parts = der::pkcs8_parts(pkcs8)?;
     if !parts.parameters.is_empty() {
         return None;
@@ -650,30 +653,12 @@ fn strict_mldsa_pkcs8(id: &AlgorithmID, pkcs8: &[u8]) -> Option<Vec<u8>> {
     encode_mldsa_pkcs8(id, element)
 }
 
-fn encode_mldsa_pkcs8(id: &AlgorithmID, private_key: &[u8]) -> Option<Vec<u8>> {
-    let oid = der_tlv(0x06, &id.oid())?;
-    let algorithm = der_tlv(0x30, &oid)?;
-    let key = der_tlv(0x04, private_key)?;
-    let mut body = alloc::vec![0x02, 0x01, 0x00];
-    body.extend(algorithm);
-    body.extend(key);
-    der_tlv(0x30, &body)
-}
-
-fn der_tlv(tag: u8, body: &[u8]) -> Option<Vec<u8>> {
-    let mut out = Vec::with_capacity(body.len() + 4);
-    out.push(tag);
-    if body.len() < 0x80 {
-        out.push(body.len() as u8);
-    } else if body.len() <= 0xff {
-        out.extend([0x81, body.len() as u8]);
-    } else {
-        let len = u16::try_from(body.len()).ok()?;
-        out.push(0x82);
-        out.extend(len.to_be_bytes());
-    }
-    out.extend_from_slice(body);
-    Some(out)
+/// The ML-DSA PKCS#8 document around `private_key`, in a wiped buffer.
+fn encode_mldsa_pkcs8(id: &AlgorithmID, private_key: &[u8]) -> Option<Wiped<Vec<u8>>> {
+    let oid = der::secret_tlv(0x06, &[&id.oid()])?;
+    let algorithm = der::secret_tlv(0x30, &[&oid])?;
+    let key = der::secret_tlv(0x04, &[private_key])?;
+    der::secret_tlv(0x30, &[&[0x02, 0x01, 0x00], &algorithm, &key])
 }
 
 /// `eckey_priv_decode`: no v2 public key, then parameters naming one of
@@ -731,7 +716,7 @@ fn same_curve(curve: &evp::Curve, key: &evp::Sec1<'_>) -> bool {
 /// A scalar shorter than the field, left-padded with zeros, for P-256,
 /// P-384, or P-521. aws-lc accepts that encoding when the value is below
 /// the order (`EC_KEY_parse_private_key`).
-fn padded_ec_scalar(pkcs8: &[u8]) -> Option<Vec<u8>> {
+fn padded_ec_scalar(pkcs8: &[u8]) -> Option<Wiped<Vec<u8>>> {
     let parts = der::pkcs8_parts(pkcs8)?;
     if parts.has_public_key {
         return None;
@@ -748,21 +733,15 @@ fn padded_ec_scalar(pkcs8: &[u8]) -> Option<Vec<u8>> {
     if scalar.is_empty() || scalar.len() >= field {
         return None;
     }
-    let mut padded_scalar = alloc::vec![0u8; field - scalar.len()];
-    padded_scalar.extend_from_slice(scalar);
+    // Every buffer that holds the scalar is wiped on drop and never grows.
+    let zeros = alloc::vec![0u8; field - scalar.len()];
     let tail = rest.get(scalar_enc.len()..)?;
-    let mut inner = version.to_vec();
-    inner.extend(der_tlv(0x04, &padded_scalar)?);
-    inner.extend_from_slice(tail);
-    let sec1 = der_tlv(0x30, &inner)?;
-    let mut algorithm = der_tlv(0x06, &[0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01])?;
-    algorithm.extend_from_slice(parts.parameters);
-    let algorithm = der_tlv(0x30, &algorithm)?;
-    let key = der_tlv(0x04, &sec1)?;
-    let mut body = alloc::vec![0x02, 0x01, 0x00];
-    body.extend(algorithm);
-    body.extend(key);
-    der_tlv(0x30, &body)
+    let padded = der::secret_tlv(0x04, &[&zeros, scalar])?;
+    let sec1 = der::secret_tlv(0x30, &[version, &padded, tail])?;
+    let ec_public_key = [0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01];
+    let algorithm = der::secret_tlv(0x30, &[&ec_public_key, parts.parameters])?;
+    let key = der::secret_tlv(0x04, &[&sec1])?;
+    der::secret_tlv(0x30, &[&[0x02, 0x01, 0x00], &algorithm, &key])
 }
 
 fn field_len(oid: &[u8]) -> Option<usize> {

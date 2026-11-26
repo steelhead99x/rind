@@ -16,6 +16,7 @@ use alloc::vec::Vec;
 use core::cmp::Ordering;
 
 use crate::der;
+use crate::wipe::Wiped;
 
 const INTEGER: u8 = 0x02;
 const BIT_STRING: u8 = 0x03;
@@ -816,7 +817,7 @@ pub(crate) fn canonical_ec_pkcs8(
     curve: &Curve,
     parameters: &[u8],
     key: &Sec1<'_>,
-) -> Option<Vec<u8>> {
+) -> Option<Wiped<Vec<u8>>> {
     let explicit = |parameters: &[u8]| parameters.first() == Some(&SEQUENCE);
     let hybrid = key
         .public_key
@@ -824,45 +825,49 @@ pub(crate) fn canonical_ec_pkcs8(
     if !(explicit(parameters) || key.parameters.is_some_and(explicit) || hybrid) {
         return None;
     }
-    let named = tlv(OBJECT_IDENTIFIER, curve.oid);
-    let mut sec1 = alloc::vec![INTEGER, 1, 1];
-    sec1.extend(tlv(OCTET_STRING, key.scalar));
-    if key.parameters.is_some() {
-        sec1.extend(tlv(0xa0, &named));
-    }
-    if let Some(point) = key.public_key {
-        if hybrid && !curve.has_point(point) {
-            return None;
+    // Every buffer that holds the scalar is `der::secret_tlv`'s: wiped on
+    // drop and never reallocated. The others hold public values.
+    let named = der::secret_tlv(OBJECT_IDENTIFIER, &[curve.oid])?;
+    let scalar = der::secret_tlv(OCTET_STRING, &[key.scalar])?;
+    let inner_parameters = match key.parameters {
+        Some(_) => Some(der::secret_tlv(0xa0, &[&named])?),
+        None => None,
+    };
+    let public_key = match key.public_key {
+        Some(point) => {
+            if hybrid && !curve.has_point(point) {
+                return None;
+            }
+            let form = if hybrid { &[0x04][..] } else { &point[..1] };
+            let bits = der::secret_tlv(BIT_STRING, &[&[0], form, &point[1..]])?;
+            Some(der::secret_tlv(0xa1, &[&bits])?)
         }
-        let mut bits = alloc::vec![0];
-        bits.extend_from_slice(point);
-        if hybrid {
-            bits[1] = 0x04;
-        }
-        sec1.extend(tlv(0xa1, &tlv(BIT_STRING, &bits)));
-    }
-    let mut algorithm = tlv(
+        None => None,
+    };
+    let empty = Wiped::new(Vec::new());
+    let sec1 = der::secret_tlv(
+        SEQUENCE,
+        &[
+            &[INTEGER, 1, 1],
+            &scalar,
+            inner_parameters.as_ref().unwrap_or(&empty),
+            public_key.as_ref().unwrap_or(&empty),
+        ],
+    )?;
+    let ec_public_key = [
         OBJECT_IDENTIFIER,
-        &[0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01],
-    );
-    algorithm.extend(named);
-    let mut body = alloc::vec![INTEGER, 1, 0];
-    body.extend(tlv(SEQUENCE, &algorithm));
-    body.extend(tlv(OCTET_STRING, &tlv(SEQUENCE, &sec1)));
-    Some(tlv(SEQUENCE, &body))
-}
-
-/// A DER element; every EC key fits a two-byte length.
-fn tlv(tag: u8, body: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(body.len() + 4);
-    out.push(tag);
-    match body.len() {
-        len @ 0..=0x7f => out.push(len as u8),
-        len @ 0x80..=0xff => out.extend([0x81, len as u8]),
-        len => out.extend([0x82, (len >> 8) as u8, len as u8]),
-    }
-    out.extend_from_slice(body);
-    out
+        7,
+        0x2a,
+        0x86,
+        0x48,
+        0xce,
+        0x3d,
+        0x02,
+        0x01,
+    ];
+    let algorithm = der::secret_tlv(SEQUENCE, &[&ec_public_key, &named])?;
+    let private_key = der::secret_tlv(OCTET_STRING, &[&sec1])?;
+    der::secret_tlv(SEQUENCE, &[&[INTEGER, 1, 0], &algorithm, &private_key])
 }
 
 #[cfg(test)]

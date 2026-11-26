@@ -3,7 +3,10 @@
 //! algorithm a PKCS#8 document names. rind parses and encodes the keys; every
 //! byte read here is public.
 
+use alloc::vec::Vec;
+
 use crate::error::{Unspecified, unspecified};
+use crate::wipe::Wiped;
 
 const INTEGER: u8 = 0x02;
 const BIT_STRING: u8 = 0x03;
@@ -261,4 +264,40 @@ pub(crate) fn rsa_private_key_parts(der: &[u8]) -> Option<RsaPrivateParts<'_>> {
             })
         })
         .ok()
+}
+
+/// A DER element of `tag` whose contents are `parts` in order, in one
+/// buffer of exactly its length, wiped on drop: for PKCS#8 documents the
+/// adapter rebuilds around a private key, so no copy of the key is freed
+/// unwiped, whether the load that reads it succeeds or not. The buffer is
+/// allocated once at its final size, so it never reallocates and leaves no
+/// stale copy behind. `None` for contents over 0xffff bytes, which no key
+/// here reaches.
+pub(crate) fn secret_tlv(tag: u8, parts: &[&[u8]]) -> Option<Wiped<Vec<u8>>> {
+    let len: usize = parts.iter().map(|part| part.len()).sum();
+    let mut header = [tag, 0, 0, 0];
+    let header_len = match len {
+        0..=0x7f => {
+            header[1] = len as u8;
+            2
+        }
+        0x80..=0xff => {
+            header[1] = 0x81;
+            header[2] = len as u8;
+            3
+        }
+        _ => {
+            let len = u16::try_from(len).ok()?;
+            header[1] = 0x82;
+            header[2..4].copy_from_slice(&len.to_be_bytes());
+            4
+        }
+    };
+    let mut out = Wiped::new(Vec::with_capacity(header_len + len));
+    out.extend_from_slice(&header[..header_len]);
+    for part in parts {
+        out.extend_from_slice(part);
+    }
+    debug_assert_eq!(out.len(), out.capacity());
+    Some(out)
 }

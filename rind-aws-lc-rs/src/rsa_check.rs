@@ -12,12 +12,19 @@
 //! over those widths with no branch or memory index on a value: products are
 //! schoolbook, remainders are bit-serial with a masked subtraction, and
 //! comparisons fold into one mask, of which only the final verdict is made
-//! public, through rind's constant-time comparison.
+//! public, through rind's constant-time comparison. Every heap buffer is
+//! wiped when dropped, on acceptance and refusal alike.
 
 use alloc::vec;
 use alloc::vec::Vec;
 
 use crate::der::RsaPrivateParts;
+use crate::wipe::Wiped;
+
+/// Little-endian limbs, wiped on drop: every value here but n and e is a
+/// private component or derived from one, and each is allocated once at its
+/// final size, so none is freed, or left behind by a reallocation, unwiped.
+type Limbs = Wiped<Vec<u64>>;
 
 /// aws-lc's largest modulus (`kMaxModulusBits`, 16384 bits): a key above it
 /// does not parse.
@@ -91,8 +98,8 @@ fn is_zero(x: u64) -> u64 {
 }
 
 /// A big-endian value as little-endian limbs, as many as its length needs.
-fn limbs(bytes: &[u8]) -> Vec<u64> {
-    let mut out = vec![0u64; bytes.len().div_ceil(8).max(1)];
+fn limbs(bytes: &[u8]) -> Limbs {
+    let mut out = Wiped::new(vec![0u64; bytes.len().div_ceil(8).max(1)]);
     for (i, byte) in bytes.iter().rev().enumerate() {
         out[i / 8] |= u64::from(*byte) << (8 * (i % 8));
     }
@@ -110,8 +117,8 @@ fn odd(a: &[u64]) -> u64 {
 
 /// `a - 1` for an odd `a`: the low bit cleared. (For an even `a`, which
 /// [`odd`] has already failed, the result is wrong but harmless.)
-fn minus_one_odd(a: &[u64]) -> Vec<u64> {
-    let mut out = a.to_vec();
+fn minus_one_odd(a: &[u64]) -> Limbs {
+    let mut out = Wiped::new(a.to_vec());
     out[0] &= !1;
     out
 }
@@ -137,8 +144,8 @@ fn less(a: &[u64], b: &[u64]) -> u64 {
 }
 
 /// `a * b`, schoolbook, `a.len() + b.len()` limbs.
-fn mul(a: &[u64], b: &[u64]) -> Vec<u64> {
-    let mut out = vec![0u64; a.len() + b.len()];
+fn mul(a: &[u64], b: &[u64]) -> Limbs {
+    let mut out = Wiped::new(vec![0u64; a.len() + b.len()]);
     for (i, &bi) in b.iter().enumerate() {
         let mut carry = 0u128;
         for (j, &aj) in a.iter().enumerate() {
@@ -156,14 +163,14 @@ fn mul(a: &[u64], b: &[u64]) -> Vec<u64> {
 /// for an even `m`, which Montgomery reduction would not. For `m` = 0 (p or
 /// q of 1) it returns `x` cut to `m`'s width; `d e = 1` then cannot hold,
 /// since e is at least 3.
-fn rem(x: &[u64], m: &[u64]) -> Vec<u64> {
+fn rem(x: &[u64], m: &[u64]) -> Limbs {
     // One limb more than m, so the shift cannot overflow.
     let width = m.len() + 1;
-    let mut r = vec![0u64; width];
-    let mut t = vec![0u64; width];
+    let mut r = Wiped::new(vec![0u64; width]);
+    let mut t = Wiped::new(vec![0u64; width]);
     for bit in (0..64 * x.len()).rev() {
         let mut carry = (x[bit / 64] >> (bit % 64)) & 1;
-        for limb in &mut r {
+        for limb in r.iter_mut() {
             let next = *limb >> 63;
             *limb = (*limb << 1) | carry;
             carry = next;
@@ -179,10 +186,12 @@ fn rem(x: &[u64], m: &[u64]) -> Vec<u64> {
         // `black_box`, so LLVM cannot turn the masked select into a branch
         // on the borrow, as it otherwise does.
         let keep = core::hint::black_box(borrow.wrapping_sub(1));
-        for (r, t) in r.iter_mut().zip(&t) {
+        for (r, t) in r.iter_mut().zip(t.iter()) {
             *r = (*t & keep) | (*r & !keep);
         }
     }
+    // The top limb is zero, since r < m; truncating keeps the allocation,
+    // which the wipe covers in full.
     r.truncate(m.len());
     r
 }
