@@ -961,7 +961,7 @@ impl PublicEncryptingKey {
             _ => false,
         };
         if !rsa {
-            return Err(match pqdsa::parses_as_other_public_key(value, &spki) {
+            return Err(match pqdsa::parses_as_other_public_key(&spki) {
                 true => KeyRejected::wrong_algorithm(),
                 false => KeyRejected::invalid_encoding(),
             });

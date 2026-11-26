@@ -10,6 +10,8 @@ use ours::signature::KeyPair as _;
 use proptest::collection::vec;
 use proptest::prelude::*;
 use rind_aws_lc_rs as ours;
+
+mod unbacked;
 use theirs::encoding::{AsBigEndian as _, AsDer as _};
 use theirs::signature::KeyPair as _;
 
@@ -619,14 +621,10 @@ fn ml_dsa_every_refusal() {
         assert_eq!(theirs.description_(), expected, "aws-lc-rs");
         assert_eq!(ours.description_(), expected, "rind");
     };
-    // A key of a type rind cannot back is refused from its OID alone, so a
-    // malformed one is `WrongAlgorithm` where aws-lc-rs may name a parse error.
-    let unbacked = |doc: &[u8], theirs_expected: &str| {
-        let ours = ours::signature::PqdsaKeyPair::from_pkcs8(ours44, doc).unwrap_err();
-        let theirs = theirs::signature::PqdsaKeyPair::from_pkcs8(theirs44, doc).unwrap_err();
-        assert_eq!(theirs.description_(), theirs_expected, "aws-lc-rs");
-        assert_eq!(ours.description_(), "WrongAlgorithm", "rind");
-    };
+    // An RSA key of a size rind cannot back is refused from its modulus
+    // length, and an EC key on a curve rind cannot back without checking that
+    // its public key is the scalar's, so a malformed one is `WrongAlgorithm`
+    // where aws-lc-rs names a parse error.
     let loaded = |doc: &[u8], ours_alg, theirs_alg| {
         let ours = ours::signature::PqdsaKeyPair::from_pkcs8(ours_alg, doc).unwrap();
         let theirs = theirs::signature::PqdsaKeyPair::from_pkcs8(theirs_alg, doc).unwrap();
@@ -669,8 +667,8 @@ fn ml_dsa_every_refusal() {
 
     // RSA-1024 from Wycheproof, below the 2048 bits rind can back. Consistent
     // components are `WrongAlgorithm` in both. A corrupted coefficient is
-    // `InvalidEncoding` in aws-lc-rs, and `WrongAlgorithm` here, decided from
-    // the modulus length.
+    // `InvalidEncoding` in both: `RSA_check_key` fails, which rind checks in
+    // constant time for a key it cannot back.
     let rsa = rsa1024_pkcs8();
     kind(&rsa, ours44, theirs44, "WrongAlgorithm");
     let mut bad_rsa = pkcs1_of(&rsa);
@@ -683,7 +681,7 @@ fn ml_dsa_every_refusal() {
         &bad_rsa,
         None,
     );
-    unbacked(&bad_rsa, "InvalidEncoding");
+    kind(&bad_rsa, ours44, theirs44, "InvalidEncoding");
     let v2_rsa = pkcs8_doc(
         1,
         &[0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01],
@@ -695,7 +693,7 @@ fn ml_dsa_every_refusal() {
 
     // RSASSA-PSS. NULL parameters do not parse. An explicit SHA-256 does.
     // A v2 public key is ignored. An inconsistent key does not parse in
-    // aws-lc-rs; this 1024-bit one is refused from its modulus length here.
+    // either.
     let pss_oid = [0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x0a];
     let pkcs1 = pkcs1_of(&rsa);
     kind(
@@ -731,8 +729,10 @@ fn ml_dsa_every_refusal() {
     let mut bad_pss = pkcs1.clone();
     let last = bad_pss.len() - 1;
     bad_pss[last] ^= 0xff;
-    unbacked(
+    kind(
         &pkcs8_doc(0, &pss_oid, &pss_params, &bad_pss, None),
+        ours44,
+        theirs44,
         "InvalidEncoding",
     );
 
@@ -783,12 +783,16 @@ fn ml_dsa_every_refusal() {
     );
     let mut off = k1_g;
     off[1] ^= 0xff;
-    unbacked(
+    kind(
         &ec_pkcs8(&[0x2b, 0x81, 0x04, 0x00, 0x0a], &[1], Some(&off)),
+        ours44,
+        theirs44,
         "InvalidEncoding",
     );
-    unbacked(
+    kind(
         &ec_pkcs8(&[0x2b, 0x81, 0x04, 0x00, 0x0a], &[2], Some(&k1_g)),
+        ours44,
+        theirs44,
         "InvalidEncoding",
     );
     let mut compressed = vec![0x02];
@@ -832,11 +836,11 @@ fn ml_dsa_every_refusal() {
     // DSA, which rind cannot back. aws-lc checks bounds, not primality:
     // x = 0 and x = q are out of range there.
     kind(&dsa_pkcs8(&[1]), ours44, theirs44, "WrongAlgorithm");
-    unbacked(&dsa_pkcs8(&[0]), "InvalidEncoding");
+    kind(&dsa_pkcs8(&[0]), ours44, theirs44, "InvalidEncoding");
     let mut q = vec![0x00, 0x80];
     q.extend_from_slice(&[0; 18]);
     q.push(0x01);
-    unbacked(&dsa_pkcs8(&q), "InvalidEncoding");
+    kind(&dsa_pkcs8(&q), ours44, theirs44, "InvalidEncoding");
 
     // An Ed25519 document with a trailing byte still parses.
     let ed = theirs::signature::Ed25519KeyPair::from_seed_unchecked(&[3; 32])
@@ -1357,6 +1361,9 @@ fn rsa_encrypting_key_refusals() {
         cases.push((format!("{size} trailing"), trailing(der), expected));
     }
 
+    cases.extend(unbacked::public_keys());
+
+    let mut failures = Vec::new();
     for (name, input, expected) in cases {
         let ours = ours::rsa::PublicEncryptingKey::from_der(&input)
             .map(|key| key.key_size_bits())
@@ -1364,11 +1371,13 @@ fn rsa_encrypting_key_refusals() {
         let theirs = theirs::rsa::PublicEncryptingKey::from_der(&input)
             .map(|key| key.key_size_bits())
             .map_err(|e| e.description_());
-        assert_eq!(ours, theirs, "{name}");
-        if let Some(expected) = expected {
-            assert_eq!(ours, Err(expected), "{name}");
+        if ours != theirs || expected.is_some_and(|expected| theirs != Err(expected)) {
+            failures.push(format!(
+                "{name}: rind {ours:?}, aws-lc-rs {theirs:?}, expected {expected:?}"
+            ));
         }
     }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
     let ours = ours::rsa::PublicEncryptingKey::from_der(&spki(&pkcs1_oid(1), &rsa2048));
     assert_eq!(ours.unwrap().key_size_bits(), 2048);
 }
