@@ -26,6 +26,9 @@
 # Writes: .tmp/hw/esp32s3-sha512-split-<time>/ with summary.md (the comment
 #   for #326), layout-{base,head}.log, branches-{base,head}.txt, run.log,
 #   and obj-{base,head}/.
+# Exits: 0 when both layout checks passed, 1 when either failed, after
+#   writing summary.md either way. The branch count is reported, not judged,
+#   and the board A/B is left to you.
 #
 # Usage: admin/hw/esp32s3-sha512-split.sh [--preflight]
 # Pin the commits of an earlier run with HW_BASE_REV and HW_HEAD_REV.
@@ -51,6 +54,7 @@ hw_say "base $base, head $head"
 
 # Step 1, and the objects step 2 reads.
 layout_ok=()
+failed=0
 for name in base head; do
     sha=${!name}
     wt=$(hw_worktree "$name" "$sha")
@@ -69,6 +73,7 @@ for name in base head; do
         layout_ok+=("$name: pass")
     else
         layout_ok+=("$name: FAIL (layout-$name.log)")
+        failed=1
     fi
     [[ -d $HW_RUN/obj-$name ]] || hw_die "no compressor objects from $name; see layout-$name.log"
 done
@@ -126,3 +131,7 @@ SHA-512 rows (16 B, 243 B, 1500 B, many-block) as medians per image to
 $HW_RUN/summary.md.
 EOF
 hw_follow_up 326 "$HW_RUN/summary.md"
+if ((failed)); then
+    echo "esp32s3-sha512-split: a layout check failed; summary.md says which" >&2
+    exit 1
+fi
