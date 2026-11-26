@@ -10,7 +10,6 @@ use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 /// at least one complete build, and concurrent stores write identical words.
 #[derive(Debug)]
 pub(crate) struct VerificationTable<const N: usize> {
-    used: AtomicBool,
     ready: AtomicBool,
     coordinates: [[[AtomicU32; 2]; N]; 8],
 }
@@ -18,53 +17,35 @@ pub(crate) struct VerificationTable<const N: usize> {
 impl<const N: usize> VerificationTable<N> {
     pub(crate) fn new() -> Self {
         Self {
-            used: AtomicBool::new(false),
             ready: AtomicBool::new(false),
             coordinates: [const { [const { [const { AtomicU32::new(0) }; 2] }; N] }; 8],
         }
     }
 
-    /// Uses the shorter table on the first call that observes an unused cache.
-    pub(crate) fn get_or_build(
+    /// Copies into the caller's table, computing it if needed.
+    pub(crate) fn fill<T>(
         &self,
-        build: impl FnOnce() -> [[u64; N]; 8],
-    ) -> Option<[[u64; N]; 8]> {
-        if !self.used.load(Ordering::Relaxed) {
-            self.used.store(true, Ordering::Relaxed);
-            return None;
+        out: &mut [T; 8],
+        limbs: impl Fn(&mut T) -> &mut [u64; N],
+        build: impl FnOnce() -> [T; 8],
+    ) {
+        if self.ready.load(Ordering::Acquire) {
+            for (point, slots) in out.iter_mut().zip(&self.coordinates) {
+                for (word, [lo, hi]) in limbs(point).iter_mut().zip(slots) {
+                    *word = u64::from(lo.load(Ordering::Relaxed))
+                        | (u64::from(hi.load(Ordering::Relaxed)) << 32);
+                }
+            }
+            return;
         }
-        Some(self.get_or_build_now(build))
-    }
 
-    /// Returns the cached coordinates, computing them if needed.
-    pub(crate) fn get_or_build_now(&self, build: impl FnOnce() -> [[u64; N]; 8]) -> [[u64; N]; 8] {
-        if let Some(value) = self.get() {
-            return value;
-        }
-        let value = build();
-        self.publish(&value);
-        value
-    }
-
-    fn get(&self) -> Option<[[u64; N]; 8]> {
-        self.ready.load(Ordering::Acquire).then(|| {
-            self.coordinates.each_ref().map(|point| {
-                point.each_ref().map(|[lo, hi]| {
-                    u64::from(lo.load(Ordering::Relaxed))
-                        | (u64::from(hi.load(Ordering::Relaxed)) << 32)
-                })
-            })
-        })
-    }
-
-    fn publish(&self, value: &[[u64; N]; 8]) {
-        for (point, words) in self.coordinates.iter().zip(value) {
-            for ([lo, hi], word) in point.iter().zip(words) {
+        *out = build();
+        for (slots, point) in self.coordinates.iter().zip(out) {
+            for ([lo, hi], word) in slots.iter().zip(limbs(point)) {
                 lo.store(*word as u32, Ordering::Relaxed);
                 hi.store((*word >> 32) as u32, Ordering::Relaxed);
             }
         }
-        self.used.store(true, Ordering::Relaxed);
         self.ready.store(true, Ordering::Release);
     }
 }
@@ -72,8 +53,17 @@ impl<const N: usize> VerificationTable<N> {
 impl<const N: usize> Clone for VerificationTable<N> {
     fn clone(&self) -> Self {
         let clone = Self::new();
-        if let Some(value) = self.get() {
-            clone.publish(&value);
+        if self.ready.load(Ordering::Acquire) {
+            for (dst, src) in clone
+                .coordinates
+                .iter()
+                .flatten()
+                .flatten()
+                .zip(self.coordinates.iter().flatten().flatten())
+            {
+                dst.store(src.load(Ordering::Relaxed), Ordering::Relaxed);
+            }
+            clone.ready.store(true, Ordering::Release);
         }
         clone
     }
@@ -86,16 +76,16 @@ mod tests {
     const VALUE: [[u64; 2]; 8] = [[0x1234_5678_9abc_def0, u64::MAX]; 8];
 
     #[test]
-    fn builds_now_or_on_second_use() {
+    fn fills_on_first_use_and_copies_on_clone() {
         let cache = VerificationTable::new();
-        assert_eq!(cache.get_or_build(|| unreachable!()), None);
-        assert_eq!(cache.get_or_build(|| VALUE), Some(VALUE));
-        assert_eq!(cache.get_or_build_now(|| unreachable!()), VALUE);
-        assert_eq!(cache.clone().get_or_build(|| unreachable!()), Some(VALUE));
+        let mut out = [[0; 2]; 8];
+        cache.fill(&mut out, |p| p, || VALUE);
+        assert_eq!(out, VALUE);
 
-        let cache = VerificationTable::new();
-        assert_eq!(cache.get_or_build_now(|| VALUE), VALUE);
-        assert_eq!(cache.get_or_build(|| unreachable!()), Some(VALUE));
+        let clone = cache.clone();
+        let mut copied = [[0; 2]; 8];
+        clone.fill(&mut copied, |p| p, || unreachable!());
+        assert_eq!(copied, VALUE);
     }
 
     #[test]
@@ -106,14 +96,19 @@ mod tests {
         std::thread::scope(|scope| {
             for _ in 0..2 {
                 scope.spawn(|| {
-                    assert_eq!(
-                        cache.get_or_build_now(|| {
+                    let mut out = [[0; 2]; 8];
+                    cache.fill(
+                        &mut out,
+                        |p| p,
+                        || {
                             both_building.wait();
                             VALUE
-                        }),
-                        VALUE
+                        },
                     );
-                    assert_eq!(cache.get_or_build_now(|| unreachable!()), VALUE);
+                    assert_eq!(out, VALUE);
+                    out.fill([0; 2]);
+                    cache.fill(&mut out, |p| p, || unreachable!());
+                    assert_eq!(out, VALUE);
                 });
             }
         });

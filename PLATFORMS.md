@@ -137,9 +137,9 @@ qemu. iOS devices' code is only built.
 - Thumb-only M-profile targets (`thumbv6m-none-eabi`, `thumbv7em-none-eabihf`)
   and `riscv32imc-unknown-none-elf` build the portable backend; M-profile has
   no A32 and no NEON for the arm assembly. Where the target has no
-  compare-and-swap (`thumbv6m`, `riscv32imc`), the reuse cache keeps nothing, so
-  each use builds its value again; that is correct on any number of cores and
-  interrupt handlers and needs no critical section.
+  compare-and-swap (`thumbv6m`, `riscv32imc`), ECDSA caches public verification
+  tables with atomic word loads and stores. ML-DSA rebuilds its expansion
+  on each use. Neither path needs a critical section.
 
 - Builds with `-Z cf-protection=branch` or `-Z branch-protection=bti`, both
   unstable, are unsupported: rind calls aws-lc's x86_64 and aarch64 routines
@@ -190,8 +190,8 @@ qemu. iOS devices' code is only built.
   `alloc`: the program supplies a global allocator and a getrandom backend.
   `just ci` lints them in debug and release (`just bare-metal`) whenever a
   change reaches the portable or x86_64 backend: `thumbv6m-none-eabi` and
-  `riscv32imc-unknown-none-elf`, which lack compare-and-swap and so keep no
-  reuse cache, `thumbv7em-none-eabihf`, `armv7a-none-eabi`,
+  `riscv32imc-unknown-none-elf`, which lack compare-and-swap,
+  `thumbv7em-none-eabihf`, `armv7a-none-eabi`,
   `armv7r-none-eabihf`, `aarch64-unknown-none`,
   `aarch64-unknown-none-softfloat`, and `x86_64-unknown-none`. Every one but
   `x86_64-unknown-none` runs the portable backend: the aarch64 and 32-bit ARM

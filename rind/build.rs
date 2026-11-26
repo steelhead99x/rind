@@ -81,7 +81,8 @@ fn main() {
     if matches!(
         env::var("TARGET").as_deref(),
         Ok("thumbv6m-none-eabi" | "riscv32imc-unknown-none-elf")
-    ) {
+    ) && target_json_text().is_none()
+    {
         println!("cargo::rustc-cfg=rind_no_cas_cache");
     }
 

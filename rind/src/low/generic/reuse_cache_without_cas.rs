@@ -29,7 +29,7 @@ impl<T> ReuseCache<T> {
     }
 
     /// Always `None`, as on a first use: the caller does without the value.
-    #[cfg(any(not(rind_no_cas_cache), test))]
+    #[cfg(any(not(rind_no_cas_cache), feature = "ml-dsa", test))]
     pub(crate) fn get_or_build(&self, _build: impl FnOnce() -> T) -> Option<&T> {
         None
     }

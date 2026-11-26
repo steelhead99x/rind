@@ -58,6 +58,7 @@ pub(crate) struct VerifyingKey {
     odd_multiples: VerificationTable,
     /// 17P, 19P, ..., 31P, which widen P's digits but pay for building
     /// only once a key is reused.
+    #[cfg(not(rind_no_cas_cache))]
     more_odd_multiples: VerificationTable,
 }
 
@@ -74,6 +75,7 @@ impl VerifyingKey {
         Ok(Self {
             point,
             odd_multiples: VerificationTable::new(),
+            #[cfg(not(rind_no_cas_cache))]
             more_odd_multiples: VerificationTable::new(),
         })
     }
@@ -91,23 +93,21 @@ impl VerifyingKey {
             .odd_multiples
             .get_or_build_now(|| self.point.public_odd_multiples());
         #[cfg(rind_no_cas_cache)]
-        let odd_multiples = self
-            .odd_multiples
-            .get_or_build_now(|| self.point.public_odd_multiples().map(|point| point.xy))
-            .map(|xy| AffinePoint { xy });
+        let odd_multiples = {
+            let mut table = [AffinePoint::default(); 8];
+            self.odd_multiples.fill(
+                &mut table,
+                |point| &mut point.xy,
+                || self.point.public_odd_multiples(),
+            );
+            table
+        };
         #[cfg(not(rind_no_cas_cache))]
         let more = self
             .more_odd_multiples
             .get_or_build(|| AffinePoint::public_more_odd_multiples(&odd_multiples));
         #[cfg(rind_no_cas_cache)]
-        let more = self
-            .more_odd_multiples
-            .get_or_build(|| {
-                AffinePoint::public_more_odd_multiples(&odd_multiples).map(|point| point.xy)
-            })
-            .map(|table| table.map(|xy| AffinePoint { xy }));
-        #[cfg(rind_no_cas_cache)]
-        let more = more.as_ref();
+        let more = None;
         let point = match more {
             Some(more) => JacobianPoint::public_twin_multiply(&u1, &u2, &[&odd_multiples, more]),
             None => JacobianPoint::public_twin_multiply(&u1, &u2, &[&odd_multiples]),
@@ -551,6 +551,7 @@ impl AffinePoint {
     ///
     /// Each is 16P = 15P + P plus one of those, so no sum adds equal points,
     /// as `p521_jmixadd` requires, and none is at infinity.
+    #[cfg(any(not(rind_no_cas_cache), test))]
     fn public_more_odd_multiples(odd_multiples: &[Self; 8]) -> [Self; 8] {
         let p16 = JacobianPoint::from_affine(&odd_multiples[7]).add_affine(&odd_multiples[0]);
         let multiples = odd_multiples.map(|multiple| p16.add_affine(&multiple));
