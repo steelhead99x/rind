@@ -55,6 +55,9 @@ hw_say "base $base, head $head"
 # Step 1, and the objects step 2 reads.
 layout_ok=()
 failed=0
+# Revisions whose layout run left no objects: their counts are unavailable,
+# and the summary still gets written.
+no_objects=()
 for name in base head; do
     sha=${!name}
     wt=$(hw_worktree "$name" "$sha")
@@ -66,7 +69,12 @@ for name in base head; do
     if ! grep -q RIND_SHA512_LAYOUT_KEEP "$script"; then
         sed "s|^trap 'rm -rf \"\$work\"' EXIT\$|trap 'mkdir -p \"\$RIND_SHA512_LAYOUT_KEEP\"; cp \"\$work\"/obj/*.o \"\$RIND_SHA512_LAYOUT_KEEP\"/ 2>/dev/null; rm -rf \"\$work\"' EXIT|" \
             "$script" >"$script-keep"
-        grep -q RIND_SHA512_LAYOUT_KEEP "$script-keep" || hw_die "cannot add the object copy to $name's layout script"
+        if ! grep -q RIND_SHA512_LAYOUT_KEEP "$script-keep"; then
+            layout_ok+=("$name: FAIL (its layout script's exit trap did not match, so no objects could be kept)")
+            no_objects+=("$name")
+            failed=1
+            continue
+        fi
         script=$script-keep
     fi
     if RIND_SHA512_LAYOUT_KEEP=$HW_RUN/obj-$name hw_gate sh "$script" >"$HW_RUN/layout-$name.log" 2>&1; then
@@ -75,8 +83,14 @@ for name in base head; do
         layout_ok+=("$name: FAIL (layout-$name.log)")
         failed=1
     fi
-    [[ -d $HW_RUN/obj-$name ]] || hw_die "no compressor objects from $name; see layout-$name.log"
+    if ! compgen -G "$HW_RUN/obj-$name/*.o" >/dev/null; then
+        no_objects+=("$name")
+        failed=1
+    fi
 done
+unavailable() {
+    [[ " ${no_objects[*]} " == *" $1 "* ]]
+}
 
 # Step 2: register-register bltu/bgeu in the compressor functions.
 count_branches() {
@@ -94,6 +108,13 @@ count_branches() {
 for name in base head; do
     count_branches "$HW_RUN/obj-$name" "$HW_RUN/branches-$name.txt"
 done
+total() {
+    if unavailable "$1"; then
+        echo "unavailable (no objects; see layout-$1.log)"
+    else
+        wc -l <"$HW_RUN/branches-$1.txt"
+    fi
+}
 per_object() {
     awk -F'\t' '{ n[$1]++ } END { for (o in n) print o, n[o] }' "$1" | sort
 }
@@ -111,9 +132,12 @@ per_object() {
     echo "| Object | base | head |"
     echo "|---|---|---|"
     join -a1 -a2 -e0 -o 0,1.2,2.2 <(per_object "$HW_RUN/branches-base.txt") \
-        <(per_object "$HW_RUN/branches-head.txt") | awk '{ printf "| %s | %s | %s |\n", $1, $2, $3 }'
+        <(per_object "$HW_RUN/branches-head.txt") |
+        awk -v nb="$(unavailable base && echo 1)" -v nh="$(unavailable head && echo 1)" '{
+            printf "| %s | %s | %s |\n", $1, nb ? "n/a" : $2, nh ? "n/a" : $3
+        }'
     echo
-    echo "Totals: base $(wc -l <"$HW_RUN/branches-base.txt"), head $(wc -l <"$HW_RUN/branches-head.txt")."
+    echo "Totals: base $(total base), head $(total head)."
     echo "Each head branch is listed in branches-head.txt; any left should be a loop bound on a public counter."
     echo
     echo "**Board A/B:** pending (see below)."
