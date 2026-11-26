@@ -551,6 +551,7 @@ vg() {
     mkdir -p "$dir"
     admin/upstream verified-garbage
     admin/import-vg-models --check "$upstream"
+    admin/import-vg-models --tables
     # `lake build` alone builds only the default target (vg-cosim).
     (cd proofs/verified-garbage && lake build vg-cosim vg-print)
     local vgprint=proofs/verified-garbage/.lake/build/bin/vg-print
@@ -1678,6 +1679,7 @@ if [[ -n $untested ]]; then
     exit 1
 fi
 
+admin/import-vg-models --tables
 cd proofs
 # Mathlib's cache unpacks a copy into each checkout, so take Mathlib and Aeneas
 # from Lake's artifact cache, which `lakefile.toml` turns on, when another

@@ -1,4 +1,5 @@
 import VerifiedGarbage.Impl.ChaCha20Poly1305.AArch64.Stitched
+import VerifiedGarbage.Impl.Ecdh.P256.X86_64.Ifma
 import VerifiedGarbage.Impl.StackScratch.AArch64
 import VerifiedGarbage.TCB.AArch64.Target
 
@@ -26,5 +27,8 @@ def chacha20Poly1305SealSve2 : Prog AArch64.isa :=
 def chacha20Poly1305OpenSve2 : Prog AArch64.isa :=
   StackScratch.AArch64.withStackScratchWiped 1312 .x7 96
     (ChaCha20Poly1305.AArch64.openInPlace ChaCha20.AArch64.XorCallee.sve2 true)
+
+/-- `Artifacts/EcdhP256/X86_64.lean`'s `vg_ecdh_p256_ifma`, with AVX512_IFMA. -/
+def ecdhP256Ifma : Prog X86_64.isa := Ecdh.X86_64.exchangeP256Ifma
 
 end Cosim.Progs
