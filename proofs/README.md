@@ -1330,9 +1330,8 @@ the cores with SHA3, each takes `KernelBuffersLow`, which names the `_alt`
 kernels' requirement that the blocks' address plus their length is below
 2^63, as a hypothesis: untagged user-space addresses meet it, and a pointer
 tag that sets bit 63 breaks it. AES-192 past the
-short path, which runs aws-lc's stitched kernels on cores with SHA3 and
-rind's AES-CTR and GHASH in turn otherwise, and the AEAD API above `tagged`
-remain to prove.
+short path, which runs aws-lc's stitched kernels, eight-way on cores with SHA3
+and four-way otherwise, and the AEAD API above `tagged` remain to prove.
 
 `aead::gcm::Key`, which takes an IV of any length and tags of any
 `TagLength`, is proven on the same tiers, in `Rind/X86_64/GcmKey.lean`, a

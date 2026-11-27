@@ -1181,6 +1181,25 @@ mod aead {
             check(ours, theirs, rustcrypto_aes_gcm, &key, nonce, &aad, &msg, flip)?;
         }
 
+        // Messages from the stitched kernels' first full loops to 16 KiB and
+        // AAD up to 4 KiB, which the cases above and `aes_gcm_every_length`
+        // stop short of.
+        #[test]
+        fn aes_gcm_large(
+            key in prop_oneof![vec(any::<u8>(), 16), vec(any::<u8>(), 24), vec(any::<u8>(), 32)],
+            nonce in any::<[u8; 12]>(),
+            aad in vec(any::<u8>(), 0..4096),
+            msg in vec(any::<u8>(), 1100..16 * 1024 + 64),
+            flip in any::<Option<Index>>(),
+        ) {
+            let (ours, theirs) = match key.len() {
+                16 => (&AES_128_GCM, &theirs::AES_128_GCM),
+                24 => (&AES_192_GCM, &theirs::AES_192_GCM),
+                _ => (&AES_256_GCM, &theirs::AES_256_GCM),
+            };
+            check(ours, theirs, rustcrypto_aes_gcm, &key, nonce, &aad, &msg, flip)?;
+        }
+
         // Long messages too, which x86_64 CPUs with AVX-512 IFMA take in
         // separate passes, across their 16 KB chunks.
         #[test]

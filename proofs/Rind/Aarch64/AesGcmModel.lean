@@ -419,7 +419,9 @@ fn stitched<const ENC: bool>(
     // for reads and writes of `len` blocks. s2n-bignum's kernels' theorems
     // (`AES*_GCM_*_NOIBT_SUBROUTINE_{CORRECT,SAFE}`) take the input and
     // output either equal, as here, or disjoint, and every other buffer
-    // is a separate borrow. aws-lc runs its AES-192 routines in place too.
+    // is a separate borrow. aws-lc runs its AES-192 routines in place too,
+    // and its four-way kernel's round count is fixed at 12, which only an
+    // AES-192 key's 13 round keys fit.
     // The `_alt` kernels' proofs also assume `inout` plus its length is
     // below 2^63 (`KernelBuffersLow` in the Lean proofs), which holds for
     // untagged user-space addresses and is not checked here: the kernels
@@ -460,7 +462,14 @@ fn stitched<const ENC: bool>(
                 let (key, ivec, xi) = (k.round_keys(), counter, tag);
                 asm_call!(unsafe extern "C" aesv8_gcm_8x_dec_192(inout, len * 128, inout, xi, ivec, key, htable));
             }
-            (HwKey::Aes192(_), _, None) => unreachable!("composed above"),
+            (HwKey::Aes192(k), true, None) => {
+                let (key, ivec, xi) = (k.round_keys(), counter, tag);
+                asm_call!(unsafe extern "C" aes_gcm_enc_kernel(inout, len * 128, inout, xi, ivec, key, htable4));
+            }
+            (HwKey::Aes192(k), false, None) => {
+                let (key, ivec, xi) = (k.round_keys(), counter, tag);
+                asm_call!(unsafe extern "C" aes_gcm_dec_kernel(inout, len * 128, inout, xi, ivec, key, htable4));
+            }
         }
     }
 }
@@ -842,11 +851,19 @@ opaque low.aarch64.aes_gcm.aesv8_gcm_8x_enc_192 : Slice (Std.Array U8 16#usize) 
 opaque low.aarch64.aes_gcm.aesv8_gcm_8x_dec_192 : Slice (Std.Array U8 16#usize) → Std.Array U8 16#usize →
   Std.Array U8 16#usize → Std.Array core.core_arch.arm_shared.neon.uint8x16_t 13#usize → Std.Array V 12#usize →
   Result low.aarch64.aes_gcm.KernelOut
+/-- aws-lc's four-way `aes_gcm_enc_kernel`, its round count fixed at 12, through `asm_call!`. -/
+opaque low.aarch64.aes_gcm.aes_gcm_enc_kernel : Slice (Std.Array U8 16#usize) → Std.Array U8 16#usize →
+  Std.Array U8 16#usize → Std.Array core.core_arch.arm_shared.neon.uint8x16_t 13#usize → Std.Array V 6#usize →
+  Result low.aarch64.aes_gcm.KernelOut
+/-- aws-lc's four-way `aes_gcm_dec_kernel`, its round count fixed at 12, through `asm_call!`. -/
+opaque low.aarch64.aes_gcm.aes_gcm_dec_kernel : Slice (Std.Array U8 16#usize) → Std.Array U8 16#usize →
+  Std.Array U8 16#usize → Std.Array core.core_arch.arm_shared.neon.uint8x16_t 13#usize → Std.Array V 6#usize →
+  Result low.aarch64.aes_gcm.KernelOut
 
 /-- `stitched`: nothing for no blocks, else the kernel for the key's size,
 `ENC`, and whether the table holds eight powers, on the first six entries of
-the table for the four-way kernels, and the panic of `unreachable!` for an
-AES-192 key without them. It returns the tag, the counter block, and the
+the table for the four-way kernels, aws-lc's four-way kernels among them for an
+AES-192 key without eight powers. It returns the tag, the counter block, and the
 blocks, in the order Aeneas returns `&mut` arguments. -/
 def low.aarch64.aes_gcm.stitched (ENC : Bool) (key : low.aarch64.aes.HwKey) (table : low.aarch64.ghash.PmullTable)
     (tag counter : Std.Array U8 16#usize) (blocks : Slice (Std.Array U8 16#usize)) :
@@ -869,7 +886,8 @@ def low.aarch64.aes_gcm.stitched (ENC : Bool) (key : low.aarch64.aes.HwKey) (tab
         low.aarch64.aes256_gcm_dec_alt.aes256_gcm_dec_alt blocks tag counter k.round_keys table.htable
       | .Aes192 k, true, some _ => low.aarch64.aes_gcm.aesv8_gcm_8x_enc_192 blocks tag counter k.round_keys table.htable
       | .Aes192 k, false, some _ => low.aarch64.aes_gcm.aesv8_gcm_8x_dec_192 blocks tag counter k.round_keys table.htable
-      | .Aes192 _, _, none => fail .panic
+      | .Aes192 k, true, none => low.aarch64.aes_gcm.aes_gcm_enc_kernel blocks tag counter k.round_keys htable4
+      | .Aes192 k, false, none => low.aarch64.aes_gcm.aes_gcm_dec_kernel blocks tag counter k.round_keys htable4
     ok (r.2.1, r.2.2, r.1)
 
 end rind.aarch64
