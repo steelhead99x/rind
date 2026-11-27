@@ -23,6 +23,7 @@ import Rind.X86_64.P256Signature
 import Rind.X86_64.P384Signature
 import Rind.X86_64.PointSelect
 import Rind.X86_64.MlKemCoding
+import Rind.X86_64.VgMlKem768Ct
 open rind.x86_64
 
 /-!
@@ -54,7 +55,9 @@ and ECDSA verification in `Rind.X86_64.VgP256`, and for P-384's `d·G`,
 which key generation and each ECDSA signature's nonce point take, and its
 ECDSA verification, in `Rind.X86_64.VgP384`, and for ChaCha20-Poly1305's
 and XChaCha20-Poly1305's one pass on AVX-512 IFMA in
-`Rind.X86_64.VgChaCha20Poly1305`; and nothing else.
+`Rind.X86_64.VgChaCha20Poly1305`; and, for the leakage of its
+ML-KEM-768 routines (which no theorem about rind's wrappers uses),
+in `Rind.X86_64.VgMlKem768Ct`; and nothing else.
 Ed25519 verification also takes its multi-scalar multiplication,
 `low::x86_64::adx_mux::edwards25519_msm`, as the hypothesis `RunsMsm`, and
 the edwards25519 group's orders, which HOL Light proves, as the hypothesis
@@ -1259,6 +1262,73 @@ change to the trust base.
 /-- info: 'rind.x86_64.MlKemCoding.to_message_bits_spec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
 #print axioms MlKemCoding.to_message_bits_spec
+
+/-- info: 'rind.x86_64.vg_mlkem768_keygen_avx512_ct' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ vg_mlkem768_keygen_avx512_ct] -/
+#guard_msgs in
+#print axioms vg_mlkem768_keygen_avx512_ct
+
+/-- info: 'rind.x86_64.vg_mlkem768_encaps_h_avx512_ct' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ vg_mlkem768_encaps_h_avx512_ct] -/
+#guard_msgs in
+#print axioms vg_mlkem768_encaps_h_avx512_ct
+
+/-- info: 'rind.x86_64.vg_mlkem768_encaps_avx512_ct' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ vg_mlkem768_encaps_avx512_ct] -/
+#guard_msgs in
+#print axioms vg_mlkem768_encaps_avx512_ct
+
+/-- info: 'rind.x86_64.vg_mlkem768_decaps_avx512_ct' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ vg_mlkem768_decaps_avx512_ct] -/
+#guard_msgs in
+#print axioms vg_mlkem768_decaps_avx512_ct
+
+/-- info: 'rind.x86_64.vg_mlkem768_encaps_h_avx2_ct' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ vg_mlkem768_encaps_h_avx2_ct] -/
+#guard_msgs in
+#print axioms vg_mlkem768_encaps_h_avx2_ct
+
+/-- info: 'rind.x86_64.vg_mlkem768_encaps_avx2_ct' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ vg_mlkem768_encaps_avx2_ct] -/
+#guard_msgs in
+#print axioms vg_mlkem768_encaps_avx2_ct
+
+/-- info: 'rind.x86_64.vg_mlkem768_encaps_h_avx_ct' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ vg_mlkem768_encaps_h_avx_ct] -/
+#guard_msgs in
+#print axioms vg_mlkem768_encaps_h_avx_ct
+
+/-- info: 'rind.x86_64.vg_mlkem768_encaps_avx_ct' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ vg_mlkem768_encaps_avx_ct] -/
+#guard_msgs in
+#print axioms vg_mlkem768_encaps_avx_ct
+
+/-- info: 'rind.x86_64.vg_mlkem768_encaps_h_ct' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ vg_mlkem768_encaps_h_ct] -/
+#guard_msgs in
+#print axioms vg_mlkem768_encaps_h_ct
+
+/-- info: 'rind.x86_64.vg_mlkem768_encaps_ct' depends on axioms: [propext, Classical.choice, Quot.sound, vg_mlkem768_encaps_ct] -/
+#guard_msgs in
+#print axioms vg_mlkem768_encaps_ct
 
 /-- info: 'rind.x86_64.MlKemCoding.sample_cbd2_spec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
