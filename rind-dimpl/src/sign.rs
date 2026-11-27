@@ -54,18 +54,20 @@ impl KeyProvider for Keys {
         };
         // dimpl's own providers also take a PEM-wrapped key, under any label.
         der_key(der)
-            .or_else(|| {
-                let relabeled = relabel(der)?;
-                let mut rest = relabeled.as_slice();
-                let (_, key) = pem::from_buf(&mut rest).ok()??;
-                // A second footer would otherwise outlive the section.
-                if !rest.is_empty() {
-                    return None;
-                }
-                der_key(&key)
-            })
+            .or_else(|| der_key(&parse_pem(&relabel(der)?)?))
             .ok_or(CryptoError::InvalidPrivateKey)
     }
+}
+
+/// Reads the one PEM section in `bytes`. Its own frame, never inlined, so that
+/// `admin/ctgrind.supp` can name where rustls-pki-types' public delimiter
+/// tests run, whichever of its frames a build inlines.
+#[inline(never)]
+fn parse_pem(bytes: &[u8]) -> Option<Vec<u8>> {
+    let mut rest = bytes;
+    let (_, key) = pem::from_buf(&mut rest).ok()??;
+    // A second footer would otherwise outlive the section.
+    rest.is_empty().then_some(key)
 }
 
 struct Key {

@@ -11,8 +11,7 @@ the round functions (sections 5.3.1 to 5.3.3), the equivalent inverse cipher
 `EqInvCipher`, and its key schedule `KeyExpansionEIC` (section 5.3.5), on the
 state laid out as `Rind.Vale` lays it out: row `r` of column `c` is byte
 `r + 4c` of a `quad32`, least significant first. The inverse S-box and
-`InvMixColumns` are opaque, as `Rind.Vale`'s S-box and `MixColumns` are, so
-they are the functions the AES instructions compute in `Rind.X86_64.Simd` and
+`InvMixColumns` are opaque, so they are the functions the AES instructions compute in `Rind.X86_64.Simd` and
 `Rind.Aarch64.Neon`; `rind.vale.aesDecrypt`'s known answers in `Rind.Aes` run
 the definitions below.
 -/
@@ -30,10 +29,23 @@ def fips197InvMixColumns (q : Quad32) : Quad32 := ofBytes fun i =>
   let a k := byte q (i / 4 * 4 + (i % 4 + k) % 4)
   gfMul (a 0) 0x0e ^^^ gfMul (a 1) 0x0b ^^^ gfMul (a 2) 0x0d ^^^ gfMul (a 3) 0x09
 
-/-- FIPS 197's inverse S-box, opaque as `sbox` is. `fips197InvSbox` is what Lean runs. -/
+/-- `fips197InvSbox`'s 256 values, as `sboxTable` holds `fips197Sbox`'s. -/
+def invSboxTable : Array (BitVec 8) :=
+  (Array.range 256).map fun i => fips197InvSbox (BitVec.ofNat 8 i)
+
+/-- `fips197InvSbox`, looked up in `invSboxTable`, as `sboxFast` is. -/
+def invSboxFast (b : BitVec 8) : BitVec 8 := invSboxTable[b.toNat]!
+
+theorem invSboxFast_eq : invSboxFast = fips197InvSbox := by
+  funext b
+  simp [invSboxFast, invSboxTable, b.isLt]
+
+/-- FIPS 197's inverse S-box, opaque. `fips197InvSbox` is what
+Lean runs, through `invSboxFast`, which `invSboxFast_eq` proves equal to it. -/
+@[implemented_by invSboxFast]
 opaque invSbox : BitVec 8 → BitVec 8 := fips197InvSbox
 
-/-- FIPS 197's `InvMixColumns`, opaque as `mixColumns` is. `fips197InvMixColumns`
+/-- FIPS 197's `InvMixColumns`, opaque. `fips197InvMixColumns`
 is what Lean runs. -/
 opaque invMixColumns : Quad32 → Quad32 := fips197InvMixColumns
 

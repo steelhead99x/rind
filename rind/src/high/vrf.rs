@@ -182,6 +182,8 @@ impl KeyPair {
 
     /// Returns the seed [`Self::from_seed`] loads.
     pub fn to_seed(&self) -> Seed {
+        // P-256's secret scalar is converted from limbs to bytes.
+        let _entry = Entry::new_secret();
         Seed(match &self.secret {
             Secret::Edwards25519 { seed, .. } => *seed,
             Secret::P256 { x } => x.as_bytes(),

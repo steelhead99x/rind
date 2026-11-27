@@ -14,7 +14,7 @@ readme = "README.md"
 # object_store exposes its CryptoProvider only with a cloud backend enabled;
 # gcp-base is the one that adds no dependencies beyond the shared cloud-base.
 object_store = { version = "0.14", default-features = false, features = ["gcp-base"] }
-rind = { version = "0.3.2", path = "../rind" }
+rind = { version = "0.3.2", path = "../rind", default-features = false }
 rustls-pki-types = { version = "1.9", default-features = false, features = ["std"] }
 
 [dev-dependencies]

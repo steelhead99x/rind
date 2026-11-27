@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 //! An OpenSSL 3 provider backed by rind, for the algorithms where rind is
-//! faster than OpenSSL's default provider: X25519 and Ed25519.
+//! faster than OpenSSL's default provider: X25519, Ed25519, ML-KEM, and
+//! ML-DSA.
 //!
 //! OpenSSL loads the shared library this crate builds through
 //! `openssl.cnf`, as the README shows. Its one export is
@@ -13,7 +14,10 @@ use core::ffi::{c_int, c_void};
 mod ed25519;
 mod ffi;
 mod keymgmt;
+mod ml_dsa;
+mod ml_kem;
 mod params;
+mod pq_keymgmt;
 mod provider;
 mod x25519;
 

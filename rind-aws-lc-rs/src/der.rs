@@ -1,10 +1,16 @@
 //! The little DER that aws-lc-rs's API needs rind-aws-lc-rs to read itself:
-//! a PKCS#1 RSA public key's fields, which rind keeps to itself. rind parses
-//! and encodes the keys; every byte read here is public.
+//! a PKCS#1 RSA public key's fields, which rind keeps to itself, and the
+//! algorithm a PKCS#8 document names. rind parses and encodes the keys; every
+//! byte read here is public.
+
+use alloc::vec::Vec;
 
 use crate::error::{Unspecified, unspecified};
+use crate::wipe::Wiped;
 
 const INTEGER: u8 = 0x02;
+const BIT_STRING: u8 = 0x03;
+const OBJECT_IDENTIFIER: u8 = 0x06;
 const SEQUENCE: u8 = 0x30;
 
 /// Reads a DER element tagged `tag` and returns its contents, refusing a
@@ -58,6 +64,119 @@ pub(crate) fn rsa_public_key(der: &[u8]) -> Result<(&[u8], &[u8]), Unspecified> 
     })
 }
 
+/// The contents of the object identifier in a PKCS#8 document's
+/// `privateKeyAlgorithm`, or `None` if its header does not parse. Only the
+/// version and the algorithm identifier are read, never the private key.
+pub(crate) fn pkcs8_algorithm(der: &[u8]) -> Option<&[u8]> {
+    let mut outer = untrusted::Reader::new(untrusted::Input::from(der));
+    let body = read(&mut outer, SEQUENCE).ok()?;
+    let mut body = untrusted::Reader::new(body);
+    read(&mut body, INTEGER).ok()?;
+    let mut algorithm = untrusted::Reader::new(read(&mut body, SEQUENCE).ok()?);
+    let oid = read(&mut algorithm, OBJECT_IDENTIFIER).ok()?;
+    Some(oid.as_slice_less_safe())
+}
+
+/// Whether bytes follow the outer PKCS#8 `SEQUENCE`. rind refuses them.
+/// aws-lc's `EVP_parse_private_key` (`crypto/evp_extra/evp_asn1.c`) reads one
+/// value and does not.
+pub(crate) fn pkcs8_trailing(der: &[u8]) -> bool {
+    let mut outer = untrusted::Reader::new(untrusted::Input::from(der));
+    read(&mut outer, SEQUENCE).is_ok() && !outer.at_end()
+}
+
+/// A PKCS#8 document's algorithm parameters and private key, the parts a
+/// non-ML-DSA decoder inspects. `parameters` is empty when the algorithm
+/// identifier has none. Bytes after the outer sequence are ignored, as
+/// aws-lc-rs 1.19.0 `parse_rfc5208_private_key` (`aws-lc-rs/src/evp_pkey.rs`)
+/// does not require the CBS to be consumed.
+pub(crate) struct Pkcs8Parts<'a> {
+    pub parameters: &'a [u8],
+    pub private_key: &'a [u8],
+    /// RFC 5958 `[1] IMPLICIT BIT STRING`, which some decoders reject.
+    pub has_public_key: bool,
+}
+
+/// Splits a v1 or v2 PKCS#8 document. The version must be 0 or 1. An
+/// attributes set and, in version 1 only, a public key, in that order, may
+/// follow the private key.
+pub(crate) fn pkcs8_parts(der: &[u8]) -> Option<Pkcs8Parts<'_>> {
+    let mut outer = untrusted::Reader::new(untrusted::Input::from(der));
+    let body = read(&mut outer, SEQUENCE).ok()?;
+    let mut body = untrusted::Reader::new(body);
+    let version = read(&mut body, INTEGER).ok()?;
+    if !matches!(version.as_slice_less_safe(), [0] | [1]) {
+        return None;
+    }
+    let mut algorithm = untrusted::Reader::new(read(&mut body, SEQUENCE).ok()?);
+    read(&mut algorithm, OBJECT_IDENTIFIER).ok()?;
+    let parameters = algorithm.read_bytes_to_end().as_slice_less_safe();
+    let private_key = read(&mut body, 0x04).ok()?.as_slice_less_safe();
+    if body.peek(0xa0) {
+        read(&mut body, 0xa0).ok()?;
+    }
+    // RFC 5958 allows the public key only in version 1 (v2), as aws-lc's
+    // `EVP_parse_private_key` does.
+    let has_public_key = body.peek(0x81);
+    if has_public_key {
+        if version.as_slice_less_safe() != [1] {
+            return None;
+        }
+        read(&mut body, 0x81).ok()?;
+    }
+    if !body.at_end() {
+        return None;
+    }
+    Some(Pkcs8Parts {
+        parameters,
+        private_key,
+        has_public_key,
+    })
+}
+
+/// The outer `SEQUENCE`, including its header, without bytes after it.
+/// [`read`] rejects a non-minimal length, so the header size follows the body.
+pub(crate) fn sequence_prefix(der: &[u8]) -> Option<&[u8]> {
+    element_encoding(der, SEQUENCE)
+}
+
+/// The first DER element's encoding. Bytes after it are not included.
+pub(crate) fn leading_element(der: &[u8]) -> Option<&[u8]> {
+    let tag = *der.first()?;
+    element_encoding(der, tag)
+}
+
+fn element_encoding(der: &[u8], tag: u8) -> Option<&[u8]> {
+    let mut reader = untrusted::Reader::new(untrusted::Input::from(der));
+    let body = read(&mut reader, tag).ok()?;
+    let len = body.as_slice_less_safe().len();
+    let header = match len {
+        0..=0x7f => 2,
+        0x80..=0xff => 3,
+        _ => 4,
+    };
+    der.get(..header + len)
+}
+
+/// The first DER element in `der`: its tag, its contents, and the bytes
+/// after it.
+pub(crate) fn split(der: &[u8]) -> Option<(u8, &[u8], &[u8])> {
+    let tag = *der.first()?;
+    let mut input = untrusted::Reader::new(untrusted::Input::from(der));
+    let body = read(&mut input, tag).ok()?;
+    let rest = input.read_bytes_to_end();
+    Some((tag, body.as_slice_less_safe(), rest.as_slice_less_safe()))
+}
+
+/// The tag and body of the first DER element in `der`. Bytes after it are
+/// left unread.
+pub(crate) fn first_element(der: &[u8]) -> Option<(u8, &[u8])> {
+    let tag = *der.first()?;
+    let mut input = untrusted::Reader::new(untrusted::Input::from(der));
+    let body = read(&mut input, tag).ok()?;
+    Some((tag, body.as_slice_less_safe()))
+}
+
 /// Whether `der` is a `SubjectPublicKeyInfo` rather than PKCS#1: its first
 /// field is a `SEQUENCE`, where PKCS#1's is an `INTEGER`.
 pub(crate) fn is_spki(der: &[u8]) -> bool {
@@ -67,10 +186,118 @@ pub(crate) fn is_spki(der: &[u8]) -> bool {
         .unwrap_or(false)
 }
 
-/// The bit length of a big-endian magnitude without leading zero bytes.
+/// A `SubjectPublicKeyInfo`'s algorithm and key.
+pub(crate) struct SpkiParts<'a> {
+    /// The algorithm's object identifier's contents.
+    pub(crate) oid: &'a [u8],
+    /// Whatever follows the object identifier in the algorithm identifier.
+    pub(crate) parameters: &'a [u8],
+    /// The key's BIT STRING contents after its unused-bits byte.
+    pub(crate) key: &'a [u8],
+}
+
+/// Splits the `SubjectPublicKeyInfo` at the start of `der` as aws-lc's
+/// `EVP_parse_public_key` (`crypto/evp_extra/evp_asn1.c`) does: bytes after
+/// it are ignored, and the key's BIT STRING has no unused bits.
+pub(crate) fn spki_parts(der: &[u8]) -> Option<SpkiParts<'_>> {
+    let mut outer = untrusted::Reader::new(untrusted::Input::from(der));
+    let (algorithm, key) = read(&mut outer, SEQUENCE)
+        .ok()?
+        .read_all(Unspecified, |body| {
+            Ok((read(body, SEQUENCE)?, read(body, BIT_STRING)?))
+        })
+        .ok()?;
+    let mut algorithm = untrusted::Reader::new(algorithm);
+    let oid = read(&mut algorithm, OBJECT_IDENTIFIER).ok()?;
+    let [0, key @ ..] = key.as_slice_less_safe() else {
+        return None;
+    };
+    Some(SpkiParts {
+        oid: oid.as_slice_less_safe(),
+        parameters: algorithm.read_bytes_to_end().as_slice_less_safe(),
+        key,
+    })
+}
+
+/// The bit length of a big-endian magnitude without leading zero bytes; 0
+/// for an empty one.
 pub(crate) fn bits(magnitude: &[u8]) -> usize {
-    8 * magnitude.len()
-        - magnitude
-            .first()
-            .map_or(8, |top| top.leading_zeros() as usize)
+    magnitude
+        .first()
+        .map_or(0, |top| 8 * magnitude.len() - top.leading_zeros() as usize)
+}
+
+/// A two-prime PKCS#1 `RSAPrivateKey`'s fields.
+pub(crate) struct RsaPrivateParts<'a> {
+    /// The modulus's magnitude, public.
+    pub(crate) n: &'a [u8],
+    /// The public exponent's magnitude.
+    pub(crate) e: &'a [u8],
+    /// The contents of `d`, `p`, `q`, `dp`, `dq`, and `qinv`, in that order,
+    /// as encoded: secret, so not checked here. A leading zero byte, if
+    /// present, is part of the contents and does not change the value.
+    pub(crate) private: [&'a [u8]; 6],
+}
+
+/// Splits a two-prime PKCS#1 `RSAPrivateKey`, or `None` if its framing is not
+/// one. Only public parts are read: the version, a positive odd modulus, a
+/// positive odd exponent of 2 to 33 bits, then six INTEGERs taken by their
+/// headers without reading their secret contents, and nothing after them.
+pub(crate) fn rsa_private_key_parts(der: &[u8]) -> Option<RsaPrivateParts<'_>> {
+    untrusted::Input::from(der)
+        .read_all(Unspecified, |input| {
+            read(input, SEQUENCE)?.read_all(Unspecified, |input| {
+                if read(input, INTEGER)?.as_slice_less_safe() != [0] {
+                    return Err(Unspecified);
+                }
+                let n = positive_integer(input)?;
+                let e = positive_integer(input)?;
+                let odd = |value: &[u8]| value.last().is_some_and(|byte| byte & 1 == 1);
+                if !odd(n) || !odd(e) || !(2..=33).contains(&bits(e)) {
+                    return Err(Unspecified);
+                }
+                let mut private = [&[][..]; 6];
+                for field in &mut private {
+                    *field = read(input, INTEGER)?.as_slice_less_safe();
+                }
+                Ok(RsaPrivateParts { n, e, private })
+            })
+        })
+        .ok()
+}
+
+/// A DER element of `tag` whose contents are `parts` in order, in one
+/// buffer of exactly its length, wiped on drop: for PKCS#8 documents the
+/// adapter rebuilds around a private key, so no copy of the key is freed
+/// unwiped, whether the load that reads it succeeds or not. The buffer is
+/// allocated once at its final size, so it never reallocates and leaves no
+/// stale copy behind. `None` for contents over 0xffff bytes, which no key
+/// here reaches.
+pub(crate) fn secret_tlv(tag: u8, parts: &[&[u8]]) -> Option<Wiped<Vec<u8>>> {
+    let len: usize = parts.iter().map(|part| part.len()).sum();
+    let mut header = [tag, 0, 0, 0];
+    let header_len = match len {
+        0..=0x7f => {
+            header[1] = len as u8;
+            2
+        }
+        0x80..=0xff => {
+            header[1] = 0x81;
+            header[2] = len as u8;
+            3
+        }
+        _ => {
+            let len = u16::try_from(len).ok()?;
+            header[1] = 0x82;
+            header[2..4].copy_from_slice(&len.to_be_bytes());
+            4
+        }
+    };
+    let mut out = Wiped::new(Vec::with_capacity(header_len + len));
+    out.extend_from_slice(&header[..header_len]);
+    for part in parts {
+        out.extend_from_slice(part);
+    }
+    debug_assert_eq!(out.len(), out.capacity());
+    Some(out)
 }

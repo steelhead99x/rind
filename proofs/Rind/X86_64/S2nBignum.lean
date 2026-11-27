@@ -17,6 +17,11 @@ hold for every call from safe Rust: the `&mut` result cannot overlap an input
 or the routine's code, and the routine's stack lies below the caller's
 frame. Its total correctness (`ensures`) gives the `ok`.
 
+A leaf that needs a CPU feature (the ADX and BMI2 `bignum_mul_p25519`) has no
+check of its own, so its axiom holds only where its mux selected it: each such
+leaf's mux theorem takes that as its `Runs` hypothesis, and nothing else calls
+the leaf.
+
 The restatement, and that rind's inline assembly is s2n-bignum's object code
 with the wrapper passing the arguments the theorem names, are trusted.
 -/
@@ -125,6 +130,20 @@ https://github.com/awslabs/s2n-bignum/blob/3f01260ff1bd2577abf0117ce45aa008bc243
 axiom bignum_neg_p25519_spec (z x : Std.Array U64 4#usize) :
     low.x86_64.bignum_neg_p25519.bignum_neg_p25519 z x ⦃ r =>
       wordsNat x.val ≤ p25519 → wordsNat r.val = (p25519 - wordsNat x.val) % p25519 ⦄
+
+/-- `BIGNUM_MUL_P25519_SUBROUTINE_CORRECT`,
+https://github.com/awslabs/s2n-bignum/blob/3f01260ff1bd2577abf0117ce45aa008bc243a80/x86/proofs/bignum_mul_p25519.ml#L446 -/
+@[step]
+axiom bignum_mul_p25519_spec (z x y : Std.Array U64 4#usize) :
+    low.x86_64.bignum_mul_p25519.bignum_mul_p25519 z x y ⦃ r =>
+      wordsNat r.val = wordsNat x.val * wordsNat y.val % p25519 ⦄
+
+/-- `BIGNUM_MUL_P25519_ALT_SUBROUTINE_CORRECT`,
+https://github.com/awslabs/s2n-bignum/blob/3f01260ff1bd2577abf0117ce45aa008bc243a80/x86/proofs/bignum_mul_p25519_alt.ml#L381 -/
+@[step]
+axiom bignum_mul_p25519_alt_spec (z x y : Std.Array U64 4#usize) :
+    low.x86_64.bignum_mul_p25519_alt.bignum_mul_p25519_alt z x y ⦃ r =>
+      wordsNat r.val = wordsNat x.val * wordsNat y.val % p25519 ⦄
 
 /-- `BIGNUM_LT_SUBROUTINE_CORRECT`, for the slices' lengths as `m` and `n`,
 https://github.com/awslabs/s2n-bignum/blob/3f01260ff1bd2577abf0117ce45aa008bc243a80/x86/proofs/bignum_lt.ml#L412 -/
@@ -640,6 +659,70 @@ axiom bignum_negmodinv_spec (z x : Slice U64) (hx : x.length = z.length) :
         (wordsNat x.val % 2 = 1 →
           (wordsNat x.val * wordsNat r.val + 1) % 2 ^ (64 * z.length) = 0) ⦄
 
+/-- `BIGNUM_MONTREDC_SUBROUTINE_CORRECT`, for `z`'s length as `k` and `x`'s as
+`r`, whose `inverse_mod n (2^(64p))` is any `i` with `2^(64p)·i ≡ 1 (mod n)`,
+and whose bound on `r` holds for any slice of `u64`, of under `2^60`
+elements, which the theorem's caller establishes,
+https://github.com/awslabs/s2n-bignum/blob/3f01260ff1bd2577abf0117ce45aa008bc243a80/x86/proofs/bignum_montredc.ml#L1092 -/
+@[step]
+axiom bignum_montredc_spec (z x m : Slice U64) (p : U64) (hm : m.length = z.length)
+    (hp : p.val < 2 ^ 61) (hr : x.length < 2 ^ 61) :
+    low.x86_64.bignum_montredc.bignum_montredc z x m p ⦃ r =>
+      r.length = z.length ∧
+        (wordsNat m.val % 2 = 1 →
+          wordsNat x.val % 2 ^ (64 * (z.length + p.val)) ≤ 2 ^ (64 * p.val) * wordsNat m.val →
+          ∀ i, 2 ^ (64 * p.val) * i % wordsNat m.val = 1 % wordsNat m.val →
+            wordsNat r.val = i * (wordsNat x.val % 2 ^ (64 * (z.length + p.val))) % wordsNat m.val) ⦄
+
+/-- `BIGNUM_MODSUB_SUBROUTINE_CORRECT`, whose `rem` is Euclidean, as Lean's
+`Int` `%` is,
+https://github.com/awslabs/s2n-bignum/blob/3f01260ff1bd2577abf0117ce45aa008bc243a80/x86/proofs/bignum_modsub.ml#L292 -/
+@[step]
+axiom bignum_modsub_spec (z x y m : Slice U64) (hx : x.length = z.length)
+    (hy : y.length = z.length) (hm : m.length = z.length)
+    (ha : wordsNat x.val < wordsNat m.val) (hb : wordsNat y.val < wordsNat m.val) :
+    low.x86_64.bignum_modsub.bignum_modsub z x y m ⦃ r =>
+      r.length = z.length ∧
+        (wordsNat r.val : Int) = ((wordsNat x.val : Int) - wordsNat y.val) % wordsNat m.val ⦄
+
+/-- `BIGNUM_MUL_SUBROUTINE_CORRECT`, for the slices' lengths as `p`, `m`, and
+`n`,
+https://github.com/awslabs/s2n-bignum/blob/3f01260ff1bd2577abf0117ce45aa008bc243a80/x86/proofs/bignum_mul.ml#L477 -/
+@[step]
+axiom bignum_mul_spec (z x y : Slice U64) (hz : x.length + y.length ≤ z.length) :
+    low.x86_64.bignum_mul.bignum_mul z x y ⦃ r =>
+      r.length = z.length ∧ wordsNat r.val = wordsNat x.val * wordsNat y.val % 2 ^ (64 * z.length) ⦄
+
+/-- `BIGNUM_ADD_SUBROUTINE_CORRECT`, for the slices' lengths as `p`, `m`, and
+`n`, which returns the carry,
+https://github.com/awslabs/s2n-bignum/blob/3f01260ff1bd2577abf0117ce45aa008bc243a80/x86/proofs/bignum_add.ml#L697 -/
+@[step]
+axiom bignum_add_spec (z x y : Slice U64) :
+    low.x86_64.bignum_add.bignum_add z x y ⦃ r =>
+      r.2.length = z.length ∧
+        wordsNat r.2.val = (wordsNat x.val + wordsNat y.val) % 2 ^ (64 * z.length) ∧
+        2 ^ (64 * z.length) * r.1.val + wordsNat r.2.val =
+          wordsNat x.val % 2 ^ (64 * z.length) + wordsNat y.val % 2 ^ (64 * z.length) ⦄
+
+/-- `BIGNUM_DIGITSIZE_SUBROUTINE_CORRECT`, for the slice's length as `k`,
+https://github.com/awslabs/s2n-bignum/blob/3f01260ff1bd2577abf0117ce45aa008bc243a80/x86/proofs/bignum_digitsize.ml#L203 -/
+@[step]
+axiom bignum_digitsize_spec (x : Slice U64) :
+    low.x86_64.bignum_digitsize.bignum_digitsize x ⦃ r =>
+      r.val = ((wordsNat x.val).size + 63) / 64 ⦄
+
+/-- `BIGNUM_COPY_ROW_FROM_TABLE_SUBROUTINE_CORRECT`, whose bound on `width`
+holds for `z`, a slice of `u64` as long, which the theorem's caller
+establishes,
+https://github.com/awslabs/s2n-bignum/blob/3f01260ff1bd2577abf0117ce45aa008bc243a80/x86/proofs/bignum_copy_row_from_table.ml#L692 -/
+@[step]
+axiom bignum_copy_row_from_table_spec (z table : Slice U64) (height width idx : U64)
+    (hz : z.length = width.val) (ht : table.length = height.val * width.val)
+    (hw : 8 * width.val < 2 ^ 64) (hidx : idx.val < height.val) :
+    low.x86_64.bignum_copy_row_from_table.bignum_copy_row_from_table z table height width idx ⦃ r =>
+      r.length = z.length ∧
+        wordsNat r.val = wordsNat ((table.val.drop (idx.val * width.val)).take width.val) ⦄
+
 /-- rind runs on this CPU: its entry guards' CPU-feature checks pass, and its
 BMI2/ADX and AVX2 dispatches read the CPU. None reads an input. -/
 def Runs : Prop :=
@@ -741,6 +824,15 @@ theorem bignum_madd_n25519_mux_spec (h : Runs) (z x y c : Std.Array U64 4#usize)
       wordsNat r.val = (wordsNat x.val * wordsNat y.val + wordsNat c.val) % n25519 ⦄ := by
   obtain ⟨-, -, ⟨t, ht⟩, -⟩ := h
   unfold low.x86_64.adx_mux.bignum_madd_n25519
+  rw [ht]
+  cases t <;> step*
+
+@[step]
+theorem bignum_mul_p25519_mux_spec (h : Runs) (z x y : Std.Array U64 4#usize) :
+    low.x86_64.adx_mux.bignum_mul_p25519 z x y ⦃ r =>
+      wordsNat r.val = wordsNat x.val * wordsNat y.val % p25519 ⦄ := by
+  obtain ⟨-, -, ⟨t, ht⟩, -⟩ := h
+  unfold low.x86_64.adx_mux.bignum_mul_p25519
   rw [ht]
   cases t <;> step*
 

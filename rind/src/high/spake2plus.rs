@@ -379,7 +379,9 @@ impl VerifierRecord {
     /// with Matter's short passcodes it is enough to recover the passcode
     /// offline.
     pub fn l(&self) -> [u8; 65] {
-        let _entry = Entry::new_public();
+        // Kept like `w0`, as the paragraph above says, so under DIT too,
+        // though its arithmetic is timed as public.
+        let _entry = Entry::new_secret();
         self.l.to_uncompressed()
     }
 

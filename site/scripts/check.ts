@@ -2,13 +2,18 @@
 // line in llms.txt, and a sitemap entry; every page carries the
 // Content-Security-Policy that keeps it to its own origin and the social card
 // it names; a Markdown twin links the site's pages by their twins; and every
-// link into the site or the repository resolves, anchors included.
+// link into the site or the repository resolves, anchors included. And
+// inputs.txt, which sh/dispatch.sh reads to run the site's check only on diffs
+// that can change it, lists every repository file the build reads, and every
+// one the build, or a routed adapter's README as its next release will publish
+// it, links with an anchor or line range.
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { Lexer, type Tokens, walkTokens } from "marked";
 import { hrefs, lex, slugger } from "../src/lib/markdown";
 import { origin, pages, twinPath } from "../src/lib/pages";
-import { repoUrl, root } from "../src/lib/repo";
+import { read, repoUrl, root, sources } from "../src/lib/repo";
+import { routes } from "../src/lib/routes";
 
 const dist = path.resolve("dist");
 const errors = new Set<string>();
@@ -22,6 +27,17 @@ function walk(dir: string): string[] {
 }
 const files = walk(dist).map((f) => `/${path.relative(dist, f).split(path.sep).join("/")}`);
 const text = (file: string) => readFileSync(path.join(dist, file), "utf8");
+
+// The repository files whose edits run the site's check, besides site/ itself.
+const inputs = new Set(
+	readFileSync("inputs.txt", "utf8")
+		.split("\n")
+		.filter((line) => line !== "" && !line.startsWith("#")),
+);
+for (const file of sources) if (!inputs.has(file)) fail(`inputs.txt lacks ${file}, which the build reads`);
+// An edit to a file a link names with a fragment can break the link.
+const anchored = (from: string, file: string) =>
+	inputs.has(file) || fail(`${from}: links ${file} with an anchor or line range, so inputs.txt must list it`);
 
 // Pages, and what lists them.
 const built = files
@@ -71,6 +87,26 @@ function anchors(file: string): Set<string> {
 const blob = new RegExp(`^${repoUrl}/(?:blob|tree)/main/([^#?]+)`);
 const raw = /^https:\/\/raw\.githubusercontent\.com\/kixel-ai\/rind\/main\/([^#?]+)/;
 
+// The repository file on `main` a URL names, if it names one.
+function repoFile(u: URL): string | undefined {
+	const located = `${u.origin}${u.pathname}`;
+	const repoPath = located.match(blob)?.[1] ?? located.match(raw)?.[1];
+	return repoPath === undefined ? undefined : decodeURIComponent(repoPath).replace(/\/$/, "");
+}
+
+// The links in Markdown, which include URLs written bare in prose, as GFM
+// autolinks them, and URLs quoted in code, such as the prompt, as a reader
+// copies them, up to whitespace or a quote.
+function links(markdown: string): string[] {
+	const tokens = lex(markdown);
+	const out = hrefs(tokens);
+	walkTokens(tokens, (t) => {
+		if (t.type !== "code" && t.type !== "codespan") return;
+		for (const m of t.text.matchAll(/https?:\/\/[^\s"'`<>]+/g)) out.push(m[0]);
+	});
+	return out;
+}
+
 // Check one link found in `from`, resolved against it as a browser would.
 function check(from: string, url: string) {
 	let u: URL;
@@ -93,10 +129,9 @@ function check(from: string, url: string) {
 	}
 	if (u.protocol === "data:") return;
 	if (u.protocol !== "https:") return fail(`${from}: ${url} is neither on this site nor https`);
-	const located = `${u.origin}${u.pathname}`;
-	const repoPath = located.match(blob)?.[1] ?? located.match(raw)?.[1];
-	if (repoPath === undefined) return;
-	const file = decodeURIComponent(repoPath).replace(/\/$/, "");
+	const file = repoFile(u);
+	if (file === undefined) return;
+	if (fragment) anchored(from, file);
 	if (!existsSync(path.join(root, file))) return fail(`${from}: ${url} names ${file}, which the repository lacks`);
 	if (fragment && !(file.endsWith(".md") ? anchors(file).has(fragment) : hasLines(file, fragment))) {
 		fail(`${from}: ${url} names an anchor ${file} lacks`);
@@ -190,15 +225,31 @@ for (const file of files) {
 			}
 		}
 	} else if (file.endsWith(".md") || file.endsWith(".txt")) {
-		// Links, which include URLs written bare in prose, as GFM autolinks them,
-		// and URLs quoted in code, such as the prompt, as a reader copies them, up
-		// to whitespace or a quote.
-		const tokens = lex(text(file));
-		for (const href of hrefs(tokens)) check(file, href);
-		walkTokens(tokens, (t) => {
-			if (t.type !== "code" && t.type !== "codespan") return;
-			for (const m of t.text.matchAll(/https?:\/\/[^\s"'`<>]+/g)) check(file, m[0]);
-		});
+		for (const href of links(text(file))) check(file, href);
+	}
+}
+// A page can quote an adapter's README from crates.io rather than this
+// checkout, so a release can change the site's links with no change here. A
+// README's relative links resolve into its release's tag, which this check
+// does not follow, so only those that reach `main` count.
+for (const { crate } of routes) {
+	const from = `${crate}/README.md`;
+	for (const href of links(read(from))) {
+		let u: URL;
+		try {
+			// As src/lib/from.ts resolves it on a release's page.
+			u = new URL(href, `${repoUrl}/blob/${crate}-v0.0.0/${crate}/`);
+		} catch {
+			continue;
+		}
+		let file: string | undefined;
+		try {
+			file = repoFile(u);
+		} catch {
+			fail(`${from}: ${href} is not a valid URL`);
+			continue;
+		}
+		if (file !== undefined && u.hash.length > 1) anchored(from, file);
 	}
 }
 for (const m of sitemap.matchAll(/<loc>([^<]+)<\/loc>/g)) check("/sitemap.xml", m[1]);

@@ -8,11 +8,12 @@
 default:
     just --list
 
-# Lints, compiles, and tests only the crates the branch changed plus
-# everything depending on them; `check --all` is the unscoped suite. BASE
-# defaults to the PR base, then a main upstream, then origin/main.
+# check and ci cover only the crates the branch changed plus everything
+# depending on them, and `--all` the whole workspace; check also narrows rind's
+# tests to the primitives it changed (admin/test-scope). BASE defaults to the
+# PR base, then a main upstream, then origin/main.
 
-# Lint, compile, and test what the branch changed since BASE, plus its dependents.
+# Format, lint, and test what the branch changed since BASE, plus its dependents, and run the quick repository lints.
 check $BASE="":
     sh/dispatch.sh check "$BASE"
 
@@ -45,11 +46,24 @@ qemu SHELL:
 portable:
     nix develop --command sh/portable.sh
 
-# Test the portable backend on wasm32-wasip2 under wasmtime (Linux or macOS).
+# Lint each published crate under every combination of its Cargo features.
+powerset:
+    nix develop --command sh/powerset.sh
+
+# Test the portable backend on wasm32-wasip2 under wasmtime, and the adapters on
+# wasm32-unknown-unknown in Node (Linux or macOS).
 wasm:
     nix develop .#wasm --command sh/wasm.sh
 
-# Test the portable backend under Miri for TARGET, such as s390x-unknown-linux-gnu (Linux only).
+# Lint rind's library for bare-metal targets, built without std (Linux or macOS).
+bare-metal:
+    nix develop --command sh/bare-metal.sh
+
+# Lint rind's library for the ESP32's Xtensa targets, with espup's `esp` toolchain.
+xtensa:
+    sh/bare-metal.sh xtensa
+
+# Test the portable backend under Miri for TARGET, such as s390x-unknown-linux-gnu or i686-unknown-linux-gnu (Linux only).
 miri TARGET="x86_64-unknown-linux-gnu":
     nix develop .#miri --command sh/miri.sh {{TARGET}}
 
@@ -57,9 +71,10 @@ miri TARGET="x86_64-unknown-linux-gnu":
 openmls *ARGS:
     nix develop --command sh/openmls.sh {{ARGS}}
 
-# Check dependencies against advisories, licenses, and sources in deny.toml.
+# Check dependencies against deny.toml's advisories, licenses, and sources, and supply-chain/'s audits.
 audit:
     cargo deny check
+    cargo vet --locked
 
 # Dispatch every scheduled workflow on the release PR (default: the open one), wait, and record the result on its head.
 release-check *ARGS:

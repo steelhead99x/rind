@@ -7,6 +7,9 @@ set -e
 # cargo-modules reads only signatures and `use` items, so also grep the source
 # for a path into a higher layer. A file's `#[cfg(test)] mod x {` is skipped up
 # to the column-0 `}` that rustfmt closes it with; any other match is an error.
+# The one exception is the table admin/import-vg's `SHARED` names: generated
+# code of `low` that reads `mid`'s P-256 generator table, which Lean proves
+# where it is, in place of a second copy of the same bytes.
 (
   cd "$(dirname "$0")/.."
   files=$(find rind/src/low rind/src/mid -name '*.rs' | sort)
@@ -16,6 +19,8 @@ set -e
     pending && /^(pub(\([^)]*\))? )?mod [A-Za-z0-9_]+ [{]$/ { pending = 0; intest = 1; next }
     /^#\[cfg\(test\)\]$/ { pending = 1 }
     !/^#\[/ { pending = 0 }
+    FILENAME == "rind/src/low/x86_64/vg/vg_p256_mul_base_adx.rs" &&
+      $0 == "        VG_P256_COMB = sym crate::mid::p256::precomp::CURVE_GENERATOR_PRECOMP," { next }
     /(crate|super)::high/ || FILENAME ~ /\/src\/low\// && /(crate|super)::mid/ {
       printf "ERROR: %s:%d names a higher layer: %s\n", FILENAME, FNR, $0 > "/dev/stderr"
       errors++

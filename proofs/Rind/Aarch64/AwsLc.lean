@@ -1,9 +1,10 @@
 import Rind.Aarch64.Funs
-import Rind.S2nSha512
+import Rind.Aarch64.VgSha512
+import Rind.Sha2Lemmas
 open Aeneas Aeneas.Std Result rind.spec
 
 /-!
-# aws-lc's SHA-512 contract on aarch64
+# rind's SHA-512 block functions on aarch64
 
 aws-lc-verification's NSym proof that aws-lc's `sha512_block_data_order_nohw`
 computes `sha512_block_data_order_array_spec`, at the revision rind's README
@@ -25,24 +26,8 @@ and, as a slice, fewer than 2^57.
 The restatement, and that rind's naked function is aws-lc's object code with
 the wrapper passing the pointers and block count the spec names, are trusted.
 
-For the routine for the SHA-512 instructions, `sha512_block_data_order_hw`,
-NSym's proof asserts the digest in registers at the end of its block loop,
-before the instruction that stores it to `state`, so rind proves the routine
-itself: its HOL Light proof `SHA512_HW_SUBROUTINE_CORRECT`, in
-`proofs/hol-light/aarch64/sha512_block_data_order_hw.ml` at rind's commit, that
-rind's naked function, as rind's build emits it, computes s2n-bignum's
-`sha512_hash_blocks`, from awslabs/s2n-bignum#420 at 7ef7ba7c, restated as an
-axiom about the Rust wrapper `compress_hw` around it. `admin/prove` checks the
-HOL Light proof against the object code rind's release build emits, its
-instructions, relocations, and the `K512` table they read. The theorem's
-hypotheses hold for every call `compress_hw`'s safety contract allows: `state`
-and `blocks` are distinct allocations, neither overlapping the code, the
-table, or the 16 bytes below the stack pointer the routine saves its frame to;
-`blocks` is a whole number of blocks, at least one and, as a slice, fewer than
-2^64; the linker places the table within the reach of the `adrp` that
-addresses it; and the ABI keeps the stack pointer 16-byte aligned. The
-restatement, and that the wrapper passes the pointers and block count the
-theorem names, are trusted. `S2nSha512` proves s2n-bignum's spec `compress`.
+On the SHA-512 instructions rind runs pyca/verified-garbage's routine
+instead, whose contract `Rind.Aarch64.VgSha512` restates.
 -/
 
 namespace rind.aarch64
@@ -60,18 +45,6 @@ for `num` blocks, at least one, the state becomes cryptol-specs'
 axiom compress_nohw_spec (state : Std.Array U64 8#usize) (blocks : Slice U8)
     (hm : blocks.length % 128 = 0) (hn : blocks.length ≠ 0) :
     low.aarch64.sha512.compress_nohw state blocks ⦃ r => r.val = compress state.val blocks.val ⦄
-
-/-- `SHA512_HW_SUBROUTINE_CORRECT`: for `n` blocks, at least one, whose `i`th
-block's `j`th word, read big-endian, is the `j`th word of `m i`, the state's
-eight words, read little-endian, become `sha512_hash_blocks m state n`. -/
-@[step]
-axiom sha512_block_data_order_hw_spec (c : low.aarch64.cpu.HaveSha3)
-    (state : Std.Array U64 8#usize) (blocks : Slice U8)
-    (hm : blocks.length % 128 = 0) (hn : blocks.length ≠ 0) :
-    low.aarch64.sha512.compress_hw c state blocks ⦃ r =>
-      r.val.map (·.bv) = s2n.sha512.hashBlocks
-        (fun i => (blockWords ((blocks.val.drop (128 * i)).take 128)).map (·.bv))
-        (state.val.map (·.bv)) (blocks.length / 128) ⦄
 
 /-- rind's SHA-512 dispatch checks the CPU for the SHA-512 instructions without
 failing, and its entry guard and the debug build's check that one is held
@@ -111,8 +84,7 @@ theorem sha512_compress_blocks_spec (h : RunsSha512) (state : Std.Array U64 8#us
       step with compress_nohw_spec
       simp_all
     | some c =>
-      step with sha512_block_data_order_hw_spec as ⟨r, hr⟩
-      apply s2n.sha512.map_bv_injective
-      rw [hr, ← s2n.sha512.hashBlocks_eq state.val (by simp) blocks.val hm]
+      step with compress_hw_spec
+      simp_all
 
 end rind.aarch64

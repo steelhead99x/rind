@@ -4,10 +4,12 @@ name: Release
 permissions:
   contents: read
 
-# Only one release job can run at a time.
+# Only one release job can run at a time. Later pushes queue rather than
+# replace a pending run, so no push cancels a release and alert.yml can post
+# every cancellation.
 concurrency:
   group: release
-  cancel-in-progress: false
+  queue: max
 
 # release-plz opens a release PR from `main` and publishes once that PR merges
 # (release_always = false in .release-plz.toml), so an ordinary merge never
@@ -27,8 +29,41 @@ on:
   workflow_dispatch:
 
 jobs:
+  # The proofs gate no merge but gate a release: before a release PR's commit
+  # publishes, a prove run on main with the same inputs must have passed
+  # (sh/release-proved.sh), so this waits for that run when the release
+  # follows it closely. A job of its own, outside the `publish` environment,
+  # so the wait never outlives the App token `release` makes.
+  proofs:
+    name: Proofs
+    runs-on: ubuntu-latest
+    if: ${{ github.repository_owner == 'kixel-ai' && github.ref == 'refs/heads/main' }}
+    # GitHub's limit for a hosted job: prove's run may take 30 minutes for its
+    # keys and 150 for HOL Light aarch64, after queueing for runners.
+    timeout-minutes: 360
+    permissions:
+      contents: read
+      # To read prove's runs.
+      actions: read
+      # To find the pull request that landed each commit.
+      pull-requests: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Wait for the proofs
+        run: sh/release-proved.sh "$BEFORE"
+        env:
+          BEFORE: ${{ github.event.before }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+
   release:
     name: Plz
+    needs: proofs
     runs-on: ubuntu-latest
     if: ${{ github.repository_owner == 'kixel-ai' && github.ref == 'refs/heads/main' }}
     # The environment, which only `main` can deploy to, holds the App key, and
@@ -42,6 +77,7 @@ jobs:
       id-token: write
     outputs:
       pyrind: ${{ steps.pypi.outputs.pyrind }}
+      pyrind-commit: ${{ steps.pypi.outputs.pyrind-commit }}
       pyrind-cryptography: ${{ steps.pypi.outputs.pyrind-cryptography }}
 
     steps:
@@ -78,7 +114,86 @@ jobs:
           for package in pyrind pyrind-cryptography; do
             ref=$(nix develop --command sh/pypi-unpublished.sh "$package")
             echo "$package=$ref" >>"$GITHUB_OUTPUT"
+            # The commit pyrind's tag names, which its wheels build from and
+            # its attestation records. release-plz created the tag after the
+            # checkout, through GitHub's API.
+            if [[ "$package" == pyrind && -n "$ref" ]]; then
+              git fetch --quiet origin "refs/tags/$ref:refs/tags/$ref"
+              commit=$(git rev-parse --verify "refs/tags/$ref^{commit}")
+              echo "pyrind-commit=$commit" >>"$GITHUB_OUTPUT"
+            fi
           done
+
+  # crates.io keeps no provenance, so GitHub holds an attestation for each
+  # .crate a release published, which `gh attestation verify` checks against
+  # the copy cargo downloads, naming the release commit it was built from.
+  # Read from crates.io rather than from what this run published, so a rerun
+  # after a partial release still attests them. Its own job, outside
+  # `release`, so a crates.io outage here holds back no PyPI release.
+  crates:
+    name: Find released crates
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      crates: ${{ steps.crates.outputs.crates }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: ./.github/actions/nix
+
+      - name: Find the released crates
+        id: crates
+        run: |
+          crates=$(nix develop --command sh/released-crates.sh "$BEFORE")
+          echo "crates=$crates" >>"$GITHUB_OUTPUT"
+        env:
+          BEFORE: ${{ github.event.before }}
+
+  crates-attest:
+    name: Attest crates
+    needs: crates
+    if: needs.crates.outputs.crates != '[]'
+    runs-on: ubuntu-latest
+    environment: publish
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    strategy:
+      matrix:
+        release: ${{ fromJSON(needs.crates.outputs.crates) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The bytes crates.io serves, which `cargo publish` waited to see
+      # published.
+      - name: Download the released crates
+        env:
+          CRATES: ${{ toJSON(matrix.release.crates) }}
+        run: |
+          mkdir "$RUNNER_TEMP/crates"
+          jq -r '.[] | "\(.name) \(.version)"' <<<"$CRATES" | while read -r name version; do
+            curl --fail --silent --show-error --output "$RUNNER_TEMP/crates/$name-$version.crate" \
+              "https://static.crates.io/crates/$name/$name-$version.crate"
+          done
+
+      - name: Describe the build
+        env:
+          COMMIT: ${{ matrix.release.commit }}
+        run: sh/provenance.sh "$COMMIT" refs/heads/main >"$RUNNER_TEMP/provenance.json"
+
+      - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ runner.temp }}/crates/*.crate
+          predicate-type: https://slsa.dev/provenance/v1
+          predicate-path: ${{ runner.temp }}/provenance.json
 
   pyrind-wheels:
     name: pyrind wheels
@@ -88,7 +203,8 @@ jobs:
       contents: read
     uses: ./.github/workflows/python.yml
     with:
-      ref: ${{ needs.release.outputs.pyrind }}
+      # The tag's commit, which a branch of the same name cannot shadow.
+      ref: ${{ needs.release.outputs.pyrind-commit }}
 
   # Publishes to PyPI by trusted publishing, which trusts this workflow in the
   # `publish` environment, so no PyPI token is stored anywhere.
@@ -98,13 +214,35 @@ jobs:
     runs-on: ubuntu-latest
     environment: publish
     permissions:
+      contents: read
       id-token: write
+      attestations: write
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: pyrind-*
           path: dist
           merge-multiple: true
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          path: source
+
+      # The wheels come from pyrind's tag, which can predate this run's commit.
+      - name: Describe the build
+        env:
+          COMMIT: ${{ needs.release.outputs.pyrind-commit }}
+          REF: refs/tags/${{ needs.release.outputs.pyrind }}
+        run: source/sh/provenance.sh "$COMMIT" "$REF" >"$RUNNER_TEMP/provenance.json"
+
+      # GitHub's provenance for `gh attestation verify`, beside the PEP 740
+      # attestations the upload makes for PyPI.
+      - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: dist/*
+          predicate-type: https://slsa.dev/provenance/v1
+          predicate-path: ${{ runner.temp }}/provenance.json
 
       - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
         with:
@@ -160,11 +298,18 @@ jobs:
     environment: publish
     permissions:
       id-token: write
+      attestations: write
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: cryptography-dist
           path: dist
+
+      # It builds from this run's own commit, which the default provenance
+      # names.
+      - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: dist/*
 
       - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
         with:

@@ -3,7 +3,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 use rind::agreement;
 
-use crate::{Bytes, algorithm, bytes, constants, error};
+use crate::{Bytes, PublicKeyCell, Secret, algorithm, bytes, constants, error};
 
 algorithm!(
     /// A key agreement algorithm.
@@ -12,68 +12,79 @@ algorithm!(
 
 /// A private key for key agreement.
 #[pyclass(frozen, module = "pyrind.agreement")]
-struct PrivateKey(Box<agreement::PrivateKey>);
+struct PrivateKey {
+    inner: Box<agreement::PrivateKey>,
+    public_key: PublicKeyCell<PublicKey>,
+}
+
+impl PrivateKey {
+    /// Wraps `key`, with the one `PublicKey` its `public_key` returns.
+    fn wrap(key: Result<agreement::PrivateKey, rind::Error>) -> PyResult<Self> {
+        Ok(Self {
+            inner: Box::new(key.map_err(error)?),
+            public_key: PublicKeyCell::new(),
+        })
+    }
+}
 
 #[pymethods]
 impl PrivateKey {
     /// Generates a key for `algorithm`.
     #[staticmethod]
     fn generate(algorithm: &Bound<'_, Algorithm>) -> PyResult<Self> {
-        agreement::PrivateKey::generate(algorithm.get().inner)
-            .map(Box::new)
-            .map(Self)
-            .map_err(error)
+        Self::wrap(agreement::PrivateKey::generate(algorithm.get().inner))
     }
 
     /// Loads a key for `algorithm` from its big-endian scalar, or for X25519
     /// its 32 bytes.
     #[staticmethod]
-    fn from_scalar(algorithm: &Bound<'_, Algorithm>, scalar: Bytes<'_>) -> PyResult<Self> {
-        agreement::PrivateKey::from_scalar(algorithm.get().inner, &scalar)
-            .map(Box::new)
-            .map(Self)
-            .map_err(error)
+    fn from_scalar(algorithm: &Bound<'_, Algorithm>, scalar: Secret<'_>) -> PyResult<Self> {
+        Self::wrap(agreement::PrivateKey::from_scalar(
+            algorithm.get().inner,
+            &scalar,
+        ))
     }
 
     /// Loads a key for `algorithm` from PKCS#8 DER.
     #[staticmethod]
-    fn from_pkcs8(algorithm: &Bound<'_, Algorithm>, der: Bytes<'_>) -> PyResult<Self> {
-        agreement::PrivateKey::from_pkcs8(algorithm.get().inner, &der)
-            .map(Box::new)
-            .map(Self)
-            .map_err(error)
+    fn from_pkcs8(algorithm: &Bound<'_, Algorithm>, der: Secret<'_>) -> PyResult<Self> {
+        Self::wrap(agreement::PrivateKey::from_pkcs8(
+            algorithm.get().inner,
+            &der,
+        ))
     }
 
     /// Loads an ECDH key for `algorithm` from SEC1 `ECPrivateKey` DER.
     #[staticmethod]
-    fn from_sec1(algorithm: &Bound<'_, Algorithm>, der: Bytes<'_>) -> PyResult<Self> {
-        agreement::PrivateKey::from_sec1(algorithm.get().inner, &der)
-            .map(Box::new)
-            .map(Self)
-            .map_err(error)
+    fn from_sec1(algorithm: &Bound<'_, Algorithm>, der: Secret<'_>) -> PyResult<Self> {
+        Self::wrap(agreement::PrivateKey::from_sec1(
+            algorithm.get().inner,
+            &der,
+        ))
     }
 
-    /// The public key to send the peer.
-    fn public_key(&self) -> PublicKey {
-        PublicKey(Box::new(self.0.public_key().clone()))
+    /// The public key to send the peer, the same object each call.
+    fn public_key(&self, py: Python<'_>) -> PyResult<Py<PublicKey>> {
+        self.public_key
+            .get(py, || PublicKey(Box::new(self.inner.public_key().clone())))
     }
 
     /// Agrees a shared secret with the peer's public key `peer`, as
     /// `bytes(PublicKey)` encodes it; raises `KeyRejected` for an invalid
     /// one.
     fn agree<'py>(&self, py: Python<'py>, peer: Bytes<'_>) -> PyResult<Bound<'py, PyBytes>> {
-        let secret = self.0.agree(&peer).map_err(error)?;
+        let secret = self.inner.agree(&peer).map_err(error)?;
         Ok(bytes(py, secret))
     }
 
     /// Encodes the key as PKCS#8 DER.
     fn to_pkcs8<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
-        bytes(py, self.0.to_pkcs8())
+        bytes(py, self.inner.to_pkcs8())
     }
 
     /// Returns the key's scalar, as `from_scalar` takes it.
     fn to_scalar<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
-        bytes(py, self.0.to_scalar())
+        bytes(py, self.inner.to_scalar())
     }
 }
 

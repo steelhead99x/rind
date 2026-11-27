@@ -9,6 +9,8 @@ import 'dart:typed_data';
 
 import 'package:cryptography/cryptography.dart';
 import 'package:cryptography/dart.dart';
+import 'package:rind/ecdsa.dart' as ecdsa;
+import 'package:rind/ed25519.dart' as ed25519;
 import 'package:rind/rind.dart' as rind;
 import 'package:rind_cryptography/rind_cryptography.dart';
 
@@ -75,16 +77,16 @@ Future<void> main() async {
   });
 
   final edPair = await dart.ed25519().newKeyPair();
-  final ed25519 = rind.Ed25519KeyPair.generate();
+  final ed25519Pair = ed25519.KeyPair.generate();
   await bench('Ed25519 sign 64 B', {
     for (final MapEntry(:key, :value) in backends.entries)
       key: () => value.ed25519().sign(message, keyPair: edPair),
-    'rind': () => ed25519.sign(message),
+    'rind': () => ed25519Pair.sign(message),
   });
 
   final edSignature = await dart.ed25519().sign(message, keyPair: edPair);
-  final edVerifier = ed25519.publicKey;
-  final edRindSignature = ed25519.sign(message);
+  final edVerifier = ed25519Pair.publicKey;
+  final edRindSignature = ed25519Pair.sign(message);
   await bench('Ed25519 verify 64 B', {
     for (final MapEntry(:key, :value) in backends.entries)
       key: () => value.ed25519().verify(message, signature: edSignature),
@@ -92,21 +94,22 @@ Future<void> main() async {
   });
 
   // The Dart implementation has no ECDSA.
-  final ecdsa = rindCryptography.ecdsaP256(rindCryptography.sha256());
-  final ecdsaPair = await ecdsa.newKeyPair();
-  final ecdsaRind = rind.EcdsaKeyPair.generate(
-    rind.EcdsaSigningAlgorithm.p256Sha256Fixed,
+  final ecdsaAlgorithm = rindCryptography.ecdsaP256(rindCryptography.sha256());
+  final ecdsaPair = await ecdsaAlgorithm.newKeyPair();
+  final ecdsaRind = ecdsa.KeyPair.generate(
+    ecdsa.SigningAlgorithm.p256Sha256Fixed,
   );
   await bench('ECDSA P-256 sign 64 B', {
-    'rind_cryptography': () => ecdsa.sign(message, keyPair: ecdsaPair),
+    'rind_cryptography': () => ecdsaAlgorithm.sign(message, keyPair: ecdsaPair),
     'rind': () => ecdsaRind.sign(message),
   });
 
-  final ecdsaSignature = await ecdsa.sign(message, keyPair: ecdsaPair);
+  final ecdsaSignature = await ecdsaAlgorithm.sign(message, keyPair: ecdsaPair);
   final ecdsaVerifier = ecdsaRind.publicKey;
   final ecdsaRindSignature = ecdsaRind.sign(message);
   await bench('ECDSA P-256 verify 64 B', {
-    'rind_cryptography': () => ecdsa.verify(message, signature: ecdsaSignature),
+    'rind_cryptography': () =>
+        ecdsaAlgorithm.verify(message, signature: ecdsaSignature),
     'rind': () => ecdsaVerifier.verify(message, ecdsaRindSignature),
   });
 }

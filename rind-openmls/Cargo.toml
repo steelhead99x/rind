@@ -11,6 +11,10 @@ categories = ["cryptography"]
 rust-version = "1.91"
 readme = "README.md"
 
+# Every feature, so docs.rs shows the items each gates, labeled with it.
+[package.metadata.docs.rs]
+all-features = true
+
 # The openmls_traits version whose provider traits this crate implements,
 # which openmls_rust_crypto, the provider it replaces, also tracks
 # (sh/adapter-versions.sh).
@@ -37,7 +41,7 @@ test-utils = ["openmls_memory_storage/test-utils"]
 [dependencies]
 openmls_memory_storage = "0.6"
 openmls_traits = "0.6"
-rind = { version = "0.3.2", path = "../rind" }
+rind = { version = "0.3.2", path = "../rind", default-features = false }
 tls_codec = { version = "0.5", default-features = false }
 
 [dev-dependencies]

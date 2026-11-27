@@ -297,3 +297,22 @@ fn unsupported_encodings_name_the_encoding() {
         );
     }
 }
+
+/// AWS-LC refuses a 2047-bit modulus, which rind loads, so every loader here
+/// refuses it as rustls's provider does.
+#[test]
+fn signing_keys_refuse_a_2047_bit_rsa_modulus_as_aws_lc_does() {
+    let pkcs1 = include_bytes!("../../rind/src/high/rsa/rsa2047.der");
+    let pkcs8 = include_bytes!("../../rind/src/high/rsa/rsa2047.pkcs8.der");
+    assert!(rind::rsa::KeyPair::from_pkcs1(pkcs1).is_ok());
+    assert!(rind::rsa::KeyPair::from_pkcs8(pkcs8).is_ok());
+    for der in [
+        PrivateKeyDer::Pkcs1(PrivatePkcs1KeyDer::from(&pkcs1[..])),
+        PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(&pkcs8[..])),
+    ] {
+        assert!(aws_lc_rs::sign::RsaSigningKey::new(&der).is_err());
+        assert!(rind_rustls::sign::RsaSigningKey::new(&der).is_err());
+        assert!(aws_lc_rs::sign::any_supported_type(&der).is_err());
+        assert!(rind_rustls::sign::any_supported_type(&der).is_err());
+    }
+}

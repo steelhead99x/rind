@@ -67,12 +67,14 @@ impl<const N: usize> PosInt<N> {
     }
 
     /// Makes a value from little-endian `words`, `words.len()` wide.
+    // Checks the length rather than `?` on `get_mut`, whose translation
+    // Lean cannot check, so `proofs/` can prove RSA's key loading.
     pub(crate) fn from_words(words: &[u64]) -> Result<Self, Error> {
+        if words.len() > N {
+            return Err(Error::WrongLength);
+        }
         let mut r = Self::zero();
-        r.words
-            .get_mut(..words.len())
-            .ok_or(Error::WrongLength)?
-            .copy_from_slice(words);
+        r.words[..words.len()].copy_from_slice(words);
         r.used = words.len();
         Ok(r)
     }
@@ -112,17 +114,22 @@ impl<const N: usize> PosInt<N> {
     /// zeroes included, and `fit` sets the width it needs.
     // Indexes, as `to_bytes_fixed` does, which Aeneas can translate, so
     // `proofs/` can prove RSA's public operation on AVX-512 IFMA.
+    #[allow(clippy::needless_range_loop)]
     pub(crate) fn from_secret_bytes(bytes: &[u8]) -> Result<Self, Error> {
-        // A DER integer this wide fits only with a zero sign byte, so the
-        // check reveals only whether it is too wide to be valid.
-        let bytes = if bytes.len() == N * 8 + 1 {
+        // Bytes beyond the words fit only if all are zero, as aws-lc's
+        // `BN_bin2bn` accepts, so the check reveals only whether the value is
+        // too wide to be valid.
+        let bytes = if bytes.len() > N * 8 {
+            let excess = bytes.len() - N * 8;
+            let mut high = 0u8;
+            for i in 0..excess {
+                high |= bytes[i];
+            }
             // `eq`, a `bool`, where Aeneas reads `==` as a proposition.
-            if !low::ct::into_public(bytes[0].eq(&0)) {
+            if !low::ct::into_public(high.eq(&0)) {
                 return Err(Error::WrongLength);
             }
-            &bytes[1..]
-        } else if bytes.len() > N * 8 {
-            return Err(Error::WrongLength);
+            &bytes[excess..]
         } else {
             bytes
         };
@@ -170,7 +177,6 @@ impl<const N: usize> PosInt<N> {
     /// Writes the low `out.len()` bytes of the value to `out`, big-endian,
     /// reading the same words whatever the value.
     // Indexes, as `to_bytes` does, which Aeneas can translate.
-    #[cfg(rind_backend = "x86_64")]
     pub(crate) fn to_bytes_fixed(&self, out: &mut [u8]) {
         let len = out.len();
         for i in 0..len {
@@ -448,36 +454,51 @@ impl<const N: usize> PosInt<N> {
         r
     }
 
-    /// Computes each of `pair`, as [`Self::mod_exp`] does: two at once by
+    /// Computes `x` and `y`, as [`Self::mod_exp`] does: two at once by
     /// aws-lc's dual RSAZ where it is the fastest, on x86_64 CPUs with
     /// AVX-512 IFMA, for moduli of 24 or 32 words each, and exponents
     /// no wider.
-    pub(crate) fn mod_exp_pair(pair: [ModExp<'_, N>; 2]) -> [Self; 2] {
+    // Two arguments and a tuple, not arrays mapped by closures, which Aeneas
+    // cannot translate, so `proofs/` can prove RSA's private operation.
+    pub(crate) fn mod_exp_pair(x: ModExp<'_, N>, y: ModExp<'_, N>) -> (Self, Self) {
         #[cfg(rind_backend = "x86_64")]
-        if let Some(r) = Self::mod_exp_pair_rsaz(&pair) {
-            return r;
+        if let Some(rsaz) = Self::rsaz_pair(&x, &y) {
+            return Self::mod_exp_pair_rsaz(rsaz, &x, &y);
         }
 
-        pair.map(|x| x.base.mod_exp(x.e, x.n, x.n_montifier, x.n_0))
+        (
+            x.base.mod_exp(x.e, x.n, x.n_montifier, x.n_0),
+            y.base.mod_exp(y.e, y.n, y.n_montifier, y.n_0),
+        )
+    }
+
+    /// aws-lc's dual RSAZ, where the CPU runs it for moduli as wide as `x`'s
+    /// and `y`'s are, both alike, and exponents no wider.
+    #[cfg(rind_backend = "x86_64")]
+    fn rsaz_pair(x: &ModExp<'_, N>, y: &ModExp<'_, N>) -> Option<low::RsazAvx512> {
+        let k = x.n.used;
+        if y.n.used != k || x.e.used > k || y.e.used > k {
+            return None;
+        }
+        low::RsazAvx512::check(k)
     }
 
     /// [`Self::mod_exp_pair`] by aws-lc's dual RSAZ, which takes every word
     /// of `e` to `n`'s width, so the trace depends on none of the values.
     #[cfg(rind_backend = "x86_64")]
-    fn mod_exp_pair_rsaz(pair: &[ModExp<'_, N>; 2]) -> Option<[Self; 2]> {
-        let k = pair[0].n.used;
-        if pair.iter().any(|x| x.n.used != k || x.e.used > k) {
-            return None;
-        }
-        let rsaz = low::RsazAvx512::check(k)?;
+    fn mod_exp_pair_rsaz(
+        rsaz: low::RsazAvx512,
+        x: &ModExp<'_, N>,
+        y: &ModExp<'_, N>,
+    ) -> (Self, Self) {
+        let k = x.n.used;
         // Each word above `used` is zero.
-        let mut r = [Self::zero(), Self::zero()];
-        let [r0, r1] = &mut r;
+        let (mut r0, mut r1) = (Self::zero(), Self::zero());
         r0.used = k;
         r1.used = k;
         rsaz.mod_exp(
             [&mut r0.words[..k], &mut r1.words[..k]],
-            pair.each_ref().map(|x| low::Operands {
+            [x, y].map(|x| low::Operands {
                 x: &x.base.words[..k],
                 e: &x.e.words[..k],
                 m: &x.n.words[..k],
@@ -485,7 +506,7 @@ impl<const N: usize> PosInt<N> {
                 n0: x.n_0,
             }),
         );
-        Some(r)
+        (r0, r1)
     }
 
     /// Computes `self` ^ `e` mod `n`.
@@ -499,7 +520,9 @@ impl<const N: usize> PosInt<N> {
     /// `n` and `n_0`.  The instruction trace depends only on `e.used` and `n.used`.
     fn mod_exp(&self, e: &Self, n: &Self, n_montifier: &Self, n_0: u64) -> Self {
         #[cfg(rind_backend = "x86_64")]
-        if let Some(r) = self.mod_exp_rsaz(e, n, n_montifier, n_0) {
+        if let Some(rsaz) = Self::rsaz(e, n)
+            && let Some(r) = self.mod_exp_rsaz(rsaz, e, n, n_montifier, n_0)
+        {
             return r;
         }
 
@@ -509,16 +532,29 @@ impl<const N: usize> PosInt<N> {
         self_mont.mont_exp(one_mont, e, n, n_0).from_montgomery(n)
     }
 
-    /// [`Self::mod_exp`] by aws-lc's RSAZ, for a 16-word `n` and an `e` no
-    /// wider, where it is the fastest: on x86_64 CPUs with AVX2 but without
-    /// ADX. RSAZ takes every 1024 bits of `e`, so the trace depends on none
-    /// of the values.
+    /// aws-lc's RSAZ, where it is the fastest for a 16-word `n` and an `e`
+    /// no wider: on x86_64 CPUs with AVX2 but without ADX.
     #[cfg(rind_backend = "x86_64")]
-    fn mod_exp_rsaz(&self, e: &Self, n: &Self, n_montifier: &Self, n_0: u64) -> Option<Self> {
+    fn rsaz(e: &Self, n: &Self) -> Option<low::Rsaz> {
         let rsaz = low::Rsaz::check()?;
         if n.used != 16 || e.used > 16 {
             return None;
         }
+        Some(rsaz)
+    }
+
+    /// [`Self::mod_exp`] by aws-lc's RSAZ, for a 16-word `n` and an `e` no
+    /// wider. RSAZ takes every 1024 bits of `e`, so the trace depends on none
+    /// of the values.
+    #[cfg(rind_backend = "x86_64")]
+    fn mod_exp_rsaz(
+        &self,
+        rsaz: low::Rsaz,
+        e: &Self,
+        n: &Self,
+        n_montifier: &Self,
+        n_0: u64,
+    ) -> Option<Self> {
         // Each word above `used` is zero.
         let mut r = Self::zero();
         r.used = n.used;
@@ -1016,23 +1052,20 @@ mod tests {
         let base = random(23);
         // Exponents of 24 and 25 words.
         let exponents = [random(24), random(25)];
-        let pair = |[i, j]: [usize; 2], [ei, ej]: [usize; 2]| {
-            [(i, ei), (j, ej)].map(|(i, e)| ModExp {
-                base: &base,
-                e: &exponents[e],
-                n: &moduli[i],
-                n_montifier: &montifiers[i],
-                n_0: moduli[i].mont_neg_inverse(),
-            })
+        let operands = |i: usize, e: usize| ModExp {
+            base: &base,
+            e: &exponents[e],
+            n: &moduli[i],
+            n_montifier: &montifiers[i],
+            n_0: moduli[i].mont_neg_inverse(),
+        };
+        let takes = |[i, j]: [usize; 2], [ei, ej]: [usize; 2]| {
+            PosInt::rsaz_pair(&operands(i, ei), &operands(j, ej)).is_some()
         };
 
-        let rsaz = low::RsazAvx512::check(24).is_some();
-        assert_eq!(
-            PosInt::mod_exp_pair_rsaz(&pair([0, 1], [0, 0])).is_some(),
-            rsaz
-        );
-        assert!(PosInt::mod_exp_pair_rsaz(&pair([0, 2], [0, 0])).is_none());
-        assert!(PosInt::mod_exp_pair_rsaz(&pair([0, 1], [0, 1])).is_none());
+        assert_eq!(takes([0, 1], [0, 0]), low::RsazAvx512::check(24).is_some());
+        assert!(!takes([0, 2], [0, 0]));
+        assert!(!takes([0, 1], [0, 1]));
     }
 
     /// The rare quotient estimates `pub_montifier`'s moduli never reach.
@@ -1069,7 +1102,7 @@ mod tests {
     /// `admin/ctgrind` neither branches on the bytes.
     #[test]
     fn from_secret_bytes_and_fit() {
-        for len in 0..=17 {
+        for len in 0..=19 {
             for zeroes in 0..=len {
                 let mut bytes = vec![0u8; len];
                 for (i, b) in bytes.iter_mut().enumerate().skip(zeroes) {
@@ -1087,9 +1120,9 @@ mod tests {
                     (Ok(want), Ok(got)) => (want, got),
                     (want, got) => {
                         // Only a nonzero byte above two words is refused.
-                        assert_eq!(len, 17, "{len} bytes, {zeroes} leading zeroes");
-                        assert_eq!(want.is_err(), zeroes == 0);
-                        assert_eq!(got.is_err(), zeroes == 0);
+                        assert!(len > 16, "{len} bytes, {zeroes} leading zeroes");
+                        assert_eq!(want.is_err(), zeroes < len - 16);
+                        assert_eq!(got.is_err(), zeroes < len - 16);
                         continue;
                     }
                 };
