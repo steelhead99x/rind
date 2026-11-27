@@ -1,10 +1,12 @@
 #![no_main]
 
-//! The legacy hashes, MD5 and SHA-1, and HMAC-SHA1, against aws-lc's.
-//! aws-lc-rs has no MD5, so that calls aws-lc directly.
+//! The legacy hashes, MD5 and SHA-1, and HMAC-SHA1, against aws-lc's and
+//! RustCrypto's. aws-lc-rs has no MD5, so that calls aws-lc directly.
 
+use ::hmac::{KeyInit, Mac};
 use aws_lc_rs::{digest, hmac};
 use libfuzzer_sys::{arbitrary, arbitrary::Arbitrary, fuzz_target};
+use sha1::Digest;
 
 fuzz_target!(|op: Operation| {
     match op {
@@ -36,10 +38,12 @@ fuzz_target!(|op: Operation| {
             };
             assert_eq!(ok, 1);
             assert_eq!(ours.finish().as_ref(), theirs);
+            assert_eq!(md5::Md5::digest(&message)[..], theirs);
         }
         Operation::Sha1(steps) => {
             let mut left = digest::Context::new(&digest::SHA1_FOR_LEGACY_USE_ONLY);
             let mut right = rind::digest::Context::new(&rind::digest::legacy::SHA1);
+            let mut independent = sha1::Sha1::new();
 
             for s in steps {
                 match s {
@@ -50,6 +54,7 @@ fuzz_target!(|op: Operation| {
                     Step::Input(d) => {
                         left.update(&d);
                         right.update(&d);
+                        independent.update(&d);
                     }
                 }
             }
@@ -57,6 +62,7 @@ fuzz_target!(|op: Operation| {
             let left = left.finish();
             let right = right.finish();
             assert_eq!(left.as_ref(), right.as_ref());
+            assert_eq!(left.as_ref(), &independent.finalize()[..]);
         }
         Operation::HmacSha1 { key, steps } => {
             let mut left =
@@ -65,6 +71,7 @@ fuzz_target!(|op: Operation| {
                 &rind::hmac::legacy::HMAC_SHA1,
                 &key,
             ));
+            let mut independent = ::hmac::Hmac::<sha1::Sha1>::new_from_slice(&key).unwrap();
 
             for s in steps {
                 match s {
@@ -75,6 +82,7 @@ fuzz_target!(|op: Operation| {
                     Step::Input(d) => {
                         left.update(&d);
                         right.update(&d);
+                        independent.update(&d);
                     }
                 }
             }
@@ -82,6 +90,7 @@ fuzz_target!(|op: Operation| {
             let left = left.sign();
             let right = right.sign();
             assert_eq!(left.as_ref(), right.as_ref());
+            assert_eq!(left.as_ref(), &independent.finalize().into_bytes()[..]);
         }
     }
 });

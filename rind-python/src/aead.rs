@@ -3,7 +3,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 use rind::aead;
 
-use crate::{Bytes, WrongLength, algorithm, bytes, bytes_with, constants, error};
+use crate::{Bytes, Secret, WrongLength, algorithm, bytes, bytes_with, constants, error};
 
 const TAG_LEN: usize = 16;
 
@@ -70,7 +70,7 @@ impl Key {
     /// Expands `key` for `algorithm`; raises `WrongLength` unless it is
     /// `algorithm.key_len` bytes.
     #[new]
-    fn new(algorithm: &Bound<'_, Algorithm>, key: Bytes<'_>) -> PyResult<Self> {
+    fn new(algorithm: &Bound<'_, Algorithm>, key: Secret<'_>) -> PyResult<Self> {
         aead::Key::new(algorithm.get().inner, &key)
             .map(Box::new)
             .map(Self)
@@ -130,7 +130,7 @@ impl RandomizedNonceKey {
     /// Makes a key from 32 bytes of key material; raises `WrongLength`
     /// otherwise.
     #[new]
-    fn new(key: Bytes<'_>) -> PyResult<Self> {
+    fn new(key: Secret<'_>) -> PyResult<Self> {
         let key = (*key)
             .try_into()
             .map_err(|_| error(rind::Error::WrongLength))?;

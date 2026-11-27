@@ -8,7 +8,10 @@
 //! runs under two keys with the same public inputs, and a freed block whose
 //! bytes differ between the runs varies with the key, so is derived from it.
 //! Key generation has no input but randomness, so everything it frees must
-//! be zero.
+//! be zero. A randomized protocol step can free public values its randomness
+//! reached, such as a proof's terms, so it is judged by search instead: no
+//! freed block may hold one of the secrets the step had, in either byte
+//! order.
 //!
 //! The allocator covers the whole binary, so this is a test binary of its
 //! own. RSA key generation is slow, so it runs only under `SLOW_TESTS`.
@@ -73,8 +76,16 @@ fn assert_independent<K, R>(what: &str, keys: [K; 2], op: impl Fn(&K) -> R) {
 /// run. `assert_zeroed` panics on `Some`. The canary asserts `Some` for a
 /// planted leak, so dropping the comparison here turns that canary red.
 fn first_nonzero<R>(op: impl Fn() -> R) -> Option<usize> {
-    op();
-    freed(&op)
+    first_nonzero_given(|| (), |()| op())
+}
+
+/// As `first_nonzero`, for an `op` given a fresh `setup()` it may consume,
+/// such as a protocol state, whose making stays out of the record. What `op`
+/// drops of it is recorded; what `op` returns is not.
+fn first_nonzero_given<S, R>(setup: impl Fn() -> S, op: impl Fn(S) -> R) -> Option<usize> {
+    op(setup());
+    let input = setup();
+    freed(|| op(input))
         .1
         .iter()
         .position(|block| block.iter().any(|&byte| byte != 0))
@@ -82,7 +93,43 @@ fn first_nonzero<R>(op: impl Fn() -> R) -> Option<usize> {
 
 /// Fails if `op` frees a block that is not all zero.
 fn assert_zeroed<R>(what: &str, op: impl Fn() -> R) {
-    if let Some(i) = first_nonzero(op) {
+    assert_zeroed_given(what, || (), |()| op());
+}
+
+/// Fails if `op`, given a fresh `setup()`, frees a block that is not all zero.
+fn assert_zeroed_given<S, R>(what: &str, setup: impl Fn() -> S, op: impl Fn(S) -> R) {
+    if let Some(i) = first_nonzero_given(setup, op) {
+        panic!("{what}: freed block {i} holds bytes of the key");
+    }
+}
+
+/// Index of the first block `op` frees, given a fresh `setup()` it may
+/// consume, that holds one of `secrets` in either byte order, after one
+/// unrecorded run. `assert_absent` panics on `Some`, and the canary asserts
+/// `Some` for a planted leak.
+fn first_holding<S, R>(
+    secrets: &[&[u8]],
+    setup: impl Fn() -> S,
+    op: impl Fn(S) -> R,
+) -> Option<usize> {
+    op(setup());
+    let input = setup();
+    assert!(secrets.iter().all(|secret| !secret.is_empty()));
+    let wanted: Vec<Vec<u8>> = secrets
+        .iter()
+        .flat_map(|secret| [secret.to_vec(), secret.iter().rev().copied().collect()])
+        .collect();
+    freed(|| op(input)).1.iter().position(|block| {
+        wanted
+            .iter()
+            .any(|secret| block.windows(secret.len()).any(|window| window == secret))
+    })
+}
+
+/// Fails if `op`, given a fresh `setup()`, frees a block holding one of
+/// `secrets`.
+fn assert_absent<S, R>(what: &str, secrets: &[&[u8]], setup: impl Fn() -> S, op: impl Fn(S) -> R) {
+    if let Some(i) = first_holding(secrets, setup, op) {
         panic!("{what}: freed block {i} holds bytes of the key");
     }
 }
@@ -91,8 +138,10 @@ fn assert_zeroed<R>(what: &str, op: impl Fn() -> R) {
 /// means something. These canaries call `independent` and `first_nonzero`, the
 /// comparisons the real checks use, and report the result instead of panicking:
 /// wasm32-wasip2 aborts on panic, and a `should_panic` test cannot run there.
-/// Native targets also have `should_panic` canaries that go through the
-/// `assert_*` wrappers, so a no-op arm there cannot pass unnoticed.
+/// Their own `assert!` aborts the wasm run when a canary misses, which still
+/// fails it, just without running the tests after it. Native targets also
+/// have `should_panic` canaries that go through the `assert_*` wrappers, so a
+/// no-op arm there cannot pass unnoticed.
 #[test]
 fn detects_a_leak() {
     let leaked = independent([[1u8; 32], [2u8; 32]], |key| {
@@ -116,6 +165,26 @@ fn detects_a_leak_in_key_generation() {
     );
 }
 
+#[test]
+fn detects_a_leak_by_search() {
+    let secret = [7u8, 1, 2, 3, 4, 5, 6, 7];
+    // Reversed, as a little-endian word holds a big-endian encoding.
+    let leaked = first_holding(
+        &[&secret],
+        || (),
+        |()| {
+            let mut block = vec![0u8; 24];
+            block[5..13].copy_from_slice(&secret);
+            block[5..13].reverse();
+            drop(black_box(block))
+        },
+    );
+    assert!(
+        leaked.is_some(),
+        "planted key bytes were not found in a freed block"
+    );
+}
+
 /// Native-only: a planted leak must fail through `assert_independent`, not
 /// only through `independent`. wasm32-wasip2 aborts on panic, so this stays
 /// off that target.
@@ -126,6 +195,19 @@ fn detects_a_leak_through_assert_independent() {
     assert_independent("planted leak", [[1u8; 32], [2u8; 32]], |key| {
         drop(black_box(key.map(|b| b ^ 0x5a).to_vec()))
     });
+}
+
+/// Native-only: a planted leak must fail through `assert_absent`.
+#[cfg(not(target_family = "wasm"))]
+#[test]
+#[should_panic(expected = "holds bytes of the key")]
+fn detects_a_leak_through_assert_absent() {
+    assert_absent(
+        "planted leak",
+        &[&[9u8; 8]],
+        || (),
+        |()| drop(black_box(vec![9u8; 8])),
+    );
 }
 
 /// Native-only: a planted leak must fail through `assert_zeroed`.
@@ -183,6 +265,15 @@ fn rsa() {
         assert_independent("RSA load", pkcs8.clone(), |der| {
             RsaKeyPair::from_pkcs8(der).unwrap()
         });
+        // A wrong CRT coefficient, the encoding's last bytes, parses but
+        // fails the key's check, after the private values are loaded.
+        let corrupt = pkcs8.clone().map(|mut der| {
+            *der.last_mut().unwrap() ^= 1;
+            der
+        });
+        assert_independent("RSA refused load", corrupt, |der| {
+            RsaKeyPair::from_pkcs8(der).unwrap_err()
+        });
         let keys = pkcs8.map(|der| RsaKeyPair::from_pkcs8(&der).unwrap());
         assert_independent("RSA export", keys.each_ref(), |key| key.to_pkcs8());
         for algorithm in [&sign::PKCS1_SHA256, &sign::PSS_SHA256] {
@@ -202,8 +293,18 @@ fn rsa_oaep() {
             let ciphertext = key.public_key().encrypt(b"message", b"").unwrap();
             (key, ciphertext)
         });
-        assert_independent("RSA decryption", keys, |(key, ciphertext)| {
+        assert_independent("RSA decryption", keys.each_ref(), |(key, ciphertext)| {
             key.decrypt(ciphertext.as_ref(), b"").unwrap()
+        });
+        // The first key's ciphertext, cleared in its top byte to fall below
+        // both moduli and changed in its last so it is never the ciphertext
+        // itself, which a top byte already zero would leave, fails the
+        // padding check under each key.
+        let mut forged = keys[0].1.as_ref().to_vec();
+        forged[0] = 0;
+        *forged.last_mut().unwrap() ^= 1;
+        assert_independent("RSA refused decryption", keys, |(key, _)| {
+            key.decrypt(&forged, b"").unwrap_err()
         });
     }
 }
@@ -215,9 +316,10 @@ fn rsa_generate() {
     if std::env::var_os("SLOW_TESTS").is_none() {
         return;
     }
-    // Under wasmtime, where `just wasm` sets SLOW_TESTS, larger sizes take
-    // far longer, so wasm generates RSA-2048 keys only. Key generation
-    // allocates the same way at every size.
+    // Under wasmtime, where `just wasm` sets SLOW_TESTS, the portable
+    // backend runs under a JIT and every freed block is copied, so larger
+    // sizes would take far longer: wasm generates RSA-2048 keys only, and
+    // `just portable` checks every size on the same 32-bit limbs natively.
     let sizes: &[KeySize] = if cfg!(target_family = "wasm") {
         &[KeySize::Rsa2048]
     } else {
@@ -566,4 +668,434 @@ fn mlkem() {
     check::<MlKem512>();
     check::<MlKem768>();
     check::<MlKem1024>();
+}
+
+#[test]
+fn hpke() {
+    use rind::hpke::{
+        AES_128_GCM, AES_256_GCM, CHACHA20_POLY1305, DHKEM_P256_HKDF_SHA256,
+        DHKEM_P384_HKDF_SHA384, DHKEM_P521_HKDF_SHA512, DHKEM_X25519_HKDF_SHA256, Exporter,
+        HKDF_SHA256, HKDF_SHA384, HKDF_SHA512, PrivateKey, Recipient, Sender, Suite,
+    };
+    for kem in [
+        &DHKEM_X25519_HKDF_SHA256,
+        &DHKEM_P256_HKDF_SHA256,
+        &DHKEM_P384_HKDF_SHA384,
+        &DHKEM_P521_HKDF_SHA512,
+    ] {
+        assert_zeroed("HPKE key generation", || PrivateKey::generate(kem).unwrap());
+        let ikms = [[1u8; 64], [2u8; 64]];
+        assert_independent("HPKE key derivation", ikms, |ikm| {
+            PrivateKey::derive(kem, ikm).unwrap()
+        });
+        let keys = ikms.map(|ikm| PrivateKey::derive(kem, &ikm).unwrap());
+        // One encapsulated key, which each key decapsulates to its own secret.
+        let (enc, _) = Exporter::sender(&HKDF_SHA256, keys[0].public_key(), b"info").unwrap();
+        for kdf in [&HKDF_SHA256, &HKDF_SHA384, &HKDF_SHA512] {
+            for aead in [&AES_128_GCM, &AES_256_GCM, &CHACHA20_POLY1305] {
+                let suite = Suite { kdf, aead };
+                // The ephemeral key is random, so the sender must free nothing
+                // unwiped.
+                assert_zeroed("HPKE sender", || {
+                    let (_, mut sender) =
+                        Sender::new(suite, keys[0].public_key(), b"info").unwrap();
+                    // Room for the tag, so sealing does not move the message.
+                    let mut message = Vec::with_capacity(64);
+                    message.extend_from_slice(b"message");
+                    sender
+                        .seal_in_place_append_tag(b"aad", &mut message)
+                        .unwrap();
+                    let mut out = [0u8; 32];
+                    sender.export(b"context", &mut out).unwrap();
+                    (message, out)
+                });
+                // The message is sealed to neither key, so both refuse it.
+                assert_independent("HPKE recipient", keys.each_ref(), |key| {
+                    let mut recipient = Recipient::new(suite, key, enc.as_ref(), b"info").unwrap();
+                    let mut sealed = [0x5au8; 48];
+                    let refused = recipient.open_in_place(b"aad", &mut sealed).is_err();
+                    let mut out = [0u8; 32];
+                    recipient.export(b"context", &mut out).unwrap();
+                    (refused, out)
+                });
+            }
+            assert_zeroed("HPKE export-only sender", || {
+                let (_, exporter) = Exporter::sender(kdf, keys[0].public_key(), b"info").unwrap();
+                let mut out = [0u8; 32];
+                exporter.export(b"context", &mut out).unwrap();
+                out
+            });
+            assert_independent("HPKE export-only recipient", keys.each_ref(), |key| {
+                let exporter = Exporter::recipient(kdf, key, enc.as_ref(), b"info").unwrap();
+                let mut out = [0u8; 32];
+                exporter.export(b"context", &mut out).unwrap();
+                out
+            });
+        }
+    }
+}
+
+#[test]
+fn oprf() {
+    use rind::oprf::{
+        Blind, P256_SHA256, P384_SHA384, P521_SHA512, RISTRETTO255_SHA512, ServerKey, voprf,
+    };
+    for suite in [
+        &RISTRETTO255_SHA512,
+        &P256_SHA256,
+        &P384_SHA384,
+        &P521_SHA512,
+    ] {
+        assert_zeroed("OPRF key generation", || {
+            ServerKey::generate(suite).unwrap()
+        });
+        assert_zeroed("VOPRF key generation", || {
+            voprf::ServerKey::generate(suite).unwrap()
+        });
+        let seeds = [[1u8; 32], [2u8; 32]];
+        assert_independent("OPRF key derivation", seeds, |seed| {
+            ServerKey::derive(suite, seed, b"info").unwrap()
+        });
+        assert_independent("VOPRF key derivation", seeds, |seed| {
+            voprf::ServerKey::derive(suite, seed, b"info").unwrap()
+        });
+
+        let keys = seeds.map(|seed| ServerKey::derive(suite, &seed, b"info").unwrap());
+        let (_, blinded) = Blind::new(suite, b"input").unwrap();
+        assert_independent("OPRF evaluation", keys.each_ref(), |key| {
+            (
+                key.evaluate(b"input").unwrap(),
+                key.blind_evaluate(blinded.as_ref()).unwrap(),
+            )
+        });
+        // Finalizing frees nothing public, so it must free nothing unwiped,
+        // the blind included.
+        assert_zeroed_given(
+            "OPRF finalization",
+            || {
+                let (blind, blinded) = Blind::new(suite, b"input").unwrap();
+                (blind, keys[0].blind_evaluate(blinded.as_ref()).unwrap())
+            },
+            |(blind, evaluated)| blind.finalize(evaluated.as_ref()).unwrap(),
+        );
+
+        let keys = seeds.map(|seed| voprf::ServerKey::derive(suite, &seed, b"info").unwrap());
+        assert_independent("VOPRF evaluation", keys.each_ref(), |key| {
+            key.evaluate(b"input").unwrap()
+        });
+        let key = &keys[0];
+        let public = voprf::PublicKey::new(suite, key.public_key().as_ref()).unwrap();
+        let outputs = [b"input", b"other"].map(|input| key.evaluate(input).unwrap());
+        // A batch of two blinds, its evaluation, and the proof of another
+        // batch's.
+        let batch = || {
+            let (first, a) = voprf::Blind::new(suite, b"input").unwrap();
+            let (second, b) = voprf::Blind::new(suite, b"other").unwrap();
+            let blinded = [a.as_ref(), b.as_ref()].concat();
+            let (evaluated, proof) = key.blind_evaluate(&blinded).unwrap();
+            let (_, wrong) = key
+                .blind_evaluate(&[b.as_ref(), a.as_ref()].concat())
+                .unwrap();
+            (vec![first, second], evaluated, proof, wrong)
+        };
+        // The proof's nonce is random, and the server frees the batch's
+        // public terms, so the key is searched for.
+        let scalar = key.to_scalar();
+        assert_absent(
+            "VOPRF blind evaluation",
+            &[scalar.as_ref()],
+            || {
+                let (_, a) = voprf::Blind::new(suite, b"input").unwrap();
+                let (_, b) = voprf::Blind::new(suite, b"other").unwrap();
+                [a.as_ref(), b.as_ref()].concat()
+            },
+            |blinded| key.blind_evaluate(&blinded).unwrap(),
+        );
+        let secrets = [outputs[0].as_ref(), outputs[1].as_ref()];
+        assert_absent(
+            "VOPRF finalization",
+            &secrets,
+            || {
+                let (blind, blinded) = voprf::Blind::new(suite, b"input").unwrap();
+                let (evaluated, proof) = key.blind_evaluate(blinded.as_ref()).unwrap();
+                (blind, evaluated, proof)
+            },
+            |(blind, evaluated, proof)| {
+                blind
+                    .finalize(evaluated.as_ref(), proof.as_ref(), &public)
+                    .unwrap()
+            },
+        );
+        assert_absent(
+            "VOPRF batch finalization",
+            &secrets,
+            batch,
+            |(blinds, evaluated, proof, _)| {
+                voprf::Blind::finalize_batch(blinds, evaluated.as_ref(), proof.as_ref(), &public)
+                    .unwrap()
+            },
+        );
+        assert_absent(
+            "VOPRF refused batch",
+            &secrets,
+            batch,
+            |(blinds, evaluated, _, wrong)| {
+                voprf::Blind::finalize_batch(blinds, evaluated.as_ref(), wrong.as_ref(), &public)
+                    .unwrap_err()
+            },
+        );
+    }
+}
+
+#[test]
+fn frost() {
+    use rind::frost::{
+        ED25519_SHA512, P256_SHA256, RISTRETTO255_SHA512, SigningNonces, SigningPackage,
+        SigningShare, deal,
+    };
+    for suite in [&ED25519_SHA512, &RISTRETTO255_SHA512, &P256_SHA256] {
+        // Dealing and committing draw only randomness.
+        assert_zeroed("FROST dealing", || deal(suite, 2, 3).unwrap());
+        let (shares, commitment) = deal(suite, 2, 3).unwrap();
+        assert_zeroed("FROST commitment", || {
+            SigningNonces::commit(&shares[0]).unwrap()
+        });
+        // The package is public; signing consumes fresh nonces.
+        assert_zeroed_given(
+            "FROST signing",
+            || {
+                let (nonces, mine) = SigningNonces::commit(&shares[0]).unwrap();
+                let (_, theirs) = SigningNonces::commit(&shares[1]).unwrap();
+                let package =
+                    SigningPackage::new(commitment.public_key(), &[mine, theirs], b"message")
+                        .unwrap();
+                (nonces, package)
+            },
+            // The package is returned, so its public blocks free after the
+            // record stops.
+            |(nonces, package)| (nonces.sign(&shares[0], &package).unwrap(), package),
+        );
+        // Loading a share checks it against the dealer's public commitment,
+        // whose terms it frees.
+        for share in &shares {
+            let scalar = share.to_scalar();
+            assert_absent(
+                "FROST share load",
+                &[scalar.as_ref()],
+                || (),
+                |()| SigningShare::from_scalar(share.identifier(), scalar.as_ref(), &commitment),
+            );
+        }
+    }
+}
+
+#[test]
+fn vrf() {
+    use rind::vrf::{ECVRF_EDWARDS25519_SHA512_TAI, ECVRF_P256_SHA256_TAI, KeyPair};
+    for algorithm in [&ECVRF_EDWARDS25519_SHA512_TAI, &ECVRF_P256_SHA256_TAI] {
+        assert_zeroed("ECVRF key generation", || {
+            KeyPair::generate(algorithm).unwrap()
+        });
+        let seeds = [[1u8; 32], [2u8; 32]];
+        assert_independent("ECVRF load", seeds, |seed| {
+            KeyPair::from_seed(algorithm, seed).unwrap()
+        });
+        let keys = seeds.map(|seed| KeyPair::from_seed(algorithm, &seed).unwrap());
+        assert_independent("ECVRF proof", keys.each_ref(), |key| {
+            key.prove(b"alpha").unwrap()
+        });
+    }
+}
+
+#[test]
+fn blind_rsa() {
+    use rind::blind_rsa::{
+        KeyPair, RSABSSA_SHA384_PSS_DETERMINISTIC, RSABSSA_SHA384_PSS_RANDOMIZED,
+        RSABSSA_SHA384_PSSZERO_DETERMINISTIC, RSABSSA_SHA384_PSSZERO_RANDOMIZED,
+    };
+    for algorithm in [
+        &RSABSSA_SHA384_PSS_RANDOMIZED,
+        &RSABSSA_SHA384_PSSZERO_RANDOMIZED,
+        &RSABSSA_SHA384_PSS_DETERMINISTIC,
+        &RSABSSA_SHA384_PSSZERO_DETERMINISTIC,
+    ] {
+        for pkcs8 in rsa_keys() {
+            assert_independent("blind RSA load", pkcs8.clone(), |der| {
+                KeyPair::from_pkcs8(algorithm, der).unwrap()
+            });
+            let keys = pkcs8.map(|der| KeyPair::from_pkcs8(algorithm, &der).unwrap());
+            // Below either modulus, whose top bit is set.
+            let mut blinded = vec![0x5a; modulus_len(&keys[0])];
+            blinded[0] = 0x01;
+            assert_independent("blind RSA signing", keys.each_ref(), |key| {
+                key.blind_sign(&blinded).unwrap()
+            });
+            // The blind is random, and the client's state is wiped on drop,
+            // so blinding and finalizing must free nothing unwiped.
+            let key = &keys[0];
+            assert_zeroed("blind RSA blinding", || {
+                key.public_key().blind(b"message").unwrap()
+            });
+            assert_zeroed_given(
+                "blind RSA finalization",
+                || {
+                    let (blinded, blinding) = key.public_key().blind(b"message").unwrap();
+                    (blinding, key.blind_sign(blinded.as_ref()).unwrap())
+                },
+                |(blinding, signature)| blinding.finalize(signature.as_ref()).unwrap(),
+            );
+            assert_zeroed_given(
+                "blind RSA refused reply",
+                || key.public_key().blind(b"message").unwrap().1,
+                |blinding| blinding.finalize(&blinded).unwrap_err(),
+            );
+        }
+    }
+}
+
+/// The modulus length of `key`, in bytes.
+fn modulus_len(key: &rind::blind_rsa::KeyPair) -> usize {
+    let (blinded, _) = key.public_key().blind(b"").unwrap();
+    blinded.as_ref().len()
+}
+
+/// The AEADs, ciphers, key wrap, HKDF, and HMAC allocate nothing today; this
+/// holds each to wiping if it starts to, on its success and refusal paths.
+#[test]
+fn symmetric() {
+    use rind::aead::{
+        self, AES_128_GCM, AES_192_GCM, AES_256_GCM, CHACHA20_POLY1305, Nonce, RandomizedNonceKey,
+    };
+    use rind::cipher::{
+        AES_128, AES_192, AES_256, Aes, AesCbcDecryptingKey, AesCbcEncryptingKey, AesCtr, CbcIv,
+        ChaCha20,
+    };
+    let keys = [[0x11u8; 32], [0x22u8; 32]];
+    for algorithm in [&AES_128_GCM, &AES_192_GCM, &AES_256_GCM, &CHACHA20_POLY1305] {
+        assert_independent(&format!("{algorithm:?}"), keys, |key| {
+            let key = aead::Key::new(algorithm, &key[..algorithm.key_len()]).unwrap();
+            let nonce = || Nonce::assume_unique_for_key([7; 12]);
+            let mut message = [0x33u8; 80];
+            let tag = key
+                .seal_in_place_separate_tag(nonce(), b"aad", &mut message)
+                .unwrap();
+            let mut forged = [0x44u8; 96];
+            let refused = key.open_in_place(nonce(), b"aad", &mut forged).is_err();
+            (message, tag, refused)
+        });
+    }
+    assert_independent("XChaCha20-Poly1305", keys, |key| {
+        let key = RandomizedNonceKey::new(key);
+        let mut forged = [0x44u8; 96];
+        key.open_in_place([7; 24].into(), b"aad", &mut forged)
+            .is_err()
+    });
+    for (algorithm, len) in [(&AES_128, 16), (&AES_192, 24), (&AES_256, 32)] {
+        use rind::aead::gcm::{Iv, Key, TagLength};
+        use rind::key_wrap::{AesKek, Mode};
+        assert_independent("AES-GCM with a long IV", keys, |key| {
+            let key = Key::new(algorithm, &key[..len], TagLength::Truncated32).unwrap();
+            let iv = [7u8; 20];
+            let mut message = [0x33u8; 80];
+            let tag = key
+                .seal_in_place_separate_tag(
+                    Iv::assume_unique_for_key(&iv).unwrap(),
+                    b"aad",
+                    &mut message,
+                )
+                .unwrap();
+            let mut forged = [0x44u8; 96];
+            let refused = key
+                .open_in_place(Iv::assume_unique_for_key(&iv).unwrap(), b"aad", &mut forged)
+                .is_err();
+            (message, tag, refused)
+        });
+        assert_independent("AES", keys, |key| {
+            let mut block = [0x33u8; 16];
+            Aes::new(algorithm, &key[..len])
+                .unwrap()
+                .encrypt_block(&mut block);
+            let mut stream = [0x33u8; 80];
+            AesCtr::new(algorithm, &key[..len], 32)
+                .unwrap()
+                .apply_keystream(&[0; 16], &mut stream)
+                .unwrap();
+            (block, stream)
+        });
+        assert_independent("AES-CBC", keys, |key| {
+            let mut blocks = [0x33u8; 80];
+            AesCbcEncryptingKey::new(algorithm, &key[..len])
+                .unwrap()
+                .encrypt_blocks(CbcIv::assume_unpredictable([7; 16]), &mut blocks)
+                .unwrap();
+            // Its padding fails to check under either key.
+            let mut padded = [0x44u8; 80];
+            let refused = AesCbcDecryptingKey::new(algorithm, &key[..len])
+                .unwrap()
+                .decrypt(&[7; 16], &mut padded)
+                .is_err();
+            (blocks, refused)
+        });
+        assert_independent("AES key wrap", keys, |key| {
+            let kek = AesKek::new(algorithm, &key[..len]).unwrap();
+            let mut wrapped = [0u8; 40];
+            kek.wrap_key(Mode::Kw, &[0x33; 32], &mut wrapped).unwrap();
+            let mut unwrapped = [0u8; 32];
+            let refused = kek
+                .unwrap_key(Mode::Kwp, &[0x44; 40], &mut unwrapped)
+                .is_err();
+            (wrapped, refused)
+        });
+    }
+    assert_independent("ChaCha20", keys, |key| {
+        let mut stream = [0x33u8; 80];
+        ChaCha20::new(key)
+            .apply_keystream(&[7; 12], 1, &mut stream)
+            .unwrap();
+        stream
+    });
+    for algorithm in [
+        &aead::quic::AES_128,
+        &aead::quic::AES_256,
+        &aead::quic::CHACHA20,
+    ] {
+        assert_independent("QUIC header protection", keys, |key| {
+            aead::quic::HeaderProtectionKey::new(algorithm, &key[..algorithm.key_len()])
+                .unwrap()
+                .mask(&[0x33; 16])
+        });
+    }
+
+    use rind::hkdf::{HKDF_SHA256, HKDF_SHA384, HKDF_SHA512, Prk, Salt, legacy::HKDF_SHA1};
+    use rind::hmac;
+    for algorithm in [&HKDF_SHA1, &HKDF_SHA256, &HKDF_SHA384, &HKDF_SHA512] {
+        assert_independent("HKDF", keys, |ikm| {
+            let prk = Salt::new(algorithm, b"salt").extract(ikm).unwrap();
+            let info: &[&[u8]] = &[b"info"];
+            let mut out = [0u8; 200];
+            prk.fill(info, &mut out).unwrap();
+            let next = Prk::from(prk.expand(info, algorithm).unwrap());
+            let key = aead::Key::from(prk.expand(info, &AES_256_GCM).unwrap());
+            (out, next, key)
+        });
+    }
+    for algorithm in [
+        &hmac::legacy::HMAC_SHA1,
+        &hmac::HMAC_SHA256,
+        &hmac::HMAC_SHA384,
+        &hmac::HMAC_SHA512,
+    ] {
+        // A key longer than a block is hashed first.
+        let keys = [[0x11u8; 200], [0x22u8; 200]];
+        for len in [32, 200] {
+            assert_independent("HMAC", keys, |key| {
+                let key = hmac::Key::new(algorithm, &key[..len]);
+                let mut ctx = hmac::Context::with_key(&key);
+                ctx.update(&[0x33; 3]);
+                let tag = ctx.sign();
+                let refused = hmac::verify(&key, b"message", &[0x44; 64]).is_err();
+                (tag, refused)
+            });
+        }
+    }
 }

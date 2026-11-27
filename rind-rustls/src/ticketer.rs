@@ -1,6 +1,8 @@
+use alloc::boxed::Box;
+use alloc::sync::Arc;
+use alloc::vec::Vec;
+use core::fmt;
 use core::sync::atomic::{AtomicUsize, Ordering};
-use std::fmt;
-use std::sync::Arc;
 
 use rind::aead::{RandomNonce, RandomizedNonceKey};
 use rind::rand;
@@ -136,6 +138,11 @@ const TAG_LEN: usize = 16;
 
 #[cfg(test)]
 mod tests {
+    use std::format;
+
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    use wasm_bindgen_test::wasm_bindgen_test as test;
+
     use super::*;
 
     #[test]
@@ -157,6 +164,11 @@ mod tests {
     #[test]
     fn make_generator() {
         let g = make_ticket_generator().unwrap();
+        // rustls requires `Debug`, which shows the lifetime but no key.
+        assert_eq!(
+            format!("{g:?}"),
+            format!("XChaCha20Ticketer {{ lifetime: {ONE_TICKET_LIFETIME_SECS}, .. }}")
+        );
         assert!(g.enabled());
         // aws-lc-rs's `Ticketer` is a rotator of two of these generators, so
         // one generator's lifetime is half of that rotator's. A change to

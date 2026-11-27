@@ -13,7 +13,10 @@
 //!
 //! verified-garbage proves its routines correct and constant time in Lean,
 //! over its own models of the instructions, which `admin/prove vg`
-//! cosimulates. rind's NEON code is not formally verified: its correctness
+//! cosimulates. `proofs/Rind/Aarch64/VgChaCha20.lean` restates VG's theorems
+//! as axioms and proves the bytes `cipher` writes from them where it runs
+//! VG's routines, and at every other length from the NEON code's contract,
+//! taken as a hypothesis. rind's NEON code is not formally verified: its correctness
 //! rests on rind's tests of it against RFC 8439, Wycheproof, aws-lc-rs, and
 //! HACL*'s rounds.
 
@@ -34,14 +37,23 @@ pub(crate) struct ChaCha20 {
     /// As little-endian words, which on aarch64 are also the bytes VG reads.
     key: [u32; 8],
     /// The block counter, then the 96-bit nonce.
-    nonce: [u32; 4],
+    counter_nonce: [u32; 4],
     sve2: Option<HaveSve2>,
 }
 
 /// `bytes` as little-endian words.
 fn words<const B: usize, const W: usize>(bytes: &[u8; B]) -> [u32; W] {
     const { assert!(B == 4 * W) };
-    core::array::from_fn(|i| u32::from_le_bytes(bytes[4 * i..4 * i + 4].try_into().unwrap()))
+    let mut words = [0; W];
+    for i in 0..W {
+        words[i] = u32::from_le_bytes([
+            bytes[4 * i],
+            bytes[4 * i + 1],
+            bytes[4 * i + 2],
+            bytes[4 * i + 3],
+        ]);
+    }
+    words
 }
 
 impl ChaCha20 {
@@ -49,7 +61,7 @@ impl ChaCha20 {
     pub(crate) fn new(key: &[u8; 32], nonce: &[u8; 16]) -> Self {
         Self {
             key: words(key),
-            nonce: words(nonce),
+            counter_nonce: words(nonce),
             sve2: HaveSve2::check(),
         }
     }
@@ -62,11 +74,12 @@ impl ChaCha20 {
     pub(crate) fn cipher(&mut self, buffer: &mut [u8]) {
         match (self.sve2, buffer.len()) {
             (Some(_), VG_SVE2_MIN_LEN..) | (None, 192..=256 | VG_NEON_MIN_LEN..) => {
-                cipher_vg(self.sve2, &self.key, &self.nonce, buffer)
+                cipher_vg(self.sve2, &self.key, &self.counter_nonce, buffer)
             }
-            _ => cipher_neon(&self.key, &self.nonce, buffer),
+            _ => cipher_neon(&self.key, &self.counter_nonce, buffer),
         }
-        self.nonce[0] = self.nonce[0].wrapping_add(buffer.len().div_ceil(64) as u32);
+        self.counter_nonce[0] =
+            self.counter_nonce[0].wrapping_add(buffer.len().div_ceil(64) as u32);
     }
 }
 
@@ -483,12 +496,14 @@ mod tests {
     /// Each of `cipher`'s paths the CPU can run, by name, on its own.
     fn paths() -> Vec<(&'static str, Path)> {
         let mut paths: Vec<(&'static str, Path)> = vec![
-            ("NEON", |c, b| cipher_neon(&c.key, &c.nonce, b)),
-            ("VG NEON", |c, b| cipher_vg(None, &c.key, &c.nonce, b)),
+            ("NEON", |c, b| cipher_neon(&c.key, &c.counter_nonce, b)),
+            ("VG NEON", |c, b| {
+                cipher_vg(None, &c.key, &c.counter_nonce, b)
+            }),
         ];
         if HaveSve2::check().is_some() {
             paths.push(("VG SVE2", |c, b| {
-                cipher_vg(HaveSve2::check(), &c.key, &c.nonce, b)
+                cipher_vg(HaveSve2::check(), &c.key, &c.counter_nonce, b)
             }));
         }
         paths
@@ -508,7 +523,7 @@ mod tests {
         for len in 0..=1700 {
             let mut want = vec![0x5a; len + 200];
             let (first, second) = want.split_at_mut(len);
-            let mut counter_nonce = base.nonce;
+            let mut counter_nonce = base.counter_nonce;
             reference(&base.key, &counter_nonce, first);
             counter_nonce[0] += len.div_ceil(64) as u32;
             reference(&base.key, &counter_nonce, second);

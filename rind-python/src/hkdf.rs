@@ -3,7 +3,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 use rind::hkdf;
 
-use crate::{Bytes, aead, algorithm, constants, error, hmac, submodule};
+use crate::{Bytes, Secret, aead, algorithm, constants, error, hmac, submodule};
 
 algorithm!(
     /// An HKDF algorithm.
@@ -23,7 +23,7 @@ impl Salt {
     }
 
     /// Extracts a pseudorandom key from `secret`.
-    fn extract(&self, secret: Bytes<'_>) -> PyResult<Prk> {
+    fn extract(&self, secret: Secret<'_>) -> PyResult<Prk> {
         let prk = self.0.extract(&secret).map_err(error)?;
         Ok(Prk(Box::new(prk)))
     }

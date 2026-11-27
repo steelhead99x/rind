@@ -54,7 +54,7 @@ impl State {
         }
     }
 
-    pub(super) fn changed(&self, after: &Self, _: Convention) -> Vec<String> {
+    pub(super) fn changed(&self, after: &Self, _: Convention, _: &str) -> Vec<String> {
         let mut broken = Vec::new();
         let widen = |r: [u32; 8]| r.map(u64::from);
         compare(&mut broken, &R, &widen(self.r), &widen(after.r));

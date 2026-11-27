@@ -1,4 +1,5 @@
-import Rind.Portable.Hacl
+import Rind.Portable.Blockwise
+import Rind.Portable.Sha512Compress
 open Aeneas Aeneas.Std Result rind.spec
 
 /-!
@@ -6,16 +7,17 @@ open Aeneas Aeneas.Std Result rind.spec
 
 `Rind.Portable.Sha512`, which `admin/prove` writes from x86_64's, takes
 `RunsSha512` and the block function's contract from here, as x86_64's takes
-them from `Rind.X86_64.AwsLc`. This file is apart from `Rind.Portable.Hacl`
-so that SHA-1's and SHA-256's proofs, which import that, do not see these
-entry-guard lemmas.
+them from `Rind.X86_64.AwsLc`. This file is apart from
+`Rind.Portable.ShaBlocks` so that SHA-1's and SHA-256's proofs, which import
+that, do not see these entry-guard lemmas.
 -/
 
 namespace rind.portable
 
 /-- rind's SHA-512 has no CPU dispatch here, so this assumes only that its
-entry guard and the debug build's check that one is held pass. Neither reads
-an input. -/
+entry guard and the debug build's check that one is held pass. Neither reads an
+input. Its block function, `low::generic::sha512`, aws-lc's C in Rust, is
+proven in `Rind.Portable.Sha512Compress`. -/
 def RunsSha512 : Prop :=
   (∃ e, low.entry.Entry.new_secret = ok e) ∧ low.entry.Entry.assert_held = ok ()
 
@@ -33,14 +35,14 @@ theorem assert_held_spec (h : RunsSha512) : low.entry.Entry.assert_held ⦃ _ =>
 `RunsSha512` states. -/
 theorem RunsSha512.held (h : RunsSha512) : low.entry.Entry.assert_held = ok () := h.2
 
-/-- SHA-512's block function, HACL*'s in pieces under 2^31 bytes, over a whole
-number of blocks. It needs nothing of the CPU; the hypothesis is the other
-targets' signature. -/
+/-- SHA-512's block function as the backend exports it, which calls
+`low::generic::sha512`'s, over a whole number of blocks. -/
 @[step]
-theorem sha512_compress_blocks_spec (_h : RunsSha512) (state : Std.Array U64 8#usize)
+theorem sha512_compress_blocks_spec (_ : RunsSha512) (state : Std.Array U64 8#usize)
     (blocks : Slice U8) (hm : blocks.length % 128 = 0) :
     low.portable.sha.sha512_compress_blocks state blocks ⦃ r =>
-      r.val = compress state.val blocks.val ⦄ :=
-  sha512_blocks_spec state blocks hm
+      r.val = compress state.val blocks.val ⦄ := by
+  unfold low.portable.sha.sha512_compress_blocks
+  exact generic_sha512_compress_blocks_spec state blocks hm
 
 end rind.portable

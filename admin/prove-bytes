@@ -9,8 +9,9 @@ Usage: admin/prove-bytes list
        admin/prove-bytes aws-lc-revision
 
 `admin/prove bytes` runs it. `list` prints each routine's target, kind, Rust
-path, and name, and for a naked function the upstream object and symbol it
-comes from. `admin/prove` writes rind's code for each to
+path, and name, for a naked function the upstream object and symbol it
+comes from, and for one whose proof lists its bytes the static holding its
+table, or `-`. `admin/prove` writes rind's code for each to
 `<dir>/<arch>/<name>.bin`, with its instructions' offsets, its relocations,
 and their targets' bytes, and the upstream's to `<name>.proof` alike, or
 `<name>.absent` where rind's release build defines no such function. `check`
@@ -27,7 +28,11 @@ harness in `rind/src/low/abi.rs` checks that it does.
 s2n-bignum's proofs each assert the bytes of the object code they are about,
 as a list in the proof's source, which `define_assert_from_elf` checks
 against s2n-bignum's build. `check` reads that list in rind's fork, whose
-proofs of routines are upstream's at its base commit.
+proofs of routines are upstream's at its base commit. mlkem-native's proofs
+of its ML-KEM compressors assert theirs alike, which `check` reads at the
+revision `admin/import-mlkem-native` pins, along with the constant table each
+proof's precondition names: rind passes that table by pointer, so no
+relocation names it, and `admin/prove` writes the static's bytes instead.
 Vale's proofs are of the code its printer writes, and aws-lc-verification's
 of aws-lc's build at the revision it pins, so `admin/prove` assembles that
 text with the GNU assembler. rind's code must hold the same instructions, in
@@ -82,6 +87,39 @@ NAKED = [
     ),
     ("x86_64", "rind::low::x86_64::sha512::sha512_block_data_order_avx", "sha512-x86_64.o", "sha512_block_data_order_avx"),
     ("aarch64", "rind::low::aarch64::sha512::sha512_block_data_order_nohw", "sha512-armv8.o", "sha512_block_data_order_nohw"),
+]
+
+# mlkem-native at the revision `admin/import-mlkem-native` pins, which
+# `admin/upstream` checks out.
+MLKEM_NATIVE = os.path.join(ROOT, ".tmp", "upstream", "mlkem-native", "proofs", "hol_light")
+
+# The naked functions rind runs over mlkem-native's ML-KEM compressors, whose
+# HOL Light proofs each assert the routine's bytes, as s2n-bignum's do: their
+# target, Rust path, proof, and the object it names, and the static rind
+# passes as the routine's table, with the proof's file and name for its bytes.
+# The tables go by pointer, so no relocation names them; the check compares
+# each static's bytes in rind's build instead.
+MLKEM_COMPRESS = [
+    *(
+        (
+            "x86_64",
+            f"rind::low::x86_64::mlkem_compress::mlkem_poly_compress_{d}_avx2_asm",
+            f"x86_64/proofs/mlkem_poly_compress_{d}_avx2_asm.ml",
+            f"x86_64/mlkem/mlkem_poly_compress_{d}_avx2_asm.o",
+            (f"rind::low::x86_64::mlkem_compress::COMPRESS_{d.upper()}_DATA", "x86_64/proofs/mlkem_compress_consts.ml", f"compress_{d}_data"),
+        )
+        for d in ("d4", "d5", "d10", "d11")
+    ),
+    *(
+        (
+            "aarch64",
+            f"rind::low::aarch64::mlkem::mlkem_poly_compress_{d}_aarch64_asm",
+            f"aarch64/proofs/mlkem_poly_compress_{d}_aarch64_asm.ml",
+            f"aarch64/mlkem/mlkem_poly_compress_{d}_aarch64_asm.o",
+            ("rind::low::aarch64::mlkem::COMPRESS_D5_TABLE", "aarch64/proofs/mlkem_compress_d5_table.ml", "mlkem_compress_d5_table") if d == "d5" else None,
+        )
+        for d in ("d4", "d5", "d10", "d11")
+    ),
 ]
 
 X86_RET = bytes([0xC3])
@@ -170,16 +208,18 @@ class Insn:
 
 def proven(arch, source):
     """The instructions of the object code `source`'s proof asserts."""
-    s2n = ARCHES[arch]
-    name = os.path.basename(source)
-    path = os.path.join(S2N, s2n, "proofs", name + ".ml")
+    path = os.path.join(S2N, ARCHES[arch], "proofs", os.path.basename(source) + ".ml")
+    return asserted(arch, path, source + ".o")
+
+
+def asserted(arch, path, obj):
+    """The instructions of the object code `obj` the proof at `path` asserts."""
     text = open(path).read()
-    obj = re.escape(f'"{source}.o"')
     m = re.search(
-        r"define_assert(_relocs)?_from_elf\b(?:(?!;;).)*?\"\w+_mc\"\s*" + obj, text, re.S
+        r"define_assert(_relocs)?_from_elf\b(?:(?!;;).)*?\"\w+_mc\"\s*" + re.escape(f'"{obj}"'), text, re.S
     )
     if not m:
-        raise Check(f"{path} asserts no object code for {source}.o")
+        raise Check(f"{path} asserts no object code for {obj}")
     rest = text[m.end() : text.index(";;", m.end())]
     if not m.group(1):
         return listed(list(tokens(rest)), arch)
@@ -256,6 +296,19 @@ def constant_data(source):
     if len(data) != int(m.group(2)):
         raise Check(f"{source}.S: {len(data)} bytes of constant data, but .size says {m.group(2)}")
     return data
+
+
+def mlkem_native_constant(path, name):
+    """The bytes of the list of byte values that mlkem-native's HOL Light
+    file at `path` defines as `name`."""
+    text = open(os.path.join(MLKEM_NATIVE, path)).read()
+    m = re.search(r"`%s:(?:int|byte) list = (?:MAP word )?\[([^\]]*)\]`" % name, text)
+    if not m:
+        raise Check(f"{path} defines no byte list {name}")
+    values = [int(v) for v in re.findall(r"&?(\d+)", m.group(1))]
+    if any(v > 0xFF for v in values):
+        raise Check(f"{path}: {name} holds a value above a byte")
+    return bytes(values)
 
 
 # --- rind's side, as `admin/prove` writes it.
@@ -539,13 +592,23 @@ OPERAND = re.compile(r'\b(?:out|inout|lateout|inlateout)\("(\w+)"\)')
 # Registers a proof lets its routine change that the code never writes, so
 # its block need not declare them. `clobbers` fails once one is declared or
 # named in the block, so that this list stays exact.
+# Keyed by `(arch, module, function, register)`. The module is the Rust
+# file, so `bignum_madd_n25519`'s exemption does not cover
+# `bignum_madd_n25519_narrow`, whose block does name X17.
 LOOSE = {
-    ("x86_64", "mlkem_unpack", "RAX"),
-    ("aarch64", "bignum_demont", "X12"),
-    ("aarch64", "bignum_demont", "X13"),
-    ("aarch64", "bignum_demont_p384", "X11"),
-    ("aarch64", "bignum_demont_p384", "X12"),
-    ("aarch64", "bignum_madd_n25519", "X17"),
+    ("x86_64", "mlkem_unpack", "mlkem_unpack", "RAX"),
+    ("aarch64", "bignum_demont", "bignum_demont", "X12"),
+    ("aarch64", "bignum_demont", "bignum_demont", "X13"),
+    ("aarch64", "bignum_demont_p384", "bignum_demont_p384", "X11"),
+    ("aarch64", "bignum_demont_p384", "bignum_demont_p384", "X12"),
+    ("aarch64", "bignum_madd_n25519", "bignum_madd_n25519", "X17"),
+}
+
+# `arm/proofs/instruction.ml`. Q8-Q15's upper halves are the part of the
+# callee-saved SIMD registers the AAPCS64 lets a routine change.
+SIMD_SETS = {
+    "MODIFIABLE_SIMD_REGS": {f"Q{i}" for i in (*range(8), *range(16, 32))},
+    "MODIFIABLE_UPPER_SIMD_REGS": {f"Q{i}" for i in range(8, 16)},
 }
 
 
@@ -587,6 +650,9 @@ def maychange(arch, source):
     for item in re.findall(r"\bMAYCHANGE\b\s*(\[[^\]]*\]|\w+)", m.group(1)):
         if item == "SOME_FLAGS":
             continue
+        if item in SIMD_SETS:
+            regs |= SIMD_SETS[item]
+            continue
         if not item.startswith("["):
             raise Check(f"its proof's MAYCHANGE {item} is not a list")
         regs |= set(re.findall(REGISTER[arch], item))
@@ -608,11 +674,12 @@ def clobbers(arch, path, source):
     named = {register(arch, r) for r in re.findall(r"\b[a-z]+\d*\b", body)}
     if 'clobber_abi("C")' in body:
         return True
+    key = (arch, module[-1], name)
     for reg in sorted(regs - UNDECLARED[arch] - declared):
-        if (arch, name, reg) not in LOOSE:
+        if (*key, reg) not in LOOSE:
             raise Check(f"its proof lets it change {reg}, which its block does not declare")
-    for a, n, reg in LOOSE:
-        if (a, n) == (arch, name) and (reg in declared or reg in named or reg not in regs):
+    for a, mod, n, reg in LOOSE:
+        if (a, mod, n) == key and (reg in declared or reg in named or reg not in regs):
             raise Check(f"LOOSE lists {reg}, which its block names or its proof keeps")
     return True
 
@@ -692,6 +759,8 @@ def main():
             print(arch, "block", path, os.path.basename(source))
         for arch, path, obj, sym in NAKED:
             print(arch, "naked", path, sym, obj, sym)
+        for arch, path, _, obj, table in MLKEM_COMPRESS:
+            print(arch, "listed", path, os.path.basename(obj)[:-2], table[0] if table else "-")
         return
     if sys.argv[1:] == ["aws-lc-revision"]:
         print(AWS_LC_REVISION)
@@ -746,6 +815,25 @@ def main():
                 if want[: len(got)] != got or len(got) < len(want) and want_sized(base, ptarget):
                     raise Check(f"{rtarget} differs from the upstream's {ptarget}")
             print(f"{arch} {sym}: {', '.join(sorted(diffs)) or 'identical'}")
+        except Check as e:
+            print(f"admin/prove-bytes: {arch} {path}: {e}", file=sys.stderr)
+            failed += 1
+    for arch, path, proof, obj, table in MLKEM_COMPRESS:
+        name = os.path.basename(obj)[:-2]
+        base = os.path.join(out, arch, name)
+        try:
+            if os.path.exists(base + ".absent"):
+                raise Check("rind's build defines no such function")
+            text = open(os.path.join(MLKEM_NATIVE, proof)).read()
+            diffs = compare(arch, asserted(arch, os.path.join(MLKEM_NATIVE, proof), obj), built(arch, base + ".bin"), set(), naked=True)
+            if table:
+                static, consts, const = table
+                # The proof's precondition names the table it reads.
+                if not re.search(r"\b%s\b" % const, text):
+                    raise Check(f"{proof} names no {const}")
+                if open(base + ".table", "rb").read() != mlkem_native_constant(consts, const):
+                    raise Check(f"{static} differs from {consts}'s {const}")
+            print(f"{arch} {name}: {', '.join(sorted(diffs)) or 'identical'}")
         except Check as e:
             print(f"admin/prove-bytes: {arch} {path}: {e}", file=sys.stderr)
             failed += 1

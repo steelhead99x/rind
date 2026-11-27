@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Seed the fuzz corpora that take encoded input: `keys` from the test keys,
 # each seed the loader's selector byte (see fuzz/fuzzer/keys.rs) followed by a
-# key, and `verify` from Wycheproof's signatures (see fuzz/fuzzer/verify.rs).
+# key, `verify` from Wycheproof's signatures (see fuzz/fuzzer/verify.rs), and
+# `dimpl` from the key-share inputs a past run failed on (see
+# fuzz/fuzzer/dimpl.rs).
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
@@ -218,3 +220,13 @@ jq -r '
     esac
     { printf %b "\\x$(printf %02x "$selector")"; basenc --base16 -d <<<"$seed"; } >"$corpus/$selector-slhdsa-$id"
 done
+
+# dimpl key shares. Each input is a KeyShare whose Edit rewrites aws-lc's
+# fresh NIST public key from SEC1 uncompressed 0x04 to hybrid 0x06 or 0x07.
+# The bytes are the fuzzer input, not the share, which the harness generates;
+# rind-dimpl/tests/provider.rs's nist_hybrid_key_shares_match_aws_lc decodes
+# both.
+corpus=fuzz/corpus/dimpl
+mkdir -p "$corpus"
+unhex <<<09a0ff97fbffffff970100000340002b01db0d250c0c06 >"$corpus/secp384r1-hybrid"
+unhex <<<02ff696910a40079fffff70000ff0000020a >"$corpus/secp256r1-hybrid"

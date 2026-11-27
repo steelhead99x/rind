@@ -18,13 +18,10 @@ use core::num::NonZeroU32;
 
 use ring::{digest, error, pbkdf2};
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
-use wasm_bindgen_test::{wasm_bindgen_test as test, wasm_bindgen_test_configure};
+use wasm_bindgen_test::wasm_bindgen_test as test;
 
 #[allow(deprecated)]
 use crate::{test, test_file};
-
-#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
-wasm_bindgen_test_configure!(run_in_browser);
 
 /// Test vectors from BoringSSL, Go, and other sources.
 #[test]

@@ -1,0 +1,150 @@
+#!/usr/bin/env python3
+
+# Usage: admin/dit-coverage [--write]
+#
+# The static half of the DIT check (`admin/dit-qemu` is the dynamic one).
+# On Apple silicon rind sets DIT for a secret computation through a secret
+# `Entry` (`rind/src/low/entry.rs`), made at the top of each public call
+# that handles a secret. This scans every `pub fn` of rind's public API, all
+# of `rind/src/` outside `low/` and tests, and fails unless each one either
+# makes an `Entry` itself, secret or public, or is listed in
+# `admin/dit-coverage.txt` with how it needs none:
+#
+#   accessor   returns or copies what the value holds, computing nothing
+#   delegates  calls rind functions that make their own `Entry`
+#   public     touches only public values or constants
+#
+# It also fails on a listed function that no longer exists or now makes an
+# `Entry` of its own, so the list stays the API's. A new `pub fn` therefore
+# cannot ship without someone deciding how DIT covers it.
+#
+# What it does not see: trait impl methods (`From`, `TryFrom`, `Drop`,
+# `Iterator` and the like), which are written without `pub`, such as the
+# `From<Okm<..>>` key conversions in `high/hkdf.rs`. Those rest on
+# `admin/dit-qemu`, which runs the ones listed in `low/entry/tests.rs`, and
+# on review. Nor does it check that a `delegates` or `public` class is true:
+# that is the reviewer's claim, recorded with its reason.
+#
+# And it fails on a function that makes a public `Entry` but whose name
+# says it handles a secret (signing, agreeing, decrypting, deriving, or
+# exporting a private key), unless listed under `public-entry` with why.
+#
+# `--write` rewrites the list's entries for new functions as `unreviewed`,
+# which still fails, for a person to classify.
+
+import os, re, sys
+
+ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+SRC = os.path.join(ROOT, "rind", "src")
+LIST = os.path.join(ROOT, "admin", "dit-coverage.txt")
+CLASSES = {"accessor", "delegates", "public", "public-entry"}
+SECRET_NAME = re.compile(
+    r"^(sign|sign_digest|agree|decapsulate|decrypt|open|derive|expand|extract|fill|"
+    r"to_scalar|to_seed|to_pkcs8|to_pkcs8v1|to_sec1|blind_sign|finish|start|prove|evaluate|"
+    r"blind_evaluate|from_seed|from_scalar|from_pkcs8|from_pkcs1|from_sec1|generate)$"
+)
+FN = re.compile(r"^\s*pub\s+(?:const\s+)?(?:unsafe\s+)?fn\s+(\w+)")
+IMPL = re.compile(r"^\s*impl\b(?:<[^{]*?>)?\s+(.*?)\s*(?:where\b.*)?\{?\s*$")
+
+
+def functions():
+    """(name, file:line, entry) for each `pub fn`: `entry` is "secret",
+    "public", or None. Names are file-relative module path, impl type, and
+    function, such as `high/agreement::PrivateKey::agree`."""
+    for dirpath, _, files in os.walk(SRC):
+        for f in sorted(files):
+            path = os.path.join(dirpath, f)
+            rel = os.path.relpath(path, SRC)
+            if not f.endswith(".rs") or rel.startswith("low/") or f == "tests.rs" or "/tests/" in rel:
+                continue
+            lines = open(path).read().split("\n")
+            impl = "-"
+            i = 0
+            while i < len(lines):
+                line = lines[i]
+                if re.match(r"\s*(#\[cfg\(test\)\]\s*)?mod tests\b", line):
+                    break
+                m = IMPL.match(line)
+                if m and not line.lstrip().startswith("//"):
+                    impl = re.sub(r"<.*", "", m.group(1).split(" for ")[-1]).strip() or "-"
+                elif re.match(r"^(pub(\(crate\))? )?(fn|mod|struct|enum|const|static)\b", line):
+                    impl = "-"
+                m = FN.match(line)
+                if m:
+                    depth, started, j = 0, False, i
+                    body = []
+                    while j < len(lines):
+                        body.append(lines[j])
+                        for ch in lines[j]:
+                            if ch == "{":
+                                depth, started = depth + 1, True
+                            elif ch == "}":
+                                depth -= 1
+                        if (started and depth <= 0) or (not started and lines[j].rstrip().endswith(";")):
+                            break
+                        j += 1
+                    text = "\n".join(body)
+                    entry = "secret" if "new_secret()" in text else "public" if "new_public()" in text else None
+                    name = "{}::{}::{}".format(rel[:-3], impl, m.group(1))
+                    yield name, "rind/src/{}:{}".format(rel, i + 1), entry
+                    i = j
+                i += 1
+
+
+def read_list():
+    listed = {}
+    if os.path.exists(LIST):
+        for n, line in enumerate(open(LIST), 1):
+            line = line.split("#", 1)[0].strip()
+            if not line:
+                continue
+            name, cls, *reason = line.split(None, 2)
+            listed[name] = (cls, reason[0] if reason else "", n)
+    return listed
+
+
+def main():
+    write = sys.argv[1:] == ["--write"]
+    if sys.argv[1:] and not write:
+        sys.exit("usage: admin/dit-coverage [--write]")
+    found = {}
+    for name, where, entry in functions():
+        # Overloads in one impl (cfg'd copies) share a name.
+        found.setdefault(name, (where, entry))
+    listed = read_list()
+    errors = []
+    for name, (where, entry) in sorted(found.items()):
+        short = name.rsplit("::", 1)[1]
+        if name in listed:
+            cls, reason, n = listed[name]
+            if cls == "public-entry":
+                if entry != "public":
+                    errors.append("{}: listed as public-entry but makes {} entry".format(where, entry or "no"))
+            elif entry:
+                errors.append("{}: makes a {} Entry, so drop it from the list (line {})".format(where, entry, n))
+            elif cls not in CLASSES:
+                errors.append("{}: {} needs a class: {}".format(where, name, ", ".join(sorted(CLASSES))))
+            elif not reason:
+                errors.append("{}: {} is listed with no reason".format(where, name))
+        elif entry is None:
+            errors.append("{}: {} makes no Entry and is not in admin/dit-coverage.txt".format(where, name))
+        elif entry == "public" and SECRET_NAME.match(short):
+            errors.append("{}: {} makes a public Entry but its name says secret; list it as public-entry".format(where, name))
+    for name, (cls, _, n) in sorted(listed.items(), key=lambda x: x[1][2]):
+        if name not in found:
+            errors.append("admin/dit-coverage.txt:{}: {} is no public function".format(n, name))
+    if write:
+        with open(LIST, "a") as out:
+            for name, (where, entry) in sorted(found.items()):
+                if name not in listed and entry is None:
+                    out.write("{} unreviewed\n".format(name))
+    if errors:
+        sys.exit("dit-coverage:\n  " + "\n  ".join(errors))
+    secret = sum(1 for _, e in found.values() if e == "secret")
+    public = sum(1 for _, e in found.values() if e == "public")
+    print("dit-coverage: {} public functions: {} make a secret Entry, {} a public one, {} listed".format(
+        len(found), secret, public, len(found) - secret - public))
+
+
+if __name__ == "__main__":
+    main()

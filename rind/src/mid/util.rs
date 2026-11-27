@@ -171,6 +171,32 @@ fn bit(k: &[u64], i: usize) -> i32 {
     }
 }
 
+/// A byte array of an ML-DSA or SLH-DSA parameter set's length.
+#[cfg(any(feature = "ml-dsa", feature = "slh-dsa"))]
+pub trait Array:
+    Clone
+    + core::fmt::Debug
+    + AsRef<[u8]>
+    + AsMut<[u8]>
+    + Send
+    + Sync
+    + Unpin
+    + core::panic::UnwindSafe
+    + core::panic::RefUnwindSafe
+    + 'static
+{
+    /// Every byte zero.
+    #[doc(hidden)]
+    fn zeroed() -> Self;
+}
+
+#[cfg(any(feature = "ml-dsa", feature = "slh-dsa"))]
+impl<const LEN: usize> Array for [u8; LEN] {
+    fn zeroed() -> Self {
+        [0; LEN]
+    }
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {

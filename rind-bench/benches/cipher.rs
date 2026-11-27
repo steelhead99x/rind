@@ -1,6 +1,13 @@
+#[cfg(target_arch = "xtensa")]
+fn main() {}
+
+#[cfg(not(target_arch = "xtensa"))]
+#[macro_use]
 mod criterion;
+#[cfg(not(target_arch = "xtensa"))]
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 
+#[cfg(not(target_arch = "xtensa"))]
 fn bench_aes_ctr(c: &mut Criterion) {
     let iv = [0u8; 16];
 
@@ -13,6 +20,7 @@ fn bench_aes_ctr(c: &mut Criterion) {
             let mut buf = vec![0u8; size];
             group.throughput(Throughput::Bytes(size as u64));
 
+            #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
             group.bench_function(BenchmarkId::new("aws-lc-rs", size_name), |b| {
                 use aws_lc_rs::cipher::{
                     AES_128, AES_192, AES_256, EncryptingKey, EncryptionContext, UnboundCipherKey,
@@ -62,6 +70,7 @@ fn bench_aes_ctr(c: &mut Criterion) {
 // the input into a buffer of kept capacity, since both directions work in
 // place and decryption consumes its ciphertext; the copy is the same for
 // both libraries.
+#[cfg(not(target_arch = "xtensa"))]
 fn bench_aes_cbc(c: &mut Criterion) {
     let iv = [0u8; 16];
 
@@ -81,6 +90,7 @@ fn bench_aes_cbc(c: &mut Criterion) {
                 let mut buf = Vec::with_capacity(size + 16);
                 group.throughput(Throughput::Bytes(size as u64));
 
+                #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
                 group.bench_function(BenchmarkId::new("aws-lc-rs", size_name), |b| {
                     use aws_lc_rs::cipher::{
                         AES_128, AES_192, AES_256, DecryptionContext, EncryptionContext,
@@ -178,6 +188,7 @@ fn bench_aes_cbc(c: &mut Criterion) {
 
 // The bare ChaCha20 stream cipher, a fresh nonce per message. aws-lc-rs and
 // ring expose no ChaCha20 without Poly1305.
+#[cfg(not(target_arch = "xtensa"))]
 fn bench_chacha20(c: &mut Criterion) {
     let key = [7u8; 32];
     let nonce = [9u8; 12];
@@ -214,6 +225,7 @@ fn bench_chacha20(c: &mut Criterion) {
 }
 
 // The QUIC header protection mask: one cipher call on a 16-byte sample.
+#[cfg(not(target_arch = "xtensa"))]
 fn bench_header_protection(c: &mut Criterion) {
     let sample = [0x5au8; 16];
     let mut group = c.benchmark_group("quic-header-protection");
@@ -230,6 +242,7 @@ fn bench_header_protection(c: &mut Criterion) {
             let key = HeaderProtectionKey::new(algorithm, key).unwrap();
             b.iter(|| key.new_mask(&sample).unwrap());
         });
+        #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
         group.bench_function(format!("{name}/aws-lc-rs"), |b| {
             use aws_lc_rs::aead::quic::{AES_128, AES_256, CHACHA20, HeaderProtectionKey};
             let algorithm = match name {
@@ -251,41 +264,75 @@ fn bench_header_protection(c: &mut Criterion) {
             let key = HeaderProtectionKey::new(algorithm, key).unwrap();
             b.iter(|| key.mask(&sample));
         });
-        group.bench_function(format!("{name}/verified-garbage"), |b| {
-            use rind::aead::quic::{AES_128, AES_256, CHACHA20, HeaderProtectionKey};
-            use verified_garbage::cipher::aes::AesEcb;
-            use verified_garbage::cipher::chacha20::ChaCha20;
-            let algorithm = match name {
-                "aes128" => &AES_128,
-                "aes256" => &AES_256,
-                _ => &CHACHA20,
-            };
-            let expect = HeaderProtectionKey::new(algorithm, key)
-                .unwrap()
-                .mask(&sample);
-            // As rustls does, the AES key is expanded once; ChaCha20 takes the
-            // sample as its counter and nonce, so each mask starts a cipher.
-            let aes = (name != "chacha20").then(|| AesEcb::new(key).unwrap());
-            let mut chacha = [0u8; 32];
-            chacha[..key_len].copy_from_slice(key);
-            let mask = || {
-                let mut mask = [0u8; 5];
-                match &aes {
-                    Some(aes) => {
-                        let mut block = sample;
-                        aes.encrypt(&mut block).unwrap();
-                        mask.copy_from_slice(&block[..5]);
+        for (lib, held) in criterion::vg_rows() {
+            group.bench_function(format!("{name}/{lib}"), |b| {
+                use rind::aead::quic::{AES_128, AES_256, CHACHA20, HeaderProtectionKey};
+                use verified_garbage::cipher::aes::AesEcb;
+                use verified_garbage::cipher::chacha20::ChaCha20;
+                let algorithm = match name {
+                    "aes128" => &AES_128,
+                    "aes256" => &AES_256,
+                    _ => &CHACHA20,
+                };
+                let expect = HeaderProtectionKey::new(algorithm, key)
+                    .unwrap()
+                    .mask(&sample);
+                // As rustls does, the AES key is expanded once; ChaCha20 takes the
+                // sample as its counter and nonce, so each mask starts a cipher.
+                let aes = (name != "chacha20").then(|| AesEcb::new(key).unwrap());
+                let mut chacha = [0u8; 32];
+                chacha[..key_len].copy_from_slice(key);
+                let mask = || {
+                    let mut mask = [0u8; 5];
+                    match &aes {
+                        Some(aes) => {
+                            let mut block = sample;
+                            aes.encrypt(&mut block).unwrap();
+                            mask.copy_from_slice(&block[..5]);
+                        }
+                        None => ChaCha20::new(&chacha, &sample).apply_keystream(&mut mask),
                     }
-                    None => ChaCha20::new(&chacha, &sample).apply_keystream(&mut mask),
-                }
-                mask
+                    mask
+                };
+                assert_eq!(mask(), expect);
+                vg_scope!(held, b.iter(mask));
+            });
+        }
+    }
+}
+
+// Expanding a CBC decryption key, as each message under a fresh key pays. It
+// drops each key in the loop, so the wiping is timed too.
+#[cfg(not(target_arch = "xtensa"))]
+fn bench_aes_cbc_key(c: &mut Criterion) {
+    use std::hint::black_box;
+
+    for (name, key_len) in [("aes128-cbc", 16), ("aes192-cbc", 24), ("aes256-cbc", 32)] {
+        let key = &[0u8; 32][..key_len];
+        let mut group = c.benchmark_group(format!("{name}-key"));
+        group.bench_function(BenchmarkId::new("aws-lc-rs", "decrypt"), |b| {
+            use aws_lc_rs::cipher::{
+                AES_128, AES_192, AES_256, PaddedBlockDecryptingKey, UnboundCipherKey,
             };
-            assert_eq!(mask(), expect);
-            b.iter(mask);
+            let algorithm = match key_len {
+                16 => &AES_128,
+                24 => &AES_192,
+                _ => &AES_256,
+            };
+            b.iter(|| {
+                let key = UnboundCipherKey::new(algorithm, black_box(key)).unwrap();
+                PaddedBlockDecryptingKey::cbc_pkcs7(key).unwrap()
+            });
+        });
+        group.bench_function(BenchmarkId::new("rind", "decrypt"), |b| {
+            let _dit = criterion::rind_dit();
+            let algorithm = rind_aes(key_len);
+            b.iter(|| rind::cipher::AesCbcDecryptingKey::new(algorithm, black_box(key)).unwrap());
         });
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn rind_aes(key_len: usize) -> &'static rind::cipher::Algorithm {
     match key_len {
         16 => &rind::cipher::AES_128,
@@ -294,11 +341,14 @@ fn rind_aes(key_len: usize) -> &'static rind::cipher::Algorithm {
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 criterion_group!(
     benches,
     bench_aes_ctr,
     bench_aes_cbc,
+    bench_aes_cbc_key,
     bench_chacha20,
     bench_header_protection
 );
+#[cfg(not(target_arch = "xtensa"))]
 criterion_main!(benches);

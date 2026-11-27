@@ -19,6 +19,7 @@ const RSA2048: &[u8] = include_bytes!("../../rind/src/high/rsa/rsa2048.pkcs8.der
 const RSA2048_PKCS1: &[u8] = include_bytes!("../../rind/src/high/rsa/rsa2048.der");
 const RSA2049: &[u8] = include_bytes!("../../rind/src/high/rsa/rsa2049.pkcs8.der");
 const RSA2050: &[u8] = include_bytes!("../../rind/src/high/rsa/rsa2050.pkcs8.der");
+const RSA2047: &[u8] = include_bytes!("../../rind/src/high/rsa/rsa2047.pkcs8.der");
 const RSA2047_PUBLIC: &[u8] = include_bytes!("../../rind/src/high/rsa/rsa2047.pub.der");
 const RSA3072: &[u8] = include_bytes!("../../rind/src/high/rsa/rsa3072.pkcs8.der");
 
@@ -786,13 +787,10 @@ fn rsa_moduli_fips_does_not_approve_are_refused() {
         Err(Error::KeyRejected(reason)) => reason,
         other => panic!("{other:?}"),
     });
-    // rind's reason for a modulus too small.
-    let reason =
-        rind::rsa::KeyPair::from_pkcs8(include_bytes!("../../rind/src/high/rsa/rsa2047.pkcs8.der"));
-    assert_eq!(
-        Some(refused.to_string()),
-        reason.err().map(|e| e.to_string())
-    );
+    // rind loads a 2047-bit key, and the module
+    // refuses it for the same reason.
+    assert!(rind::rsa::KeyPair::from_pkcs8(RSA2047).is_ok());
+    assert_eq!(rsa::KeyPair::from_pkcs8(RSA2047).err(), Some(refused));
 
     // An odd length rind signs with.
     assert!(rind::rsa::KeyPair::from_pkcs8(RSA2049).is_ok());
@@ -1049,4 +1047,35 @@ fn cloned_public_keys_outlive_their_key_pairs() {
     };
     assert_eq!(key.clone().as_ref(), key.as_ref());
     key.verify(MESSAGE, signature.as_ref()).unwrap();
+}
+
+/// Key handles shared by threads sign and verify as on one thread, and one
+/// the module allocated on this thread is freed on another. The handles are
+/// `Send` and `Sync` on the claim that the values behind them are, which
+/// ThreadSanitizer, in `sanitizers.yml`, checks inside the module: an ML-DSA
+/// public key keeps the expansion that racing verifications build.
+#[test]
+fn keys_shared_across_threads() {
+    let pair = ecdsa::KeyPair::from_pkcs8(&ecdsa::sign::P256_SHA256_ASN1, P256).unwrap();
+    let signer = ml_dsa::KeyPair::<ml_dsa::MlDsa44>::from_seed(&[1; 32]).unwrap();
+    let signature = signer.sign(MESSAGE).unwrap();
+    let public = ml_dsa::PublicKey::<ml_dsa::MlDsa44>::new(signer.public_key().as_ref()).unwrap();
+    std::thread::scope(|s| {
+        for _ in 0..4 {
+            s.spawn(|| {
+                for _ in 0..2 {
+                    let ecdsa = pair.sign(MESSAGE).unwrap();
+                    pair.public_key().verify(MESSAGE, ecdsa.as_ref()).unwrap();
+                    public.verify(MESSAGE, signature.as_ref()).unwrap();
+                }
+            });
+        }
+    });
+    std::thread::spawn(move || {
+        let ecdsa = pair.sign(MESSAGE).unwrap();
+        pair.public_key().verify(MESSAGE, ecdsa.as_ref()).unwrap();
+        drop((pair, signer, public));
+    })
+    .join()
+    .unwrap();
 }

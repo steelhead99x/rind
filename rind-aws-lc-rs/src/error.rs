@@ -16,12 +16,12 @@ impl fmt::Display for Unspecified {
 // aws-lc-rs overrides the deprecated `description` and `cause`, so a caller
 // still on them gets its answers.
 #[allow(deprecated)]
-impl std::error::Error for Unspecified {
+impl core::error::Error for Unspecified {
     fn description(&self) -> &str {
         "Unspecified"
     }
 
-    fn cause(&self) -> Option<&dyn std::error::Error> {
+    fn cause(&self) -> Option<&dyn core::error::Error> {
         None
     }
 }
@@ -133,12 +133,12 @@ impl fmt::Display for KeyRejected {
 }
 
 #[allow(deprecated)]
-impl std::error::Error for KeyRejected {
+impl core::error::Error for KeyRejected {
     fn description(&self) -> &str {
         self.description_()
     }
 
-    fn cause(&self) -> Option<&dyn std::error::Error> {
+    fn cause(&self) -> Option<&dyn core::error::Error> {
         None
     }
 }
@@ -164,4 +164,18 @@ impl From<Unspecified> for KeyRejected {
 /// Maps any rind error to [`Unspecified`], as `.map_err(unspecified)`.
 pub(crate) fn unspecified<E>(_: E) -> Unspecified {
     Unspecified
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // rind's wrong-length refusal is aws-lc-rs's `InvalidEncoding`.
+    #[test]
+    fn wrong_length_is_invalid_encoding() {
+        assert_eq!(
+            KeyRejected::rind(rind::Error::WrongLength).description_(),
+            "InvalidEncoding"
+        );
+    }
 }

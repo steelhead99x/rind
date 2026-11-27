@@ -30,11 +30,11 @@ final class HmacAlgorithm {
 const hmacSha1 = HmacAlgorithm._(100, 20, 'HMAC-SHA1');
 
 /// An HMAC key, whose keyed hash states are computed once.
-final class HmacKey extends _Handle {
+final class HmacKey extends Handle {
   /// Keys [algorithm] with [key], which may be any length.
   HmacKey(this.algorithm, Uint8List key)
     : super(
-        _newHandle(
+        newHandle(
           (out) => _hmacKeyNew(algorithm._id, key.address, key.length, out),
         ),
         _hmacKeyFinalizer,
@@ -44,28 +44,28 @@ final class HmacKey extends _Handle {
   final HmacAlgorithm algorithm;
 
   /// Returns the tag of [data].
-  Uint8List sign(Uint8List data) => _output(
+  Uint8List sign(Uint8List data) => output(
     algorithm.tagLength,
     (out) =>
-        _hmacSign(_pointer, data.address, data.length, out.address, out.length),
+        _hmacSign(pointer, data.address, data.length, out.address, out.length),
   );
 
   /// Checks in constant time that [tag] is the tag of [data], throwing
   /// [RindError.badSignature] if not.
   void verify(Uint8List data, Uint8List tag) {
-    _check(
-      _hmacVerify(_pointer, data.address, data.length, tag.address, tag.length),
+    check(
+      _hmacVerify(pointer, data.address, data.length, tag.address, tag.length),
     );
   }
 }
 
 /// An HMAC of a message given in parts.
-final class HmacContext extends _Handle {
+final class HmacContext extends Handle {
   /// Starts a message under [key].
   HmacContext(HmacKey key)
     : _tagLength = key.algorithm.tagLength,
       super(
-        _newHandle((out) => _hmacContextNew(key._pointer, out)),
+        newHandle((out) => _hmacContextNew(key.pointer, out)),
         _hmacContextFinalizer,
       );
 
@@ -75,7 +75,7 @@ final class HmacContext extends _Handle {
   /// Adds [data] to the message.
   void update(Uint8List data) {
     _live();
-    _check(_hmacContextUpdate(_pointer, data.address, data.length));
+    check(_hmacContextUpdate(pointer, data.address, data.length));
   }
 
   /// Returns the message's tag. The context is spent after.
@@ -83,9 +83,9 @@ final class HmacContext extends _Handle {
     _live();
     _signed = true;
     _hmacContextFinalizer.detach(this);
-    return _output(
+    return output(
       _tagLength,
-      (out) => _hmacContextSign(_pointer, out.address, out.length),
+      (out) => _hmacContextSign(pointer, out.address, out.length),
     );
   }
 

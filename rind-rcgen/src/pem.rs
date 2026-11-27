@@ -11,6 +11,9 @@ use base64ct::{Base64, Encoding};
 use rcgen::Error;
 
 /// Decodes the first PEM block in `pem`, as `pem::parse` does.
+// Never inlined, so that `admin/ctgrind.supp` can name the frame its
+// suppressions end in, whatever the build inlines into the callers.
+#[inline(never)]
 pub(crate) fn decode(pem: &str) -> Result<Vec<u8>, Error> {
     let malformed = || Error::PemError("malformedframing".to_string());
     let input = pem.as_bytes();
