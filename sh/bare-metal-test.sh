@@ -187,8 +187,8 @@ if ! run "$default" env \
     exit 1
 fi
 count=$(find "$default" -name '*.args' | wc -l)
-if [[ $count -ne 22 ]]; then
-    echo "default path ran $count commands, want 22" >&2
+if [[ $count -ne 30 ]]; then
+    echo "default path ran $count commands, want 30" >&2
     exit 1
 fi
 i=0
@@ -222,24 +222,46 @@ while [[ $i -lt 16 ]]; do
     fi
     i=$((i + 1))
 done
-x86=$(args_of "$default/16.args")
+# The opt-in ECDSA table cache rows: each target without compare-and-swap,
+# with `no-cas-ecdsa-cache`, then also without default features, in both
+# profiles.
+i=16
+for target in thumbv6m-none-eabi riscv32imc-unknown-none-elf; do
+    for features in default none; do
+        for profile in dev release; do
+            args=$(args_of "$default/$i.args")
+            assert_has "$args" "clippy"
+            assert_has "$args" "$target"
+            assert_has "$args" "no-cas-ecdsa-cache"
+            assert_has "$args" "$profile"
+            if [[ $features == none ]]; then
+                assert_has "$args" "--no-default-features"
+            else
+                assert_lacks "$args" "--no-default-features"
+            fi
+            assert_has "$(script_flags "$default/$i.env")" 'getrandom_backend="custom"'
+            i=$((i + 1))
+        done
+    done
+done
+x86=$(args_of "$default/24.args")
 assert_has "$x86" "build"
 assert_has "$x86" "x86_64-unknown-none"
-assert_has "$(script_flags "$default/16.env")" 'getrandom_backend="custom"'
-assert_has "$(script_flags "$default/16.env")" "target-feature=+sse,+sse2,-soft-float"
-nosse=$(args_of "$default/17.args")
+assert_has "$(script_flags "$default/24.env")" 'getrandom_backend="custom"'
+assert_has "$(script_flags "$default/24.env")" "target-feature=+sse,+sse2,-soft-float"
+nosse=$(args_of "$default/25.args")
 assert_has "$nosse" "clippy"
 assert_has "$nosse" "x86_64-unknown-none"
-nosse_flags=$(script_flags "$default/17.env")
+nosse_flags=$(script_flags "$default/25.env")
 assert_has "$nosse_flags" 'curve25519_dalek_backend="serial"'
 assert_lacks "$nosse_flags" "soft-float"
-nosse_build=$(args_of "$default/19.args")
+nosse_build=$(args_of "$default/27.args")
 assert_has "$nosse_build" "build"
 assert_has "$nosse_build" "x86_64-unknown-none"
-tree_args=$(args_of "$default/20.args")
+tree_args=$(args_of "$default/28.args")
 assert_has "$tree_args" "tree"
 assert_has "$tree_args" "thumbv7em-none-eabihf"
-arm_tree=$(args_of "$default/21.args")
+arm_tree=$(args_of "$default/29.args")
 assert_has "$arm_tree" "tree"
 assert_has "$arm_tree" "armv7a-none-eabi"
 # Cargo does not fingerprint wrapper flags. Each flag set gets its own
@@ -247,7 +269,7 @@ assert_has "$arm_tree" "armv7a-none-eabi"
 thumb_dir=$(target_dir_of "$default/0.env")
 if [[ $thumb_dir != "$(target_dir_of "$default/2.env")" \
     || $thumb_dir == "$(target_dir_of "$default/14.env")" \
-    || $(target_dir_of "$default/14.env") == "$(target_dir_of "$default/17.env")" ]]; then
+    || $(target_dir_of "$default/14.env") == "$(target_dir_of "$default/25.env")" ]]; then
     echo "flag sets shared a target dir" >&2
     exit 1
 fi
