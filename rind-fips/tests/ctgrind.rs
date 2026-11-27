@@ -163,6 +163,19 @@ fn aes() {
         assert_eq!(opened, MESSAGE);
     }
 
+    // QUIC packets, sealed out of order: the packet number is public, and
+    // the window the module keeps depends only on it.
+    let mut quic = aead::quic::PacketSealingKey::new(&aead::AES_256_GCM, &key, &[1; 12]).unwrap();
+    for pn in [1u64, 0, 3, 2] {
+        let mut message = MESSAGE.to_vec();
+        secret(&message[..]);
+        let tag = quic
+            .seal_in_place_separate_tag(pn, b"aad", &mut message)
+            .unwrap();
+        public(&message[..]);
+        public(tag.as_ref());
+    }
+
     // GCM with a truncated tag and an IV that is not 96 bits, which GCM
     // hashes under the key into its counter.
     let iv = [9u8; 7];

@@ -287,6 +287,61 @@ fn quic_packets_agree_with_aws_lc_rs_from_any_packet_number() {
     }
 }
 
+/// Packets sealed out of order under one key, as concurrent `&self` sealing
+/// does, seal as rustls's aws-lc-rs provider does: pn + 1 before pn, and a
+/// few reversed, each equal byte for byte, while under `fips` a packet number
+/// sealed twice is refused (rind's own AES-GCM does not track them).
+#[cfg(not(target_family = "wasm"))]
+#[test]
+fn quic_packets_seal_out_of_order_as_aws_lc_rs_does() {
+    use rustls::crypto::aws_lc_rs::cipher_suite as aws;
+    use rustls::crypto::cipher::{AeadKey, Iv};
+
+    // rustls builds a 16-byte key only by deriving it, so this takes the
+    // 32-byte AES-256 key directly, as the test above does.
+    {
+        let (ours, theirs) = (
+            cipher_suite::TLS13_AES_256_GCM_SHA384,
+            aws::TLS13_AES_256_GCM_SHA384,
+        );
+        let ours = ours.tls13().unwrap().quic_suite().unwrap();
+        let theirs = theirs.tls13().unwrap().quic_suite().unwrap();
+        for start in [0u64, 1, 3, 8_388_609, 1 << 40, (1 << 62) - 20] {
+            let key = |alg: &dyn rustls::quic::Algorithm| {
+                alg.packet_key(AeadKey::from([0x42u8; 32]), Iv::new([0x5a; 12]))
+            };
+            let (here, there) = (key(ours.quic), key(theirs.quic));
+            let header = b"header";
+            for pn in [
+                start + 1,
+                start,
+                start + 5,
+                start + 3,
+                start + 4,
+                start + 2,
+                start + 12,
+                start + 9,
+            ] {
+                let mut mine = b"quic payload".to_vec();
+                let tag = here.encrypt_in_place(pn, header, &mut mine).unwrap();
+                let mut theirs_out = b"quic payload".to_vec();
+                let their_tag = there.encrypt_in_place(pn, header, &mut theirs_out).unwrap();
+                assert_eq!(mine, theirs_out, "start {start} pn {pn}");
+                assert_eq!(tag.as_ref(), their_tag.as_ref());
+                mine.extend_from_slice(tag.as_ref());
+                let plain = there.decrypt_in_place(pn, header, &mut mine).unwrap();
+                assert_eq!(plain, b"quic payload");
+            }
+            // Each of them again.
+            for pn in [start, start + 1, start + 9, start + 12] {
+                let mut again = b"quic payload".to_vec();
+                let refused = here.encrypt_in_place(pn, header, &mut again);
+                assert_eq!(refused.is_err(), FIPS, "pn {pn}");
+            }
+        }
+    }
+}
+
 /// HKDF-Expand through rind-rustls's TLS 1.3 suites matches rustls's aws-lc-rs
 /// provider for every `info` it takes, an empty one included: aws-lc-rs
 /// derives `expand_slice(&[], ..)`, and under `fips` the module refuses it, so

@@ -781,6 +781,189 @@ fn tls_record_sealing_key_seals_as_rind_does() {
     );
 }
 
+/// A QUIC packet sealing key seals as rind does, in any order of packet
+/// numbers, and never twice under one packet number.
+#[test]
+fn quic_packet_sealing_key_seals_out_of_order_as_rind_does() {
+    use aead::quic::{PacketSealingKey, SEAL_WINDOW};
+
+    for (ours, theirs) in AEADS {
+        for len in 0..=33 {
+            let key = bytes("key", len);
+            let iv = [3; 12];
+            let result = PacketSealingKey::new(ours, &key, &iv);
+            if ours.key_len() == 24 {
+                // No QUIC cipher suite is AES-192-GCM.
+                assert_eq!(result.err(), Some(Error::Unsupported));
+            } else {
+                same(&result, &rind::aead::Key::new(theirs, &key));
+            }
+        }
+        if ours.key_len() == 24 {
+            continue;
+        }
+
+        let key_value = bytes("key", ours.key_len());
+        let reference = rind::aead::Key::new(theirs, &key_value).unwrap();
+        let opening = aead::Key::new(ours, &key_value).unwrap();
+        let iv: [u8; 12] = bytes("iv", 12).try_into().unwrap();
+        let mut key = PacketSealingKey::new(ours, &key_value, &iv).unwrap();
+        assert!(format!("{key:?}").starts_with("PacketSealingKey { algorithm: Aes"));
+
+        // The first packet number is anything; later ones come in any
+        // order, each sealed once, however far below the highest. Each is
+        // sealed as rind's key seals it.
+        let base = 1u64 << 40;
+        let steps = [
+            (base + 1, true),
+            (base, true),
+            (base + 1, false),
+            (base, false),
+            (base + 5, true),
+            (base + 3, true),
+            (base + 4, true),
+            (base + 3, false),
+            (base + 6, true),
+            (base + SEAL_WINDOW + 6, true),
+            // Just inside the window below the highest, and below it: a
+            // number never sealed seals, a repeat does not.
+            (base + 7, true),
+            (base + 6, false),
+            (base + 5, false),
+            (base + 2, true),
+            (base + 2, false),
+            ((1 << 62) - 1, true),
+            ((1 << 62) - 1, false),
+            (1 << 62, true),
+            (1 << 62, false),
+            (u64::MAX, true),
+            (u64::MAX, false),
+            (base + SEAL_WINDOW + 6, false),
+            (0, true),
+            (0, false),
+            (base + 1, false),
+        ];
+        for (i, (pn, sealed)) in steps.into_iter().enumerate() {
+            let plaintext = bytes(&format!("packet {i}"), i * 7);
+            let aad = bytes(&format!("header {i}"), 5);
+            let mut ours_out = plaintext.clone();
+            let result = key.seal_in_place_separate_tag(pn, &aad, &mut ours_out);
+            if !sealed {
+                assert_eq!(result.err(), Some(Error::MessageLimitReached), "pn {pn}");
+                assert_eq!(ours_out, vec![0; plaintext.len()]);
+                continue;
+            }
+            let tag = result.unwrap();
+            let mut theirs_nonce = [0; 12];
+            theirs_nonce[4..].copy_from_slice(&pn.to_be_bytes());
+            for (n, v) in theirs_nonce.iter_mut().zip(iv) {
+                *n ^= v;
+            }
+            let mut theirs_out = plaintext.clone();
+            reference
+                .seal_in_place_append_tag(
+                    rind::aead::Nonce::assume_unique_for_key(theirs_nonce),
+                    &aad,
+                    &mut theirs_out,
+                )
+                .unwrap();
+            let mut mine = ours_out.clone();
+            mine.extend_from_slice(tag.as_ref());
+            assert_eq!(mine, theirs_out, "pn {pn}");
+            // The module's own key opens it.
+            let opened = opening
+                .open_in_place_separate_tag(tls13_nonce(iv, pn), &aad, tag, &mut ours_out)
+                .unwrap();
+            assert_eq!(opened, plaintext);
+        }
+    }
+}
+
+/// Packet numbers sealed in order, as a connection mostly does, and a key
+/// whose first packet number is one, all seal; a packet number's slot in the
+/// module's window is reused only after the window has moved past it.
+#[test]
+fn quic_packet_sealing_key_window_slides() {
+    use aead::quic::{PacketSealingKey, SEAL_WINDOW};
+
+    let mut key = PacketSealingKey::new(&aead::AES_128_GCM, &[1; 16], &[9; 12]).unwrap();
+    let seal = |key: &mut PacketSealingKey, pn| {
+        key.seal_in_place_separate_tag(pn, b"", &mut [0u8; 4])
+            .map(|_| ())
+    };
+    for pn in 1..=3 * SEAL_WINDOW {
+        seal(&mut key, pn).unwrap();
+    }
+    let top = 3 * SEAL_WINDOW;
+    for pn in 1..=top {
+        assert_eq!(seal(&mut key, pn), Err(Error::MessageLimitReached), "{pn}");
+    }
+    // Packet number 0 was never sealed, though far below the window.
+    seal(&mut key, 0).unwrap();
+    assert_eq!(seal(&mut key, 0), Err(Error::MessageLimitReached));
+    // A jump past the whole window forgets nothing it should remember.
+    let jump = top + 10 * SEAL_WINDOW + 3;
+    seal(&mut key, jump).unwrap();
+    assert_eq!(seal(&mut key, jump), Err(Error::MessageLimitReached));
+    seal(&mut key, jump - 1).unwrap();
+    seal(&mut key, jump - SEAL_WINDOW + 1).unwrap();
+    // Just below the window, and the gap the jump skipped, were never sealed.
+    seal(&mut key, jump - SEAL_WINDOW).unwrap();
+    seal(&mut key, top + 1).unwrap();
+    for pn in [jump - SEAL_WINDOW, top + 1, top, jump - 1] {
+        assert_eq!(seal(&mut key, pn), Err(Error::MessageLimitReached), "{pn}");
+    }
+}
+
+/// Against a set of every packet number sealed: runs in order, jumps of a
+/// window or more, revisits inside the window and far below it, and the
+/// ends of `u64`, in a seeded order. A packet number seals exactly when it
+/// was never sealed under the key.
+#[test]
+fn quic_packet_sealing_key_refuses_exactly_the_repeats() {
+    use aead::quic::{PacketSealingKey, SEAL_WINDOW};
+    use std::collections::BTreeSet;
+
+    let mut key = PacketSealingKey::new(&aead::AES_128_GCM, &[2; 16], &[4; 12]).unwrap();
+    let mut sealed = BTreeSet::new();
+    let mut state = 0x9e37_79b9_7f4a_7c15u64;
+    let mut next = move || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state
+    };
+    let mut top = 0u64;
+    for i in 0..20_000u32 {
+        let r = next();
+        let pn = match r % 8 {
+            // Mostly in order, sometimes skipping a few.
+            0..=3 => top.saturating_add(1 + (r >> 8) % 3),
+            // Inside the window.
+            4 => top.saturating_sub((r >> 8) % SEAL_WINDOW),
+            // Below it, near or far.
+            5 => top.saturating_sub(SEAL_WINDOW + (r >> 8) % (4 * SEAL_WINDOW)),
+            6 => (r >> 8) % top.max(1),
+            // A jump of a window or more, rarely to the end of u64.
+            _ if (r >> 8) % 64 == 0 => u64::MAX - (r >> 16) % 3,
+            _ => top.saturating_add(SEAL_WINDOW + (r >> 8) % (3 * SEAL_WINDOW)),
+        };
+        let fresh = sealed.insert(pn);
+        let result = key.seal_in_place_separate_tag(pn, b"", &mut [0u8; 1]);
+        assert_eq!(result.is_ok(), fresh, "step {i}, pn {pn}");
+        if !fresh {
+            assert_eq!(result.err(), Some(Error::MessageLimitReached));
+        }
+        top = top.max(pn);
+        if top > u64::MAX - 8 {
+            // Start the next stretch on a fresh key, from low numbers.
+            key = PacketSealingKey::new(&aead::AES_128_GCM, &[2; 16], &[4; 12]).unwrap();
+            sealed.clear();
+            top = 0;
+        }
+    }
+}
+
 /// The break build lowers a randomized-nonce key's limit from 2^32 seals
 /// to 2^10, so this reaches it.
 #[cfg(feature = "__break_tests")]
