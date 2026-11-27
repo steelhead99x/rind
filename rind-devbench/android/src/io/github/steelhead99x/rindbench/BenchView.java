@@ -332,8 +332,12 @@ final class BenchView extends LinearLayout {
             // After setup, probe the new target; a probe of the old one still out is then ignored.
             if (changed && probeGen > 0) findCollector();
         }
-        if ("full".equals(it.getStringExtra("preset"))) { fullPreset = true; presetChanged(); }
-        if ("quick".equals(it.getStringExtra("preset"))) { fullPreset = false; presetChanged(); }
+        // Each runner launch resolves its own preset, so one without `preset` runs Quick, as in a fresh
+        // process, rather than the Full a previous run picked.
+        String preset = it.getStringExtra("preset");
+        boolean runnerLaunch = Collector.RUNNER && it.getBooleanExtra("autostart", false);
+        if ("full".equals(preset)) { fullPreset = true; presetChanged(); }
+        else if ("quick".equals(preset) || runnerLaunch) { fullPreset = false; presetChanged(); }
     }
 
     private void setBody(String s) {
@@ -372,6 +376,11 @@ final class BenchView extends LinearLayout {
             catalog = null; catalogReady = false;
             detailsText = "Could not load test list.";
             agreeChanged();
+            // A runner's launch waiting on the list gets an outcome too, not silence.
+            if (launchPending) {
+                launchPending = false;
+                notStarted("the list of tests couldn't be read");
+            }
             return;
         }
         try {
@@ -494,16 +503,19 @@ final class BenchView extends LinearLayout {
         launchPending = false;
         cancelAutostart();
         if (running) {
-            android.util.Log.i("RindBench", "autostart ignored: a run is going");
+            notStarted("a run is going");
             return;
         }
         if (!tabShown) {
-            android.util.Log.i("RindBench", "autostart ignored: the Bench tab isn't shown");
+            notStarted("the Bench tab isn't shown");
             return;
         }
         autostart = () -> {
             autostart = null;
-            if (!onScreen || !tabShown || running) return;
+            if (!onScreen || !tabShown || running) {
+                notStarted(running ? "a run is going" : "the app or the Bench tab was left");
+                return;
+            }
             // A finished run's results are cleared as the Clear button does, so Start can run.
             if (!nativeStatus().optString("run_id", "").isEmpty()) clearTapped();
             agree.setChecked(true);
@@ -827,9 +839,8 @@ final class BenchView extends LinearLayout {
     void setOnScreen(boolean on) {
         onScreen = on;
         if (!on) {
-            // Leaving the app drops a launch's autostart, queued or still waiting.
-            launchPending = false;
-            cancelAutostart();
+            // Leaving the app drops a launch's autostart, queued or still waiting, and says so.
+            dropLaunch("the app was left before the run started");
         } else if (loadedOnce) {
             scheduleAutostart();
         }
@@ -840,9 +851,16 @@ final class BenchView extends LinearLayout {
         tabShown = shown;
         if (!shown) {
             // As leaving the app does: a launch still waiting for the list is dropped too, not revived on return.
-            launchPending = false;
-            cancelAutostart();
+            dropLaunch("the Bench tab was left before the run started");
         }
+    }
+
+    /** Drops a launch that is waiting or queued, logging its outcome; nothing when there is none. */
+    private void dropLaunch(String reason) {
+        boolean had = launchPending || autostart != null;
+        launchPending = false;
+        cancelAutostart();
+        if (had) notStarted(reason);
     }
 
     /** Stops polling, for the activity's onDestroy: a recreated activity's new view picks the run up. */

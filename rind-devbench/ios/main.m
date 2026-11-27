@@ -391,6 +391,7 @@ static void SetTitle(UIButton *b, NSString *t) {
   // -autostart waits a moment, so a runner can capture the picker before the run.
   if (ArgOn(@"autostart"))
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+      if (self->running) return;  // started by hand while it waited
       self->agree.on = YES; [self agreeChanged]; [self startTapped];
     });
 }

@@ -285,6 +285,9 @@ final class ContenderView extends LinearLayout {
                 "Type the session code instead, or allow the camera in Settings.", false);
     }
 
+    /** Counts session lookups, so only the latest one's answer is shown. */
+    private int lookupSeq;
+
     private void joinTapped() {
         if (!enabledOn) return;
         String code = ContenderClient.codeFromQRString(codeField.getText() == null ? "" : codeField.getText().toString());
@@ -293,8 +296,11 @@ final class ContenderView extends LinearLayout {
             return;
         }
         setStatus("Looking up session…", BUSY, "Checking code " + code + ".", false);
+        // Lookups can overlap, a second Join or scan before the first answers: only the newest may
+        // change the screen, so an older, slower answer can't replace it.
+        final int seq = ++lookupSeq;
         client.lookupSession(code, (session, error) -> ui.post(() -> {
-            if (!enabledOn) return;
+            if (!enabledOn || seq != lookupSeq) return;
             if (error != null || session == null) {
                 boolean unavail = error != null && error.contains("not available");
                 String title = unavail ? "Session service not available yet" : (error != null ? error : "Could not join");
