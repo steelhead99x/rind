@@ -437,7 +437,8 @@ def bind_statics(name, got, got_statics, want, want_statics, bound, text, checke
     symbol that only shares a static's or routine's last component. A
     relocation of rind's to a static `shared` maps to a table of VG's, by its
     whole path, pairs only with a relocation of VG's to that table, by its
-    name: rind's tests hold its bytes to VG's, so neither side's is followed.
+    name, which must be VG's static of that name by its whole path: rind's
+    tests hold its bytes to VG's, so neither side's is followed.
     Adds each static to `bound`."""
     if want_routines is None:
         want_routines = {n: n for n in text}
@@ -467,11 +468,12 @@ def bind_statics(name, got, got_statics, want, want_statics, bound, text, checke
     def resolved_want(relocs, paths):
         out = []
         for r, path in zip(relocs, paths):
-            # VG's table, unless the name is one of VG's routines.
-            if r[2] in tables and path.split("::")[-1] == r[2] and want_routines.get(r[2]) != path:
+            kind = resolve("VG's build", name, r[2], path, want_statics, want_routines)
+            # VG's table only as its own static, by its whole path: a symbol
+            # that only shares the table's name failed in `resolve`.
+            if kind == "static" and r[2] in tables:
                 out.append((r, "shared", path))
                 continue
-            kind = resolve("VG's build", name, r[2], path, want_statics, want_routines)
             if kind is None:
                 fail(f"{name}: VG's build reaches {path}, which is neither its static nor "
                      f"its routine, so nothing binds its bytes")
@@ -563,17 +565,23 @@ def self_test():
         i.relocs.append((0, "R_X86_64_PC32", n, 0))
         i.paths.append(path)
         return [i]
-    bind_statics("vg_a", to_table("rind::mid::p::TABLE", "VG_T"), {}, to_table("VG_T", "VG_T"),
-                 k_vg, set(), text, rind, vg, shared)
-    # rind's own `vg` static that only shares the table's name, or SHARED's
-    # static where VG's routine reaches a routine of that name, fails.
-    for got, statics, want, routines in (
-            ("rind::vg::VG_T", {"VG_T": static("rind::vg::VG_T")}, "VG_T", vg),
-            ("rind::mid::p::TABLE", {}, "verified_garbage::VG_T", dict(vg, VG_T="verified_garbage::VG_T"))):
+    k_vg_t = dict(k_vg, VG_T=static("verified_garbage::consts::VG_T"))
+    bind_statics("vg_a", to_table("rind::mid::p::TABLE", "VG_T"), {},
+                 to_table("verified_garbage::consts::VG_T", "VG_T"), k_vg_t, set(), text, rind, vg,
+                 shared)
+    # rind's own `vg` static that only shares the table's name; SHARED's
+    # static where VG's routine reaches a routine of that name; or where it
+    # reaches another symbol, by its whole path, of the table's name: each fails.
+    for got, statics, want, want_statics, routines in (
+            ("rind::vg::VG_T", {"VG_T": static("rind::vg::VG_T")}, "verified_garbage::consts::VG_T",
+             k_vg_t, vg),
+            ("rind::mid::p::TABLE", {}, "verified_garbage::VG_T", k_vg,
+             dict(vg, VG_T="verified_garbage::VG_T")),
+            ("rind::mid::p::TABLE", {}, "verified_garbage::other::VG_T", k_vg_t, vg)):
         try:
-            bind_statics("vg_a", to_table(got, "VG_T"), statics, to_table(want, "VG_T"), k_vg,
-                         set(), dict(text, VG_T=[]), dict(rind, VG_T="rind::vg::VG_T"), routines,
-                         shared)
+            bind_statics("vg_a", to_table(got, "VG_T"), statics, to_table(want, "VG_T"),
+                         want_statics, set(), dict(text, VG_T=[]), dict(rind, VG_T="rind::vg::VG_T"),
+                         routines, shared)
         except SystemExit:
             continue
         fail(f"self-test: rind's {got} paired with VG's {want} as VG's shared table")
