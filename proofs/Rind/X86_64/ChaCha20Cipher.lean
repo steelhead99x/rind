@@ -15,10 +15,38 @@ over axioms restating VG's theorems, `Rind.X86_64.ChaCha20Avx2` the kernel,
 and this file HACL*'s loop, `cipher`, and the API's `apply_keystream`, at
 every length.
 
-aws-lc's SSSE3 routine has no proof yet, so the theorems take its contract as
-the hypothesis `Ssse3`, which [the x86_64 cipher
-quest](/quest/m4/verified/chacha20-poly1305-x86/cipher.md) is to prove. A call
-where `new` picked a VG routine never runs it.
+For aws-lc's SSSE3 routine, rind proves the routine itself: its HOL Light
+proof `CHACHA20_CTR32_SSSE3_4X_SUBROUTINE_CORRECT`, in
+`proofs/hol-light/x86_64/chacha20_ctr32_ssse3_4x.ml` at rind's commit, that
+rind's naked function, as rind's Linux build emits it, computes s2n-bignum's
+`chacha20_encrypt` in place on a nonempty buffer, restated as the axiom
+`chacha20_ctr32_ssse3_4x_spec` about the Rust wrapper `cipher_ssse3_4x`
+around it. `admin/prove` checks the HOL Light proof against the object code
+rind's release build emits, its instructions, relocations, and the table they
+read, on s2n-bignum's x86 model with the instructions rind adds to it, which
+`admin/prove cosim` checks against the CPU, but for the `rep ret` (`F3 C3`) the
+routine returns with, which the proof steps as `RET` and cosimulation omits
+because the return leaves its harness. The safety contract itself
+asks only for a nonempty buffer; the theorem's other hypotheses hold of every
+call for facts outside it, trusted like the restatement: the buffer is a live
+`&mut [u8]` allocation, so it overlaps neither the code, the table, nor the
+336 bytes from the 328 below the stack pointer, where the routine keeps its
+frame, through the return address (the call's own frame, which the buffer
+predates), and it ends at or below 2^64, as x86_64's user addresses do; the
+ABI aligns the stack pointer to 16 bytes before the call; and the linker
+places the table, which its type aligns to 16 bytes, within the reach of the
+five instructions that address it. The 32-bit block counter wraps, in the
+routine and in the spec alike. The restatement, and that the wrapper passes
+the key, counter, nonce, and buffer the theorem names, are trusted.
+
+The proof is of the `x86_64-unknown-linux-gnu` build's object only. Apple's build assembles its own
+copy, `ChaCha20_ctr32_ssse3_4x.apple.s`, which lacks the entry's `.align 32`,
+so its branches can land at other offsets, and whose two tables are separate
+statics, not one section, so nothing here covers an x86_64 Mac's SSSE3 routine. The axiom and
+`RunsCipher` take `LinuxBuild`, that rind's build assembled the Linux object,
+as a hypothesis, which no axiom states; `cipher_all_spec` and `RunsCipher` take
+it only where `new` picks no VG routine and finds SSSE3, so a CPU that runs
+VG's routines keeps its proof on any OS.
 -/
 
 namespace rind.x86_64.generic
@@ -167,15 +195,22 @@ namespace rind.x86_64
 
 open low.x86_64.chacha20 (VgState)
 
+/-- rind's build assembled `ChaCha20_ctr32_ssse3_4x.linux.s`, the object its HOL
+Light proof covers, not Apple's copy. `admin/prove` checks the object of the
+`x86_64-unknown-linux-gnu` target only, so a musl build is outside it too.
+Nothing states it: a caller on another target must not claim it. -/
+opaque LinuxBuild : Prop
+
 /-! ## The dispatch, `ChaCha20::cipher` -/
 
-/-- aws-lc's `ChaCha20_ctr32_ssse3_4x`, as `cipher_ssse3_4x` calls it, XORs
-RFC 8439's keystream into a nonempty buffer, as its safety contract requires,
-for as many blocks as remain before the block counter wraps. -/
-def Ssse3 : Prop :=
-  ∀ (t : low.x86_64.cpu.HaveSsse3) (key : Std.Array U32 8#usize) (counter_nonce : Std.Array U32 4#usize)
-    (buffer : Slice U8), 0 < buffer.length →
-    counter_nonce.val[0]!.val + (buffer.length + 63) / 64 ≤ 2 ^ 32 →
+/-- `CHACHA20_CTR32_SSSE3_4X_SUBROUTINE_CORRECT`: aws-lc's
+`ChaCha20_ctr32_ssse3_4x`, as `cipher_ssse3_4x` calls it, XORs RFC 8439's
+keystream into a nonempty buffer in place, the block counter wrapping, in
+rind's Linux build: the proof is of that object only. -/
+@[step]
+axiom chacha20_ctr32_ssse3_4x_spec (t : low.x86_64.cpu.HaveSsse3) (key : Std.Array U32 8#usize)
+    (counter_nonce : Std.Array U32 4#usize) (buffer : Slice U8) (hlinux : LinuxBuild)
+    (hn : 0 < buffer.length) :
     low.x86_64.chacha20.cipher_ssse3_4x t key counter_nonce buffer ⦃ r =>
       bvs r.val = chacha20.encrypt (wordBytes key.val) counter_nonce.val[0]!.bv
         (wordBytes (counter_nonce.val.drop 1)) (bvs buffer.val) ⦄
@@ -183,9 +218,11 @@ def Ssse3 : Prop :=
 /-- `cipher` XORs RFC 8439's keystream into the buffer, for as many blocks as
 remain before the block counter wraps, on whichever routine it picks: VG's
 and the kernel where `new` picked a VG routine, aws-lc's SSSE3 routine where
-it did not and found SSSE3, and HACL*'s rounds otherwise. -/
-theorem cipher_all_spec (hu : ∃ s, VgState.uninit = ok s) (c : low.x86_64.chacha20.ChaCha20)
-    (hs : c.vg.isSome ∨ Ssse3) (buffer : Slice U8)
+it did not and found SSSE3 (which takes `LinuxBuild`: the proof is of the
+Linux object), and HACL*'s rounds otherwise. -/
+theorem cipher_all_spec (hu : ∃ s, VgState.uninit = ok s)
+    (c : low.x86_64.chacha20.ChaCha20) (hlinux : c.vg = none → c.ssse3.isSome → LinuxBuild)
+    (buffer : Slice U8)
     (hl : c.counter_nonce.val[0]!.val + (buffer.length + 63) / 64 ≤ 2 ^ 32) :
     low.x86_64.chacha20.ChaCha20.cipher c buffer ⦃ _ r =>
       bvs r.val = chacha20.encrypt (wordBytes c.key.val) c.counter_nonce.val[0]!.bv
@@ -205,9 +242,7 @@ theorem cipher_all_spec (hu : ∃ s, VgState.uninit = ok s) (c : low.x86_64.chac
     · exact generic.cipher_spec _ _ _
     · simp only
       split
-      · rcases hs with hs | hs
-        · simp [hvg] at hs
-        · exact hs t _ _ _ (by scalar_tac) hl
+      · exact chacha20_ctr32_ssse3_4x_spec t _ _ _ (hlinux hvg (by simp [hss])) (by scalar_tac)
       · exact generic.cipher_spec _ _ _
   · simp only
     have h256 : ¬ 256 ≤ buffer.length := fun h => hv ⟨by simp [hvg], h⟩
@@ -219,32 +254,26 @@ theorem cipher_all_spec (hu : ∃ s, VgState.uninit = ok s) (c : low.x86_64.chac
 
 /-! ## The API, `mid::chacha20` -/
 
-/-- rind runs VG's routines for ChaCha20 on this CPU: the entry guard admits
-the call, a state can be made, and the CPU-feature checks find AVX2, or
-AVX-512 VL. None reads an input. -/
-def RunsVg : Prop :=
-  (∃ e, low.entry.Entry.new_secret = ok e) ∧ (∃ s, VgState.uninit = ok s) ∧
-  ∃ a b s, low.x86_64.cpu.HaveAvx512Vl.check = ok a ∧ low.x86_64.cpu.HaveAvx2.check = ok b ∧
-    low.x86_64.cpu.HaveSsse3.check = ok s ∧ (a.isSome ∨ b.isSome)
-
-/-- rind runs ChaCha20 on this CPU: the entry guard admits the call, a VG
-state can be made, and the CPU-feature checks return, whatever they find.
-None reads an input. -/
+/-- rind runs ChaCha20 on this CPU: the entry guard admits the call, a VG state
+can be made, the CPU-feature checks return, whatever they find, and, where
+`new` picks no VG routine and finds SSSE3, so that `cipher` can run aws-lc's
+SSSE3 routine, the build assembled the Linux object (`LinuxBuild`). A CPU where
+either VG feature check returns a token (AVX2 with BMI2, which they require)
+needs no such premise. None reads an input. -/
 def RunsCipher : Prop :=
   (∃ e, low.entry.Entry.new_secret = ok e) ∧ (∃ s, VgState.uninit = ok s) ∧
   ∃ a b s, low.x86_64.cpu.HaveAvx512Vl.check = ok a ∧ low.x86_64.cpu.HaveAvx2.check = ok b ∧
-    low.x86_64.cpu.HaveSsse3.check = ok s
+    low.x86_64.cpu.HaveSsse3.check = ok s ∧ (¬ (a.isSome ∨ b.isSome) → s.isSome → LinuxBuild)
 
-/-- ChaCha20 on a CPU where `new` picks a VG routine, or aws-lc's SSSE3
-routine meets its contract: RFC 8439's encryption of the buffer under the key,
-the block counter, and the nonce, if the counter covers it before it wraps;
-otherwise `WrongLength`, with the buffer unchanged. -/
+/-- ChaCha20: RFC 8439's encryption of the buffer under the key, the block
+counter, and the nonce, if the counter covers it before it wraps; otherwise
+`WrongLength`, with the buffer unchanged. -/
 theorem apply_keystream_spec (he : ∃ e, low.entry.Entry.new_secret = ok e)
     (hu : ∃ s, VgState.uninit = ok s)
-    (a : Option low.x86_64.cpu.HaveAvx512Vl) (b : Option low.x86_64.cpu.HaveAvx2)
-    (s : Option low.x86_64.cpu.HaveSsse3) (ha : low.x86_64.cpu.HaveAvx512Vl.check = ok a)
-    (hb : low.x86_64.cpu.HaveAvx2.check = ok b) (hs : low.x86_64.cpu.HaveSsse3.check = ok s)
-    (hab : (a.isSome ∨ b.isSome) ∨ Ssse3) (k : mid.chacha20.ChaCha20)
+    (va : Option low.x86_64.cpu.HaveAvx512Vl) (vb : Option low.x86_64.cpu.HaveAvx2)
+    (vs : Option low.x86_64.cpu.HaveSsse3) (ha : low.x86_64.cpu.HaveAvx512Vl.check = ok va)
+    (hb : low.x86_64.cpu.HaveAvx2.check = ok vb) (hs : low.x86_64.cpu.HaveSsse3.check = ok vs)
+    (hlinux : ¬ (va.isSome ∨ vb.isSome) → vs.isSome → LinuxBuild) (k : mid.chacha20.ChaCha20)
     (nonce : Std.Array U8 12#usize) (counter : U32) (inout : Slice U8) :
     k.apply_keystream nonce counter inout ⦃ r inout' =>
       if counter.val + (inout.length + 63) / 64 ≤ 2 ^ 32 then
@@ -278,40 +307,39 @@ theorem apply_keystream_spec (he : ∃ e, low.entry.Entry.new_secret = ok e)
       have hcv : cc.counter_nonce.val[0]!.val = counter.val := by
         have := congrArg BitVec.toNat hcn0
         simpa only [UScalar.bv_toNat] using this
-      step with cipher_all_spec hu cc (hab.imp_left cc_post2.mpr) inout (by rw [hcv]; exact hc)
-        as ⟨c', inout1, h1⟩
+      have hsc : cc.ssse3.isSome → vs.isSome := by
+        intro h
+        first
+          | exact h
+          | (rw [← ‹cc.ssse3 = vs›]; exact h)
+          | (rw [‹vs = cc.ssse3›]; exact h)
+          | simp_all
+      have hvg : cc.vg = none → ¬ (va.isSome ∨ vb.isSome) := by
+        intro hv h
+        have := cc_post2.mpr h
+        simp [hv] at this
+      step with cipher_all_spec hu cc (fun hv hs' => hlinux (hvg hv) (hsc hs')) inout
+        (by rw [hcv]; exact hc) as ⟨c', inout1, h1⟩
       step*
     · subst r_post
       simp_all
   · rw [Slice.len_val] at r_post
     split_ifs at r_post ⊢ <;> subst r_post <;> simp_all
 
-/-- ChaCha20 where the CPU-feature checks find AVX2 or AVX-512 VL: RFC 8439's
-encryption of the buffer under the key, the block counter, and the nonce, if
-the counter covers it before it wraps; otherwise `WrongLength`, with the
-buffer unchanged. -/
-theorem chacha20_apply_keystream (h : RunsVg) (k : mid.chacha20.ChaCha20)
+/-- ChaCha20 on any x86_64 CPU: RFC 8439's encryption of the buffer under the
+key, the block counter, and the nonce, if the counter covers it before it
+wraps; otherwise `WrongLength`, with the buffer unchanged. Where `new` picks no
+VG routine and finds SSSE3, this holds of rind's `x86_64-unknown-linux-gnu`
+build (`LinuxBuild`); an x86_64 Mac's SSSE3 routine is Apple's copy, which no
+proof covers. -/
+theorem chacha20_apply_keystream (h : RunsCipher) (k : mid.chacha20.ChaCha20)
     (nonce : Std.Array U8 12#usize) (counter : U32) (inout : Slice U8) :
     k.apply_keystream nonce counter inout ⦃ r inout' =>
       if counter.val + (inout.length + 63) / 64 ≤ 2 ^ 32 then
         r = .Ok () ∧
           bvs inout'.val = chacha20.encrypt (bvs k.key.val) counter.bv (bvs nonce.val) (bvs inout.val)
       else r = .Err .WrongLength ∧ inout' = inout ⦄ :=
-  let ⟨he, hu, a, b, s, ha, hb, hs, hab⟩ := h
-  apply_keystream_spec he hu a b s ha hb hs (Or.inl hab) k nonce counter inout
-
-/-- ChaCha20 on any x86_64 CPU, if aws-lc's SSSE3 routine meets its
-contract: RFC 8439's encryption of the buffer under the key, the block
-counter, and the nonce, if the counter covers it before it wraps; otherwise
-`WrongLength`, with the buffer unchanged. -/
-theorem chacha20_apply_keystream_ssse3 (h : RunsCipher) (hs : Ssse3) (k : mid.chacha20.ChaCha20)
-    (nonce : Std.Array U8 12#usize) (counter : U32) (inout : Slice U8) :
-    k.apply_keystream nonce counter inout ⦃ r inout' =>
-      if counter.val + (inout.length + 63) / 64 ≤ 2 ^ 32 then
-        r = .Ok () ∧
-          bvs inout'.val = chacha20.encrypt (bvs k.key.val) counter.bv (bvs nonce.val) (bvs inout.val)
-      else r = .Err .WrongLength ∧ inout' = inout ⦄ :=
-  let ⟨he, hu, a, b, s, ha, hb, hs'⟩ := h
-  apply_keystream_spec he hu a b s ha hb hs' (Or.inr hs) k nonce counter inout
+  let ⟨he, hu, a, b, s, ha, hb, hs, hlinux⟩ := h
+  apply_keystream_spec he hu a b s ha hb hs hlinux k nonce counter inout
 
 end rind.x86_64

@@ -24,7 +24,8 @@
 //! and from `KARATSUBA_MUL` and `KARATSUBA_SQR` limbs, products and
 //! squares split by Karatsuba's method (Knuth, TAOCP 4.3.3), as aws-lc's C
 //! does. Their loops add two rows a pass, in two carry chains, where one
-//! chain's latency would bound them.
+//! chain's latency would bound them, forming a block of each pass's products
+//! before the chains that add them.
 //!
 //! The crossovers are where each measured faster on x86_64 at both limb
 //! widths, and are the same in limbs for both.
@@ -35,6 +36,10 @@ use crate::low::ct;
 
 /// Limbs in a 64-bit word.
 const PER_WORD: usize = (u64::BITS / Limb::BITS) as usize;
+
+/// The limbs of `mul_add2`'s block, which forms its products before the chains
+/// that add them: eight at 32 bits, four at 64.
+const BLOCK: usize = if Limb::BITS == 32 { 8 } else { 4 };
 
 /// `MAX_WORDS` in limbs.
 const MAX_LIMBS: usize = MAX_WORDS * PER_WORD;
@@ -457,12 +462,33 @@ fn redc(t: &mut [Limb], m: &[Limb], n0: Limb) {
 /// that fits a limb, returning what lands above them, which fits `Wide`.
 ///
 /// Its two products a limb are summed in two carry chains, which run side
-/// by side, so two rows take about one chain's latency, where `mul_add`
-/// takes one row a chain and gains its overlap from issuing four products
-/// before the chain.
+/// by side where one chain's latency would bound `mul_add`. A block of limbs
+/// forms its products first, which depend only on `u`, `v`, and `y`, so a core
+/// overlaps them with the chains that add them: four limbs at 64 bits and
+/// eight at 32, which measured fastest across x86_64 and aarch64, as a
+/// longer block of the wider products costs registers x86_64 lacks.
 fn mul_add2(x: &mut [Limb], y: &[Limb], u: Limb, v: Limb, c: Wide) -> Wide {
     let (mut c0, mut c1, mut prev) = (c, 0, 0);
-    for (x, y) in x.iter_mut().zip(y) {
+    let (xs, x_rest) = x.as_chunks_mut::<BLOCK>();
+    let (ys, y_rest) = y.as_chunks::<BLOCK>();
+    for (x, y) in xs.iter_mut().zip(ys) {
+        let pu: [Wide; BLOCK] =
+            core::array::from_fn(|k| Wide::from(u).wrapping_mul(Wide::from(y[k])));
+        let pv: [Wide; BLOCK] = core::array::from_fn(|k| {
+            let below = if k == 0 { prev } else { y[k - 1] };
+            Wide::from(v).wrapping_mul(Wide::from(below))
+        });
+        for k in 0..BLOCK {
+            // Each sum is at most (2^b - 1)^2 + 2 (2^b - 1) = 2^2b - 1.
+            let s0 = pu[k].wrapping_add(Wide::from(x[k])).wrapping_add(c0);
+            c0 = s0 >> Limb::BITS;
+            let s1 = pv[k].wrapping_add(Wide::from(s0 as Limb)).wrapping_add(c1);
+            x[k] = s1 as Limb;
+            c1 = s1 >> Limb::BITS;
+        }
+        prev = y[BLOCK - 1];
+    }
+    for (x, y) in x_rest.iter_mut().zip(y_rest) {
         let s0 = mul_add_limb(u, *y, *x, c0);
         c0 = s0 >> Limb::BITS;
         let s1 = mul_add_limb(v, prev, s0 as Limb, c1);
@@ -553,6 +579,77 @@ fn sub_limbs_masked(x: &mut [Limb], y: &[Limb], keep: Limb) {
         let (diff, b2) = diff.overflowing_sub(borrow);
         *x = diff;
         borrow = Limb::from(b1 | b2);
+    }
+}
+
+/// `mul_add2` against a plain sum of its rows and an all-ones closed form,
+/// at every width past its block's remainders, on any backend, since it is
+/// the portable code whatever else runs.
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod mul_add2_tests {
+    use proptest::prelude::*;
+
+    use super::*;
+
+    /// `acc += row * m` from limb `at`, with the carry rippling to the top.
+    fn add_row(acc: &mut [Limb], row: &[Limb], m: Limb, at: usize) {
+        let mut carry: Wide = 0;
+        for (i, a) in acc[at..].iter_mut().enumerate() {
+            let y = row.get(i).copied().unwrap_or(0);
+            let s = mul_add_limb(m, y, *a, carry);
+            *a = s as Limb;
+            carry = s >> Limb::BITS;
+        }
+        assert_eq!(carry, 0);
+    }
+
+    proptest! {
+        #[test]
+        fn rows(
+            (x, y) in (0..40usize).prop_flat_map(|n| (
+                prop::collection::vec(any::<Limb>(), n),
+                prop::collection::vec(any::<Limb>(), n),
+            )),
+            u in any::<Limb>(),
+            v in any::<Limb>(),
+            c in any::<Limb>(),
+        ) {
+            let n = x.len();
+            let mut acc = x.clone();
+            acc.extend([0; 2]);
+            add_row(&mut acc, &[c], 1, 0);
+            add_row(&mut acc, &y, u, 0);
+            add_row(&mut acc, &y, v, 1);
+
+            let mut ours = x;
+            let rest = mul_add2(&mut ours, &y, u, v, Wide::from(c));
+            prop_assert_eq!(&ours[..], &acc[..n]);
+            prop_assert_eq!(rest, Wide::from(acc[n]) | Wide::from(acc[n + 1]) << Limb::BITS);
+        }
+    }
+
+    /// Of all-ones `x`, `y`, `u`, and `v`, the sum is
+    /// `(2^bn - 1) 2^2b + c`, for any `n` of two or more.
+    #[test]
+    fn ones() {
+        for n in 2..40 {
+            for c in [0, 1, Limb::MAX] {
+                let mut x = vec![Limb::MAX; n];
+                let rest = mul_add2(
+                    &mut x,
+                    &vec![Limb::MAX; n],
+                    Limb::MAX,
+                    Limb::MAX,
+                    Wide::from(c),
+                );
+                let mut want = vec![Limb::MAX; n];
+                want[..2].fill(0);
+                want[0] = c;
+                assert_eq!(x, want, "n = {n}, c = {c}");
+                assert_eq!(rest, Wide::MAX, "n = {n}, c = {c}");
+            }
+        }
     }
 }
 

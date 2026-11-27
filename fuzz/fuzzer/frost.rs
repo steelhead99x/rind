@@ -17,7 +17,8 @@
 //! the reference's signature, which both verify. Too few signers, a
 //! tampered commitment, or a tampered share is refused where its step
 //! documents, rather than panicking or aggregating, and a tampered
-//! signature verifies on rind exactly when it does on the reference.
+//! signature verifies on rind exactly when it does on the reference, unless
+//! P-256's `R` takes a tag RFC 9591 forbids, which rind refuses.
 //!
 //! On armv7 and the portable backend, frost-ed25519 and frost-ristretto255
 //! run curve25519-dalek, as rind does, so there only frost-p256 is
@@ -60,15 +61,18 @@ struct Input {
 
 fuzz_target!(|input: Input| {
     match input.suite % 3 {
-        0 => differential!(frost_ed25519, &ED25519_SHA512, &input),
-        1 => differential!(frost_ristretto255, &RISTRETTO255_SHA512, &input),
-        _ => differential!(frost_p256, &P256_SHA256, &input),
+        0 => differential!(frost_ed25519, &ED25519_SHA512, false, &input),
+        1 => differential!(frost_ristretto255, &RISTRETTO255_SHA512, false, &input),
+        _ => differential!(frost_p256, &P256_SHA256, true, &input),
     }
 });
 
-/// One round of FROST in `$suite`, against `$frost`.
+/// One round of FROST in `$suite`, against `$frost`. `$sec1` is whether the
+/// suite encodes an element SEC1-compressed, as RFC 9591 6.4 does P-256's,
+/// which `frost-p256` also decodes in the compact tag `0x05`, an `x` alone.
+/// rind refuses it.
 macro_rules! differential {
-    ($frost:ident, $suite:expr, $input:expr) => {{
+    ($frost:ident, $suite:expr, $sec1:expr, $input:expr) => {{
         use std::collections::BTreeMap;
 
         use $frost::keys::{
@@ -287,10 +291,16 @@ macro_rules! differential {
             .unwrap();
 
         let mut bytes = signature.as_ref().to_vec();
+        if $sec1 {
+            bytes[0] = 0x05;
+            assert!(public_key.verify(&input.message, &bytes).is_err());
+            bytes.copy_from_slice(signature.as_ref());
+        }
         let changed = input.signature.apply(&mut bytes);
         let ours = public_key.verify(&input.message, &bytes);
-        let theirs = FrostSignature::deserialize(&bytes)
-            .is_ok_and(|s| pubkeys.verifying_key().verify(&input.message, &s).is_ok());
+        let theirs = (!$sec1 || matches!(bytes.first(), Some(0x02 | 0x03)))
+            && FrostSignature::deserialize(&bytes)
+                .is_ok_and(|s| pubkeys.verifying_key().verify(&input.message, &s).is_ok());
         assert_eq!(ours.is_ok(), theirs, "{ours:?}");
         assert_eq!(ours.is_ok(), !changed);
 

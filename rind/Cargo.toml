@@ -7,6 +7,7 @@ homepage = "https://rind.kixel.ai"
 license = "(Apache-2.0 OR ISC OR MIT-0) AND (Apache-2.0 OR ISC OR MIT) AND Apache-2.0 AND ISC AND BSD-3-Clause AND MIT"
 readme = "README.md"
 description = "Pure-Rust cryptography for MoQ, forked from graviola"
+keywords = ["crypto", "tls", "quic", "post-quantum", "pure-rust"]
 categories = ["network-programming", "cryptography"]
 rust-version.workspace = true
 
@@ -50,9 +51,11 @@ zeroize = { version = "1.9", default-features = false, optional = true }
 # no C or intrinsics features enabled, fiat-crypto's for the NIST curves, and
 # curve25519-dalek's for X25519 and Ed25519. The cfg is build.rs's choice of
 # the arm or portable backend (or portable for aarch64 without NEON), which a
-# manifest cannot read.
+# manifest cannot read. dalek's features are the ones Beneficial AI
+# Foundation's proofs of it build it with, which `admin/prove dalek` checks:
+# `zeroize` adds a wipe of the ladder's last bit, which those proofs cover.
 [target.'cfg(any(rind_portable, target_endian = "big", all(target_arch = "aarch64", not(target_feature = "neon")), all(target_arch = "x86_64", not(target_feature = "sse2")), not(any(target_arch = "x86_64", target_arch = "aarch64"))))'.dependencies]
-curve25519-dalek = { version = "5", default-features = false, features = ["precomputed-tables"] }
+curve25519-dalek = { version = "5", default-features = false, features = ["alloc", "precomputed-tables", "zeroize"] }
 fiat-crypto = { version = "0.3", default-features = false }
 libcrux-hacl-rs = { version = "0.0.6", features = ["alloc"] }
 libcrux-macros = "0.0.4"
@@ -148,8 +151,11 @@ pakery-crypto = { version = "0.6.2", default-features = false, features = ["std"
 pakery-spake2plus = { version = "0.6.2", default-features = false, features = ["std", "test-utils"] }
 # Matter PASE (draft-01). `test-support` injects the ephemeral scalars.
 matter-crypto = { version = "0.5.1", default-features = false, features = ["test-support"] }
-# RSA blind signatures, which aws-lc-rs does not offer.
-blind-rsa-signatures = { version = "0.18", default-features = false }
+# RSA blind signatures, which aws-lc-rs does not offer. rind's fork, by path:
+# UPSTREAM.md's "blind-rsa-signatures 0.18 does not build on rsa 0.10.0".
+# A `[patch.crates-io]` would break pyrind's sdist, which maturin builds
+# without the patched tree.
+blind-rsa-signatures = { path = "../thirdparty/blind-rsa-signatures", default-features = false }
 # ECVRF, which aws-lc-rs does not offer: key transparency's `akd` for
 # Edwards25519, and `vrf-rfc9381` for P-256.
 akd_core = { version = "0.13", default-features = false, features = ["vrf"] }
@@ -176,7 +182,23 @@ rand_core-voprf = { package = "rand_core", version = "0.6", features = ["getrand
 
 # These cover every algorithm, so a build that leaves one out skips them.
 [[test]]
-name = "crosschecks"
+name = "crosschecks_curves"
+required-features = ["ml-dsa", "slh-dsa"]
+
+[[test]]
+name = "crosschecks_pq"
+required-features = ["ml-dsa", "slh-dsa"]
+
+[[test]]
+name = "crosschecks_protocols"
+required-features = ["ml-dsa", "slh-dsa"]
+
+[[test]]
+name = "crosschecks_rsa"
+required-features = ["ml-dsa", "slh-dsa"]
+
+[[test]]
+name = "crosschecks_symmetric"
 required-features = ["ml-dsa", "slh-dsa"]
 
 [[test]]

@@ -14,14 +14,18 @@
  *                                                        symbolic agreement
  *
  * The transport holds R0-R12, LR, the four flags, SP's offset into a private
- * 256-byte scratch buffer, PC's offset from the instruction, and the buffer's
- * 64 words. A load or store goes through SP, which starts at the buffer's
- * middle, or through a register a case gives that address, at offsets that
- * stay inside the buffer, so the other registers take any value; one whose
- * condition fails, which transfers nothing, may go anywhere. A branch
+ * 256-byte scratch buffer, PC's offset from the instruction, the buffer's 64
+ * words, and Q0-Q15, four words each, low first; the theorem's register file
+ * holds each Q register as one number. A load or store goes through SP,
+ * which starts at the buffer's middle, or through a register a case gives an
+ * address in the buffer, at offsets that stay inside it, so the other
+ * registers take any value; one whose condition fails, which transfers
+ * nothing, may go anywhere. The buffer is 32-byte aligned, so that an
+ * Advanced SIMD transfer's alignment qualifier holds of it. A branch
  * lands 8 or 4 bytes before the instruction, or 8, 12, or 16 past it, where
  * the executor has a landing slot, and falling through lands at 4, as a
- * branch to there does too.
+ * branch to there does too. BX and a load into PC may also interwork to the
+ * T32 slot 20 past it, at 21 with the T bit, PC's bit 0, set.
  *
  * The executor's greeting gives the instruction's and the buffer's addresses.
  * Each theorem assumes them of `pc` and the buffer, so that it can say what
@@ -50,7 +54,8 @@ let aarch32_regfile =
       map (fun f -> "bitval(read " ^ f ^ " s)") flags @
       ["val(word_sub (read SP s) scratch)";
        "val(word_sub (read PC s) (word pc))"] @
-      map memory (0--63)) ^ "]"));;
+      map memory (0--63) @
+      map (fun k -> Printf.sprintf "val(read Q%d s)" k) (0--15)) ^ "]"));;
 
 let template =
  `val(word pc:int32) = slot_address /\
@@ -65,8 +70,23 @@ let template =
        (MAYCHANGE [PC; R0; R1; R2; R3; R4; R5; R6; R7; R8; R9; R10; R11;
                    R12; SP; LR] ,,
         MAYCHANGE [NF; ZF; CF; VF] ,,
+        MAYCHANGE [Q0; Q1; Q2; Q3; Q4; Q5; Q6; Q7; Q8; Q9; Q10; Q11; Q12;
+                   Q13; Q14; Q15] ,,
         MAYCHANGE [memory :> bytes(scratchpointer,256)] ,,
         MAYCHANGE [events])`;;
+
+(* The executor's 148 words as the register file's 100 numbers, each Q
+   register's four words as one. *)
+let regfile_of_words words =
+  let rec q ws =
+    match ws with
+      w0::w1::w2::w3::rest ->
+        (w0 +/ num 0x100000000 */ (w1 +/ num 0x100000000 */
+          (w2 +/ num 0x100000000 */ w3)))::q rest
+    | [] -> []
+    | _ -> failwith "regfile_of_words" in
+  let core,qwords = chop_list 84 words in
+  core @ q qwords;;
 
 let random_boold d = Random.int 64 < d;;
 
@@ -100,6 +120,7 @@ let make_input_state density =
   map (fun _ -> random32 density) (0--13) @
   map (fun _ -> random_flag ()) (1--4) @
   [num 128; num_0] @
+  map (fun _ -> random32 density) (0--63) @
   map (fun _ -> random32 density) (0--63);;
 
 type aarch32_test_case =
@@ -189,7 +210,7 @@ let make_ldst_case input =
    greeting. *)
 let aarch32_cosim_executor = lazy
   (start_cosim_executor "RIND_AARCH32_EXECUTOR"
-    "qemu-arm -cpu cortex-a15 aarch32/proofs/cosim-runner" "aarch32" 84);;
+    "qemu-arm -cpu max aarch32/proofs/cosim-runner" "aarch32" 148);;
 
 let executor_address name =
   let prefix = name ^ "=" in
@@ -285,10 +306,13 @@ let make_misc_case input =
            (random_register () lsl 12) lor random_register () in
   { case_instruction = instruction; case_memop = false; case_input = input };;
 
-(* How far from the instruction each of the executor's landing slots is. *)
+(* How far from the instruction each of the executor's landing slots is, and
+   where BX or a load into PC lands in its T32 slot, with bit 0 set. *)
 let landings = [-8; -4; 4; 8; 12; 16];;
+let t32_landing = 21;;
 
 let random_landing () =
+  let landings = t32_landing :: landings in
   num (Lazy.force slot_address + el (Random.int (length landings)) landings);;
 
 let make_bl_case input =
@@ -477,12 +501,234 @@ let make_skipped_case input =
         encode_ldstm cond p u false load rn list in
   { case_instruction = instruction; case_memop = true; case_input = input };;
 
+(* Advanced SIMD and the crypto extension. A data-processing case takes a
+   form's fixed bits and random bits under its mask, until the decoder
+   accepts the word, so it reaches every operand shape the decoder does,
+   odd Q registers and UNPREDICTABLE fields refused. *)
+
+let decodes w =
+  try not (is_decode_none (DECODE_OPTION_CONV
+            (mk_comb(`decode`,mk_comb(`word:num->int32`,mk_numeral(num w))))))
+  with Failure _ -> false;;
+
+let random_word () =
+  (Random.bits () lor (Random.bits () lsl 30)) land 0xffffffff;;
+
+let rec random_encoding (value,mask) =
+  let w = value lor (random_word () land mask) in
+  if decodes w then w else random_encoding (value,mask);;
+
+let random_form forms = random_encoding (el (Random.int (length forms)) forms);;
+
+(* D, Vn, Vd, N, Q, M, and Vm; U; and size. *)
+let simd_regs = 0x004ff0ef and simd_u = 0x01000000 and simd_size = 0x00300000;;
+
+(* The register file's word `j` of Q`k`. *)
+let with_qword k j = with_index (84 + 4 * k + j);;
+
+(* Q`k`'s bytes, each from `byte`. *)
+let with_qbytes k byte input =
+  itlist (fun j ->
+    with_qword k j (num (byte () lor (byte () lsl 8) lor (byte () lsl 16) lor
+                         (byte () lsl 24))))
+   (0--3) input;;
+
+(* The 64-bit register `D:Vd` names, at bit 22 and bits 15:12, or `N:Vn`, at
+   bit 7 and bits 19:16, or `M:Vm`, at bit 5 and bits 3:0. *)
+let simd_dnum w = ((w lsr 18) land 16) lor ((w lsr 12) land 15)
+and simd_nnum w = ((w lsr 3) land 16) lor ((w lsr 16) land 15)
+and simd_mnum w = ((w lsr 1) land 16) lor (w land 15);;
+
+let simd_case w input =
+  { case_instruction = w; case_memop = false; case_input = input };;
+
+(* Three registers of the same length: VAND, VBIC, VORR, VEOR, VBSL, VADD,
+   VSUB, VTST, VMUL, and VSHL by register, whose shift amounts, each lane's
+   low byte of Vn, are small more often than not. *)
+let make_simd_3same_case input =
+  let w = random_form
+   [0xf2000110,simd_regs lor simd_u lor simd_size;
+    0xf2000800,simd_regs lor simd_u lor simd_size;
+    0xf2000810,simd_regs lor simd_size;
+    0xf2000910,simd_regs lor simd_size;
+    0xf2000400,simd_regs lor simd_u lor simd_size] in
+  let input =
+    if w land 0xf10 = 0x400 && Random.bool () then
+      with_qbytes (simd_nnum w / 2) (fun () -> (Random.int 141 - 70) land 255)
+        input
+    else input in
+  simd_case w input;;
+
+(* VSHR, VSRI, VSHL, VSLI, VSHRN, and VSHLL by an immediate, and the
+   modified immediates of VMOV, VMVN, VORR, and VBIC. *)
+let make_simd_shift_case input =
+  let shift = simd_u lor 0x007ff0ff in
+  simd_case
+   (random_form
+     [0xf2800010,shift; 0xf2800410,shift; 0xf2800510,shift;
+      0xf2800810,shift; 0xf2800a10,shift;
+      0xf2800010,simd_u lor 0x0047ff6f])
+   input;;
+
+(* The miscellaneous two-register operations, VEXT, VTBL, whose indices are
+   as often in range as not, and VDUP of a scalar. *)
+let make_simd_misc_case input =
+  let w = random_form
+   [0xf3b00000,0x004ff7ef;
+    0xf2b00000,0x004fffef;
+    0xf3b00800,0x004ff3af;
+    0xf3b00c00,0x004ff06f] in
+  let input =
+    if w land 0xffb00c50 = 0xf3b00800 then
+      with_qbytes (simd_mnum w / 2) (fun () -> Random.int 40) input
+    else input in
+  simd_case w input;;
+
+(* VMLAL and VMULL, of registers or by a scalar, and VMULL.P8. *)
+let make_simd_long_case input =
+  let long = simd_u lor simd_size lor 0x004ff0af in
+  simd_case
+   (random_form
+     [0xf2800800,long; 0xf2800c00,long; 0xf2800e00,long;
+      0xf2800240,long; 0xf2800a40,long])
+   input;;
+
+(* The crypto extension: SHA1C, SHA1P, SHA1M, SHA1SU0, SHA256H, SHA256H2,
+   and SHA256SU1; AESE, AESD, AESMC, and AESIMC; SHA1H, SHA1SU1, and
+   SHA256SU0; and VMULL.P64. *)
+let make_simd_crypto_case input =
+  simd_case
+   (random_form
+     [0xf2000c40,(simd_regs land lnot 0x40) lor simd_u lor simd_size;
+      0xf3b00300,0x0040f0ef;
+      0xf3b902c0,0x0040f02f;
+      0xf3ba0380,0x0040f06f;
+      0xf2a00e00,0x004ff0af])
+   input;;
+
+(* VMOV from a core register to a lane, and VDUP from a core register,
+   under a random condition. *)
+let make_simd_core_case input =
+  let cond = random_condition () in
+  let w = random_form
+   [(cond lsl 28) lor 0x0e000b10,0x006f00e0;
+    (cond lsl 28) lor 0x0e800b10,0x006f00a0] in
+  simd_case (w lor (random_register () lsl 12)) input;;
+
+(* A base for a transfer of `len` bytes at an `align`-byte boundary: SP,
+   at the buffer's middle, or, as often, a register that holds such an
+   address in the buffer, with the base's offset into the buffer. *)
+let simd_base input len align =
+  if Random.bool () && len <= 128 then 13,128,input else
+  let rn = random_register () in
+  let offset = align * Random.int ((256 - len) / align + 1) in
+  rn,offset,
+  with_register rn (num (Lazy.force scratch_address + offset)) input;;
+
+(* VLD1 and VST1 of one to four registers, with or without an alignment
+   qualifier, and without writeback, with writeback by the length, or by a
+   register that holds a small offset. *)
+let make_simd_vld1_case input =
+  let regs = 1 + Random.int 4 in
+  let ty = el (regs - 1) [7; 10; 6; 2] in
+  let align =
+    Random.int (if regs = 4 then 4 else if regs = 2 then 3 else 2) in
+  let d = Random.int (33 - regs) in
+  let rn,_,input =
+    simd_base input (8 * regs) (if align = 0 then 1 else 4 lsl align) in
+  let rm,input =
+    match Random.int 3 with
+      0 -> 15,input
+    | 1 -> 13,input
+    | _ ->
+        let rec other () =
+          let r = random_register () in if r = rn then other () else r in
+        let rm = other () in
+        rm,with_register rm (num (4 * Random.int 17)) input in
+  { case_instruction =
+      0xf4000000 lor ((d lsr 4) lsl 22) lor (bit (Random.bool ()) lsl 21) lor
+      (rn lsl 16) lor ((d land 15) lsl 12) lor (ty lsl 8) lor
+      (Random.int 4 lsl 6) lor (align lsl 4) lor rm;
+    case_memop = true; case_input = input };;
+
+(* VLD1 and VST1 of one lane, and VLD1 to every lane of one or two
+   registers, at a word-aligned address, which any alignment qualifier
+   allows. *)
+let make_simd_lane_case input =
+  let rn,_,input = simd_base input 8 4 in
+  let rm = if Random.bool () then 15 else 13 in
+  let w = random_form
+   [0xf4800000 lor (rn lsl 16) lor rm,0x0060fcf0;
+    0xf4a00c00 lor (rn lsl 16) lor rm,0x0040f0f0] in
+  { case_instruction = w; case_memop = true; case_input = input };;
+
+(* VLDM and VSTM of 1 to 16 registers, increment after or decrement before
+   with writeback, VPUSH and VPOP among them, and VLDR and VSTR, under a
+   random condition. *)
+let make_simd_vldm_case input =
+  let cond = random_condition () and load = Random.bool () in
+  let n = 1 + Random.int 16 in
+  let d = Random.int (33 - n) in
+  let mode = Random.int 3 in
+  let rn,offset,input =
+    if Random.bool () then 13,128,input else
+    let rn = random_register () in
+    let offset =
+      match mode with
+        0 -> 4 * Random.int ((256 - 8 * n) / 4 + 1)
+      | 1 -> 8 * n + 4 * Random.int ((256 - 8 * n) / 4 + 1)
+      | _ -> 4 * Random.int 63 in
+    rn,offset,with_register rn (num (Lazy.force scratch_address + offset))
+                 input in
+  let p,u,w,imm8 =
+    match mode with
+      0 -> false,true,Random.bool (),2 * n
+    | 1 -> true,false,true,2 * n
+    | _ ->
+        let u = Random.bool () in
+        let limit = if u then (256 - 8 - offset) / 4 else offset / 4 in
+        true,u,false,Random.int (limit + 1) in
+  let d = if mode = 2 then Random.int 32 else d in
+  { case_instruction =
+      (cond lsl 28) lor (0b110 lsl 25) lor (bit p lsl 24) lor (bit u lsl 23) lor
+      ((d lsr 4) lsl 22) lor (bit w lsl 21) lor (bit load lsl 20) lor
+      (rn lsl 16) lor ((d land 15) lsl 12) lor 0xb00 lor imm8;
+    case_memop = true; case_input = input };;
+
+(* VLDM, VSTM, VLDR, and VSTR whose condition fails, through a register
+   that holds any address from 64 KiB to 64 KiB short of the top. *)
+let make_simd_skipped_case input =
+  let rec failing () =
+    let cond = Random.int 14 in
+    if condition_holds cond input then failing () else cond in
+  let cond = failing () and rn = random_register () in
+  let input =
+    with_register rn
+      (num 0x10000 +/ mod_num (random32 32) (num 0xfffe0000)) input in
+  let n = 1 + Random.int 16 in
+  let d = Random.int (33 - n) in
+  let p,u,w,imm8 =
+    match Random.int 3 with
+      0 -> false,true,Random.bool (),2 * n
+    | 1 -> true,false,true,2 * n
+    | _ -> true,Random.bool (),false,Random.int 256 in
+  { case_instruction =
+      (cond lsl 28) lor (0b110 lsl 25) lor (bit p lsl 24) lor (bit u lsl 23) lor
+      ((d lsr 4) lsl 22) lor (bit w lsl 21) lor
+      (bit (Random.bool ()) lsl 20) lor (rn lsl 16) lor ((d land 15) lsl 12) lor
+      0xb00 lor imm8;
+    case_memop = true; case_input = input };;
+
 let caseclasses =
   [make_dp_reg_case; make_dp_imm_case; make_movw_movt_case;
    make_branch_case; make_ldst_case; make_dp_rsr_case; make_dp_pc_case;
    make_multiply_case; make_misc_case; make_bl_case; make_bx_case;
    make_ldst_reg_case; make_ldstd_case; make_ldstm_case; make_load_pc_case;
-   make_literal_case; make_skipped_case];;
+   make_literal_case; make_skipped_case;
+   make_simd_3same_case; make_simd_shift_case; make_simd_misc_case;
+   make_simd_long_case; make_simd_crypto_case; make_simd_core_case;
+   make_simd_vld1_case; make_simd_lane_case; make_simd_vldm_case;
+   make_simd_skipped_case];;
 
 let make_case kind =
   el kind caseclasses (make_input_state (Random.int 65));;
@@ -496,7 +742,7 @@ let make_case kind =
    address that would fault. *)
 let directed_input assignments =
   let base = map (fun _ -> num_0) (0--13) @ map (fun _ -> num_0) (1--4) @
-             [num 128; num_0] @ map (fun _ -> num_0) (0--63) in
+             [num 128; num_0] @ map (fun _ -> num_0) (0--127) in
   itlist (fun (i,v) state ->
             List.mapi (fun j x -> if j = i then v else x) state)
     assignments base;;
@@ -598,13 +844,17 @@ let AARCH32_ADDRESSES_TAC =
     RULE_ASSUM_TAC(CONV_RULE(REWRITE_CONV ths THENC WORD_REDUCE_CONV)) THEN
     REWRITE_TAC ths THEN CONV_TAC WORD_REDUCE_CONV THEN ASM_REWRITE_TAC[]));;
 
-(* The buffer is word-aligned, which LDRD, STRD, LDM, and STM need of SP. *)
+(* The buffer is word-aligned, which LDRD, STRD, LDM, and STM need of SP,
+   and aligned to 32 bytes, which an Advanced SIMD transfer's alignment
+   qualifier needs of its address. *)
 let AARCH32_SCRATCH_ALIGNED_TAC =
   USE_THEN "scratch" (fun scratch ->
     let eq = REWRITE_RULE[WORD_VAL] (AP_TERM `word:num->int32` scratch) in
-    let th = AP_TERM `aligned 4:int32->bool` eq in
-    ASSUME_TAC(EQ_MP (SYM th)
-     (EQT_ELIM(AARCH32_ALIGNED_NUMERAL_CONV(rhs(concl th))))));;
+    MAP_EVERY (fun n ->
+      let th = AP_TERM (mk_comb(`aligned:num->int32->bool`,n)) eq in
+      ASSUME_TAC(EQ_MP (SYM th)
+       (EQT_ELIM(AARCH32_ALIGNED_NUMERAL_CONV(rhs(concl th))))))
+     [`4`; `32`]);;
 
 (* What is known of each of the buffer's words, restated at the word's
    offset from `pc`, where a literal load reads it. *)
@@ -646,8 +896,9 @@ let AARCH32_SCRATCH_REGISTERS_TAC =
     RULE_ASSUM_TAC (fun th ->
       match concl th with
         Comb(Comb(Const("=",_),Comb(Comb(Const("read",_),Const(_,_)),_)),
-             Comb(Const("word",_),n))
-          when is_numeral n && dest_numeral n >=/ num base &&
+             (Comb(Const("word",_),n) as w))
+          when type_of w = `:int32` && is_numeral n &&
+               dest_numeral n >=/ num base &&
                dest_numeral n <=/ num (base + 256) ->
             let k = Num.int_of_num (dest_numeral n) - base in
             let address =
@@ -667,7 +918,7 @@ let tac_before memop literal =
   REWRITE_TAC[NONOVERLAPPING_CLAUSES] THEN STRIP_TAC THEN
   REWRITE_TAC[aarch32_regfile; CONS_11; VAL_WORD_GALOIS;
               BITVAL_EQ_0; BITVAL_EQ_1] THEN
-  REWRITE_TAC[DIMINDEX_32] THEN
+  REWRITE_TAC[DIMINDEX_32; DIMINDEX_128] THEN
   CONV_TAC NUM_REDUCE_CONV THEN
   ENSURES_INIT_TAC "s0" THEN
   AARCH32_SCRATCH_REGISTERS_TAC THEN
@@ -684,8 +935,12 @@ and tac_after memop =
    else ALL_TAC) THEN
   REWRITE_TAC AARCH32_OFFSET_RULES THEN
   AARCH32_ADDRESSES_TAC THEN
-  CONV_TAC(DEPTH_CONV(WORD_RED_CONV ORELSEC WORD_NUM_RED_CONV ORELSEC
-                      INT_RED_CONV ORELSEC NUM_RED_CONV)) THEN
+  (* The crypto extension's operations reduce as their extra conversions
+     say, and VTBL's lanes by whether each index is in range. *)
+  CONV_TAC(TOP_DEPTH_CONV(WORD_RED_CONV ORELSEC WORD_NUM_RED_CONV ORELSEC
+                          INT_RED_CONV ORELSEC NUM_RED_CONV ORELSEC
+                          apply_extra_word_convs ORELSEC
+                          GEN_REWRITE_CONV I [COND_CLAUSES])) THEN
   ASM_REWRITE_TAC[] THEN
   CONV_TAC WORD_REDUCE_CONV THEN
   REWRITE_TAC[] THEN
@@ -707,10 +962,10 @@ let cosimulate_case test_case =
         (String.concat " " details);
       mk_numeral (num test_case.case_instruction),false
   | Cosim_ok output_words ->
-      let output_state = map num_of_string output_words in
+      let output_state = regfile_of_words (map num_of_string output_words) in
       let goal = subst
         [ibyteterm,`ibytes:byte list`;
-         mk_flist (map mk_numeral test_case.case_input),
+         mk_flist (map mk_numeral (regfile_of_words test_case.case_input)),
          `input_state:num list`;
          mk_flist (map mk_numeral output_state),`output_state:num list`;
          mk_small_numeral (Lazy.force slot_address),`slot_address:num`;

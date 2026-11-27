@@ -29,7 +29,7 @@ Keys, and the adapter's own copies of secrets such as PKCS#8 documents, Ed25519 
 These items are left out, so code using them fails to build:
 
 - `signature::PqdsaPrivateKey::as_raw_bytes` and `encoding::PqdsaPrivateKeyRaw`: rind does not export an ML-DSA key's expanded form. `to_pkcs8v1` encodes its seed.
-- `kem::DecapsulationKey::new`, `kem::DecapsulationKey::key_bytes`, and `kem::DecapsulationKeyBytes`: rind neither imports nor exports an ML-KEM private key.
+- `kem::DecapsulationKey::new`, `kem::DecapsulationKey::key_bytes`, and `kem::DecapsulationKeyBytes`, which the adapter does not wrap yet.
 - SHA-224 (`digest::SHA224*`, `hmac::HMAC_SHA224`, `signature::ECDSA_P521_SHA224_*`), ECDSA with SHA-1 or SHA-3 (`signature::ECDSA_*_SHA1_*`, `signature::ECDSA_*_SHA3_*`), and ECDSA on secp256k1 (`signature::ECDSA_P256K1_*`).
 - AES-GCM-SIV (`aead::AES_*_GCM_SIV`); AES in ECB, CFB, or OFB mode (`cipher::*::ecb`, `cipher::*::ecb_pkcs7`, `cipher::*::cfb*`, `cipher::*::ofb`, `cipher::OperatingMode::ECB`, `cipher::OperatingMode::CFB*`, `cipher::OperatingMode::OFB`, `cipher::AES_CFB_IV_LEN`, `cipher::AES_OFB_IV_LEN`); ISO 10126 padding (`cipher::PaddedBlockDecryptingKey::cbc_iso10126`); DES under `legacy-des` (`cipher::DES_*`, `cipher::AlgorithmId::Des*`, `cipher::*Context::Iv64`); CMAC (`cmac`); the KBKDF and SSKDF key derivations (`kdf`); the TLS 1.2 PRF (`tls_prf`); and the streaming cipher contexts (`cipher::Streaming*`, `cipher::BufferUpdate`).
 - `aead::chacha20_poly1305_openssh`: rind has no SSH consumer.
@@ -45,8 +45,7 @@ These items are left out, so code using them fails to build:
 - ECDSA and ECDH public keys in the X9.62 hybrid form are refused, and so are
   ECDSA private keys whose curve is given by explicit parameters rather than
   its name, which AWS-LC loads when they match a curve it knows.
-- rind cannot back PKCS#8 private keys on secp256k1, P-224, or brainpoolP256r1, or DSA keys. `signature::PqdsaKeyPair::from_pkcs8` refuses one as `WrongAlgorithm` from its algorithm identifier alone, so a malformed key of those types gets `WrongAlgorithm` where aws-lc-rs may report a parse error (`InvalidEncoding`).
-- rind signs only with an RSA modulus of 2048 to 8192 bits, so it cannot back an RSA or RSASSA-PSS private key outside that range. `signature::PqdsaKeyPair::from_pkcs8` refuses one as `WrongAlgorithm` from its modulus length alone, without checking its private components, so an inconsistent key of that size gets `WrongAlgorithm` where aws-lc-rs reports `InvalidEncoding`.
+- rind cannot back EC keys on P-224, secp256k1, or the brainpool curves, DSA and DH keys, or RSA and RSASSA-PSS private keys outside the 2048 to 8192 bits it signs with. A loader refusing one as another algorithm checks it as AWS-LC parses it and names AWS-LC's reason: for a PKCS#8 EC key it computes the scalar's point, and for an RSA key it checks `RSA_check_key`'s relations, both in constant time, so a key whose parts disagree is `InvalidEncoding` as in aws-lc-rs.
 - An RSA public key, from `rsa::PublicKey::from_der` or elsewhere, must have a modulus of 1024 to 8192 bits, the range rind verifies with.
 - `try_fips_cpu_jitter_entropy()` fails, where aws-lc-rs's default build answers `Ok`: rind seeds from the operating system, not from CPU jitter.
 - An RSA-OAEP private key is bound to one algorithm in rind, so a `rsa::PrivateDecryptingKey` loads the key again the first time it decrypts with each other algorithm, and keeps it.

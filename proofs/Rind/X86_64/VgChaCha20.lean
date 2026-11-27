@@ -209,8 +209,9 @@ theorem words_spec {B : Usize} (W : Usize) (bytes : Std.Array U8 B) (hB : B.val 
   intro i h1 h2
   simp [List.getElem_range', List.getElem?_eq_getElem h2]
 
-/-- `ChaCha20::new` holds the key and the counter and nonce as words, and
-picks a VG routine where the CPU has AVX2. -/
+/-- `ChaCha20::new` holds the key and the counter and nonce as words, picks a
+VG routine where either VG feature check returns a token (AVX2 with the BMI2
+they require), and keeps the SSSE3 check's result. -/
 @[step]
 theorem new_spec (key : Std.Array U8 32#usize) (counter_nonce : Std.Array U8 16#usize)
     (a : Option low.x86_64.cpu.HaveAvx512Vl) (b : Option low.x86_64.cpu.HaveAvx2)
@@ -218,7 +219,7 @@ theorem new_spec (key : Std.Array U8 32#usize) (counter_nonce : Std.Array U8 16#
     (hb : low.x86_64.cpu.HaveAvx2.check = ok b) (hs : low.x86_64.cpu.HaveSsse3.check = ok s) :
     low.x86_64.chacha20.ChaCha20.new key counter_nonce ⦃ c =>
       wordBytes c.key.val = bvs key.val ∧ wordBytes c.counter_nonce.val = bvs counter_nonce.val ∧
-      (c.vg.isSome ↔ (a.isSome ∨ b.isSome)) ⦄ := by
+      (c.vg.isSome ↔ (a.isSome ∨ b.isSome)) ∧ c.ssse3 = s ⦄ := by
   unfold low.x86_64.chacha20.ChaCha20.new
   simp only [ha, hb, hs, bind_ok]
   step with words_spec 8#usize key (by simp) as ⟨k, hk⟩

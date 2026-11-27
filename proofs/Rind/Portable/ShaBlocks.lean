@@ -1,13 +1,14 @@
 import Rind.Portable.Blockwise
+import Rind.Portable.Sha256Compress
 open Aeneas Aeneas.Std Result rind.spec
 
 /-!
 # SHA-1 and SHA-256's block functions on the portable backend
 
-No proof covers SHA-256's block function yet, `low::generic::sha256`,
-aws-lc's C in Rust, or SHA-1's, `low::generic::sha1`, so the SHA-256
-theorems take `Sha256Blocks` and the SHA-1 theorems `Sha1Blocks`, each the
-block function's contract, as on x86_64 and aarch64.
+`Rind.Portable.Sha256Compress` proves SHA-256's block function,
+`low::generic::sha256`, aws-lc's C in Rust, so `Sha256Blocks` holds only its
+entry checks. No proof covers SHA-1's, `low::generic::sha1`, so the SHA-1
+theorems take `Sha1Blocks`, its contract, as on x86_64 and aarch64.
 `Rind.X86_64.ShaBlocks` states the same names for x86_64.
 -/
 
@@ -22,20 +23,18 @@ structure Sha1Blocks : Prop where
   sha1 : Compresses sha1.compress low.generic.sha1.sha1_compress_blocks
 
 /-- What the SHA-256 theorems assume of the code below rind's padding on the
-portable backend: the block function computes FIPS 180-4's, and the entry
-checks pass. None reads an input. -/
+portable backend: the entry checks pass. Neither reads an input. -/
 structure Sha256Blocks : Prop where
   entry : ∃ e, low.entry.Entry.new_secret = ok e
   held : low.entry.Entry.assert_held = ok ()
-  sha256 : Compresses sha256.compress low.generic.sha256.sha256_compress_blocks
 
 /-- SHA-256's block function as the backend exports it, which calls
 `low::generic::sha256`'s. -/
-theorem sha256_compress_blocks_spec (hb : Sha256Blocks) :
+theorem sha256_compress_blocks_spec (_ : Sha256Blocks) :
     Compresses sha256.compress low.portable.sha.sha256_compress_blocks := by
   intro h b hl
   unfold low.portable.sha.sha256_compress_blocks
-  exact hb.sha256 h b hl
+  exact generic_sha256_compress_blocks_spec h b hl
 
 /-- SHA-256's block function as `Sha256State` calls it. -/
 theorem sha256_block_spec (hb : Sha256Blocks) : Compresses sha256.compress mid.sha2.Sha256State.compress := by

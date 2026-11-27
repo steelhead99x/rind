@@ -55,7 +55,7 @@ per library on how to move it to rind.
 <!-- comparison: `admin/bench-report render` writes this table -->
 | Library | Build tools beyond rustc | Lacks, of the 22 algorithms benchmarked | Formally verified | Fastest, or within 10% |
 |---|---|---|---|---|
-| rind | [none](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#build-cost) | none | [aarch64: SHA-256 (some CPUs), SHA-512, SHA-3, HMAC (some CPUs), HKDF (some CPUs), X25519 (some CPUs), Ed25519 (some CPUs, some operations), P-256, P-384; x86_64: AES-GCM (some CPUs), SHA-256 (some CPUs), SHA-512 (some CPUs), SHA-3, HMAC (some CPUs), HKDF (some CPUs), X25519, Ed25519 (some CPUs), P-256 (some CPUs), P-384, RSA (some CPUs, some operations)](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#verified-code) | [538 of its 560 times](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#speed) |
+| rind | [none](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#build-cost) | none | [aarch64: ChaCha20-Poly1305 (some CPUs), XChaCha20-Poly1305 (some CPUs), SHA-256 (some CPUs), SHA-512, SHA-3, HMAC (some CPUs), HKDF (some CPUs), X25519 (some CPUs), Ed25519 (some CPUs, some operations), P-256, P-384; portable: SHA-256, SHA-512, HMAC, HKDF; x86_64: AES-GCM (some CPUs), ChaCha20-Poly1305 (some CPUs), XChaCha20-Poly1305 (some CPUs), SHA-256 (some CPUs), SHA-512 (some CPUs), SHA-3, HMAC (some CPUs), HKDF (some CPUs), X25519, Ed25519 (some CPUs), P-256 (some CPUs), P-384, RSA (some CPUs, some operations)](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#verified-code) | [538 of its 560 times](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#speed) |
 | [aws-lc-rs](https://github.com/aws/aws-lc-rs) | [cc](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#build-cost) | XChaCha20-Poly1305 (aws-lc has it, through aws-lc-sys), Blind RSA, OPRF, VRF, SPAKE2+, Argon2id | [x86_64: SHA-512 (some CPUs)](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#verified-code) | [126 of its 464 times](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#speed) |
 | [ring](https://github.com/briansmith/ring) | [cc](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#build-cost) | XChaCha20-Poly1305, SHA-3, P-521, ML-KEM, ML-DSA, HPKE, Blind RSA, OPRF, VRF, SPAKE2+, Argon2id | [none](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#verified-code) | [75 of its 304 times](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#speed) |
 | [RustCrypto + dalek](https://github.com/RustCrypto) | [none](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#build-cost) | none | [none](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#verified-code) | [39 of its 452 times](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#speed) |
@@ -170,7 +170,7 @@ Each crate's README shows its setup.
 | [rind-object-store][] | S3, Azure, and GCS request signing through [object_store](https://github.com/apache/arrow-rs-object-store) |
 | [rind-rcgen][] | certificates through [rcgen](https://github.com/rustls/rcgen) |
 | [rind-rand-core][] | rind's random source as a [rand_core](https://github.com/rust-random/rand) RNG, such as RustCrypto's crates take |
-| [rind-openssl][] | X25519 and Ed25519 for whatever links OpenSSL 3, as a provider its configuration loads; built from source |
+| [rind-openssl][] | X25519, Ed25519, ML-KEM, and ML-DSA for whatever links OpenSSL 3, as a provider its configuration loads; built from source |
 | [rind-dart][] | Dart and Flutter, through FFI, as the `rind` package on [pub.dev](https://pub.dev/packages/rind) |
 | [rind_cryptography][] | Dart and Flutter, as the `rind_cryptography` package, with the `cryptography` package's API on rind |
 | [rind-python][] | Python, as the `pyrind` package on PyPI, with rind's own API |
@@ -264,6 +264,7 @@ feature.
 rind is below 1.0, so a minor release is its breaking one. There is no date
 for 1.0: it comes once the API takes one shape, every key type loading,
 exporting, and naming things the same way, and no breaking change is planned.
+[STABILITY.md][stability] says what is checked and what is open.
 
 - A patch release, such as 0.3.1 to 0.3.2, adds API and fixes bugs: code
   that built against an earlier patch of the same minor still builds. A fix
@@ -392,3 +393,4 @@ from other projects keeps its source's license, which [LICENSE] lists.
 [architecture]: https://github.com/kixel-ai/rind/blob/main/ARCHITECTURE.md
 [audit]: https://github.com/kixel-ai/rind/blob/main/AUDIT.md
 [dit-barrier]: https://github.com/kixel-ai/rind/blob/main/benchmarks/apple-dit-barrier.md
+[stability]: https://github.com/kixel-ai/rind/blob/main/STABILITY.md

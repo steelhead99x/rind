@@ -5,10 +5,10 @@
 //! textbook reference's P-384 and P-521. RustCrypto's `p256`, and `p384`
 //! without its optional fiat backend, would share nothing there either.
 //!
-//! `tests/crosschecks.rs` and the fuzz targets include this file, which
-//! takes the textbook reference as `super::reference` from the module that
-//! includes it and picks by `rind_backend`, which the fuzz crate's build
-//! script sets as rind's does.
+//! `tests/crosschecks_curves.rs` and the fuzz targets include this file,
+//! which takes the textbook reference as `super::reference` from the module
+//! that includes it and picks by `rind_backend`, which the fuzz crate's
+//! build script sets as rind's does.
 
 /// ECDH and ECDSA on one NIST curve, over big-endian scalars, SEC 1
 /// points, and fixed-width signatures.

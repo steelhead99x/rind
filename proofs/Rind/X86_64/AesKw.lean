@@ -53,11 +53,11 @@ theorem dec_bytes {alg : Algorithm} {key : List (BitVec 8)} {k : low.x86_64.aes.
   obtain ⟨hwk, rfl, hwk_is⟩ := hk
   rw [hw_decrypt_block_spec hwk alg _ hwk_is b, WP.spec_ok, store_bytes]; rfl
 
-/-- `mid::aes::expand_key` passes `AesKey::new` its key unchanged. -/
-theorem expand_key_eq (key : Slice U8) (hk : key.length ≤ 32) :
-    mid.aes.expand_key key = low.x86_64.aes.AesKey.new key := by
-  have h1 : (Slice.len key).val ≤ (Std.Array.repeat 32#usize 0#u8).to_slice.length := by simpa using hk
-  simp only [mid.aes.expand_key, core.array.Array.index_mut, core.ops.index.IndexMutSlice,
+/-- `expand_copy` passes `AesKey::new` its key unchanged. -/
+theorem expand_copy_eq (n : Usize) (key : Slice U8) (hn : n.val ≤ 32) (hk : key.length = n.val) :
+    mid.aes.expand_copy n key = low.x86_64.aes.AesKey.new key := by
+  have h1 : n.val ≤ (Std.Array.repeat 32#usize 0#u8).to_slice.length := by simpa using hn
+  simp only [mid.aes.expand_copy, core.array.Array.index_mut, core.ops.index.IndexMutSlice,
     core.slice.index.Slice.index_mut, core.slice.index.SliceIndexRangeToUsizeSlice,
     core.slice.index.SliceIndexRangeToUsizeSlice.index_mut, h1, ite_true, bind_ok,
     core.slice.Slice.copy_from_slice, low.ct.secret_slice]
@@ -65,11 +65,19 @@ theorem expand_key_eq (key : Slice U8) (hk : key.length ≤ 32) :
   split
   · simp only [bind_ok]
   · rename_i hne
-    exact absurd (by apply UScalar.eq_of_val_eq; simpa [List.slice] using hk) hne
+    exact absurd (by apply UScalar.eq_of_val_eq; simpa [List.slice, hn] using hk.symm) hne
+
+/-- `mid::aes::expand_key` passes `AesKey::new` its key unchanged. -/
+theorem expand_key_eq (key : Slice U8) (hk : key.length = 16 ∨ key.length = 24 ∨ key.length = 32) :
+    mid.aes.expand_key key = low.x86_64.aes.AesKey.new key := by
+  rcases hk with hk | hk | hk
+  · rw [expand_key_16_eq key hk]; exact expand_copy_eq _ key (by simp) (by simpa using hk)
+  · rw [expand_key_24_eq key hk]; exact expand_copy_eq _ key (by simp) (by simpa using hk)
+  · rw [expand_key_32_eq key hk]; exact expand_copy_eq _ key (by simp) (by simpa using hk)
 
 theorem aes_key_new_spec (h : RunsAesHw) (alg : Algorithm) (key : Slice U8) (hk : key.length = 4 * nk alg) :
     low.x86_64.aes.AesKey.new key ⦃ k => AesIs alg (bvs key.val) k ⦄ := by
-  rw [← expand_key_eq key (by cases alg <;> simp [nk] at hk ⊢ <;> omega)]
+  rw [← expand_key_eq key (by cases alg <;> simp only [nk] at hk <;> omega)]
   have hl : (bvs key.val).length = 4 * nk alg := by simp [bvs, hk]
   cases alg
   · exact WP.spec_mono (expand_key128_spec h key (by simpa [nk] using hk))

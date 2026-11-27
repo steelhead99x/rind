@@ -18,8 +18,9 @@ qemu. iOS devices' code is only built.
   [ALGORITHMS.md](ALGORITHMS.md)), `rind::cpu::has_aes_hardware()` is false, and
   rind-rustls and rind-dimpl prefer ChaCha20-Poly1305. Where the CPU has
   SVE2, as Armv9 cores from Neoverse N2 and Cortex-A710 on do,
-  ChaCha20-Poly1305 runs [verified-garbage]'s SVE2 assembly, and aws-lc's
-  NEON assembly otherwise. Where the CPU has DIT, as Armv8.4 cores and
+  ChaCha20-Poly1305 runs [verified-garbage]'s SVE2 assembly; otherwise it
+  runs verified-garbage's NEON assembly or aws-lc's, whichever is faster at
+  the message's length (see [ALGORITHMS.md](ALGORITHMS.md)). Where the CPU has DIT, as Armv8.4 cores and
   Apple's do, secret-dependent code runs with data-independent timing, set
   and cleared in each call unless `rind::cpu::Dit::hold()` holds it across a
   batch of calls, as Arm
@@ -91,11 +92,11 @@ qemu. iOS devices' code is only built.
   NEON, X25519's shared secret runs [BoringSSL]'s assembly. SHA-3's, ML-KEM's,
   and ML-DSA's Keccak-f runs [OpenSSL]'s assembly, on NEON where the CPU has it,
   and so do P-256's field multiplication, squaring, addition, and subtraction.
-  That assembly is A32 on every target, but `armv7-linux-androideabi` and
-  the `thumbv7` targets build Rust as Thumb-2, the inline assembly of the
-  constant-time compares included, so the compares' proofs (see
-  [proofs/README.md](proofs/README.md)) cover only targets that build A32,
-  such as `armv7-unknown-linux-gnueabihf`.
+  That assembly, the constant-time compares' included, is A32 on every
+  target, though `armv7-linux-androideabi` and the `thumbv7` targets build
+  Rust as Thumb-2, so the compares' proofs (see
+  [proofs/README.md](proofs/README.md)), which hold for a caller in either
+  instruction set, cover every target.
 
   On a Raspberry Pi 2 B's Cortex-A7 (900 MHz, NEON, no crypto extension),
   `armv7-unknown-linux-gnueabihf`, rind runs the key-derivation and public-key
@@ -187,7 +188,7 @@ qemu. iOS devices' code is only built.
   compiles rind again, so its JIT may turn a select into a branch.
   Bare-metal targets (`target_os = "none"`) build the library without std, on
   `alloc`: the program supplies a global allocator and a getrandom backend.
-  `just check` lints them in debug and release (`just bare-metal`) whenever a
+  `just ci` lints them in debug and release (`just bare-metal`) whenever a
   change reaches the portable or x86_64 backend: `thumbv6m-none-eabi` and
   `riscv32imc-unknown-none-elf`, which lack compare-and-swap and so keep no
   reuse cache, `thumbv7em-none-eabihf`, `armv7a-none-eabi`,

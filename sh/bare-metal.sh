@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Lint rind's library for bare-metal targets (`target_os = "none"`), where it
-# builds without std, as `just bare-metal` and `just check`'s cross module run
+# builds without std, as `just bare-metal` and `just ci`'s cross module run
 # it. Clippy does not generate code, so each target that keeps an assembly
 # backend is also built: that assembles its `global_asm`. `xtensa` lints the
 # ESP32's Xtensa targets instead. Those are tier 3 and need espup's toolchain

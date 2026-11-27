@@ -10,7 +10,7 @@
 use core::arch::x86_64::*;
 
 use super::cpu::HaveAvx512ForMlKem;
-use super::mlkem_sample_poly_ntt_8x::{_sha3_keccak8_f1600, RC};
+use super::sha3_keccak8_f1600::{RC, keccak8_f1600};
 
 /// Computes the first `count` of eight 128-byte PRF outputs.
 type Fallback = fn(&[[u8; 40]; 8], &mut [[u8; 128]; 8], usize);
@@ -57,7 +57,7 @@ fn shake256_8x_avx512(
     // The pad's final bit, at the end of SHAKE256's 136-byte rate.
     states[16] = _mm512_set1_epi64(0x8000_0000_0000_0000_u64 as i64);
 
-    _sha3_keccak8_f1600(&mut states, &RC);
+    keccak8_f1600(&mut states, &RC);
 
     // The 128 output bytes are the first 16 words of each state.
     let low = transpose_8x8(states[..8].try_into().unwrap());
@@ -139,7 +139,11 @@ mod tests {
         let mut rng = Rng(7);
         for _ in 0..8 {
             let inputs = inputs(&mut rng);
-            ct::secret_slice(inputs.as_flattened());
+            // Only PRF's seed is secret: its counter and SHAKE's padding are
+            // public, and `shake256_batch` checks the padding byte.
+            for input in &inputs {
+                ct::secret_slice(&input[..32]);
+            }
             let mut ours = [[0; 128]; 8];
             mlkem_shake256_8x(&inputs, &mut ours, 8, |inputs, outputs, count| {
                 for (input, output) in inputs.iter().zip(outputs.iter_mut()).take(count) {

@@ -31,6 +31,19 @@ loadt "common/elf.ml";;
 loadt "common/safety.ml";;
 loadt "common/execution.ml";;
 
+(* The crypto extension's AES rounds and SHA-256 steps are the aarch64
+   model's, and its SHA-1 steps this model's own. *)
+
+loadt "arm/proofs/sha256.ml";;
+loadt "arm/proofs/utils/aes.ml";;
+loadt "aarch32/proofs/sha1.ml";;
+
+extra_word_CONV :=
+  [SHA256H_REDUCE_CONV; SHA256H2_REDUCE_CONV; SHA256SU0_REDUCE_CONV;
+   SHA256SU1_REDUCE_CONV; AESE_REDUCE_CONV; AESMC_REDUCE_CONV;
+   AESD_REDUCE_CONV; AESIMC_REDUCE_CONV; SHA1_REDUCE_CONV] @
+  !extra_word_CONV;;
+
 loadt "aarch32/proofs/instruction.ml";;
 loadt "aarch32/proofs/decode.ml";;
 loadt "aarch32/proofs/aarch32.ml";;

@@ -1,15 +1,19 @@
 name: Queue
 
 # GitHub's merge queue tests each picked PR on top of main, one at a time, on
-# the host's self-hosted runner, and merges exactly the tree it tested. When the
-# queue drops a PR, kixel-ai/quest's queue watcher on the host runs the land
-# fixer and re-enqueues it at the back of the queue.
+# the self-hosted runners, and merges exactly the tree it tested. When the
+# queue drops a PR, kixel-ai/quest's queue watcher on the x86_64 host runs
+# the land fixer and re-enqueues it at the back of the queue.
 #
-# `main`'s ruleset requires the build's `Queue build / Build` context. GitHub
-# admits a PR to the queue only once its required checks pass on the PR itself,
-# so the build also reports, as skipped, on main pull requests; a skipped job
-# satisfies the requirement. Only the merge group build runs code, and only a
-# maintainer's pick enters the queue.
+# `main`'s ruleset requires the build's context, `Queue build / Build`, and
+# will require its aarch64 jobs' `Queue build / Build aarch64 macOS` and
+# `Queue build / Build aarch64 Linux` once one merge group has passed both
+# (quest/m0/mac-mini-runner.md); until then they report but gate nothing.
+# GitHub admits a PR to the queue only once its required checks pass on the PR
+# itself, so the build also reports, as skipped, on main pull requests; a
+# skipped job satisfies the requirement.
+# Only the merge group build runs code, and only a maintainer's pick enters
+# the queue.
 on:
   pull_request:
     branches: [main]
@@ -44,8 +48,9 @@ jobs:
   # since the group admits that workflow only at refs/heads/main: a PR's edit to
   # queue-build.yml runs only after it lands.
   #
-  # Its job reports `Queue build / Build`, the context main's ruleset requires,
-  # with no job after it waiting on a hosted runner. The call runs on pull
+  # Its jobs report `Queue build / Build` and the aarch64 contexts, which
+  # main's ruleset requires (the aarch64 two once a group has passed them),
+  # with no job after them waiting on a hosted runner. The call runs on pull
   # requests too, where that job skips without a runner; a call skipped here
   # would report no context at all.
   build:
@@ -63,12 +68,14 @@ jobs:
     permissions:
       checks: write
     steps:
-      - name: Report the skipped required context
+      - name: Report the skipped required contexts
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           SHA: ${{ inputs.sha }}
         run: |
           [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::sha must be a full commit SHA" >&2; exit 1; }
-          gh api "repos/$REPO/check-runs" -f 'name=Queue build / Build' -f head_sha="$SHA" -f status=completed -f conclusion=skipped \
-            -f 'output[title]=Queue build / Build' -f 'output[summary]=Skipped on the pull request; the merge queue builds the group.' --silent
+          for name in 'Queue build / Build' 'Queue build / Build aarch64 macOS' 'Queue build / Build aarch64 Linux'; do
+            gh api "repos/$REPO/check-runs" -f "name=$name" -f head_sha="$SHA" -f status=completed -f conclusion=skipped \
+              -f "output[title]=$name" -f 'output[summary]=Skipped on the pull request; the merge queue builds the group.' --silent
+          done

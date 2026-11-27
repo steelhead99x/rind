@@ -8,11 +8,12 @@
 default:
     just --list
 
-# Lints, compiles, and tests only the crates the branch changed plus
-# everything depending on them; `check --all` is the unscoped suite. BASE
-# defaults to the PR base, then a main upstream, then origin/main.
+# check and ci cover only the crates the branch changed plus everything
+# depending on them, and `--all` the whole workspace; check also narrows rind's
+# tests to the primitives it changed (admin/test-scope). BASE defaults to the
+# PR base, then a main upstream, then origin/main.
 
-# Lint, compile, and test what the branch changed since BASE, plus its dependents.
+# Format, lint, and test what the branch changed since BASE, plus its dependents, and run the quick repository lints.
 check $BASE="":
     sh/dispatch.sh check "$BASE"
 
@@ -70,9 +71,10 @@ miri TARGET="x86_64-unknown-linux-gnu":
 openmls *ARGS:
     nix develop --command sh/openmls.sh {{ARGS}}
 
-# Check dependencies against advisories, licenses, and sources in deny.toml.
+# Check dependencies against deny.toml's advisories, licenses, and sources, and supply-chain/'s audits.
 audit:
     cargo deny check
+    cargo vet --locked
 
 # Dispatch every scheduled workflow on the release PR (default: the open one), wait, and record the result on its head.
 release-check *ARGS:

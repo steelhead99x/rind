@@ -17,7 +17,8 @@ codspeed-criterion-compat = { optional = true, version = "6" }
 [target.'cfg(not(target_arch = "xtensa"))'.dev-dependencies]
 aes-gcm = "0.11"
 argon2 = { version = "0.6", default-features = false, features = ["alloc"] }
-blind-rsa-signatures = "0.18"
+# rind's fork: UPSTREAM.md's "blind-rsa-signatures 0.18 does not build on rsa 0.10.0".
+blind-rsa-signatures = { path = "../thirdparty/blind-rsa-signatures" }
 chacha20poly1305 = "0.11"
 criterion = "0.8"
 ed25519-dalek = { version = "3", features = ["alloc", "pkcs8", "rand_core"] }

@@ -239,9 +239,9 @@ fn arm_early_mul() -> bool {
     // Those Linux triples are ARMv6. Stable cfg hides `v6`, and `+v5te` on
     // top of one does not retarget it. A custom JSON is not in this list,
     // even one whose file takes such a name: its `llvm-target` decides.
-    if let Ok(target) = env::var("TARGET")
-        && target_json_text().is_none()
-        && matches!(
+    // No let chains: this crate is edition 2021.
+    let armv6_triple = env::var("TARGET").is_ok_and(|target| {
+        matches!(
             target.as_str(),
             "arm-unknown-linux-gnueabi"
                 | "arm-unknown-linux-gnueabihf"
@@ -249,7 +249,8 @@ fn arm_early_mul() -> bool {
                 | "arm-unknown-linux-musleabihf"
                 | "armeb-unknown-linux-gnueabi"
         )
-    {
+    });
+    if armv6_triple && target_json_text().is_none() {
         return false;
     }
     let names = arch_names();
@@ -386,10 +387,9 @@ fn feature_on(name: &str) -> bool {
 
 fn explicit_feature(name: &str) -> Option<bool> {
     let mut found = None;
-    if let Some(text) = target_json_text()
-        && let Some(features) = json_string_field(&text, "features")
-        && let Some(enabled) = last_sign(&features, name)
-    {
+    if let Some(enabled) = target_json_text().and_then(|text| {
+        json_string_field(&text, "features").and_then(|features| last_sign(&features, name))
+    }) {
         found = Some(enabled);
     }
     if let Ok(encoded) = env::var("CARGO_ENCODED_RUSTFLAGS") {
@@ -406,13 +406,9 @@ fn last_sign(list: &str, name: &str) -> Option<bool> {
     let mut found = None;
     for token in list.split(',') {
         let token = token.trim();
-        if let Some(feature) = token.strip_prefix('+')
-            && feature == name
-        {
+        if token.strip_prefix('+') == Some(name) {
             found = Some(true);
-        } else if let Some(feature) = token.strip_prefix('-')
-            && feature == name
-        {
+        } else if token.strip_prefix('-') == Some(name) {
             found = Some(false);
         }
     }
@@ -430,12 +426,13 @@ fn rustflag_feature_lists(encoded: &str) -> Vec<&str> {
             lists.push(list);
         } else if let Some(list) = arg.strip_prefix("target-feature=") {
             lists.push(list);
-        } else if *arg == "-C"
-            && let Some(list) = args
+        } else if *arg == "-C" {
+            if let Some(list) = args
                 .get(i + 1)
                 .and_then(|next| next.strip_prefix("target-feature="))
-        {
-            lists.push(list);
+            {
+                lists.push(list);
+            }
         }
     }
     lists

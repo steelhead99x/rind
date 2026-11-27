@@ -13,6 +13,7 @@ refuses any other host; `--preflight` runs only those checks.
 | `admin/hw/ipad-dit-matrix.sh` | [steelhead99x/rind#277](https://github.com/steelhead99x/rind/pull/277), the A/B/C/D matrix | a Mac with Xcode, and the iPads |
 | `admin/hw/mldsa-sign-vg.sh` | [steelhead99x/rind#315](https://github.com/steelhead99x/rind/pull/315), ML-DSA without AVX2 against verified-garbage | idle dedicated Linux x86_64 with AVX2 |
 | `admin/hw/dit-barrier-aarch64.sh` | [steelhead99x/rind#325](https://github.com/steelhead99x/rind/pull/325), the DIT barrier picked from `MIDR_EL1` | Linux aarch64: the Pi 5, and a Linux VM on an Apple-silicon Mac |
+| `admin/hw/lean-replay.sh` | [steelhead99x/rind#323](https://github.com/steelhead99x/rind/pull/323) (`HW_PR=322` for [#322](https://github.com/steelhead99x/rind/pull/322)), `admin/prove lean` on the PR head | Linux x86_64 with AVX2 and Nix, 16 GB RAM, 40 GB free |
 
 The x86_64 scripts follow the A/B rules: each revision is built in its own
 checkout and target dir, binaries of different commits must not hash equal,

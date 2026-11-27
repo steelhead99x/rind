@@ -3,7 +3,10 @@
 //! algorithm a PKCS#8 document names. rind parses and encodes the keys; every
 //! byte read here is public.
 
+use alloc::vec::Vec;
+
 use crate::error::{Unspecified, unspecified};
+use crate::wipe::Wiped;
 
 const INTEGER: u8 = 0x02;
 const BIT_STRING: u8 = 0x03;
@@ -155,6 +158,16 @@ fn element_encoding(der: &[u8], tag: u8) -> Option<&[u8]> {
     der.get(..header + len)
 }
 
+/// The first DER element in `der`: its tag, its contents, and the bytes
+/// after it.
+pub(crate) fn split(der: &[u8]) -> Option<(u8, &[u8], &[u8])> {
+    let tag = *der.first()?;
+    let mut input = untrusted::Reader::new(untrusted::Input::from(der));
+    let body = read(&mut input, tag).ok()?;
+    let rest = input.read_bytes_to_end();
+    Some((tag, body.as_slice_less_safe(), rest.as_slice_less_safe()))
+}
+
 /// The tag and body of the first DER element in `der`. Bytes after it are
 /// left unread.
 pub(crate) fn first_element(der: &[u8]) -> Option<(u8, &[u8])> {
@@ -214,12 +227,23 @@ pub(crate) fn bits(magnitude: &[u8]) -> usize {
         .map_or(0, |top| 8 * magnitude.len() - top.leading_zeros() as usize)
 }
 
-/// The modulus's bit length in a two-prime PKCS#1 `RSAPrivateKey`, or `None`
-/// if its framing is not one. Only public parts are read: the version, a
-/// positive odd modulus, a positive odd exponent of 3 to 33 bits, then six
-/// INTEGERs stepped over by their headers, without reading their secret
-/// contents, and nothing after them.
-pub(crate) fn rsa_private_key_modulus_bits(der: &[u8]) -> Option<usize> {
+/// A two-prime PKCS#1 `RSAPrivateKey`'s fields.
+pub(crate) struct RsaPrivateParts<'a> {
+    /// The modulus's magnitude, public.
+    pub(crate) n: &'a [u8],
+    /// The public exponent's magnitude.
+    pub(crate) e: &'a [u8],
+    /// The contents of `d`, `p`, `q`, `dp`, `dq`, and `qinv`, in that order,
+    /// as encoded: secret, so not checked here. A leading zero byte, if
+    /// present, is part of the contents and does not change the value.
+    pub(crate) private: [&'a [u8]; 6],
+}
+
+/// Splits a two-prime PKCS#1 `RSAPrivateKey`, or `None` if its framing is not
+/// one. Only public parts are read: the version, a positive odd modulus, a
+/// positive odd exponent of 2 to 33 bits, then six INTEGERs taken by their
+/// headers without reading their secret contents, and nothing after them.
+pub(crate) fn rsa_private_key_parts(der: &[u8]) -> Option<RsaPrivateParts<'_>> {
     untrusted::Input::from(der)
         .read_all(Unspecified, |input| {
             read(input, SEQUENCE)?.read_all(Unspecified, |input| {
@@ -232,11 +256,48 @@ pub(crate) fn rsa_private_key_modulus_bits(der: &[u8]) -> Option<usize> {
                 if !odd(n) || !odd(e) || !(2..=33).contains(&bits(e)) {
                     return Err(Unspecified);
                 }
-                for _ in 0..6 {
-                    read(input, INTEGER)?;
+                let mut private = [&[][..]; 6];
+                for field in &mut private {
+                    *field = read(input, INTEGER)?.as_slice_less_safe();
                 }
-                Ok(bits(n))
+                Ok(RsaPrivateParts { n, e, private })
             })
         })
         .ok()
+}
+
+/// A DER element of `tag` whose contents are `parts` in order, in one
+/// buffer of exactly its length, wiped on drop: for PKCS#8 documents the
+/// adapter rebuilds around a private key, so no copy of the key is freed
+/// unwiped, whether the load that reads it succeeds or not. The buffer is
+/// allocated once at its final size, so it never reallocates and leaves no
+/// stale copy behind. `None` for contents over 0xffff bytes, which no key
+/// here reaches.
+pub(crate) fn secret_tlv(tag: u8, parts: &[&[u8]]) -> Option<Wiped<Vec<u8>>> {
+    let len: usize = parts.iter().map(|part| part.len()).sum();
+    let mut header = [tag, 0, 0, 0];
+    let header_len = match len {
+        0..=0x7f => {
+            header[1] = len as u8;
+            2
+        }
+        0x80..=0xff => {
+            header[1] = 0x81;
+            header[2] = len as u8;
+            3
+        }
+        _ => {
+            let len = u16::try_from(len).ok()?;
+            header[1] = 0x82;
+            header[2..4].copy_from_slice(&len.to_be_bytes());
+            4
+        }
+    };
+    let mut out = Wiped::new(Vec::with_capacity(header_len + len));
+    out.extend_from_slice(&header[..header_len]);
+    for part in parts {
+        out.extend_from_slice(part);
+    }
+    debug_assert_eq!(out.len(), out.capacity());
+    Some(out)
 }

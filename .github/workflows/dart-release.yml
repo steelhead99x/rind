@@ -25,7 +25,7 @@ jobs:
       contents: read
     uses: ./.github/workflows/dart-libraries.yml
     with:
-      ref: ${{ github.ref }}
+      ref: ${{ github.sha }}
 
   publish:
     name: Publish
@@ -35,6 +35,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
+      attestations: write
 
     steps:
       - name: Generate GitHub token
@@ -78,19 +79,59 @@ jobs:
           fi
 
       # A rerun keeps the libraries an earlier run released, since a published
-      # package may already pin them, and pins what the release serves.
-      - name: Release the libraries
+      # package may already pin them.
+      - name: Look for the release
+        id: release
         env:
           GH_TOKEN: ${{ steps.generate-token.outputs.token }}
         run: |
-          if ! gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null; then
-            gh release create "$GITHUB_REF_NAME" "$RUNNER_TEMP"/libraries/* \
-              --repo "$GITHUB_REPOSITORY" --verify-tag --latest=false \
-              --title "rind for Dart ${GITHUB_REF_NAME#rind-dart-v}" \
-              --notes "The prebuilt libraries the rind package's build hook downloads, pinned by their SHA-256."
+          if out=$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" 2>&1); then
+            echo "exists=true" >>"$GITHUB_OUTPUT"
+          elif [[ "$out" == *"release not found"* ]]; then
+            echo "exists=false" >>"$GITHUB_OUTPUT"
+          else
+            echo "::error::$out"
+            exit 1
           fi
+
+      # Provenance covers only the bytes this run built, and exists before the
+      # release does, so a release's assets always have one. A rerun that
+      # reuses a release attests nothing.
+      - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        if: steps.release.outputs.exists == 'false'
+        with:
+          subject-path: ${{ runner.temp }}/libraries/*
+
+      - name: Release the libraries
+        if: steps.release.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" "$RUNNER_TEMP"/libraries/* \
+            --repo "$GITHUB_REPOSITORY" --verify-tag --latest=false \
+            --title "rind for Dart ${GITHUB_REF_NAME#rind-dart-v}" \
+            --notes "The prebuilt libraries the rind package's build hook downloads, pinned by their SHA-256."
+
+      # What the release serves, a rerun's included, must verify against this
+      # tag's attestation before it is pinned: `gh attestation verify` checks
+      # the download's digest, and the workflow, ref, and commit that signed
+      # it, so a tag moved after its release was made cannot reuse libraries
+      # built from the commit it pointed at before.
+      - name: Pin and verify what the release serves
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
           gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
             --pattern 'rind_dart-*' --dir "$RUNNER_TEMP/released"
+          shopt -s nullglob
+          assets=("$RUNNER_TEMP"/released/rind_dart-*)
+          [[ ${#assets[@]} -gt 0 ]] || { echo "::error::the release has no libraries"; exit 1; }
+          for asset in "${assets[@]}"; do
+            gh attestation verify "$asset" --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/dart-release.yml" \
+              --source-ref "refs/tags/$GITHUB_REF_NAME" \
+              --source-digest "$GITHUB_SHA"
+          done
           sh/dart-prebuilt.sh "$RUNNER_TEMP/rind-dart" "$RUNNER_TEMP/released"
 
       # The package as pub.dev receives it, for publishing by hand while

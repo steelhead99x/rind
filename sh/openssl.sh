@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Run OpenSSL's own `evp_test` on its X25519 and Ed25519 data with
-# rind-openssl loaded and preferred, as its README's configuration does;
-# `-provider rind` fails the run if rind does not load, instead of letting
-# the default provider pass it.
+# Run OpenSSL's own `evp_test` on its X25519, Ed25519, ML-KEM, and ML-DSA
+# data with rind-openssl loaded and preferred, as its README's configuration
+# does; `-provider rind` fails the run if rind does not load, instead of
+# letting the default provider pass it.
 #
 # Usage: nix develop .#openssl --command sh/openssl.sh
 # That dev shell builds `evp_test` from the source of the OpenSSL the default
@@ -10,6 +10,16 @@
 # Ed25519ph is left out, since rind backs only pure Ed25519 and refuses
 # them; OpenSSL's ED25519ctx and ED25519ph signature algorithms stay the
 # default provider's, so their stanzas run.
+#
+# The ML-KEM and ML-DSA data runs less each stanza that asks for what rind
+# refuses, which are counted: ML-KEM encapsulation from given randomness
+# (`Entropy`, OpenSSL's `ikme`); ML-DSA signing that is deterministic, from
+# given randomness, or from an external mu, or over a raw message encoding or
+# a non-empty context string; and a private key that fails to load, which
+# rind loads as refused and fails at each use instead, so that OpenSSL never
+# runs it on the default provider. An ML-DSA key generated from its seed
+# keeps the stanza's check of its public key, not of its expanded private
+# key, which rind does not keep.
 set -euo pipefail
 
 : "${OPENSSL_EVP_TEST:?run in the .#openssl dev shell}"
@@ -34,7 +44,7 @@ MODULE="module = $module" awk '/^module = /{ print ENVIRON["MODULE"]; next } { p
 grep -qxF "module = $module" "$work/openssl.cnf"
 
 skipped=0
-for file in "$OPENSSL_EVP_TEST"/share/evp_test/*.txt; do
+for file in "$OPENSSL_EVP_TEST"/share/evp_test/evppkey_*ecx*.txt; do
     # Stanzas are paragraphs.
     awk 'BEGIN { RS = ""; ORS = "\n\n" } !/Ctrl = instance:Ed25519(ctx|ph)/' "$file" >"$work/${file##*/}"
     count() { awk 'BEGIN { RS = "" } END { print NR }' "$1"; }
@@ -42,4 +52,22 @@ for file in "$OPENSSL_EVP_TEST"/share/evp_test/*.txt; do
 done
 echo "Left out $skipped stanzas for Ed25519ctx or Ed25519ph through Ed25519's instance." >&2
 
-"$OPENSSL_EVP_TEST/bin/evp_test" -config "$work/openssl.cnf" -provider rind "$work"/evppkey_*.txt
+"$OPENSSL_EVP_TEST/bin/evp_test" -config "$work/openssl.cnf" -provider rind "$work"/evppkey_*ecx*.txt
+
+mkdir "$work/ml"
+skipped=0
+for file in "$OPENSSL_EVP_TEST"/share/evp_test/evppkey_ml_*.txt; do
+    awk '
+    BEGIN { RS = ""; ORS = "\n\n" }
+    /(^|\n)Entropy = / { next }
+    /Ctrl = (mu:1|message-encoding:0|hexcontext-string:[0-9A-Fa-f])/ { next }
+    /Sign-Message = / && /Ctrl = (deterministic:1|hextest-entropy:)/ { next }
+    /KeyGen = ML-DSA/ { gsub(/\nCtrlOut = hexpriv:[0-9A-Fa-f]*/, "") }
+    /Result = TEST_PARSE_PRIVATE_KEY_ERROR/ { next }
+    /Result = KEY_FROMDATA_ERROR/ && /Ctrl = hex(priv|seed):/ { next }
+    { print }' "$file" >"$work/ml/${file##*/}"
+    skipped=$((skipped + $(count "$file") - $(count "$work/ml/${file##*/}")))
+done
+echo "Left out $skipped ML-KEM and ML-DSA stanzas for what rind refuses." >&2
+
+"$OPENSSL_EVP_TEST/bin/evp_test" -config "$work/openssl.cnf" -provider rind "$work"/ml/evppkey_*.txt

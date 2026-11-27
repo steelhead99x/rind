@@ -36,9 +36,17 @@
    "p384": "0.14.0",
    "p521": "0.14.0",
    "rsa": "0.10.0-rc.19",
+   "ml-dsa": "?",
    "ml-kem": "0.3.4",
    "ed25519-dalek": "3.0.0",
-   "x25519-dalek": "3.0.0"
+   "x25519-dalek": "3.0.0",
+   "hpke": "?",
+   "blind-rsa-signatures": "?",
+   "voprf": "?",
+   "vrf-rfc9381": "?",
+   "spake2plus": "?",
+   "argon2": "?",
+   "slh-dsa": "?"
   },
   "graviola": {
    "graviola": "0.4.4",
@@ -52,16 +60,22 @@
    "libcrux-ed25519": "0.0.10",
    "libcrux-hkdf": "0.0.9",
    "libcrux-hmac": "0.0.9",
+   "libcrux-ml-dsa": "?",
    "libcrux-ml-kem": "0.0.11",
    "libcrux-rsa": "0.0.9",
    "libcrux-sha2": "0.0.9",
-   "libcrux-sha3": "0.0.11"
+   "libcrux-sha3": "0.0.11",
+   "hpke-rs": "?",
+   "hpke-rs-libcrux": "?"
   },
   "openssl": {
    "openssl": "0.10.82",
    "openssl-sys": "0.9.118",
    "rustls-openssl": "0.4.2",
    "linked": "OpenSSL 3.5.9 29 Sep 2026 (Library: OpenSSL 3.5.9 29 Sep 2026)"
+  },
+  "verified-garbage": {
+   "verified-garbage": "?"
   },
   "tls": {
    "rustls": "0.23.46"

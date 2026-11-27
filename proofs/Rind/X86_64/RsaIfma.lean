@@ -557,7 +557,7 @@ theorem public_op_spec (key : mid.rsa_pub.RsaPublicKey) (hinv : PubKeyInv key)
     have hmlt : wordsNat (lowWords key.montifier key.n.used) < wordsNat (lowWords key.n key.n.used) := by
       rw [hmont]; exact Nat.mod_lt _ (by omega)
     step with mont_mul_into_spec _ key.montifier _ key.n n0' hP hk
-      (mont_args_of _ _ key.n n0' hk hk2 hodd hn0' (by rw [hc1]; exact hlt) hmlt) as ⟨cm, hcmu, hcmr, _⟩
+      (mont_args_of _ _ key.n n0' hk hk2 (by omega) hodd hn0' (by rw [hc1]; exact hlt) hmlt) as ⟨cm, hcmu, hcmr, _⟩
     obtain ⟨hcmN, hcmv⟩ := mont_result_of hcmr
     rw [lowWords_length _ hk, hc1, hmont] at hcmv
     have hcmC : wordsNat (lowWords cm key.n.used) ≡

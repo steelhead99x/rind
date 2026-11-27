@@ -166,6 +166,18 @@ impl fmt::Debug for VerificationAlgorithm {
 }
 
 impl VerificationAlgorithm {
+    /// This algorithm with its modulus floor counted in whole bytes, as ring
+    /// does: a modulus a bit short of the floor, such as 2047 bits for a
+    /// floor of 2048, still verifies as long as it fills the floor's bytes.
+    pub const fn floor_in_bytes(&self) -> Self {
+        Self {
+            verification: self.verification,
+            // The fewest bits that still round up to the floor's bytes.
+            min_bits: 8 * self.min_bits.div_ceil(8) - 7,
+            verify: self.verify,
+        }
+    }
+
     /// RSASSA-PSS with SHA-256, MGF1-SHA-256, and a salt of `salt_length`,
     /// for moduli of 2048 to 8192 bits long enough for it.
     pub const fn pss_sha256(salt_length: PssSaltLength) -> Self {
@@ -302,7 +314,7 @@ where
     }
 }
 
-/// An RSA public key, with a modulus of 1024 to 8192 bits, which verifies
+/// An RSA public key, with a modulus of 1017 to 8192 bits, which verifies
 /// with any [`VerificationAlgorithm`] whose floor it meets.
 ///
 /// Its bytes are its PKCS#1 `RSAPublicKey` DER, however it was loaded.
@@ -365,6 +377,12 @@ impl PublicKey {
         self.key.modulus_len_bits().div_ceil(8)
     }
 
+    /// The modulus's length in bits, for a caller that enforces its own floor,
+    /// such as one mirroring a library that refuses a key under 2048 bits.
+    pub fn modulus_bits(&self) -> usize {
+        self.key.modulus_len_bits()
+    }
+
     /// Verifies `signature` over `message` with `algorithm`, refusing a
     /// malformed signature, and refusing the key if its modulus is below
     /// the algorithm's floor.
@@ -378,16 +396,6 @@ impl PublicKey {
             return Err(KeyFormatError::RsaModulus.into());
         }
         (algorithm.verify)(&self.key, algorithm.verification.salt(), signature, message)
-    }
-}
-
-// Compiled as `crate::fips` is.
-#[cfg(all(any(test, rind_fips), feature = "ml-dsa", feature = "slh-dsa"))]
-impl PublicKey {
-    /// The modulus length in bits: what the FIPS module checks against
-    /// FIPS 186-5's sizes.
-    pub(crate) fn modulus_bits(&self) -> usize {
-        self.key.modulus_len_bits()
     }
 }
 
@@ -419,7 +427,7 @@ impl fmt::Debug for Signature {
     }
 }
 
-/// A two-prime RSA private key, with a modulus of 2048 to 8192 bits, and its
+/// A two-prime RSA private key, with a modulus of 2047 to 8192 bits, and its
 /// public key.
 pub struct KeyPair {
     key: rsa::SigningKey,
@@ -472,6 +480,15 @@ impl KeyPair {
     /// Returns the public key, which verifies what this key pair signs.
     pub fn public_key(&self) -> &PublicKey {
         &self.public
+    }
+
+    /// The bit lengths of the primes `p` and `q`, for a loader that sizes
+    /// keys by them, as ring does.
+    ///
+    /// Loading a key already reveals them, as aws-lc treats them as public,
+    /// and the encoding's framing shows their byte lengths.
+    pub fn prime_bits(&self) -> [usize; 2] {
+        self.key.prime_bits()
     }
 
     /// Signs `message` with `algorithm`, as long as the modulus.

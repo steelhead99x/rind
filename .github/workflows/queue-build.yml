@@ -1,9 +1,11 @@
 name: Queue build
 
-# The merge queue's build of a group, on the host's self-hosted runner. Only
-# queue.yml calls it. Once queue.yml calls it at main and the rind-queue runner
-# group admits only this workflow at refs/heads/main, no other workflow can
-# reach the runner, an approved fork run's included; a PR's edit to this file
+# The merge queue's build of a group, on the host's self-hosted runner, and
+# rind's tests on aarch64 macOS and Linux, on the Mac mini's two runners (VMs
+# admin/mac-mini-runners sets up). Only queue.yml calls it. Once queue.yml
+# calls it at main and the rind-queue runner group, which holds all three,
+# admits only this workflow at refs/heads/main, no other workflow can
+# reach the runners, an approved fork run's included; a PR's edit to this file
 # then runs only after it lands. For the same reason it uses no local action:
 # main's copy runs against every group's tree, so a PR that moved or deleted one
 # could not land. The tree's own setup belongs in `just ci`.
@@ -44,6 +46,49 @@ jobs:
       - name: Check and test the merge group
         # Every group waits on this build, so it waits only for memory, never
         # behind the host's agent load.
+        env:
+          QUEST_GATE_PRIORITY: 1
+        run: nix develop --command quest gate just ci "$BASE"
+
+  # The x86_64 build above runs the tests only on x86_64, so these run them
+  # natively on aarch64, where rind runs its own assembly and dispatch, which
+  # two PRs can break together. They run only the `rs` module, whose result
+  # depends on the host; the lints and other targets' builds do not. Each
+  # reports its own context, as `Build` does, so main's ruleset can require it.
+  macos-aarch64:
+    name: Build aarch64 macOS
+    if: github.event_name == 'merge_group'
+    runs-on: [self-hosted, rind-queue-macos]
+    timeout-minutes: 60
+    env:
+      BASE: ${{ github.event.merge_group.base_sha }}
+      CHECK_FAIL_FAST: 1
+      CHECK_MODULES: rs
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Test the merge group
+        env:
+          QUEST_GATE_PRIORITY: 1
+        run: nix develop --command quest gate just ci "$BASE"
+
+  linux-aarch64:
+    name: Build aarch64 Linux
+    if: github.event_name == 'merge_group'
+    runs-on: [self-hosted, rind-queue-linux]
+    timeout-minutes: 60
+    env:
+      BASE: ${{ github.event.merge_group.base_sha }}
+      CHECK_FAIL_FAST: 1
+      CHECK_MODULES: rs
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Test the merge group
         env:
           QUEST_GATE_PRIORITY: 1
         run: nix develop --command quest gate just ci "$BASE"

@@ -101,6 +101,16 @@
    fun:*16rustls_pki_types6base6413decode_secret
 }
 
+# rind-dimpl reads PEM keys through `parse_pem`, which is `#[inline(never)]`
+# so that fat LTO, which inlines every rustls-pki-types frame above, still
+# leaves one to name. It holds nothing but that crate's PEM parser.
+{
+   rind-dimpl-parse-pem
+   Memcheck:Cond
+   ...
+   fun:*10rind_dimpl4sign9parse_pem*
+}
+
 # rind-rcgen's PEM codec (`rind-rcgen/src/pem.rs`) frames base64ct's, whose
 # per-character arithmetic is branch-free. What they branch on or index by is
 # public: whether the base64 was well-formed (`err == 0` in base64ct's

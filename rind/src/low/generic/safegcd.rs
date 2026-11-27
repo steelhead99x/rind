@@ -374,9 +374,20 @@ mod tests {
         into_public(bignum_coprime(&secret(x), &secret(y), &mut []))
     }
 
+    /// Miri on a 32-bit target runs the proptests below for hours and then
+    /// runs out of address space, so there they take fewer, narrower cases:
+    /// enough to check the 32-bit limbs for undefined behavior, which the
+    /// native runs check over the full range.
+    const MIRI_32: bool = cfg!(all(miri, target_pointer_width = "32"));
+
     proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: if MIRI_32 { 16 } else { ProptestConfig::default().cases },
+            ..ProptestConfig::default()
+        })]
+
         #[test]
-        fn inverse((m, a) in modulus(20)) {
+        fn inverse((m, a) in modulus(if MIRI_32 { 6 } else { 20 })) {
             let (bm, ba) = (big(&m), big(&a));
             let want = ba.modinv(&bm);
             prop_assert_eq!(coprime(&a, &m), want.is_some());

@@ -311,3 +311,28 @@ fn sign_refuses_non_rsa_keys() {
         assert!(provider.sign(SigningAlgorithm::RS256, pem).is_err());
     }
 }
+
+/// aws-lc-rs, which object_store signs with, refuses a 2047-bit modulus that
+/// rind loads, so the provider does as well.
+#[test]
+fn sign_refuses_a_2047_bit_rsa_key_as_aws_lc_does() {
+    let provider = rind_object_store::default_provider();
+    let pkcs1 = include_bytes!("data/rsa2047.pkcs1.pem");
+    let pkcs8 = include_bytes!("data/rsa2047.pkcs8.pem");
+    for pem in [&pkcs1[..], &pkcs8[..]] {
+        let (rind_loads, aws_loads) = match PrivateKeyDer::from_pem_slice(pem).unwrap() {
+            PrivateKeyDer::Pkcs8(key) => (
+                rind::rsa::KeyPair::from_pkcs8(key.secret_pkcs8_der()).is_ok(),
+                signature::RsaKeyPair::from_pkcs8(key.secret_pkcs8_der()).is_ok(),
+            ),
+            PrivateKeyDer::Pkcs1(key) => (
+                rind::rsa::KeyPair::from_pkcs1(key.secret_pkcs1_der()).is_ok(),
+                signature::RsaKeyPair::from_der(key.secret_pkcs1_der()).is_ok(),
+            ),
+            _ => panic!("not an RSA key"),
+        };
+        assert!(rind_loads);
+        assert!(!aws_loads);
+        assert!(provider.sign(SigningAlgorithm::RS256, pem).is_err());
+    }
+}

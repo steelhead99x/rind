@@ -21,6 +21,26 @@ subDir = "backends/lean"
 name = "verified-garbage"
 path = "verified-garbage"
 
+# Beneficial AI Foundation's elliptic curves, which its curve25519-dalek
+# specs in `curve25519-dalek/` state X25519 over: the revision that fork's
+# `lakefile.lean` pins at `admin/import-dalek`'s REV.
+[[require]]
+name = "EllipticCurve"
+git = "https://github.com/Beneficial-AI-Foundation/elliptic-curve.git"
+rev = "4015c7cfab714640e77500bdbde6e64face3fbaa"
+
+# Those specs, which `admin/import-dalek` vendors byte for byte under their
+# own module names.
+[[lean_lib]]
+name = "ForHumans"
+srcDir = "curve25519-dalek"
+globs = ["ForHumans.+"]
+
+[[lean_lib]]
+name = "Proofs"
+srcDir = "curve25519-dalek"
+globs = ["Proofs.+"]
+
 # No module imports both targets: their translations share global names.
 [[lean_lib]]
 name = "Rind"

@@ -1,6 +1,7 @@
 import Rind.X86_64.S2nBignum
 import Rind.X86_64.Sha512
 import Rind.X86_64.X25519
+import Rind.Ed25519Group
 open Aeneas Aeneas.Std Result rind.spec
 
 /-!
@@ -12,8 +13,9 @@ returns, in terms of `Rind.Ed25519`'s spec, and SHA-512 as
 theorems are about its translation, with no hand model. `admin/prove` writes
 the aarch64 proof from this file by renaming the target.
 
-Verification checks a multiple of the equation with half-size scalars on
-x86_64 and aarch64, which nothing proves yet.
+Verification differs per target. x86_64 proves it in its own
+`Ed25519Verify`, on top of this file. aarch64 checks a multiple of the
+equation with half-size scalars, which nothing proves yet.
 -/
 
 namespace rind.x86_64
@@ -294,20 +296,6 @@ theorem edModEncode_of_onCurve (x : Int) (h0 : 0 ≤ x) (h1 : x < p25519) : (edM
   unfold edModEncode
   rw [Int.emod_eq_of_lt h0 h1]
   omega
-
-/-- The negation of a point of the group is in the group. -/
-theorem edOnCurve_neg (P : EdPoint) (h : edOnCurve P) : edOnCurve (edNeg P) := by
-  obtain ⟨x, y⟩ := P
-  obtain ⟨-, -, hy0, hy1, he⟩ := h
-  have hq : (-x) % (p25519 : Int) ≡ -x [ZMOD p25519] := Int.mod_modEq _ _
-  have hq2 : ((-x) % (p25519 : Int)) ^ 2 ≡ x ^ 2 [ZMOD p25519] := by
-    simpa [neg_sq] using hq.pow 2
-  refine ⟨Int.emod_nonneg _ (by decide), Int.emod_lt_of_pos _ (by decide), hy0, hy1, ?_⟩
-  show e25519 * ((-x) % (p25519 : Int)) ^ 2 + y ^ 2 ≡
-    1 + d25519 * ((-x) % (p25519 : Int)) ^ 2 * y ^ 2 [ZMOD p25519]
-  calc _ ≡ e25519 * x ^ 2 + y ^ 2 [ZMOD p25519] := (hq2.mul_left _).add_right _
-    _ ≡ 1 + d25519 * x ^ 2 * y ^ 2 [ZMOD p25519] := he
-    _ ≡ _ [ZMOD p25519] := ((hq2.symm.mul_left _).mul_right _).add_left _
 
 /-- A valid encoding decodes to a point of the group that encodes as it. -/
 theorem edDecode_spec (n : Nat) (h : edValidEncode n) :

@@ -2,7 +2,10 @@
 
 //! ML-KEM's ciphertext compression with mlkem-native's AVX2 routines, which
 //! `admin/import-aws-lc` takes from aws-lc's copy. mlkem-native's HOL Light
-//! proofs cover them, as it builds them.
+//! proofs cover them, at the revision `admin/import-mlkem-native` pins, which
+//! ends them with the same `vzeroupper`; `admin/prove bytes` checks this
+//! build's code and the table statics below are the ones those proofs list,
+//! not which table each wrapper passes.
 
 /// `ByteEncode_4(Compress_4(a))`, for `a` in `[0, Q)`.
 pub(crate) fn mlkem_compress_d4(r: &mut [u8; 128], a: &[i16; 256]) {

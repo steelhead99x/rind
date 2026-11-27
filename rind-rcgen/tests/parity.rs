@@ -45,6 +45,14 @@ fn encodings() -> Vec<(&'static str, Vec<u8>)> {
         ("RSA PKCS#1", rsa_pkcs1),
         ("RSA PKCS#8", rsa.as_ref().to_vec()),
         ("RSA PKCS#8 v2", with_version(rsa.as_ref(), 1)),
+        (
+            "RSA 2047-bit PKCS#1",
+            include_bytes!("../../rind/src/high/rsa/rsa2047.der").to_vec(),
+        ),
+        (
+            "RSA 2047-bit PKCS#8",
+            include_bytes!("../../rind/src/high/rsa/rsa2047.pkcs8.der").to_vec(),
+        ),
         ("Ed25519 PKCS#8 v2", ed25519.to_pkcs8().as_ref().to_vec()),
         ("Ed25519 PKCS#8 v1", ed25519.to_pkcs8v1().as_ref().to_vec()),
         (
@@ -125,6 +133,39 @@ fn refuses_what_rcgen_loads() {
                     "{name}"
                 );
             }
+        }
+    }
+}
+
+/// AWS-LC refuses a 2047-bit modulus, which rind loads, so each loader here
+/// refuses it under every label and algorithm, with AWS-LC's reason where the
+/// key's own label names its encoding.
+#[test]
+fn refuses_a_2047_bit_rsa_key_as_rcgen_does() {
+    let pkcs1 = &include_bytes!("../../rind/src/high/rsa/rsa2047.der")[..];
+    let pkcs8 = &include_bytes!("../../rind/src/high/rsa/rsa2047.pkcs8.der")[..];
+    assert!(rind::rsa::KeyPair::from_pkcs1(pkcs1).is_ok());
+    assert!(rind::rsa::KeyPair::from_pkcs8(pkcs8).is_ok());
+    for (der, own) in [(pkcs1, 2), (pkcs8, 0)] {
+        for (label, key) in labels(der).iter().enumerate() {
+            let theirs = rcgen::KeyPair::try_from(key).err();
+            assert!(theirs.is_some());
+            assert!(KeyPair::try_from(key).is_err());
+            for alg in [&PKCS_RSA_SHA256, &PKCS_RSA_SHA384, &PKCS_RSA_SHA512] {
+                let theirs = rcgen::KeyPair::from_der_and_sign_algo(key, alg).err();
+                let ours = KeyPair::from_der_and_sign_algo(key, alg).err();
+                assert!(theirs.is_some() && ours.is_some());
+                if label == own {
+                    assert_eq!(ours, theirs);
+                }
+            }
+        }
+        let der = PrivatePkcs8KeyDer::from(der);
+        let theirs = rcgen::KeyPair::from_pkcs8_der_and_sign_algo(&der, &PKCS_RSA_SHA256).err();
+        let ours = KeyPair::from_pkcs8_der_and_sign_algo(&der, &PKCS_RSA_SHA256).err();
+        assert!(theirs.is_some() && ours.is_some());
+        if own == 0 {
+            assert_eq!(ours, theirs);
         }
     }
 }

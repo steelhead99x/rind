@@ -936,6 +936,8 @@ mod tests {
         ("x86_64/aes_gcm_avx.rs", "gcm128_decrypt_opt", DISPATCHED),
         ("x86_64/aes_gcm_avx.rs", "gcm256_encrypt_opt", DISPATCHED),
         ("x86_64/aes_gcm_avx.rs", "gcm256_decrypt_opt", DISPATCHED),
+        ("x86_64/rsa_ifma.rs", "crt_vg", DISPATCHED),
+        ("x86_64/rsa_ifma.rs", "crt_vg512", DISPATCHED),
         (
             "x86_64/rsaz_avx512.rs",
             "rsaz_amm52x20_x2_ifma256",
@@ -990,6 +992,11 @@ mod tests {
             "arm/ct_qemu.rs",
             "traced",
             "test-only hints, which touch no register",
+        ),
+        (
+            "arm/keccak1600_armv4.rs",
+            "keccak_f1600_neon_regs",
+            "an entry on registers that only `keccak_f1600_neon`, whose harness call covers it, reaches",
         ),
     ];
 
@@ -1056,9 +1063,16 @@ mod tests {
             }
         }
 
+        // A `global_asm!`'s `sym` operand names the routine it defines, not
+        // an internal entry.
+        let blocks: Vec<&str> = text
+            .match_indices("asm!(")
+            .filter(|&(at, _)| !text[..at].ends_with("global_"))
+            .map(|(at, _)| parenthesized(&text[at + 4..]))
+            .collect();
         names.retain(|name| {
             !name.is_empty()
-                && !text.contains(&format!("sym {name}"))
+                && !blocks.iter().any(|b| b.contains(&format!("sym {name}")))
                 && !text.contains(&format!("{name} = {name}"))
         });
         names.sort();

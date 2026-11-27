@@ -18,16 +18,24 @@
    https://developer.arm.com/documentation/ddi0406/latest
 
    The state is the A32 instruction set's, at user level: R0-R12, SP, LR,
-   the program counter, the NZCV flags, and flat 32-bit memory. It omits
-   Thumb (T32), the GE and Q flags, NEON and VFP registers, FPSCR, banked
-   registers, exceptions, and the system registers.
+   the program counter with the T bit, the NZCV flags, the Advanced SIMD
+   registers Q0-Q15, and flat 32-bit memory. It omits T32's instructions,
+   the GE and Q flags, VFP's S registers, FPSCR, banked registers,
+   exceptions, and the system registers. The Advanced SIMD and
+   crypto-extension instructions follow DDI 0406's chapter A7 and DDI 0487's
+   F6 pseudocode.
 
-   A branch to a register's or a loaded word's value interworks: bit 0 of
-   the target selects Thumb, which this state cannot hold, and a target with
-   bit 1 set alone is UNPREDICTABLE. So BX and a load
-   into PC take only a target aligned to four bytes, and allow every next
-   state otherwise, as s2n-bignum's models do an instruction whose side
-   condition fails: a proof that reaches one proves nothing.
+   A branch to a register's or a loaded word's value interworks, as
+   `BXWritePC` says: bit 0 of the target is the T bit, which selects T32 at
+   the target with that bit cleared, and a target with bit 1 set alone is
+   UNPREDICTABLE. PC holds the T bit as its bit 0, as LR and BX's operand
+   do, so BX and a load into PC step to an aligned target or to one with
+   bit 0 set (`aarch32_bx_target`), and allow every next state otherwise,
+   as s2n-bignum's models do an instruction whose side condition fails: a
+   proof that reaches one proves nothing. The fetch takes only an aligned
+   PC, so a state in T32 steps nowhere: a proof ends there, as a
+   subroutine's return to a T32 caller does, which is all a T32 caller
+   needs of A32 code.
 
    Unaligned word loads and stores are architectural on ARMv7 and later when
    SCTLR.A is clear, as Linux and Android leave it at user level, so LDR and
@@ -59,6 +67,7 @@ let aarch32state_INDUCT,aarch32state_RECURSION,aarch32state_COMPONENTS =
      { PC: int32;                       // address of the next instruction
        registers: 4 word -> int32;      // R0-R14; R15 is PC
        flags: 4 word;                   // NZCV
+       simdregisters: 4 word -> int128; // Q0-Q15, which D0-D31 halve
        memory: int32 -> byte;           // memory
        events: aarch32_uarch_event list // observable events
      }";;
@@ -154,6 +163,76 @@ let aarch32_R15 = define
 let aarch32_src = define
  `aarch32_src (n:4 word) =
     if n = word 15 then aarch32_R15 else aarch32_reg n`;;
+
+(* ------------------------------------------------------------------------- *)
+(* The Advanced SIMD registers: Q0-Q15, whose halves are D0-D31, D(2k) the  *)
+(* low half of Qk and D(2k+1) the high. A32 writes a D register and leaves   *)
+(* its pair, so the step conversion turns each D read and write into one of  *)
+(* Q's, and a state holds only Q registers.                                  *)
+(* ------------------------------------------------------------------------- *)
+
+let QREG = define
+ `QREG n = simdregisters :> element (word n)`;;
+
+add_component_alias_thms
+ (map (fun n -> let tm = mk_comb(`QREG`,mk_small_numeral n) in
+                (GEN_REWRITE_CONV I [QREG] THENC NUM_REDUCE_CONV) tm)
+      (0--15));;
+
+let Q0  = define `Q0  = QREG 0`
+and Q1  = define `Q1  = QREG 1`
+and Q2  = define `Q2  = QREG 2`
+and Q3  = define `Q3  = QREG 3`
+and Q4  = define `Q4  = QREG 4`
+and Q5  = define `Q5  = QREG 5`
+and Q6  = define `Q6  = QREG 6`
+and Q7  = define `Q7  = QREG 7`
+and Q8  = define `Q8  = QREG 8`
+and Q9  = define `Q9  = QREG 9`
+and Q10 = define `Q10 = QREG 10`
+and Q11 = define `Q11 = QREG 11`
+and Q12 = define `Q12 = QREG 12`
+and Q13 = define `Q13 = QREG 13`
+and Q14 = define `Q14 = QREG 14`
+and Q15 = define `Q15 = QREG 15`;;
+
+add_component_alias_thms
+ [Q0; Q1; Q2; Q3; Q4; Q5; Q6; Q7; Q8; Q9; Q10; Q11; Q12; Q13; Q14; Q15];;
+
+(* D0-D31, as `D5 = Q2 :> top_64`. *)
+
+let AARCH32_DREGS =
+  map (fun n ->
+         define (parse_term (Printf.sprintf "D%d = Q%d :> %s" n (n / 2)
+                   (if n mod 2 = 0 then "bottom_64" else "top_64"))))
+      (0--31);;
+
+(* What a read and a write of a half are in terms of the whole. *)
+
+let AARCH32_HALF_READS = prove
+ (`(!(c:(A,int128)component) s.
+      read (c :> bottom_64) s = word_subword (read c s) (0,64)) /\
+   (!(c:(A,int128)component) s.
+      read (c :> top_64) s = word_subword (read c s) (64,64))`,
+  REWRITE_TAC[READ_COMPONENT_COMPOSE; bottom_64; top_64; bottomhalf; tophalf;
+              DIMINDEX_64; READ_SUBWORD]);;
+
+let AARCH32_HALF_WRITES = prove
+ (`(!(c:(A,int128)component) (y:int64) s.
+      write (c :> bottom_64) y s =
+      write c (word_join (word_subword (read c s) (64,64):int64) y) s) /\
+   (!(c:(A,int128)component) (y:int64) s.
+      write (c :> top_64) y s =
+      write c (word_join y (word_subword (read c s) (0,64):int64)) s)`,
+  CONJ_TAC THEN REPEAT GEN_TAC THEN
+  REWRITE_TAC[WRITE_COMPONENT_COMPOSE; bottom_64; top_64; bottomhalf;
+              tophalf; DIMINDEX_64; through; write] THEN
+  AP_THM_TAC THEN AP_TERM_TAC THEN
+  SPEC_TAC (`read (c:(A,int128)component) s:int128`,`d:int128`) THEN
+  GEN_TAC THEN ONCE_REWRITE_TAC[WORD_EQ_BITS_ALT] THEN
+  REWRITE_TAC[WRITE_SUBWORD_BITWISE; BIT_WORD_JOIN; BIT_WORD_SUBWORD;
+              DIMINDEX_64; DIMINDEX_128] THEN
+  CONV_TAC EXPAND_CASES_CONV THEN CONV_TAC NUM_REDUCE_CONV);;
 
 (* ------------------------------------------------------------------------- *)
 (* Conditions: the pseudocode's ConditionHolds.                              *)
@@ -682,12 +761,18 @@ let aarch32_BL = define
          PC := pc_next ,,
          events := CONS (EventJump (pc,pc_next)) (read events s)) s`;;
 
+(* Where BX and a load into PC may go: an A32 address, aligned to four
+   bytes, or a T32 one, whose bit 0 is the T bit. *)
+
+let aarch32_bx_target = define
+ `aarch32_bx_target (a:int32) <=> aligned 4 a \/ bit 0 a`;;
+
 let aarch32_BX = define
  `aarch32_BX Rm =
     \s:aarch32state.
         let pc = word_sub (read PC s) (word 4) in
         let pc_next:int32 = read Rm s in
-        (if aligned 4 pc_next then
+        (if aarch32_bx_target pc_next then
            PC := pc_next ,,
            events := CONS (EventJump (pc,pc_next)) (read events s)
          else ASSIGNS entirety) s`;;
@@ -778,7 +863,7 @@ let aarch32_LDR_PC = define
         let pc_next:int32 = read (memory :> bytes32 addr) s in
         (if aarch32_nowrap addr 4 then
            if aarch32_condition cond s then
-             if aligned 4 addr /\ aligned 4 pc_next then
+             if aligned 4 addr /\ aarch32_bx_target pc_next then
                PC := pc_next ,,
                events := CONS (EventJump (pc,pc_next))
                               (CONS (EventLoad (addr,4)) (read events s)) ,,
@@ -892,7 +977,7 @@ let aarch32_LDM_PC = define
         let pc_next:int32 = read (memory :> bytes32 (word_add base pcoff)) s in
         (if aarch32_nowrap (word_add base off) len then
            if aarch32_condition cond s then
-             if aligned 4 base /\ aligned 4 pc_next then
+             if aligned 4 base /\ aarch32_bx_target pc_next then
                aarch32_loads regs base off s
                 (PC := pc_next ,,
                  events := CONS (EventJump (pc,pc_next))
@@ -903,6 +988,387 @@ let aarch32_LDM_PC = define
            else events := CONS (EventJump (pc,read PC s))
                                (CONS (EventLoad (word_add base off,0))
                                      (read events s))
+         else ASSIGNS entirety) s`;;
+
+(* ------------------------------------------------------------------------- *)
+(* Advanced SIMD data processing. Each form applies a function to its        *)
+(* operands' values, which the decoder builds from HOL Light's `simd` and    *)
+(* `usimd` lane combinators and the lane operations below, any shift, index, *)
+(* or count first, so that a decoded instruction holds no binder and its     *)
+(* evaluation leaves numerals in place. An operation AArch64 shares, the AES *)
+(* rounds, the SHA-256 steps, and polynomial multiplication, is s2n-bignum's *)
+(* aarch64 model's. The instructions are unconditional but for those in the  *)
+(* coprocessor space, VLDM, VSTM, VMOV to a lane, and VDUP from a core       *)
+(* register, which the decoder guards as it does the integer ones.           *)
+(* ------------------------------------------------------------------------- *)
+
+let aarch32_VMOV = define
+ `aarch32_VMOV (Vd:(aarch32state,N word)component) Vm =
+    \s:aarch32state. (Vd := read Vm s) s`;;
+
+let aarch32_VUNARY = define
+ `aarch32_VUNARY (f:M word->N word) (Vd:(aarch32state,N word)component) Vm =
+    \s:aarch32state. (Vd := f (read Vm s)) s`;;
+
+let aarch32_VBINARY = define
+ `aarch32_VBINARY (f:L word->M word->N word)
+                  (Vd:(aarch32state,N word)component) Vn Vm =
+    \s:aarch32state. (Vd := f (read Vn s) (read Vm s)) s`;;
+
+(* An operation that reads its destination too: Vd := f Vd Vm. *)
+
+let aarch32_VUPDATE = define
+ `aarch32_VUPDATE (f:N word->M word->N word)
+                  (Vd:(aarch32state,N word)component) Vm =
+    \s:aarch32state. (Vd := f (read Vd s) (read Vm s)) s`;;
+
+let aarch32_VTERNARY = define
+ `aarch32_VTERNARY (f:N word->L word->M word->N word)
+                   (Vd:(aarch32state,N word)component) Vn Vm =
+    \s:aarch32state. (Vd := f (read Vd s) (read Vn s) (read Vm s)) s`;;
+
+(* VSWP and VTRN write both registers from both old values, and VZIP the
+   two halves of what `f` makes of them. The decoder refuses Vd = Vm. *)
+
+let aarch32_VSWP = define
+ `aarch32_VSWP (Vd:(aarch32state,N word)component) Vm =
+    \s:aarch32state.
+        let d = read Vd s and m = read Vm s in
+        (Vd := m ,, Vm := d) s`;;
+
+let aarch32_VTRN = define
+ `aarch32_VTRN (f:N word->N word->N word) g
+               (Vd:(aarch32state,N word)component) Vm =
+    \s:aarch32state.
+        let d = read Vd s and m = read Vm s in
+        (Vd := f d m ,, Vm := g d m) s`;;
+
+let aarch32_VZIP = define
+ `aarch32_VZIP (f:N word->N word->(N tybit0)word)
+               (Vd:(aarch32state,N word)component) Vm =
+    \s:aarch32state.
+        let z = f (read Vd s) (read Vm s) in
+        (Vd := word_subword z (0,dimindex(:N)) ,,
+         Vm := word_subword z (dimindex(:N),dimindex(:N))) s`;;
+
+(* VTBL looks each byte of Dm up in a table of `len` D registers, up to four,
+   the first in the low bytes, with `rvalue (word 0)` for the rest. *)
+
+let aarch32_tbl = define
+ `aarch32_tbl len (t:256 word) (x:byte) : byte =
+    if val x < 8 * len then word_subword t (8 * val x,8) else word 0`;;
+
+let aarch32_VTBL = define
+ `aarch32_VTBL (Dd:(aarch32state,int64)component)
+               (Dn1:(aarch32state,int64)component)
+               (Dn2:(aarch32state,int64)component)
+               (Dn3:(aarch32state,int64)component)
+               (Dn4:(aarch32state,int64)component) len Dm =
+    \s:aarch32state.
+        let t:256 word =
+          word_join (word_join (read Dn4 s) (read Dn3 s):int128)
+                    (word_join (read Dn2 s) (read Dn1 s):int128) in
+        (Dd := usimd8 (aarch32_tbl len t) (read Dm s)) s`;;
+
+(* The lane operations. Shifts take their amount first; a right shift by the
+   whole lane, which VSHR and VSRI encode, leaves zero or the sign. *)
+
+let aarch32_shl = define
+ `aarch32_shl n (x:N word) = word_shl x n`;;
+
+let aarch32_ushr = define
+ `aarch32_ushr n (x:N word) = word_ushr x n`;;
+
+let aarch32_sshr = define
+ `aarch32_sshr n (x:N word) = word_ishr x n`;;
+
+(* VSLI keeps the destination's low n bits, VSRI its high n. *)
+
+let aarch32_sli = define
+ `aarch32_sli n (d:N word) (m:N word) =
+    word_or (word_shl m n) (word_and d (word(2 EXP n - 1)))`;;
+
+let aarch32_sri = define
+ `aarch32_sri n (d:N word) (m:N word) =
+    word_or (word_ushr m n)
+            (word_and d (word_not(word(2 EXP (dimindex(:N) - n) - 1))))`;;
+
+(* VSHRN keeps each lane's shifted low half, and VSHLL widens then shifts. *)
+
+let aarch32_shrn = define
+ `aarch32_shrn n (x:(N tybit0)word) : N word =
+    word_subword (word_ushr x n) (0,dimindex(:N))`;;
+
+let aarch32_ushll = define
+ `aarch32_ushll n (x:N word) : (N tybit0)word = word_shl (word_zx x) n`;;
+
+let aarch32_sshll = define
+ `aarch32_sshll n (x:N word) : (N tybit0)word = word_shl (word_sx x) n`;;
+
+(* VSHL by register: by the signed low byte of the other lane, rightward when
+   it is negative. *)
+
+let aarch32_ushl = define
+ `aarch32_ushl (x:N word) (y:N word) =
+    if bit 7 (word_subword y (0,8):byte)
+    then word_ushr x (val(word_neg(word_subword y (0,8):byte)))
+    else word_shl x (val(word_subword y (0,8):byte))`;;
+
+let aarch32_sshl = define
+ `aarch32_sshl (x:N word) (y:N word) =
+    if bit 7 (word_subword y (0,8):byte)
+    then word_ishr x (val(word_neg(word_subword y (0,8):byte)))
+    else word_shl x (val(word_subword y (0,8):byte))`;;
+
+let aarch32_bic = define
+ `aarch32_bic (x:N word) y = word_and x (word_not y)`;;
+
+let aarch32_bsl = define
+ `aarch32_bsl (d:N word) n m =
+    word_or (word_and n d) (word_and m (word_not d))`;;
+
+let aarch32_tst = define
+ `aarch32_tst (x:N word) y =
+    if word_and x y = word 0 then word 0 else word_not(word 0)`;;
+
+(* VEXT: the bytes from `k` on of Vm:Vn. *)
+
+let aarch32_ext = define
+ `aarch32_ext k (n:N word) (m:N word) : N word =
+    word_subword (word_join m n:(N tybit0)word) (8 * k,dimindex(:N))`;;
+
+(* VTRN's lane pairs, per container of two lanes, and VZIP's interleave. *)
+
+let aarch32_trn1 = define
+ `aarch32_trn1 (x:(N tybit0)word) (y:(N tybit0)word) : (N tybit0)word =
+    word_join (word_subword y (0,dimindex(:N)):N word)
+              (word_subword x (0,dimindex(:N)):N word)`;;
+
+let aarch32_trn2 = define
+ `aarch32_trn2 (x:(N tybit0)word) (y:(N tybit0)word) : (N tybit0)word =
+    word_join (word_subword y (dimindex(:N),dimindex(:N)):N word)
+              (word_subword x (dimindex(:N),dimindex(:N)):N word)`;;
+
+let aarch32_pair = define
+ `aarch32_pair (x:N word) (y:N word) : (N tybit0)word = word_join y x`;;
+
+(* `simd2` for an operation whose lanes widen. *)
+
+let aarch32_simd2 = define
+ `aarch32_simd2 (f:N word->N word->M word) (x:(N tybit0)word)
+                (y:(N tybit0)word) : (M tybit0)word =
+    word_join (f (word_subword x (dimindex(:N),dimindex(:N)))
+                 (word_subword y (dimindex(:N),dimindex(:N))))
+              (f (word_subword x (0,dimindex(:N)))
+                 (word_subword y (0,dimindex(:N))))`;;
+
+let aarch32_simd4 = define
+ `aarch32_simd4 (f:N word->N word->M word) = aarch32_simd2 (aarch32_simd2 f)`;;
+
+let aarch32_simd8 = define
+ `aarch32_simd8 (f:N word->N word->M word) = aarch32_simd2 (aarch32_simd4 f)`;;
+
+let aarch32_simd16 = define
+ `aarch32_simd16 (f:N word->N word->M word) = aarch32_simd2 (aarch32_simd8 f)`;;
+
+(* Lane `x` of a scalar operand, everywhere; and VMOV's write of a core
+   register's low `len` bits at `pos`. *)
+
+let aarch32_dup8 = define
+ `aarch32_dup8 x (m:M word) : N word =
+    word_duplicate (word_subword m (8 * x,8):byte)`;;
+
+let aarch32_dup16 = define
+ `aarch32_dup16 x (m:M word) : N word =
+    word_duplicate (word_subword m (16 * x,16):int16)`;;
+
+let aarch32_dup32 = define
+ `aarch32_dup32 x (m:M word) : N word =
+    word_duplicate (word_subword m (32 * x,32):int32)`;;
+
+let aarch32_ins = define
+ `aarch32_ins pos len (d:N word) (r:M word) = word_insert d (pos,len) r`;;
+
+(* The long multiplies, of 32-bit lanes, as AArch64's UMULL and SMULL; the
+   polynomial ones of 8-bit lanes as its PMULL. *)
+
+let aarch32_umull = define
+ `aarch32_umull (n:int64) (m:int64) : int128 =
+    simd2 word_mul (usimd2 word_zx n) (usimd2 word_zx m)`;;
+
+let aarch32_smull = define
+ `aarch32_smull (n:int64) (m:int64) : int128 =
+    simd2 word_mul (usimd2 word_sx n) (usimd2 word_sx m)`;;
+
+let aarch32_umlal = define
+ `aarch32_umlal (d:int128) n m = simd2 word_add d (aarch32_umull n m)`;;
+
+let aarch32_smlal = define
+ `aarch32_smlal (d:int128) n m = simd2 word_add d (aarch32_smull n m)`;;
+
+let aarch32_umull_lane = define
+ `aarch32_umull_lane x n (m:int64) = aarch32_umull n (aarch32_dup32 x m)`;;
+
+let aarch32_smull_lane = define
+ `aarch32_smull_lane x n (m:int64) = aarch32_smull n (aarch32_dup32 x m)`;;
+
+let aarch32_umlal_lane = define
+ `aarch32_umlal_lane x d n (m:int64) = aarch32_umlal d n (aarch32_dup32 x m)`;;
+
+let aarch32_smlal_lane = define
+ `aarch32_smlal_lane x d n (m:int64) = aarch32_smlal d n (aarch32_dup32 x m)`;;
+
+let aarch32_pmull8 = define
+ `aarch32_pmull8 (n:int64) (m:int64) : int128 =
+    simd8 (word_pmul:int16->int16->int16) (usimd8 word_zx n) (usimd8 word_zx m)`;;
+
+(* What the step conversion unfolds a decoded operation with, before the
+   widths' `dimindex` and the lanes' subwords reduce. *)
+
+let AARCH32_SIMD_EXPANSIONS =
+  [usimd16; usimd8; usimd4; usimd2; simd16; simd8; simd4; simd2;
+   aarch32_simd16; aarch32_simd8; aarch32_simd4; aarch32_simd2;
+   aarch32_shl; aarch32_ushr; aarch32_sshr; aarch32_sli; aarch32_sri;
+   aarch32_shrn; aarch32_ushll; aarch32_sshll; aarch32_ushl; aarch32_sshl;
+   aarch32_bic; aarch32_bsl; aarch32_tst; aarch32_ext; aarch32_trn1;
+   aarch32_trn2; aarch32_pair; aarch32_dup8; aarch32_dup16; aarch32_dup32;
+   aarch32_ins; aarch32_umull_lane; aarch32_smull_lane; aarch32_umlal_lane;
+   aarch32_smlal_lane; aarch32_umlal; aarch32_smlal; aarch32_umull;
+   aarch32_smull; aarch32_pmull8; aarch32_tbl];;
+
+(* ------------------------------------------------------------------------- *)
+(* Advanced SIMD loads and stores. A D register is the eight bytes at its    *)
+(* address, little-endian whatever the element size; `regs` lists D          *)
+(* registers in ascending order, which take ascending addresses. VLD1 and    *)
+(* VST1 add `Rm`'s value to Rn when `wback`, the transfer's length for the   *)
+(* `!` form, and need the address aligned to `align`, which is 1 without an  *)
+(* alignment qualifier. VLDM, VSTM, VLDR, and VSTR take a condition, as LDM  *)
+(* does, and a word-aligned base, as their word accesses fault otherwise.    *)
+(* ------------------------------------------------------------------------- *)
+
+let aarch32_vloads = define
+ `(aarch32_vloads [] (base:int32) (off:int32) (s:aarch32state)
+                  (k:aarch32state->aarch32state->bool) = k) /\
+  (aarch32_vloads (CONS (r:(aarch32state,int64)component) rs) base off s k =
+     (r := read (memory :> bytes64 (word_add base off)) s ,,
+      aarch32_vloads rs base (word_add off (word 8)) s k))`;;
+
+let aarch32_vstores = define
+ `(aarch32_vstores [] (base:int32) (off:int32) (s:aarch32state)
+                   (k:aarch32state->aarch32state->bool) = k) /\
+  (aarch32_vstores (CONS (r:(aarch32state,int64)component) rs) base off s k =
+     (memory :> bytes64 (word_add base off) := read r s ,,
+      aarch32_vstores rs base (word_add off (word 8)) s k))`;;
+
+let aarch32_vdups = define
+ `(aarch32_vdups [] (v:int64) (k:aarch32state->aarch32state->bool) = k) /\
+  (aarch32_vdups (CONS (r:(aarch32state,int64)component) rs) v k =
+     (r := v ,, aarch32_vdups rs v k))`;;
+
+let aarch32_VLD1 = define
+ `aarch32_VLD1 regs Rn (Rm:(aarch32state,int32)component) len align wback =
+    \s:aarch32state.
+        let addr:int32 = read Rn s in
+        (if aarch32_nowrap addr len then
+           if aligned align addr then
+             aarch32_vloads regs addr (word 0) s
+              (events := CONS (EventLoad (addr,len)) (read events s) ,,
+               (if wback then Rn := word_add addr (read Rm s) else (=)))
+           else ASSIGNS entirety
+         else ASSIGNS entirety) s`;;
+
+let aarch32_VST1 = define
+ `aarch32_VST1 regs Rn (Rm:(aarch32state,int32)component) len align wback =
+    \s:aarch32state.
+        let addr:int32 = read Rn s in
+        (if aarch32_nowrap addr len then
+           if aligned align addr then
+             aarch32_vstores regs addr (word 0) s
+              (events := CONS (EventStore (addr,len)) (read events s) ,,
+               (if wback then Rn := word_add addr (read Rm s) else (=)))
+           else ASSIGNS entirety
+         else ASSIGNS entirety) s`;;
+
+(* One lane, `esize` bits at bit `pos` of Dd, from or to the `len` bytes that
+   `mem` names at the address, such as `bytes32`. *)
+
+let aarch32_VLD1_LANE = define
+ `aarch32_VLD1_LANE (Dd:(aarch32state,int64)component)
+                    (mem:int32->(int32->byte,L word)component) pos esize len
+                    Rn (Rm:(aarch32state,int32)component) align wback =
+    \s:aarch32state.
+        let addr:int32 = read Rn s in
+        (if aarch32_nowrap addr len then
+           if aligned align addr then
+             Dd := word_insert (read Dd s) (pos,esize)
+                     (read (memory :> mem addr) s) ,,
+             events := CONS (EventLoad (addr,len)) (read events s) ,,
+             (if wback then Rn := word_add addr (read Rm s) else (=))
+           else ASSIGNS entirety
+         else ASSIGNS entirety) s`;;
+
+let aarch32_VST1_LANE = define
+ `aarch32_VST1_LANE (Dd:(aarch32state,int64)component)
+                    (mem:int32->(int32->byte,L word)component) pos esize len
+                    Rn (Rm:(aarch32state,int32)component) align wback =
+    \s:aarch32state.
+        let addr:int32 = read Rn s in
+        (if aarch32_nowrap addr len then
+           if aligned align addr then
+             memory :> mem addr := word_subword (read Dd s) (pos,esize) ,,
+             events := CONS (EventStore (addr,len)) (read events s) ,,
+             (if wback then Rn := word_add addr (read Rm s) else (=))
+           else ASSIGNS entirety
+         else ASSIGNS entirety) s`;;
+
+(* One element into every lane of each register in `regs`. *)
+
+let aarch32_VLD1_ALL = define
+ `aarch32_VLD1_ALL regs (mem:int32->(int32->byte,L word)component) len
+                   Rn (Rm:(aarch32state,int32)component) align wback =
+    \s:aarch32state.
+        let addr:int32 = read Rn s in
+        (if aarch32_nowrap addr len then
+           if aligned align addr then
+             aarch32_vdups regs
+              (word_duplicate (read (memory :> mem addr) s))
+              (events := CONS (EventLoad (addr,len)) (read events s) ,,
+               (if wback then Rn := word_add addr (read Rm s) else (=)))
+           else ASSIGNS entirety
+         else ASSIGNS entirety) s`;;
+
+(* `off`, `len`, and `wb` as for LDM; VLDR is one register at an offset. *)
+
+let aarch32_VLDM = define
+ `aarch32_VLDM (cond:4 word) regs Rn (off:int32) len (wb:int32) wback =
+    \s:aarch32state.
+        let base:int32 = read Rn s in
+        (if aarch32_nowrap (word_add base off) len then
+           if aarch32_condition cond s then
+             if aligned 4 base then
+               aarch32_vloads regs base off s
+                (events := CONS (EventLoad (word_add base off,len))
+                                (read events s) ,,
+                 (if wback then Rn := word_add base wb else (=)))
+             else ASSIGNS entirety
+           else events := CONS (EventLoad (word_add base off,0))
+                               (read events s)
+         else ASSIGNS entirety) s`;;
+
+let aarch32_VSTM = define
+ `aarch32_VSTM (cond:4 word) regs Rn (off:int32) len (wb:int32) wback =
+    \s:aarch32state.
+        let base:int32 = read Rn s in
+        (if aarch32_nowrap (word_add base off) len then
+           if aarch32_condition cond s then
+             if aligned 4 base then
+               aarch32_vstores regs base off s
+                (events := CONS (EventStore (word_add base off,len))
+                                (read events s) ,,
+                 (if wback then Rn := word_add base wb else (=)))
+             else ASSIGNS entirety
+           else events := CONS (EventStore (word_add base off,0))
+                               (read events s)
          else ASSIGNS entirety) s`;;
 
 (* ------------------------------------------------------------------------- *)
@@ -919,4 +1385,9 @@ let AARCH32_INSTRUCTIONS =
    aarch32_MUL; aarch32_UMULL; aarch32_UMLAL; aarch32_REV; aarch32_NOP;
    aarch32_DMB; aarch32_B; aarch32_BL; aarch32_BX; aarch32_LDR; aarch32_LDRB;
    aarch32_STR; aarch32_STRB; aarch32_LDR_PC; aarch32_LDRD; aarch32_STRD;
-   aarch32_loads; aarch32_stores; aarch32_LDM; aarch32_STM; aarch32_LDM_PC];;
+   aarch32_loads; aarch32_stores; aarch32_LDM; aarch32_STM; aarch32_LDM_PC;
+   aarch32_VMOV; aarch32_VUNARY; aarch32_VBINARY; aarch32_VUPDATE;
+   aarch32_VTERNARY; aarch32_VSWP; aarch32_VTRN; aarch32_VZIP; aarch32_VTBL;
+   aarch32_vloads; aarch32_vstores; aarch32_vdups; aarch32_VLD1;
+   aarch32_VST1; aarch32_VLD1_LANE; aarch32_VST1_LANE; aarch32_VLD1_ALL;
+   aarch32_VLDM; aarch32_VSTM];;

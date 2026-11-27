@@ -9,29 +9,76 @@ use serde_json::Value;
 use crate::From::{Rind, Vector};
 use crate::{Run, hex, trim, unhex};
 
-/// A section's name and its tests.
-pub type Section = (&'static str, fn(&mut Run));
+/// A section's name, the group of specs it runs, and its tests.
+pub type Section = (&'static str, &'static str, fn(&mut Run));
 
-/// The sections, each run on its own thread, the slowest first.
+/// The sections, each run on its own thread, the slowest of each group first.
+/// The unsampled run's slowest sections are split, so that none takes more
+/// than about 15 minutes and a runner's four cores stay busy: ML-KEM into
+/// parts of each file's cases, SHA-2 by hash, and PBKDF2 by hash.
 pub const SECTIONS: &[Section] = &[
-    ("mlkem1024", |run| {
-        mlkem::<rind::kem::MlKem1024>(run, "1024")
+    ("mlkem1024.0", "mlkem.a", |run| {
+        mlkem::<rind::kem::MlKem1024>(run, "1024", 0, 8)
     }),
-    ("sha2", sha2),
-    ("mlkem768", |run| mlkem::<rind::kem::MlKem768>(run, "768")),
-    ("ed25519", ed25519),
-    ("kdfs", kdfs),
-    ("mlkem512", |run| mlkem::<rind::kem::MlKem512>(run, "512")),
-    ("sha3", sha3),
-    ("ecdsa", ecdsa),
-    ("nist", nist),
-    ("aes_modes", aes_modes),
-    ("rsa", rsa),
-    ("gcm", gcm),
-    ("aes", aes),
-    ("macs", macs),
-    ("chacha", chacha),
-    ("x25519", x25519),
+    ("mlkem1024.1", "mlkem.a", |run| {
+        mlkem::<rind::kem::MlKem1024>(run, "1024", 1, 8)
+    }),
+    ("mlkem1024.2", "mlkem.a", |run| {
+        mlkem::<rind::kem::MlKem1024>(run, "1024", 2, 8)
+    }),
+    ("mlkem1024.3", "mlkem.a", |run| {
+        mlkem::<rind::kem::MlKem1024>(run, "1024", 3, 8)
+    }),
+    ("mlkem1024.4", "mlkem.b", |run| {
+        mlkem::<rind::kem::MlKem1024>(run, "1024", 4, 8)
+    }),
+    ("mlkem1024.5", "mlkem.b", |run| {
+        mlkem::<rind::kem::MlKem1024>(run, "1024", 5, 8)
+    }),
+    ("mlkem1024.6", "mlkem.b", |run| {
+        mlkem::<rind::kem::MlKem1024>(run, "1024", 6, 8)
+    }),
+    ("mlkem1024.7", "mlkem.b", |run| {
+        mlkem::<rind::kem::MlKem1024>(run, "1024", 7, 8)
+    }),
+    ("mlkem768.0", "mlkem.c", |run| {
+        mlkem::<rind::kem::MlKem768>(run, "768", 0, 4)
+    }),
+    ("mlkem768.1", "mlkem.c", |run| {
+        mlkem::<rind::kem::MlKem768>(run, "768", 1, 4)
+    }),
+    ("mlkem768.2", "mlkem.c", |run| {
+        mlkem::<rind::kem::MlKem768>(run, "768", 2, 4)
+    }),
+    ("mlkem768.3", "mlkem.c", |run| {
+        mlkem::<rind::kem::MlKem768>(run, "768", 3, 4)
+    }),
+    ("mlkem512.0", "mlkem.c", |run| {
+        mlkem::<rind::kem::MlKem512>(run, "512", 0, 2)
+    }),
+    ("mlkem512.1", "mlkem.c", |run| {
+        mlkem::<rind::kem::MlKem512>(run, "512", 1, 2)
+    }),
+    ("sha2-sha384", "digests", |run| sha2(run, "sha384")),
+    ("sha2-sha512", "digests", |run| sha2(run, "sha512")),
+    ("sha2-sha512_256", "digests", |run| sha2(run, "sha512_256")),
+    ("sha2-sha256", "digests", |run| sha2(run, "sha256")),
+    ("sha3", "digests", sha3),
+    ("pbkdf2-sha1", "rest", |run| pbkdf2(run, "sha1")),
+    ("pbkdf2-sha256", "rest", |run| pbkdf2(run, "sha256")),
+    ("pbkdf2-sha384", "rest", |run| pbkdf2(run, "sha384")),
+    ("pbkdf2-sha512", "rest", |run| pbkdf2(run, "sha512")),
+    ("ed25519", "rest", ed25519),
+    ("kdfs", "rest", kdfs),
+    ("ecdsa", "rest", ecdsa),
+    ("nist", "rest", nist),
+    ("aes_modes", "rest", aes_modes),
+    ("rsa", "rest", rsa),
+    ("gcm", "rest", gcm),
+    ("aes", "rest", aes),
+    ("macs", "rest", macs),
+    ("chacha", "rest", chacha),
+    ("x25519", "rest", x25519),
 ];
 
 /// The lowercase hex of a hex or quoted string, as the server reads it.
@@ -271,9 +318,11 @@ fn s2n_runs(run: &Run, op: &str, len: usize, ran: usize) -> bool {
     }
 }
 
-fn sha2(run: &mut Run) {
+/// One SHA-2 hash on its vectors and random inputs, the s2n-bignum form's
+/// being slow enough to need a section each. SHA-256's also runs SHA-1.
+fn sha2(run: &mut Run, only: &str) {
     // CAVP's byte-aligned messages, through the spec and its s2n-bignum form.
-    for (file, op, _) in SHA2 {
+    for (file, op, _) in SHA2.iter().filter(|(_, op, _)| *op == only) {
         let mut ran = 0;
         for kind in ["ShortMsg", "LongMsg"] {
             let rel = format!("cavp/sha2/{file}{kind}.rsp");
@@ -292,22 +341,25 @@ fn sha2(run: &mut Run) {
             }
         }
     }
-    // RFC 3174's, as CAVP has no SHA-1 file here.
-    run.source("RFC 3174");
-    for (m, md) in [
-        ("616263", "a9993e364706816aba3e25717850c26c9cd0d89d"),
-        (
-            "6162636462636465636465666465666765666768666768696768696a68696a6b696a6b6c6a6b6c6d6b6c6d6e6c6d6e6f6d6e6f706e6f7071",
-            "84983e441c3bd26ebaae4aa1f95129e5e54670f1",
-        ),
-    ] {
-        run.check(Vector, "RFC 3174", &["sha1", m], md);
-    }
-    let algs: Vec<(&str, &rind::digest::Algorithm)> = SHA2
+    let mut algs: Vec<(&str, &rind::digest::Algorithm)> = SHA2
         .iter()
+        .filter(|(_, op, _)| *op == only)
         .map(|(_, op, alg)| (*op, *alg))
-        .chain([("sha1", &rind::digest::legacy::SHA1)])
         .collect();
+    if only == "sha256" {
+        // RFC 3174's, as CAVP has no SHA-1 file here.
+        run.source("RFC 3174");
+        for (m, md) in [
+            ("616263", "a9993e364706816aba3e25717850c26c9cd0d89d"),
+            (
+                "6162636462636465636465666465666765666768666768696768696a68696a6b696a6b6c6a6b6c6d6b6c6d6e6c6d6e6f6d6e6f706e6f7071",
+                "84983e441c3bd26ebaae4aa1f95129e5e54670f1",
+            ),
+        ] {
+            run.check(Vector, "RFC 3174", &["sha1", m], md);
+        }
+        algs.push(("sha1", &rind::digest::legacy::SHA1));
+    }
     random_digests(run, &algs);
 }
 
@@ -529,55 +581,55 @@ fn kdfs(run: &mut Run) {
             );
         }
     }
+}
 
-    // PBKDF2's vectors iterate HMAC 4096 times, mostly, which the spec takes
-    // some seconds over: without `full`, each file runs four of them, and
-    // with it every vector but RFC 6070's 2^24 iterations, which would take
-    // hours.
-    for op in HASHES {
-        let file = format!("pbkdf2_hmac{op}_test");
-        let cases: Vec<_> = wycheproof(run, &file)
-            .into_iter()
-            .filter(|(_, t)| valid(t) && jn(t, "iterationCount") <= 100_000)
-            .collect();
-        for (_, t) in run.sample_n(cases, 4) {
-            let c = jn(&t, "iterationCount");
-            run.check(
-                Vector,
-                &label(&file, &t),
-                &[
-                    "pbkdf2",
-                    op,
-                    &jh(&t, "password"),
-                    &jh(&t, "salt"),
-                    &c.to_string(),
-                    &jn(&t, "dkLen").to_string(),
-                ],
-                &jh(&t, "dk"),
-            );
-        }
-        let alg = match *op {
-            "sha1" => &rind::pbkdf2::legacy::PBKDF2_HMAC_SHA1,
-            "sha256" => &rind::pbkdf2::PBKDF2_HMAC_SHA256,
-            "sha384" => &rind::pbkdf2::PBKDF2_HMAC_SHA384,
-            _ => &rind::pbkdf2::PBKDF2_HMAC_SHA512,
-        };
-        for _ in 0..run.random {
-            let pw = run.rng.message(100);
-            let salt = run.rng.message(100);
-            let c = 1 + run.rng.below(20) as u32;
-            let mut dk = vec![0; 1 + run.rng.below(150)];
-            rind::pbkdf2::Secret::new(alg, &pw)
-                .derive(NonZeroU32::new(c).unwrap(), &salt, &mut dk)
-                .unwrap();
-            let len = dk.len().to_string();
-            run.check(
-                Rind,
-                "random",
-                &["pbkdf2", op, &hex(&pw), &hex(&salt), &c.to_string(), &len],
-                &hex(&dk),
-            );
-        }
+/// PBKDF2 with one hash, which takes a section of its own: its vectors
+/// iterate HMAC 4096 times, mostly, which the spec takes some seconds over.
+fn pbkdf2(run: &mut Run, op: &str) {
+    // Without `full`, each file runs four of them, and with it every vector but
+    // RFC 6070's 2^24 iterations, which would take hours.
+    let file = format!("pbkdf2_hmac{op}_test");
+    let cases: Vec<_> = wycheproof(run, &file)
+        .into_iter()
+        .filter(|(_, t)| valid(t) && jn(t, "iterationCount") <= 100_000)
+        .collect();
+    for (_, t) in run.sample_n(cases, 4) {
+        let c = jn(&t, "iterationCount");
+        run.check(
+            Vector,
+            &label(&file, &t),
+            &[
+                "pbkdf2",
+                op,
+                &jh(&t, "password"),
+                &jh(&t, "salt"),
+                &c.to_string(),
+                &jn(&t, "dkLen").to_string(),
+            ],
+            &jh(&t, "dk"),
+        );
+    }
+    let alg = match op {
+        "sha1" => &rind::pbkdf2::legacy::PBKDF2_HMAC_SHA1,
+        "sha256" => &rind::pbkdf2::PBKDF2_HMAC_SHA256,
+        "sha384" => &rind::pbkdf2::PBKDF2_HMAC_SHA384,
+        _ => &rind::pbkdf2::PBKDF2_HMAC_SHA512,
+    };
+    for _ in 0..run.random {
+        let pw = run.rng.message(100);
+        let salt = run.rng.message(100);
+        let c = 1 + run.rng.below(20) as u32;
+        let mut dk = vec![0; 1 + run.rng.below(150)];
+        rind::pbkdf2::Secret::new(alg, &pw)
+            .derive(NonZeroU32::new(c).unwrap(), &salt, &mut dk)
+            .unwrap();
+        let len = dk.len().to_string();
+        run.check(
+            Rind,
+            "random",
+            &["pbkdf2", op, &hex(&pw), &hex(&salt), &c.to_string(), &len],
+            &hex(&dk),
+        );
     }
 }
 
@@ -1964,15 +2016,17 @@ fn rsa(run: &mut Run) {
 
 // ## ML-KEM
 
-/// ML-KEM, one parameter set. SymCrypt's spec takes most of a second over a
-/// key generation or decapsulation, so without `full` each vector file runs
-/// a sample of `MLKEM_SAMPLE`, and the random tests a quarter of the others'
-/// cases.
-fn mlkem<A: rind::kem::Algorithm>(run: &mut Run, set: &str) {
+/// ML-KEM, one parameter set. SymCrypt's spec takes a few seconds over a key
+/// generation or decapsulation, so without `full` each vector file runs a
+/// sample of `MLKEM_SAMPLE`, and the random tests a quarter of the others'
+/// cases. With `full` it is the slowest of the suite, so each of `parts`
+/// sections runs the cases of each file, and the random tests, whose index is
+/// its `part` modulo `parts`.
+fn mlkem<A: rind::kem::Algorithm>(run: &mut Run, set: &str, part: usize, parts: usize) {
     let k = set.parse::<usize>().unwrap() / 256;
     let file = format!("mlkem_{set}_keygen_seed_test");
     let cases = wycheproof(run, &file);
-    for (_, t) in run.sample_n(cases, MLKEM_SAMPLE) {
+    for (_, t) in part_of(run.sample_n(cases, MLKEM_SAMPLE), part, parts) {
         let seed = unhex(js(&t, "seed"));
         run.check(
             Vector,
@@ -1983,7 +2037,7 @@ fn mlkem<A: rind::kem::Algorithm>(run: &mut Run, set: &str) {
     }
     let file = format!("mlkem_{set}_encaps_test");
     let cases = wycheproof(run, &file);
-    for (_, t) in run.sample_n(cases, MLKEM_SAMPLE) {
+    for (_, t) in part_of(run.sample_n(cases, MLKEM_SAMPLE), part, parts) {
         // The spec takes keys only of the set's length.
         if unhex(js(&t, "ek")).len() != 384 * k + 32 {
             continue;
@@ -2001,7 +2055,14 @@ fn mlkem<A: rind::kem::Algorithm>(run: &mut Run, set: &str) {
         );
     }
     let file = format!("mlkem_{set}_semi_expanded_decaps_test");
-    for (_, t) in wycheproof(run, &file) {
+    // Nine cases, which the first part runs alone: each part runs a file's
+    // cases, or none of them, so that no part's source ran no vectors.
+    let semi = if part == 0 {
+        wycheproof(run, &file)
+    } else {
+        Vec::new()
+    };
+    for (_, t) in semi {
         // Nor decapsulation keys and ciphertexts of other lengths.
         if unhex(js(&t, "dk")).len() != 768 * k + 96 || unhex(js(&t, "c")).len() != expected_c(set)
         {
@@ -2032,7 +2093,7 @@ fn mlkem<A: rind::kem::Algorithm>(run: &mut Run, set: &str) {
                 && unhex(js(t, "c")).len() == expected_c(set)
         })
         .collect();
-    for (_, t) in run.sample_n(cases, MLKEM_SAMPLE) {
+    for (_, t) in part_of(run.sample_n(cases, MLKEM_SAMPLE), part, parts) {
         let seed = unhex(js(&t, "seed"));
         let label = label(&file, &t);
         let got = run.ask(
@@ -2060,9 +2121,20 @@ fn mlkem<A: rind::kem::Algorithm>(run: &mut Run, set: &str) {
     } else {
         run.random.div_ceil(4)
     };
-    for _ in 0..random {
+    for _ in 0..random.div_ceil(parts) {
         mlkem_random::<A>(run, set);
     }
+}
+
+/// The cases of a section's `part` of `parts`: every one whose index is `part`
+/// modulo `parts`, so that the parts together run each case once.
+fn part_of<T>(cases: Vec<T>, part: usize, parts: usize) -> Vec<T> {
+    cases
+        .into_iter()
+        .enumerate()
+        .filter(|(i, _)| i % parts == part)
+        .map(|(_, c)| c)
+        .collect()
 }
 
 /// The most cases an ML-KEM vector file runs without `full`.

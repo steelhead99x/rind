@@ -186,7 +186,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        test: [rsa3072, rsa4096, crt_ifma_2048, crt_ifma512_2048, crt_ifma512_3072, crt_ifma_4096, crt_ifma512_4096, public_ifma, aes128_gcm, aes192_gcm, aes256_gcm, aes_gcm_vaes_avx2, hmac, chacha20, mlkem768, mlkem_prf_8x, x25519, ed25519, p256_ifma_ecdh]
+        test: [rsa3072, rsa4096, crt_ifma_2048, crt_ifma512_2048, crt_ifma512_3072, crt_ifma_4096, crt_ifma512_4096, public_ifma, aes128_gcm, aes192_gcm, aes256_gcm, aes_gcm_vaes_avx2, hmac, chacha20, mlkem768, mlkem_prf_8x, expand_mask, x25519, ed25519, p256_ifma_ecdh]
         exclude: ${{ fromJSON(needs.select.outputs.exclude || '{}')['x86_64-sde'] || fromJSON('[]') }}
     runs-on: ubuntu-latest
     steps:
@@ -382,11 +382,14 @@ jobs:
 
   # Consumers often build rind with LTO, which inlines it into their code and
   # reoptimizes it, or for size, where LLVM may pick a branch over a select
-  # and divides by a constant with `div`. Each row reruns the valgrind suites
-  # and BINSEC, whose division checks tell a secret dividend from a public
-  # one, under that profile on x86_64. `admin/ct-vartime` reads rlibs, which
-  # LTO never reaches, and at `opt-level = "z"` would refuse every division
-  # by a constant, almost all of public lengths.
+  # and divides by a constant with `div`; that row also uses fat LTO and one
+  # codegen unit, as consumers who optimize for size usually do, which inlines
+  # dependencies' frames that `admin/ctgrind.supp` would otherwise name. Each
+  # row reruns the valgrind suites and BINSEC, whose division checks tell a
+  # secret dividend from a public one, under that profile on x86_64.
+  # `admin/ct-vartime` reads rlibs, which LTO never reaches, and at
+  # `opt-level = "z"` would refuse every division by a constant, almost all of
+  # public lengths.
   profile:
     name: profile (${{ matrix.profile }})
     needs: select
@@ -398,8 +401,9 @@ jobs:
         exclude: ${{ fromJSON(needs.select.outputs.exclude || '{}').profile || fromJSON('[]') }}
     runs-on: ubuntu-latest
     env:
-      CARGO_PROFILE_RELEASE_LTO: ${{ matrix.profile == 'lto' && 'thin' || 'false' }}
+      CARGO_PROFILE_RELEASE_LTO: ${{ matrix.profile == 'lto' && 'thin' || matrix.profile == 'opt-z' && 'fat' || 'false' }}
       CARGO_PROFILE_RELEASE_OPT_LEVEL: ${{ matrix.profile == 'opt-z' && 'z' || '3' }}
+      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: ${{ matrix.profile == 'opt-z' && '1' || '16' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

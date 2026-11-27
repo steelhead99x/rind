@@ -1,0 +1,95 @@
+#!/usr/bin/env python3
+"""Fails unless two Aeneas translations of curve25519-dalek agree on what some functions reach.
+
+Usage: admin/dalek-closure <want dir> <got dir> <configuration> <root>...
+
+Each directory holds a translation's `Types.lean` and `Funs.lean`. From each
+root, a name in the first translation, this follows every name of the first
+translation's definitions that a reached definition's text names, and fails
+unless the second translation defines each reached name with the same text.
+A definition's text leaves out its doc comment, which cites the Rust's source
+lines. A multi-target translation suffixes what differs between its targets
+with the target's name, `«32bit-tables»` and the like, so this follows only
+`configuration`'s: a name that holds another target's, or the other word
+size's backend, is not followed.
+
+`admin/prove dalek` runs it with BAIF's translation first and rind's second.
+"""
+
+import re
+import sys
+
+NAME = re.compile(r"(?:[A-Za-z_][\w']*|«[^»]*»)(?:\.(?:[A-Za-z_][\w']*|«[^»]*»))*")
+DECL = re.compile(
+    r"^(?:@\[[^\]]*\]\s*)*(?:noncomputable\s+|private\s+|protected\s+|partial\s+)*"
+    r"(?:def|impl_def|abbrev|structure|inductive|instance|opaque|axiom|theorem|class)\s+(\S+)",
+    re.M,
+)
+CONFIGS = ["64bit-tables", "64bit-notables", "32bit-tables", "32bit-notables"]
+
+
+def definitions(directory):
+    """Each defined name's texts, from the doc comment Aeneas puts before each item.
+
+    A trait declaration's or implementation's doc comment names its kind before
+    the Rust path. Each is an item of its own, so a call through an
+    implementation reaches its methods.
+    """
+    out = {}
+    for module in ["Types", "Funs"]:
+        with open(f"{directory}/{module}.lean") as f:
+            text = f.read()
+        preamble, *items = re.split(r"(?m)^(?=/-- (?:Trait (?:declaration|implementation): )?\[)", text)
+        # A doc comment of a form the split misses would hide the names of the
+        # items it joins.
+        if DECL.search(preamble):
+            sys.exit(f"admin/dalek-closure: {directory}/{module}.lean: a definition before the first item")
+        for item in items:
+            body = re.sub(r"(?s)^/--.*?-/\n", "", item, count=1).strip()
+            decls = DECL.findall(body)
+            if len(decls) != 1:
+                sys.exit(f"admin/dalek-closure: {directory}/{module}.lean: not one definition in: {body[:200]}")
+            out.setdefault(decls[0], []).append(body)
+    return out
+
+
+def main():
+    if len(sys.argv) < 5:
+        sys.exit(__doc__.split("\n\n")[1])
+    want_dir, got_dir, config = sys.argv[1:4]
+    roots = sys.argv[4:]
+    if config not in CONFIGS:
+        sys.exit(f"admin/dalek-closure: no configuration {config}")
+    want, got = definitions(want_dir), definitions(got_dir)
+    others = [c for c in CONFIGS if c != config]
+    backend = ".u32." if config.startswith("64") else ".u64."
+
+    def follow(name):
+        return name in want and backend not in name and not any(o in name for o in others)
+
+    reached, todo = set(), []
+    for root in roots:
+        if root not in want:
+            sys.exit(f"admin/dalek-closure: {want_dir} defines no {root}")
+        todo.append(root)
+    while todo:
+        name = todo.pop()
+        if name in reached:
+            continue
+        reached.add(name)
+        for body in want[name]:
+            for token in NAME.findall(body):
+                parts = token.split(".")
+                for n in range(len(parts), 0, -1):
+                    prefix = ".".join(parts[:n])
+                    if prefix not in reached and follow(prefix):
+                        todo.append(prefix)
+
+    differ = sorted(n for n in reached if want[n] != got.get(n))
+    for name in differ:
+        print(f"admin/dalek-closure: {name} is not the definition BAIF's proofs are about", file=sys.stderr)
+    print(f"admin/dalek-closure: {len(reached)} definitions reached, {len(differ)} differ", file=sys.stderr)
+    sys.exit(1 if differ else 0)
+
+
+main()
