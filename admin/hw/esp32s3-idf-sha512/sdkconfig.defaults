@@ -1,0 +1,5 @@
+# The timing loop runs for minutes without yielding.
+CONFIG_ESP_TASK_WDT_EN=n
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=20480
+# 80 MHz unless sdkconfig.240mhz follows this file.
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_80=y

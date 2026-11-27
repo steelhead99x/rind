@@ -1,0 +1,18 @@
+[build]
+target = "xtensa-esp32s3-espidf"
+
+[target.xtensa-esp32s3-espidf]
+linker = "ldproxy"
+runner = "espflash flash --monitor"
+# ESP-IDF 5's 64-bit time_t, which the libc crate must match.
+rustflags = ["--cfg", "espidf_time64"]
+
+[unstable]
+build-std = ["std", "panic_abort"]
+
+[env]
+MCU = "esp32s3"
+# The ESP-IDF whose ESP32-S3 core-isa.h admin/esp32s3-sha512-layout checks.
+ESP_IDF_VERSION = "v5.5.1"
+# One ESP-IDF checkout under ~/.espressif for every image, not one per build.
+ESP_IDF_TOOLS_INSTALL_DIR = "global"

@@ -9,8 +9,12 @@
 //! flash. This follows Graviola's portable SHA-256: one 16-word window and
 //! an 80-round loop, a few kilobytes. The round functions are FIPS 180-4
 //! §4.1.3. Every test build compiles it, so ctgrind checks it on a host.
+//!
+//! Its sums go through [`Sum64`](sum64.rs), which on Xtensa adds in `u32`
+//! lanes: LLVM adds a plain `u64` there with a branch on the carry.
 
 use super::sha512::K;
+use super::sum64::Sum64;
 
 macro_rules! CH {
     ($x:expr, $y:expr, $z:expr) => {
@@ -79,38 +83,40 @@ fn sha512_compress_block(state: &mut [u64; 8], block: &[u8; 128]) {
             w[t] = w_t;
             w_t
         } else {
-            let w_t = SSIG1!(w[(t - 2) % 16])
-                .wrapping_add(w[(t - 7) % 16])
-                .wrapping_add(SSIG0!(w[(t - 15) % 16]))
-                .wrapping_add(w[(t - 16) % 16]);
+            let w_t = Sum64::of(SSIG1!(w[(t - 2) % 16]))
+                .add(w[(t - 7) % 16])
+                .add(SSIG0!(w[(t - 15) % 16]))
+                .add(w[(t - 16) % 16])
+                .value();
             w[t % 16] = w_t;
             w_t
         };
 
-        let t1 = h
-            .wrapping_add(BSIG1!(e))
-            .wrapping_add(CH!(e, f, g))
-            .wrapping_add(K[t])
-            .wrapping_add(w_t);
-        let t2 = BSIG0!(a).wrapping_add(MAJ!(a, b, c));
+        // T1, unfolded, is shared by `e` and `a`; T2 is Σ0(a) + Maj(a, b, c).
+        let t1 = Sum64::of(h)
+            .add(BSIG1!(e))
+            .add(CH!(e, f, g))
+            .add(K[t])
+            .add(w_t);
+        let new_a = t1.add(BSIG0!(a)).add(MAJ!(a, b, c)).value();
         h = g;
         g = f;
         f = e;
-        e = d.wrapping_add(t1);
+        e = t1.add(d).value();
         d = c;
         c = b;
         b = a;
-        a = t1.wrapping_add(t2);
+        a = new_a;
     }
 
-    state[0] = state[0].wrapping_add(a);
-    state[1] = state[1].wrapping_add(b);
-    state[2] = state[2].wrapping_add(c);
-    state[3] = state[3].wrapping_add(d);
-    state[4] = state[4].wrapping_add(e);
-    state[5] = state[5].wrapping_add(f);
-    state[6] = state[6].wrapping_add(g);
-    state[7] = state[7].wrapping_add(h);
+    state[0] = Sum64::of(state[0]).add(a).value();
+    state[1] = Sum64::of(state[1]).add(b).value();
+    state[2] = Sum64::of(state[2]).add(c).value();
+    state[3] = Sum64::of(state[3]).add(d).value();
+    state[4] = Sum64::of(state[4]).add(e).value();
+    state[5] = Sum64::of(state[5]).add(f).value();
+    state[6] = Sum64::of(state[6]).add(g).value();
+    state[7] = Sum64::of(state[7]).add(h).value();
 }
 
 pub(crate) fn sha512_compress_blocks(state: &mut [u64; 8], blocks: &[u8]) {

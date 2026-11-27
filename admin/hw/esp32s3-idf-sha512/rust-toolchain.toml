@@ -1,0 +1,3 @@
+# The espup toolchain the board uses (admin/hw/esp32s3-sha512-split.sh).
+[toolchain]
+channel = "esp"
