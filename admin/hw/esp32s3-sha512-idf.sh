@@ -176,29 +176,51 @@ if not port:
 else:
     per = {}  # image -> size -> [capture medians]
     rejected = []
+    # What every round of admin/hw/esp32s3-idf-sha512 prints.
+    KATS = {"empty", "abc", "two-block", "bench-16B", "bench-243B", "bench-1500B", "bench-16384B"}
+    SIZES = {16, 243, 1500, 16384}
+
+    def check_round(r, image):
+        """Why round `r` of a capture of `image` is not whole and passing, or None."""
+        want_label, want_mhz = image + "@", image.rsplit("-", 1)[1].removesuffix("mhz")
+        if not r["label"].startswith(want_label) or r["mhz"] != want_mhz:
+            return f"round {r['n']} booted {r['label']} at {r['mhz']} MHz, not {image}"
+        names = [k[0] for k in r["kat"]]
+        if sorted(names) != sorted(KATS):
+            return (f"round {r['n']} has known answers {sorted(names)}, "
+                    f"want each of {sorted(KATS)} once")
+        if any(v != "PASS" for _, v in r["kat"]):
+            return f"round {r['n']}: " + ", ".join(f"{k} {v}" for k, v in r["kat"] if v != "PASS")
+        if set(r["bench"]) != SIZES or r["nbench"] != len(SIZES):
+            return f"round {r['n']} timed sizes {sorted(r['bench'])}, want each of {sorted(SIZES)} once"
+        return None
+
     for cap in sorted(glob.glob(os.path.join(run, "cap-*.log"))):
         image = re.match(r"cap-\d+-(.*)\.log$", os.path.basename(cap)).group(1)
-        rounds, cur = [], None
+        rounds, cur, why = [], None, None
         for line in open(cap, errors="replace"):
             line = line.strip()
-            if line.startswith("IDF-BENCH v1 "):
-                cur = {"kat": [], "bench": {}}
+            if m := re.match(r"^IDF-BENCH v1 label=(\S+) mhz=(\S+) round=(\d+)$", line):
+                cur = {"label": m.group(1), "mhz": m.group(2), "n": int(m.group(3)),
+                       "kat": [], "bench": {}, "nbench": 0}
             elif cur is None:
                 continue
-            elif line.startswith("KAT "):
-                cur["kat"].append(line.split()[-1])
+            elif m := re.match(r"^KAT sha512 (\S+) (\S+)$", line):
+                cur["kat"].append((m.group(1), m.group(2)))
             elif m := re.match(r"^BENCH sha512 (\d+)B ([0-9.]+) us$", line):
                 cur["bench"][int(m.group(1))] = float(m.group(2))
-            elif line.startswith("ROUND-END"):
+                cur["nbench"] += 1
+            elif line == f"ROUND-END {cur['n']}":
+                why = why or check_round(cur, image)
                 rounds.append(cur)
                 cur = None
-        kats = [k for r in rounds for k in r["kat"]]
-        if len(rounds) < 3 or not kats or any(k != "PASS" for k in kats):
-            rejected.append(f"{os.path.basename(cap)}: {len(rounds)} whole rounds, "
-                            f"{sum(k != 'PASS' for k in kats)} known answers not PASS")
+        if why is None and len(rounds) < 3:
+            why = f"{len(rounds)} whole rounds, want at least 3"
+        if why is not None:
+            rejected.append(f"{os.path.basename(cap)}: {why}")
             bad = True
             continue
-        for size in rounds[1]["bench"]:
+        for size in SIZES:
             per.setdefault(image, {}).setdefault(size, []).append(
                 statistics.median(r["bench"][size] for r in rounds[1:]))
     for mhz in ("80", "240"):
@@ -217,8 +239,9 @@ else:
             out.append(f"| {size} B | {bm:.2f} us | {hm:.2f} us | {(hm - bm) / bm * 100:+.2f}% "
                        f"| {spread:.2f}% |")
         out.append("")
-    out += ["Every accepted capture's known answers (FIPS 180-4's three SHA-512 examples "
-            "and the four bench inputs) read PASS."]
+    out += ["Every round of every accepted capture booted the image flashed, at its "
+            "frequency, and printed all seven known answers (FIPS 180-4's three SHA-512 "
+            "examples and the four bench inputs) as PASS and all four sizes' times."]
     if rejected:
         out += ["", "Rejected captures:", ""] + [f"- {r}" for r in rejected]
 print("\n".join(out))
