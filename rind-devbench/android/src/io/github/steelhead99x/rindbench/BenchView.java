@@ -336,6 +336,18 @@ final class BenchView extends LinearLayout {
         if ("quick".equals(it.getStringExtra("preset"))) { fullPreset = false; presetChanged(); }
     }
 
+    /** The status title in Rind green, for every state but a failure. */
+    private void title(String t) {
+        statusTitle.setText(t);
+        statusTitle.setTextColor(Theme.primary);
+    }
+
+    /** A failure's title, in the error colour: green reads as success. */
+    private void failTitle(String t) {
+        statusTitle.setText(t);
+        statusTitle.setTextColor(Theme.error);
+    }
+
     private void setBody(String s) {
         statusLbl.setText(s);
         statusLbl.setVisibility(s == null || s.isEmpty() ? GONE : VISIBLE);
@@ -406,11 +418,11 @@ final class BenchView extends LinearLayout {
                 if (s.startsWith("More: ")) moreRows.add(row); else groupRows.add(row);
             }
             if (!running && resultsText.isEmpty()) {
-                statusTitle.setText("Ready");
+                title("Ready");
                 setBody("");
             }
         } catch (Exception e) {
-            statusTitle.setText("Could not load tests");
+            failTitle("Could not load tests");
         }
         countsChanged();
         agreeChanged();
@@ -703,7 +715,7 @@ final class BenchView extends LinearLayout {
         for (Map.Entry<String, CompoundButton> e : libSw.entrySet()) if (e.getValue().isChecked()) libs.add(e.getKey());
         for (Map.Entry<String, CompoundButton> e : secSw.entrySet()) if (e.getValue().isChecked()) secs.add(e.getKey());
         if (libs.isEmpty() || secs.isEmpty()) {
-            statusTitle.setText("Nothing picked");
+            failTitle("Nothing picked");
             setBody("Turn on at least one library and group.");
             return;
         }
@@ -727,7 +739,7 @@ final class BenchView extends LinearLayout {
             cfg.put("env", env);
             if (Native.start(cfg.toString()) != 0) {
                 android.util.Log.w("RindBench", "RINDBENCH_RUN {\"started\":false}");
-                statusTitle.setText("Could not start");
+                failTitle("Could not start");
                 setBody(new JSONObject(Native.status()).optString("start_error"));
                 return;
             }
@@ -742,7 +754,7 @@ final class BenchView extends LinearLayout {
             run.put("port", colPort);
             android.util.Log.i("RindBench", "RINDBENCH_RUN " + run);
         } catch (Exception e) {
-            statusTitle.setText("Could not start");
+            failTitle("Could not start");
             setBody(String.valueOf(e));
             return;
         }
@@ -765,7 +777,7 @@ final class BenchView extends LinearLayout {
         progress.setMax(1);
         progress.setProgress(0);
         progress.setVisibility(VISIBLE);
-        statusTitle.setText("Starting");
+        title("Starting");
         setBody("Warming up…");
         findCollector();
         agreeChanged();
@@ -777,7 +789,7 @@ final class BenchView extends LinearLayout {
         Theme.haptic(stopBtn, false);
         Native.stop();
         stopBtn.setEnabled(false);
-        statusTitle.setText("Stopping");
+        title("Stopping");
         setBody("Stops after the current test.");
     }
 
@@ -796,7 +808,7 @@ final class BenchView extends LinearLayout {
         setControlsEnabled(true);
         progress.setProgress(0);
         progress.setVisibility(GONE);
-        statusTitle.setText("Ready");
+        title("Ready");
         setBody("");
         agreeChanged();
         findCollector();
@@ -855,7 +867,7 @@ final class BenchView extends LinearLayout {
             progress.setContentDescription("Run progress, " + (still ? done : (done > 0 ? total : 0)) + " of " + total);
             updateCollectorFromSink(s.optString("sink"));
             if (still) {
-                statusTitle.setText("Running " + s.optInt("round") + " of " + s.optInt("rounds"));
+                title("Running " + s.optInt("round") + " of " + s.optInt("rounds"));
                 String cur = s.optString("current", "");
                 String warm = isWarm() ? " (warm)" : "";
                 setBody(done + " of " + total + (cur.isEmpty() ? "" : " · " + cur) + warm);
@@ -875,7 +887,7 @@ final class BenchView extends LinearLayout {
         running = false;
         boolean stopped = s.optBoolean("stopped");
         if (justEnded) Theme.haptic(statusCard, !stopped);
-        statusTitle.setText(stopped ? "Stopped" : "Done");
+        title(stopped ? "Stopped" : "Done");
         int errs = s.optInt("errors");
         String errTxt = errs > 0 ? " (" + errs + " errors)" : "";
         setBody(String.format(Locale.US, "%d tests in %.0f s%s",
@@ -1010,7 +1022,8 @@ final class BenchView extends LinearLayout {
         LayoutParams logo = new LayoutParams(Theme.dpi(host, 30), Theme.dpi(host, 30));
         logo.setMarginEnd(inset);
         publisher.addView(mark, logo);
-        publisher.addView(Theme.text(host, "Kixel AI", Theme.Type.TITLE_SMALL, Theme.onSurface));
+        // Credits the project; the app is built and signed from a fork, so it names no publisher.
+        publisher.addView(Theme.text(host, "rind by Kixel AI", Theme.Type.TITLE_SMALL, Theme.onSurface));
         LayoutParams publisherSize = new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT);
         publisherSize.setMarginStart(Theme.dpi(host, 24));
         publisherSize.bottomMargin = inset;
