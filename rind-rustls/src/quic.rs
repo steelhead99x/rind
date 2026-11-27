@@ -103,10 +103,9 @@ impl quic::Algorithm for Algorithm {
 ///
 /// The module builds each packet's nonce from the packet protection IV and
 /// the packet number, and seals each packet number once under a key, in any
-/// order within a window below the highest (`module_quic::SEAL_WINDOW`), so
-/// concurrent sealing of packet `n + 1` before `n` works as in rustls's
-/// aws-lc-rs provider. A packet number sealed already, and one far below the
-/// highest, are refused.
+/// order, so concurrent sealing of packet `n + 1` before `n`, or of any packet
+/// number not sealed yet, works as in rustls's aws-lc-rs provider. Only a
+/// packet number sealed already is refused: a nonce is never reused.
 #[cfg(feature = "fips")]
 struct ModulePacketKey {
     sealer: Mutex<module_quic::PacketSealingKey>,

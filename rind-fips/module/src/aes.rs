@@ -712,10 +712,13 @@ free!(rind_fips_tls13_sealing_key_free, Tls13SealingKey);
 ///
 /// QUIC may seal packets out of order (a sender seals packet `n + 1` while
 /// another thread still seals `n`), so the module does not demand increasing
-/// packet numbers, as [`Tls13SealingKey`] does. It remembers instead which of
-/// the last [`Self::WINDOW`] packet numbers, the highest included, it has
-/// sealed and refuses a repeat, and any packet number `WINDOW` or more below
-/// the highest, which it can no longer vouch for. Under one key a nonce is
+/// packet numbers, as [`Tls13SealingKey`] does. It remembers instead every
+/// packet number it has sealed under the key and refuses only a repeat, as
+/// rustls's aws-lc-rs provider seals any packet number: the last
+/// [`Self::WINDOW`], the highest included, as a bitmap, and those below them
+/// as sorted, disjoint ranges. A sender that seals in order keeps one range;
+/// each packet number it skips (RFC 9000 section 21.4) and leaves unsealed
+/// as the window passes adds one, 16 bytes, until the key is updated. Under one key a nonce is
 /// therefore never used twice, whatever the order of calls: SP 800-38D
 /// section 8.2.1 requires the invocation field to be unique, which holds for
 /// any one-to-one mapping from packet number to nonce, as XOR with a fixed IV
@@ -728,38 +731,121 @@ pub struct QuicSealingKey {
     /// Bit `n % WINDOW` is set if packet number `n`, at most `WINDOW - 1`
     /// below `top`, was sealed.
     seen: [u64; Self::WINDOW / 64],
+    /// The packet numbers sealed below the window (more than `WINDOW - 1`
+    /// below `top`), as sorted, disjoint, non-adjacent inclusive ranges.
+    /// Freed with the key, whose allocator zeroes the block.
+    below: Vec<(u64, u64)>,
 }
 
 impl QuicSealingKey {
-    /// How many packet numbers are tracked: `top` and the `WINDOW - 1` below it.
+    /// How many packet numbers the bitmap tracks: `top` and the `WINDOW - 1`
+    /// below it.
     const WINDOW: usize = 1024;
 
-    /// Takes packet number `pn`, refusing one sealed before, one too far
-    /// below the highest.
+    fn bit(pn: u64) -> (usize, u64) {
+        let slot = (pn % Self::WINDOW as u64) as usize;
+        (slot / 64, 1u64 << (slot % 64))
+    }
+
+    fn sealed_in_window(&self, pn: u64) -> bool {
+        let (word, bit) = Self::bit(pn);
+        self.seen[word] & bit != 0
+    }
+
+    /// The index of the range in `below` that holds `pn`, or where a range
+    /// holding it would go.
+    fn find_below(&self, pn: u64) -> Result<usize, usize> {
+        self.below.binary_search_by(|&(lo, hi)| {
+            if hi < pn {
+                core::cmp::Ordering::Less
+            } else if lo > pn {
+                core::cmp::Ordering::Greater
+            } else {
+                core::cmp::Ordering::Equal
+            }
+        })
+    }
+
+    /// Records `pn` in `below`, merging it with the ranges beside it. Room
+    /// for one more range is reserved already.
+    fn insert_below(&mut self, at: usize, pn: u64) {
+        let joins_left = at > 0 && self.below[at - 1].1.checked_add(1) == Some(pn);
+        let joins_right = at < self.below.len() && pn.checked_add(1) == Some(self.below[at].0);
+        match (joins_left, joins_right) {
+            (true, true) => {
+                self.below[at - 1].1 = self.below[at].1;
+                self.below.remove(at);
+            }
+            (true, false) => self.below[at - 1].1 = pn,
+            (false, true) => self.below[at].0 = pn,
+            (false, false) => self.below.insert(at, (pn, pn)),
+        }
+    }
+
+    /// Takes packet number `pn`, refusing one sealed before. Changes nothing
+    /// when it refuses, including when the module cannot allocate the room
+    /// to remember `pn`.
     fn take(&mut self, pn: u64) -> Result<(), Error> {
         let window = Self::WINDOW as u64;
-        let slot = (pn % window) as usize;
-        let (word, bit) = (slot / 64, 1u64 << (slot % 64));
         match self.top {
             None => {
                 self.seen = [0; Self::WINDOW / 64];
                 self.top = Some(pn);
             }
             Some(top) if pn > top => {
-                // Slide the window: forget the packet numbers it leaves.
-                let gone = (pn - top).min(window);
-                for old in (top + 1)..=(top + gone) {
-                    let slot = (old % window) as usize;
-                    self.seen[slot / 64] &= !(1u64 << (slot % 64));
+                // Slide the window: the packet numbers it leaves, from the
+                // old bottom up to the new bottom or the old top, move to
+                // `below` if they were sealed. Count the new ranges first, so
+                // a failed allocation refuses before anything changes.
+                let leaving =
+                    top.saturating_sub(window - 1)..pn.saturating_sub(window - 1).min(top + 1);
+                let mut last = self.below.last().map(|&(_, hi)| hi);
+                let mut new_ranges = 0usize;
+                for old in leaving.clone() {
+                    if self.sealed_in_window(old) {
+                        if last.and_then(|hi| hi.checked_add(1)) != Some(old) {
+                            new_ranges += 1;
+                        }
+                        last = Some(old);
+                    }
                 }
+                self.below
+                    .try_reserve(new_ranges)
+                    .map_err(|_| Error::MessageLimitReached)?;
+                for old in leaving {
+                    if self.sealed_in_window(old) {
+                        match self.below.last_mut() {
+                            Some((_, hi)) if hi.checked_add(1) == Some(old) => *hi = old,
+                            _ => self.below.push((old, old)),
+                        }
+                    }
+                    let (word, bit) = Self::bit(old);
+                    self.seen[word] &= !bit;
+                }
+                // The slots of the numbers entering above the old top are
+                // those the leaving numbers freed, or, after a jump of a whole
+                // window or more, all of them.
                 self.top = Some(pn);
             }
-            Some(top) => {
-                if top - pn >= window || self.seen[word] & bit != 0 {
+            Some(top) if top - pn < window => {
+                if self.sealed_in_window(pn) {
                     return Err(Error::MessageLimitReached);
                 }
             }
+            Some(_) => {
+                // Below the window: refuse a repeat, record anything else.
+                let at = match self.find_below(pn) {
+                    Ok(_) => return Err(Error::MessageLimitReached),
+                    Err(at) => at,
+                };
+                self.below
+                    .try_reserve(1)
+                    .map_err(|_| Error::MessageLimitReached)?;
+                self.insert_below(at, pn);
+                return Ok(());
+            }
         }
+        let (word, bit) = Self::bit(pn);
         self.seen[word] |= bit;
         Ok(())
     }
@@ -796,6 +882,7 @@ pub unsafe extern "C" fn rind_fips_quic_sealing_key_new(
                 iv,
                 top: None,
                 seen: [0; QuicSealingKey::WINDOW / 64],
+                below: Vec::new(),
             })
         })
     }
@@ -803,8 +890,7 @@ pub unsafe extern "C" fn rind_fips_quic_sealing_key_new(
 
 /// Encrypts the `len` bytes at `in_out` in place for packet number `pn`
 /// and the `aad_len` bytes at `aad`, writing the tag to `tag`, if no
-/// packet of `pn` was sealed under the key and `pn` is less than 1024 below
-/// the highest sealed.
+/// packet of `pn` was sealed under the key.
 ///
 /// # Safety
 /// `key` must be live and in no other call, `aad` valid for `aad_len`

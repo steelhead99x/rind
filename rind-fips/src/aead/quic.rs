@@ -147,9 +147,9 @@ impl From<hkdf::Okm<'_, &'static Algorithm>> for HeaderProtectionKey {
     }
 }
 
-/// How many packet numbers a [`PacketSealingKey`] tracks: the highest sealed
-/// and the `SEAL_WINDOW - 1` below it. A packet number `SEAL_WINDOW` or more
-/// below the highest sealed is refused.
+/// How many packet numbers a [`PacketSealingKey`] tracks in its bitmap: the
+/// highest sealed and the `SEAL_WINDOW - 1` below it. It keeps those it
+/// sealed further below as ranges, so it refuses none of them but a repeat.
 pub const SEAL_WINDOW: u64 = 1024;
 
 /// An AES-GCM key that seals QUIC packets (RFC 9001 section 5.3), each
@@ -159,9 +159,11 @@ pub const SEAL_WINDOW: u64 = 1024;
 /// XORed with the packet number, so the caller never picks one. Unlike a
 /// [`super::TlsRecordSealingKey`], it does not need packet numbers in
 /// increasing order, since QUIC senders may seal packet `n + 1` before `n`:
-/// the module remembers which packet numbers it has sealed among the highest
-/// and the `SEAL_WINDOW - 1` below it (see [`SEAL_WINDOW`]), and refuses a
-/// repeat, or one `SEAL_WINDOW` or more below the highest. Any `u64` is a
+/// the module remembers every packet number it has sealed under the key and
+/// refuses only a repeat, as rustls's aws-lc-rs provider seals any packet
+/// number. It holds the last [`SEAL_WINDOW`] in a bitmap and those below as
+/// ranges: one while packets are sealed in order, and one more, 16 bytes,
+/// for each packet number skipped and left unsealed below the window. Any `u64` is a
 /// packet number, though QUIC's are below 2^62 (RFC 9000 section 17.1),
 /// since the XOR with the IV is one-to-one on all of them. So no nonce is
 /// used twice under a key, in whatever order the calls come (SP 800-38D
@@ -227,8 +229,8 @@ impl PacketSealingKey {
     /// tag.
     ///
     /// Fails with [`Error::MessageLimitReached`] if `packet_number` was
-    /// sealed under the key already or is [`SEAL_WINDOW`] or more below the
-    /// highest sealed, and with [`Error::WrongLength`] past the sealing
+    /// sealed under the key already (or, in place of aborting, the module
+    /// cannot allocate the room to remember it), and with [`Error::WrongLength`] past the sealing
     /// limits, zeroing `in_out` in either case. The latter still spends the
     /// packet number.
     pub fn seal_in_place_separate_tag(
