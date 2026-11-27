@@ -146,73 +146,83 @@ pub(in crate::low) unsafe fn zero_bytes(ptr: *mut u8, len: usize) {
     }
 }
 
+unsafe extern "C" {
+    #[link_name = aws_lc_symbol!("ct_compare_16")]
+    fn compare_16(a: *const [u8; 16], b: *const [u8; 16]) -> u32;
+
+    #[link_name = aws_lc_symbol!("ct_compare_bytes")]
+    fn compare_bytes(a: *const u8, b: *const u8, len: usize) -> u32;
+}
+
+// The compares are A32 on every target, Thumb-2 ones included, so
+// `proofs/hol-light/armv7/` proves the one copy each target runs: a Thumb-2
+// caller reaches them through the linker's BLX, and their return interworks.
+// `compare_16` reads each block as four unaligned words; `compare_bytes`
+// ORs together the XOR of each pair of bytes, so its result is below 256.
+core::arch::global_asm!(
+    ".text",
+    ".code 32",
+    ".p2align 2",
+    ".globl {compare_16}",
+    ".hidden {compare_16}",
+    ".type {compare_16}, %function",
+    "{compare_16}:",
+    "   ldr r2, [r0]",
+    "   ldr r3, [r1]",
+    "   eor r12, r2, r3",
+    "   ldr r2, [r0, #4]",
+    "   ldr r3, [r1, #4]",
+    "   eor r2, r2, r3",
+    "   orr r12, r12, r2",
+    "   ldr r2, [r0, #8]",
+    "   ldr r3, [r1, #8]",
+    "   eor r2, r2, r3",
+    "   orr r12, r12, r2",
+    "   ldr r2, [r0, #12]",
+    "   ldr r3, [r1, #12]",
+    "   eor r2, r2, r3",
+    "   orr r0, r12, r2",
+    "   bx lr",
+    ".size {compare_16}, .-{compare_16}",
+    "",
+    ".p2align 2",
+    ".globl {compare_bytes}",
+    ".hidden {compare_bytes}",
+    ".type {compare_bytes}, %function",
+    "{compare_bytes}:",
+    "   push {{r4, lr}}",
+    "   mov r3, #0",
+    "2: subs r2, r2, #1",
+    "   blo 3f",
+    "   ldrb r12, [r0], #1",
+    "   ldrb r4, [r1], #1",
+    "   eor r12, r12, r4",
+    "   orr r3, r3, r12",
+    "   b 2b",
+    "3: mov r0, r3",
+    "   pop {{r4, pc}}",
+    ".size {compare_bytes}, .-{compare_bytes}",
+    compare_16 = sym compare_16,
+    compare_bytes = sym compare_bytes,
+);
+
 /// Compares the first `min(a.len(), b.len())` bytes of `a` and `b`, reading
 /// every one of them whatever their values.
 ///
 /// Returns zero if they are equal, otherwise non-zero.
-#[inline(never)]
 pub(in crate::low) fn ct_compare_bytes(a: &[u8], b: &[u8]) -> u8 {
-    let (len, a, b) = (a.len().min(b.len()), a.as_ptr(), b.as_ptr());
-    let acc: u32;
+    let len = a.len().min(b.len());
     // SAFETY: reads `len` bytes from `a` and `b`, which both hold.
-    // Its registers are fixed, and it is never inlined, so its proof in
-    // `proofs/hol-light/armv7/ct_compare_bytes.ml` is of one copy, where the
-    // target builds A32. Android and the `thumbv7` targets build it as
-    // Thumb-2, which no proof covers.
-    unsafe {
-        core::arch::asm!(
-            "   2:  subs r2, r2, #1",
-            "       blo 3f",
-            "       ldrb r12, [r0], #1",
-            "       ldrb lr, [r1], #1",
-            "       eor r12, r12, lr",
-            "       orr r3, r3, r12",
-            "       b 2b",
-            "   3:",
-            inout("r0") a => _,
-            inout("r1") b => _,
-            inout("r2") len => _,
-            inout("r3") 0u32 => acc,
-            out("r12") _,
-            out("lr") _,
-            options(readonly, nostack),
-        )
-    }
+    let acc = unsafe { asm_call!(unsafe extern "C" compare_bytes(a.as_ptr(), b.as_ptr(), len)) };
     acc as u8
 }
 
 /// Compares two 16-byte blocks, such as AEAD tags, in constant time.
 ///
-/// Returns zero if `a == b`, otherwise non-zero. The words are combined in
-/// assembly so the compiler cannot split the test into early exits.
-#[inline(never)]
+/// Returns zero if `a == b`, otherwise non-zero.
 pub(in crate::low) fn ct_compare_16(a: &[u8; 16], b: &[u8; 16]) -> usize {
-    let (a, b) = (u128::from_ne_bytes(*a), u128::from_ne_bytes(*b));
-    let diff: u32;
-    // SAFETY: register-only arithmetic, proven in
-    // `proofs/hol-light/armv7/ct_compare_16.ml` where the target builds A32,
-    // as for `ct_compare_bytes`.
-    unsafe {
-        core::arch::asm!(
-            "eor r0, r0, r4",
-            "eor r1, r1, r5",
-            "eor r2, r2, r8",
-            "eor r3, r3, r12",
-            "orr r0, r0, r1",
-            "orr r2, r2, r3",
-            "orr r0, r0, r2",
-            inout("r0") a as u32 => diff,
-            inout("r1") (a >> 32) as u32 => _,
-            inout("r2") (a >> 64) as u32 => _,
-            inout("r3") (a >> 96) as u32 => _,
-            in("r4") b as u32,
-            in("r5") (b >> 32) as u32,
-            in("r8") (b >> 64) as u32,
-            in("r12") (b >> 96) as u32,
-            options(pure, nomem, nostack, preserves_flags),
-        );
-    }
-    diff as usize
+    // SAFETY: reads the 16 bytes of `a` and `b`.
+    unsafe { asm_call!(unsafe extern "C" compare_16(a, b)) as usize }
 }
 
 #[cfg(test)]
@@ -228,8 +238,10 @@ mod tests {
         unsafe { call!(unsafe zero_bytes, bytes.as_mut_ptr(), 100) };
         assert_eq!(bytes, [0; 100]);
         let (a, b) = ([1u8; 37], [2u8; 37]);
-        assert_ne!(call!(ct_compare_bytes, &a, &b), 0);
-        assert_ne!(call!(ct_compare_16, &[1; 16], &[2; 16]), 0);
+        assert_ne!(ct_compare_bytes(&a, &b), 0);
+        assert_eq!(ct_compare_bytes(&a, &a), 0);
+        assert_ne!(ct_compare_16(&[1; 16], &[2; 16]), 0);
+        assert_eq!(ct_compare_16(&[1; 16], &[1; 16]), 0);
     }
 
     // CI runs the armv7 suite on a CPU model with NEON and the extension and

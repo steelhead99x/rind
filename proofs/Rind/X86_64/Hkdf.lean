@@ -433,7 +433,11 @@ theorem hmac_key_from_spec (a : high.hmac.Algorithm) (hr : RunsHmac a) (prk : Li
   obtain ⟨m, hm, hmv⟩ := tagLen_eq a
   have h64 : tagLen a ≤ 64 := by cases a <;> decide
   have hpos := tagLen_pos a
+  -- The conversion opens one `Entry` over the expand and the keying, which
+  -- `RunsHmac` says succeeds.
+  obtain ⟨e, he⟩ := hr.1
   unfold high.hmac.Key.Insts.CoreConvertFromOkm0SharedStaticAlgorithm.from
+  rw [he, bind_ok]
   simp only [hm, bind_ok]
   apply WP.spec_bind (Array.index_mut_SliceIndexRangeToUsizeSlice (Array.repeat 64#usize 0#u8)
     { «end» := m } (by scalar_tac))
@@ -471,7 +475,11 @@ theorem header_key_from_spec (a : high.hmac.Algorithm) (hr : RunsHmac a) (prk : 
       ∃ c : mid.chacha20.ChaCha20, key = .ChaCha20 c ∧
         bv c.key.val = hkdfExpand (hmacOf a) (tagLen a) prk (bv (infoBytes info)) 32 ⦄ := by
   have hpos := tagLen_pos a
+  -- The conversion opens one `Entry` over the expand and the keying, which
+  -- `RunsHmac` says succeeds.
+  obtain ⟨e, he⟩ := hr.1
   unfold aead.quic.HeaderProtectionKey.Insts.CoreConvertFromOkm0SharedStaticAlgorithm.from
+  rw [he, bind_ok]
   unfold aead.quic.Algorithm.key_len
   have hk32 : (rind.x86_64.aead.quic.Algorithm.key_len rind.x86_64.aead.quic.CHACHA20).val = 32 := rfl
   simp only [bind_ok]
@@ -500,7 +508,11 @@ theorem prk_from_spec (a : high.hmac.Algorithm) (hr : RunsHmac a) (prk : List By
   obtain ⟨m, hm, hmv⟩ := tagLen_eq a
   have h64 : tagLen a ≤ 64 := by cases a <;> decide
   have hpos := tagLen_pos a
+  -- The conversion opens one `Entry` over the expand and the keying, which
+  -- `RunsHmac` says succeeds.
+  obtain ⟨e, he⟩ := hr.1
   unfold high.hkdf.Prk.Insts.CoreConvertFromOkm0SharedStaticAlgorithm.from
+  rw [he, bind_ok]
   simp only [hm, bind_ok]
   apply WP.spec_bind (Array.index_mut_SliceIndexRangeToUsizeSlice (Array.repeat 64#usize 0#u8)
     { «end» := m } (by scalar_tac))

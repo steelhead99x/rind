@@ -7,28 +7,35 @@
 (* Constant-time byte compare, as rind's build emits it.                     *)
 (* ========================================================================= *)
 
-(* The asm! block in rind's low::arm::cpu::ct_compare_bytes, which ORs
-   together the XOR of each pair of bytes at R0 and R1, R2 of them, into R3,
-   zero on entry. R3 ends below 256, and zero exactly when the bytes are
-   equal. Its loads and branches depend only on R0, R1, and R2. *)
+(* The A32 routine `ct_compare_bytes` in rind's low::arm::cpu, which ORs
+   together the XOR of each pair of bytes at R0 and R1, R2 of them, and
+   returns the result in R0: below 256, and zero exactly when the bytes are
+   equal. Its loads, its stack frame's two words, its branches, and its
+   return depend only on R0, R1, R2, SP, and the return address. Its
+   theorems hold for a caller in A32 or T32, whose return address has bit 0
+   set, so they cover every armv7 target. *)
 
 needs "aarch32/proofs/base.ml";;
 needs "aarch32/proofs/consttime.ml";;
 
-(* admin/prove writes the block's bytes, as rind's release build for
-   armv7-unknown-linux-gnueabihf emits them, to armv7/ct_compare_bytes.bin, and the
-   definition fails unless they are these. A target that builds Thumb-2 by
-   default, as Android's does, emits other bytes, which this does not cover. *)
+(* admin/prove writes the routine's bytes, as rind's release build for
+   armv7-unknown-linux-gnueabihf emits them, to armv7/ct_compare_bytes.bin,
+   and the definition fails unless they are these. The routine is A32 on
+   every target. *)
 let ct_compare_bytes_mc = define_assert_word_list "ct_compare_bytes_mc"
   (term_of_bytes (load_file "armv7/ct_compare_bytes.bin"))
 [
-  0xe2522001;       (* aarch32_SUBS R2 R2 (rvalue (word 1)) *)
-  0x3a000004;       (* aarch32_B (word 3) (word 24) *)
-  0xe4d0c001;       (* aarch32_LDRB R12 R0 (word 1) F T *)
-  0xe4d1e001;       (* aarch32_LDRB LR R1 (word 1) F T *)
-  0xe02cc00e;       (* aarch32_EOR R12 R12 LR *)
-  0xe183300c;       (* aarch32_ORR R3 R3 R12 *)
-  0xeafffff8        (* aarch32_B (word 14) (word 4294967272) *)
+  0xe92d4010;       (* push {r4, lr} *)
+  0xe3a03000;       (* mov r3, #0 *)
+  0xe2522001;       (* subs r2, r2, #1 *)
+  0x3a000004;       (* blo pc + 0x24 *)
+  0xe4d0c001;       (* ldrb r12, [r0], #1 *)
+  0xe4d14001;       (* ldrb r4, [r1], #1 *)
+  0xe02cc004;       (* eor r12, r12, r4 *)
+  0xe183300c;       (* orr r3, r3, r12 *)
+  0xeafffff8;       (* b pc + 0x8 *)
+  0xe1a00003;       (* mov r0, r3 *)
+  0xe8bd8010        (* pop {r4, pc} *)
 ];;
 
 let CT_COMPARE_BYTES_EXEC = AARCH32_MK_EXEC_RULE ct_compare_bytes_mc;;
@@ -75,7 +82,7 @@ let CT_COMPARE_BYTES_VAL = prove
   CONV_TAC NUM_REDUCE_CONV THEN
   SIMP_TAC[MOD_LT; MOD_LT_EQ; ARITH_RULE `x < 256 ==> x < 4294967296`;
            ARITH_EQ] THEN
-  MESON_TAC[MOD_EQ_SELF; ARITH_EQ]);;
+  CONV_TAC(RAND_CONV SYM_CONV) THEN REWRITE_TAC[MOD_EQ_SELF; ARITH_EQ]);;
 
 (* The byte at offset i of a string is its value's digit i. *)
 let CT_COMPARE_BYTES_LOAD = prove
@@ -89,37 +96,36 @@ let CT_COMPARE_BYTES_LOAD = prove
   ASM_SIMP_TAC[ARITH_RULE `i < n ==> MIN (n - i) 1 = 1`] THEN
   REWRITE_TAC[READ_BYTES_BYTES8; WORD_VAL; WORD_MOD_SIZE]);;
 
-(* The loop runs from the load at pc + 0x8, after the SUBS and BLO that
-   test R2, through the BLO that leaves at pc + 0x1c once R2 runs out. That
-   last SUBS wraps R2 to 2^32 - 1, so the invariant states R2 as a word
-   difference. *)
-let CT_COMPARE_BYTES_CORRECT = prove
+(* From after the prologue's push to the epilogue's pop. The loop runs from
+   the load at pc + 0x10, after the SUBS and BLO that test R2, through the
+   BLO that leaves at pc + 0x24 once R2 runs out. That last SUBS wraps R2 to
+   2^32 - 1, so the invariant states R2 as a word difference. *)
+let CT_COMPARE_BYTES_CORE_CORRECT = prove
  (`!a b n x y pc.
         ensures aarch32
           (\s. aligned_bytes_loaded s (word pc) ct_compare_bytes_mc /\
-               read PC s = word pc /\
-               read R0 s = a /\ read R1 s = b /\ read R2 s = n /\
-               read R3 s = word 0 /\
+               read PC s = word (pc + 0x4) /\
+               C_ARGUMENTS [a; b; n] s /\
                read (memory :> bytes(a,val n)) s = x /\
                read (memory :> bytes(b,val n)) s = y)
-          (\s. read PC s = word (pc + 0x1c) /\
-               val(read R3 s) < 256 /\
-               (read R3 s = word 0 <=> x = y))
-          (MAYCHANGE [PC; R0; R1; R2; R3; R12; LR] ,, MAYCHANGE SOME_FLAGS ,,
+          (\s. read PC s = word (pc + 0x28) /\
+               val(C_RETURN s) < 256 /\
+               (C_RETURN s = word 0 <=> x = y))
+          (MAYCHANGE [PC; R0; R1; R2; R3; R4; R12] ,, MAYCHANGE SOME_FLAGS ,,
            MAYCHANGE [events])`,
   MAP_EVERY X_GEN_TAC [`a:int32`; `b:int32`] THEN
   W32_GEN_TAC `n:num` THEN MAP_EVERY X_GEN_TAC [`x:num`; `y:num`; `pc:num`] THEN
-  REWRITE_TAC[SOME_FLAGS; fst CT_COMPARE_BYTES_EXEC] THEN
+  REWRITE_TAC[C_ARGUMENTS; C_RETURN; SOME_FLAGS; fst CT_COMPARE_BYTES_EXEC] THEN
   ASM_CASES_TAC `n = 0` THENL
    [ASM_REWRITE_TAC[] THEN
     ENSURES_INIT_TAC "s0" THEN
-    AARCH32_STEPS_TAC CT_COMPARE_BYTES_EXEC (1--2) THEN
+    AARCH32_STEPS_TAC CT_COMPARE_BYTES_EXEC (1--4) THEN
     ENSURES_FINAL_STATE_TAC THEN ASM_REWRITE_TAC[] THEN
     RULE_ASSUM_TAC(REWRITE_RULE[READ_COMPONENT_COMPOSE; READ_BYTES_TRIVIAL]) THEN
     REPEAT(FIRST_X_ASSUM(SUBST_ALL_TAC o SYM o check (is_var o rhs o concl))) THEN
     REWRITE_TAC[VAL_WORD_0] THEN CONV_TAC NUM_REDUCE_CONV;
     ALL_TAC] THEN
-  ENSURES_WHILE_UP2_TAC `n:num` `pc + 0x8` `pc + 0x1c`
+  ENSURES_WHILE_UP2_TAC `n:num` `pc + 0x10` `pc + 0x24`
    `\i s. read R0 s = word_add a (word i) /\
           read R1 s = word_add b (word i) /\
           read R2 s = word_sub (word n) (word(i + 1)) /\
@@ -130,7 +136,7 @@ let CT_COMPARE_BYTES_CORRECT = prove
            x MOD 2 EXP (8 * i) = y MOD 2 EXP (8 * i))` THEN
   ASM_REWRITE_TAC[] THEN REPEAT CONJ_TAC THENL
    [ENSURES_INIT_TAC "s0" THEN
-    AARCH32_STEPS_TAC CT_COMPARE_BYTES_EXEC (1--2) THEN
+    AARCH32_STEPS_TAC CT_COMPARE_BYTES_EXEC (1--3) THEN
     MP_TAC(SPEC `n:num` CT_COMPARE_BYTES_CARRY) THEN
     ASM_REWRITE_TAC[] THEN
     DISCH_THEN(fun th -> RULE_ASSUM_TAC(REWRITE_RULE[th])) THEN
@@ -139,10 +145,16 @@ let CT_COMPARE_BYTES_CORRECT = prove
                 MOD_1] THEN
     CONV_TAC NUM_REDUCE_CONV;
     ALL_TAC;
-    ENSURES_INIT_TAC "s0" THEN ENSURES_FINAL_STATE_TAC THEN
-    ASM_REWRITE_TAC[] THEN
-    BINOP_TAC THEN MATCH_MP_TAC MOD_LT THEN
-    ASM_MESON_TAC[READ_BYTES_BOUND; READ_COMPONENT_COMPOSE]] THEN
+    GHOST_INTRO_TAC `acc:int32` `read R3` THEN
+    ENSURES_INIT_TAC "s0" THEN
+    SUBGOAL_THEN `x < 2 EXP (8 * n) /\ y < 2 EXP (8 * n)` STRIP_ASSUME_TAC
+    THENL
+     [MAP_EVERY EXPAND_TAC ["x"; "y"] THEN
+      REWRITE_TAC[READ_COMPONENT_COMPOSE; READ_BYTES_BOUND];
+      ALL_TAC] THEN
+    AARCH32_STEPS_TAC CT_COMPARE_BYTES_EXEC [1] THEN
+    ENSURES_FINAL_STATE_TAC THEN ASM_REWRITE_TAC[] THEN
+    ASM_SIMP_TAC[MOD_LT]] THEN
   X_GEN_TAC `i:num` THEN STRIP_TAC THEN
   GHOST_INTRO_TAC `acc:int32` `read R3` THEN
   SUBGOAL_THEN `word_sub (word n) (word(i + 1)):int32 = word(n - (i + 1))`
@@ -191,22 +203,50 @@ let CT_COMPARE_BYTES_CORRECT = prove
   REWRITE_TAC[CT_COMPARE_BYTES_VAL] THEN
   CONJ_TAC THEN BITBLAST_TAC);;
 
-(* The trace, its loads and branches, is a function of R0, R1, and R2 alone,
-   and every load lands inside the two strings. *)
-let CT_COMPARE_BYTES_SAFE = prove
+(* From entry to return, through the prologue's push of R4 and LR into the
+   8 bytes below SP and the epilogue's pop of them into R4 and PC. *)
+let CT_COMPARE_BYTES_CORRECT = prove
+ (`!a b n x y pc stackpointer returnaddress.
+        aarch32_bx_target returnaddress /\ aligned 4 stackpointer /\
+        aarch32_nowrap (word_sub stackpointer (word 8)) 8 /\
+        ALL (nonoverlapping (word_sub stackpointer (word 8),8))
+            [word pc,LENGTH ct_compare_bytes_mc; a,val n; b,val n]
+        ==> ensures aarch32
+          (\s. aligned_bytes_loaded s (word pc) ct_compare_bytes_mc /\
+               read PC s = word pc /\
+               read SP s = stackpointer /\
+               read LR s = returnaddress /\
+               C_ARGUMENTS [a; b; n] s /\
+               read (memory :> bytes(a,val n)) s = x /\
+               read (memory :> bytes(b,val n)) s = y)
+          (\s. read PC s = returnaddress /\
+               val(C_RETURN s) < 256 /\
+               (C_RETURN s = word 0 <=> x = y))
+          (MAYCHANGE_REGS_AND_FLAGS_PERMITTED_BY_ABI ,,
+           MAYCHANGE [memory :> bytes(word_sub stackpointer (word 8),8)])`,
+  REWRITE_TAC[fst CT_COMPARE_BYTES_EXEC] THEN
+  AARCH32_ADD_RETURN_STACK_TAC CT_COMPARE_BYTES_EXEC
+    (REWRITE_RULE[fst CT_COMPARE_BYTES_EXEC] CT_COMPARE_BYTES_CORE_CORRECT)
+    `[R4]` 8);;
+
+(* The trace from after the push to the pop, its loads and branches, is a
+   function of R0, R1, and R2 alone, and every load lands inside the two
+   strings. *)
+let CT_COMPARE_BYTES_CORE_SAFE = prove
  (`exists f_events.
        forall e a b n pc.
            ensures aarch32
            (\s. aligned_bytes_loaded s (word pc) ct_compare_bytes_mc /\
-                read PC s = word pc /\
-                read R0 s = a /\ read R1 s = b /\ read R2 s = n /\
+                read PC s = word (pc + 0x4) /\
+                C_ARGUMENTS [a; b; n] s /\
                 read events s = e)
-           (\s. read PC s = word (pc + 0x1c) /\
+           (\s. read PC s = word (pc + 0x28) /\
                 exists e2.
                     read events s = APPEND e2 e /\
                     e2 = f_events a b n pc /\
                     memaccess_inbounds e2 [a,val n; b,val n] [])
-           (\s s'. true)`,
+           (MAYCHANGE [PC; R0; R1; R2; R3; R4; R12] ,, MAYCHANGE SOME_FLAGS ,,
+            MAYCHANGE [events])`,
   CONCRETIZE_F_EVENTS_TAC
    `\(a:int32) (b:int32) (n:int32) (pc:num).
       if val n = 0 then f_ev_zero a b n pc
@@ -217,22 +257,22 @@ let CT_COMPARE_BYTES_SAFE = prove
   REPEAT META_EXISTS_TAC THEN STRIP_TAC THEN
   MAP_EVERY X_GEN_TAC [`a:int32`; `b:int32`] THEN
   W32_GEN_TAC `n:num` THEN X_GEN_TAC `pc:num` THEN
-  REWRITE_TAC[fst CT_COMPARE_BYTES_EXEC] THEN
+  REWRITE_TAC[C_ARGUMENTS; SOME_FLAGS; fst CT_COMPARE_BYTES_EXEC] THEN
   ASM_CASES_TAC `n = 0` THENL
    [ASM_REWRITE_TAC[] THEN
     AARCH32_SIM_TAC ~preprocess_tac:(TRY STRIP_EXISTS_ASSUM_TAC)
-      ~canonicalize_pc_diff:false CT_COMPARE_BYTES_EXEC (1--2) THEN
+      ~canonicalize_pc_diff:false CT_COMPARE_BYTES_EXEC (1--4) THEN
     ASM_REWRITE_TAC[WORD_SUB_0; VAL_WORD_0] THEN
     DISCHARGE_SAFETY_PROPERTY_TAC;
     ALL_TAC] THEN
   ASM_REWRITE_TAC[] THEN
-  ENSURES_EVENTS_WHILE_UP2_TAC `n:num` `pc + 0x8` `pc + 0x1c`
+  ENSURES_EVENTS_WHILE_UP2_TAC `n:num` `pc + 0x10` `pc + 0x24`
    `\i s. read R0 s = word_add a (word i) /\
           read R1 s = word_add b (word i) /\
           read R2 s = word_sub (word n) (word(i + 1))` THEN
   ASM_REWRITE_TAC[] THEN REPEAT CONJ_TAC THENL
    [ENSURES_INIT_TAC "s0" THEN TRY STRIP_EXISTS_ASSUM_TAC THEN
-    AARCH32_STEPS_TAC CT_COMPARE_BYTES_EXEC (1--2) THEN
+    AARCH32_STEPS_TAC CT_COMPARE_BYTES_EXEC (1--3) THEN
     MP_TAC(SPEC `n:num` CT_COMPARE_BYTES_CARRY) THEN
     ASM_REWRITE_TAC[] THEN
     DISCH_THEN(fun th -> RULE_ASSUM_TAC(REWRITE_RULE[th])) THEN
@@ -242,6 +282,7 @@ let CT_COMPARE_BYTES_SAFE = prove
     ALL_TAC;
     REWRITE_TAC[] THEN ENSURES_INIT_TAC "s0" THEN
     TRY STRIP_EXISTS_ASSUM_TAC THEN
+    AARCH32_STEPS_TAC CT_COMPARE_BYTES_EXEC [1] THEN
     ENSURES_FINAL_STATE_TAC THEN ASM_REWRITE_TAC[] THEN
     DISCHARGE_SAFETY_PROPERTY_TAC] THEN
   X_GEN_TAC `i:num` THEN STRIP_TAC THEN
@@ -266,4 +307,37 @@ let CT_COMPARE_BYTES_SAFE = prove
      [ASM_SIMP_TAC[WORD_SUB; ARITH_RULE `i < n ==> i + 1 <= n`]; ALL_TAC] THEN
     CONV_TAC WORD_RULE;
     ALL_TAC] THEN
+  DISCHARGE_SAFETY_PROPERTY_TAC);;
+
+(* The whole trace, with the frame's push and pop and the return, is a
+   function of R0, R1, R2, SP, and the return address alone, and every
+   access lands inside the two strings or the frame. *)
+let CT_COMPARE_BYTES_SAFE = prove
+ (`exists f_events.
+       forall e a b n pc stackpointer returnaddress.
+           aarch32_bx_target returnaddress /\ aligned 4 stackpointer /\
+           aarch32_nowrap (word_sub stackpointer (word 8)) 8 /\
+           nonoverlapping (word_sub stackpointer (word 8),8)
+                          (word pc,LENGTH ct_compare_bytes_mc)
+           ==> ensures aarch32
+           (\s. aligned_bytes_loaded s (word pc) ct_compare_bytes_mc /\
+                read PC s = word pc /\
+                read SP s = stackpointer /\
+                read LR s = returnaddress /\
+                C_ARGUMENTS [a; b; n] s /\
+                read events s = e)
+           (\s. read PC s = returnaddress /\
+                exists e2.
+                    read events s = APPEND e2 e /\
+                    e2 = f_events a b n pc (word_sub stackpointer (word 8))
+                                  returnaddress /\
+                    memaccess_inbounds e2
+                      [a,val n; b,val n; word_sub stackpointer (word 8),8]
+                      [word_sub stackpointer (word 8),8])
+           (MAYCHANGE_REGS_AND_FLAGS_PERMITTED_BY_ABI ,,
+            MAYCHANGE [memory :> bytes(word_sub stackpointer (word 8),8)])`,
+  REWRITE_TAC[fst CT_COMPARE_BYTES_EXEC] THEN
+  AARCH32_ADD_RETURN_STACK_TAC CT_COMPARE_BYTES_EXEC
+    (REWRITE_RULE[fst CT_COMPARE_BYTES_EXEC] CT_COMPARE_BYTES_CORE_SAFE)
+    `[R4]` 8 THEN
   DISCHARGE_SAFETY_PROPERTY_TAC);;

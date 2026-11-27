@@ -29,10 +29,10 @@ use core::panic::{RefUnwindSafe, UnwindSafe};
 use crate::Error;
 use crate::error::KeyFormatError;
 use crate::low::{self, Entry, UpdateBlocks};
-use crate::mid::mldsa::Array;
 use crate::mid::rng::{RandomSource, SystemRandom};
 use crate::mid::sha2::{Sha256Context, Sha256State, Sha512Context, Sha512State};
 use crate::mid::sha3::{Shake256Sponge, shake256_x4};
+use crate::mid::util::Array;
 
 /// The largest `n`, the hash output length.
 const MAX_N: usize = 32;
@@ -1302,5 +1302,35 @@ mod tests {
         check::<SlhDsaSha2_256f>();
         check::<SlhDsaShake192f>();
         check::<SlhDsaShake256f>();
+    }
+
+    // SLH-DSA-SHA2-128f's key load, which rebuilds the top XMSS tree, and
+    // its signing through the bottom one: `R`, FORS, and the first layer of
+    // the hypertree, since BINSEC cannot finish all 22 in a scheduled run's
+    // time. Each layer runs the same `merkle_sign` on a public root. The
+    // other parameter sets run this code with other heights, or SHAKE, which
+    // `ct_binsec_digest` and ML-DSA check.
+    #[test]
+    #[ignore = "admin/ct-binsec runs it under BINSEC"]
+    fn ct_binsec_slhdsa() {
+        type P = SlhDsaSha2_128f;
+        let sk = low::ct::into_public(*KeyPair::<P>::generate().unwrap().secret_key());
+        low::ct_binsec::checked(|| {
+            let key = KeyPair::<P>::from_secret_key(sk.as_ref()).unwrap();
+            // As `KeyPair::sign` holds one.
+            let _entry = Entry::new_secret();
+            let addrnd = [3u8; P::N];
+            low::ct::secret_slice(&addrnd);
+            // Room for one layer, so `sign_internal` signs no further.
+            let mut signature = alloc::vec![0u8; P::N + P::FORS_LEN + P::XMSS_LEN];
+            sign_internal::<P>(
+                key.secret_key().as_ref(),
+                &[0, 0],
+                &[2; 40],
+                &addrnd,
+                &mut signature,
+            );
+            core::hint::black_box(signature);
+        });
     }
 }

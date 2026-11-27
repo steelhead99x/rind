@@ -12,8 +12,9 @@ encoding, and `decodeC_none` that it refuses every other, from Fermat's
 little theorem, for which `p25519_prime` proves p prime by a Pratt
 certificate.
 
-The spec's signing and verification take `edPow` and `edMul`, which are
-opaque, so `publicKeyWith`, `signWith`, and `verifiesWith` restate them over
+The spec's signing and verification take `edPow`, which adds its point once
+per unit of its exponent, too slowly to run, and `edMul`, so `publicKeyWith`,
+`signWith`, and `verifiesWith` restate them over
 any group operations, proven to be them at `edPow` and `edMul`; the spec
 tests (`Rind.SpecTest.Server`) run them over `Rind.SpecTest.Upstream`'s.
 -/

@@ -11,6 +11,8 @@ mod provider;
 pub use provider::*;
 
 /// An OpenMLS provider: rind's cryptography and randomness, with in-memory storage.
+///
+/// `Clone` needs the `test-utils` feature, as upstream's does.
 #[derive(Default, Debug)]
 #[cfg_attr(feature = "test-utils", derive(Clone))]
 pub struct OpenMlsRustCrypto {

@@ -1,0 +1,50 @@
+name: PR macOS
+
+# rind's debug tests on Apple silicon, for a PR that changes rind or the
+# workspace's manifest or lockfile, so a macOS-only break fails its own PR
+# instead of main's nightly `build` a day later: pr-check.yml runs only on
+# Linux. Advisory, as pr-check.yml is.
+#
+# The doc tests and the adapters are left out: they are no more
+# platform-specific than rind's own tests, which pr-check.yml already runs on
+# Linux. No Rust cache: no run on main saves a macOS one, and a PR's own
+# would crowd main's out of the repository's cache quota.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - rind/**
+      - Cargo.toml
+      - Cargo.lock
+      - .github/workflows/pr-macos.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-macos-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # release-plz's release PR, which only bumps versions and changelogs, skips
+  # this, as pr-check.yml does; its release check runs `build` on macOS.
+  test:
+    name: macOS
+    if: ${{ !(startsWith(github.head_ref, 'release-plz-') && github.event.pull_request.user.login == 'moq-bot[bot]') }}
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: stable
+
+      - name: Run rind's tests (debug)
+        run: cargo test -p rind --tests --locked

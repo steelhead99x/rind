@@ -4,8 +4,9 @@ open rind.portable
 
 /-!
 The axioms the SHA-1, SHA-256, HMAC, and digest API theorems rest on: Lean's
-own, and nothing else. SHA-1's and SHA-256's block functions' contracts are
-`Sha1Blocks` and `Sha256Blocks`, hypotheses of each theorem. `Axioms` pins
+own, and nothing else. SHA-1's block function's contract is `Sha1Blocks`, a
+hypothesis of each theorem; SHA-256's is proven, and `Sha256Blocks` states
+only its entry checks. `Axioms` pins
 the theorems over every HMAC algorithm, which take SHA-512's too. A change
 here is a change to the trust base.
 -/

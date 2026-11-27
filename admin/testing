@@ -6,7 +6,7 @@
 # difference:
 # - every item rind exports is named in the table's Exports column, or in the
 #   list of exports that are not primitives, and every name there is exported;
-# - every fuzz target, every differential test in `rind/tests/crosschecks.rs`,
+# - every fuzz target, every differential test in `rind/tests/crosschecks_*.rs`,
 #   every `ct_sde_...`, `ct_qemu_...`, and `ct_binsec_...` test, every CCTV and
 #   imported-vector test, every test in `rind/tests/zeroing.rs`, and every
 #   Wycheproof and CAVP file the tests load is named in the table;
@@ -15,11 +15,14 @@
 #   every name there in backticks is one of rind's dev-dependencies, or, with
 #   a slash, a file in the repository;
 # - every function, fuzz target, and vector file the table names exists;
-# - every other fuzz target is an adapter's, named on the adapters line.
+# - every other fuzz target is an adapter's or a binding's, named on the
+#   adapters or bindings line.
 #
 # A backticked name in the table's other columns, but the oracle's, is one of:
 # - `fuzz::NAME`, a fuzz target;
-# - `crosschecks::[MOD::]FN`, a test in `rind/tests/crosschecks.rs`;
+# - `crosschecks_FAMILY::[MOD::]FN`, a test in `rind/tests/crosschecks_FAMILY.rs` by its
+#   full module path, where `*` matches any run of characters, as a macro's
+#   per-curve or per-suite modules need;
 # - `zeroing::FN`, a test in `rind/tests/zeroing.rs`;
 # - `aws_lc::FN` or `cctv::FN`, a test in `rind/tests/NAME.rs`;
 # - `a::b::FN`, a function in `rind/src/a/b.rs` (or `a/b/mod.rs`);
@@ -35,17 +38,29 @@ COLUMNS = ["Primitive", "Exports", "Vectors", "Fuzz target", "Differential test"
 ORACLE = "Independent oracle"
 NOT_PRIMITIVES = "Exports that are not primitives:"
 ADAPTERS = "Adapter fuzz targets:"
+BINDINGS = "Binding fuzz targets:"
 
 errors = []
 
 
-def strip_comments(text):
-    return re.sub(r"//[^\n]*", "", text)
+# One alternation, so each token starts at its own leftmost delimiter and a
+# `//` inside a string, or a quote inside a comment or char literal, is inert.
+LEXEME = re.compile(
+    r"(?P<comment>//[^\n]*|/\*.*?\*/)"
+    r'|(?P<literal>r(?P<hashes>#*)".*?"(?P=hashes)|"(?:\\.|[^"\\])*"|\'(?:\\.[^\']*|[^\'\\])\')',
+    re.S,
+)
+
+
+def strip_literals(text):
+    """`text` with each comment a space and each string or char literal empty,
+    so only code's own braces, items, and attributes remain."""
+    return LEXEME.sub(lambda m: " " if m.lastgroup == "comment" else '""', text)
 
 
 def exports(path, prefix):
     """The public paths of the items `path` exports, following `pub mod`."""
-    text = strip_comments(path.read_text())
+    text = strip_literals(path.read_text())
     token = re.compile(
         r"pub mod (\w+)\s*\{|pub mod (\w+)\s*;|pub use ([^;]+);"
         r"|pub (?:static|struct|fn|enum|const|trait|type) (\w+)|(\{)|(\})"
@@ -119,6 +134,89 @@ def tests(path):
     return set(re.findall(r"#\[test\]\s*(?:#\[[^\]]*\]\s*)*fn ([a-z0-9_]+)", path.read_text()))
 
 
+def test_paths(text):
+    """The module path of each `#[test]` in the Rust source `text`, as
+    `mod::fn`, with a test a macro defines counted under each module it is
+    invoked in, and a `$name` module it declares named by the invocation's
+    argument."""
+    text = strip_literals(text)
+    tokens = re.findall(r"\$?[A-Za-z_][A-Za-z0-9_]*|[{}()\[\]!#;,]", text)
+    macros = {}  # name -> [(modules relative to its body, test)]
+    found = set()
+    stack = []  # ("mod", name), ("macro", name), or ("other", None)
+    marked = False
+    i = 0
+
+    def group(i):
+        """The index after the bracket group opening at `i`."""
+        depth = 0
+        while True:
+            depth += tokens[i] in "{(["
+            depth -= tokens[i] in "})]"
+            i += 1
+            if depth == 0:
+                return i
+
+    while i < len(tokens):
+        tok = tokens[i]
+        if tok == "#" and tokens[i + 1 : i + 2] == ["["]:
+            end = group(i + 1)
+            marked |= tokens[i + 2 : end - 1] == ["test"]
+            i = end
+        elif tok == "mod" and tokens[i + 2 : i + 3] == ["{"]:
+            stack.append(("mod", tokens[i + 1]))
+            i += 3
+        elif tok == "macro_rules" and tokens[i + 1 : i + 2] == ["!"]:
+            macros[tokens[i + 2]] = []
+            stack.append(("macro", tokens[i + 2]))
+            i += 4
+        elif tok == "{":
+            stack.append(("other", None))
+            marked = False
+            i += 1
+        elif tok == "}":
+            stack.pop()
+            marked = False
+            i += 1
+        elif tok == "fn" and marked:
+            mods = [n for kind, n in stack if kind == "mod"]
+            macro = next((n for kind, n in stack if kind == "macro"), None)
+            if macro is None:
+                found.add("::".join([*mods, tokens[i + 1]]))
+            else:
+                depth = [k for k, (kind, _) in enumerate(stack) if kind == "macro"][0]
+                macros[macro].append(([n for kind, n in stack[depth:] if kind == "mod"], tokens[i + 1]))
+            marked = False
+            i += 2
+        elif tok in macros and tokens[i + 1 : i + 2] == ["!"] and tokens[i + 2 : i + 3] in (["("], ["{"], ["["]) and not any(k == "macro" for k, _ in stack):
+            end = group(i + 2)
+            args = tokens[i + 3 : end - 1]
+            first = args[0] if args else ""
+            mods = [n for kind, n in stack if kind == "mod"]
+            for relative, test in macros[tok]:
+                found.add("::".join([*mods, *(first if m.startswith("$") else m for m in relative), test]))
+            i = end
+        else:
+            if tok == ";":
+                marked = False
+            i += 1
+    return found
+
+
+# Parser checks: delimiters inside a literal or comment must not hide or invent
+# a test, or the completeness check below would accept an undocumented one.
+PARSER_CHECKS = [
+    ('#[test]\nfn first() { let _ = "https://example.test"; }\n#[test]\nfn second() { let _ = "ok"; }', {"first", "second"}),
+    ('#[test]\nfn a() { let _ = r#"// "x"#; }\n#[test]\nfn b() { let _ = \'"\'; }\n#[test]\nfn c() {}', {"a", "b", "c"}),
+    ('// "\n#[test]\nfn a() {}\n/* " */\n#[test]\nfn b() { let _ = "}"; }', {"a", "b"}),
+    ('#[test]\nfn a() { let _ = "/* "; }\n#[test]\nfn b() { let _ = " */"; }', {"a", "b"}),
+]
+for source, want in PARSER_CHECKS:
+    got = test_paths(source)
+    if got != want:
+        sys.exit(f"admin/testing: parser check failed: found {sorted(got)}, not {sorted(want)}, in {source!r}")
+
+
 def source_file(segments):
     for candidate in [SRC.joinpath(*segments).with_suffix(".rs"), SRC.joinpath(*segments, "mod.rs")]:
         if candidate.is_file():
@@ -138,8 +236,7 @@ for name in sorted(named - exported):
 
 fuzz_targets = set(re.findall(r'^name = "([a-z0-9_]+)"', (ROOT / "fuzz/Cargo.toml").read_text(), re.M))
 fuzz_targets.discard("rind-fuzz")
-crosschecks_path = ROOT / "rind/tests/crosschecks.rs"
-crosschecks = crosschecks_path.read_text()
+crosschecks = {p.stem: test_paths(p.read_text()) for p in (ROOT / "rind/tests").glob("crosschecks_*.rs")}
 zeroing_path = ROOT / "rind/tests/zeroing.rs"
 
 # What the code loads, read from string literals across the tests.
@@ -190,13 +287,11 @@ for row in rows:
                 if segments[1] not in fuzz_targets:
                     errors.append(f"{where} is no fuzz target")
                 seen["fuzz"].add(segments[1])
-            elif segments[0] == "crosschecks" and len(segments) >= 2:
-                for module in segments[1:-1]:
-                    if not re.search(rf"\bmod {module}\b", crosschecks):
-                        errors.append(f"{where}: no `mod {module}` in {crosschecks_path.name}")
-                if segments[-1] not in tests(crosschecks_path):
-                    errors.append(f"{where}: no such test in {crosschecks_path.name}")
-                seen["crosschecks"].add(segments[-1])
+            elif segments[0] in crosschecks and len(segments) >= 2:
+                matches = fnmatch.filter(crosschecks[segments[0]], "::".join(segments[1:]))
+                if not matches:
+                    errors.append(f"{where}: no such test in {segments[0]}.rs")
+                seen["crosschecks"].update(f"{segments[0]}::{match}" for match in matches)
             elif segments[0] == "zeroing" and len(segments) == 2:
                 if segments[1] not in tests(zeroing_path):
                     errors.append(f"{where}: no such test in {zeroing_path.name}")
@@ -226,21 +321,22 @@ for row in rows:
             else:
                 errors.append(f"{where} is not a name admin/testing knows")
 
-adapters = [line for line in PAGE.read_text().splitlines() if line.startswith(ADAPTERS)]
-if len(adapters) != 1:
-    sys.exit(f"admin/testing: TESTING.md needs one line starting {ADAPTERS!r}")
-for token in re.findall(r"`([^`]+)`", adapters[0]):
-    segments = token.split("::")
-    if len(segments) != 2 or segments[0] != "fuzz" or segments[1] not in fuzz_targets:
-        errors.append(f"adapters: `{token}` is no fuzz target")
-    elif segments[1] in seen["fuzz"]:
-        errors.append(f"adapters: `{token}` is also a primitive's")
-    else:
-        seen["fuzz"].add(segments[1])
+for label in [ADAPTERS, BINDINGS]:
+    lines = [line for line in PAGE.read_text().splitlines() if line.startswith(label)]
+    if len(lines) != 1:
+        sys.exit(f"admin/testing: TESTING.md needs one line starting {label!r}")
+    for token in re.findall(r"`([^`]+)`", lines[0]):
+        segments = token.split("::")
+        if len(segments) != 2 or segments[0] != "fuzz" or segments[1] not in fuzz_targets:
+            errors.append(f"{label} `{token}` is no fuzz target")
+        elif segments[1] in seen["fuzz"]:
+            errors.append(f"{label} `{token}` is also a primitive's or adapter's")
+        else:
+            seen["fuzz"].add(segments[1])
 
 for kind, names in [
     ("fuzz target", fuzz_targets - seen["fuzz"]),
-    ("differential test", tests(crosschecks_path) - seen["crosschecks"]),
+    ("differential test", {f"{stem}::{name}" for stem, names in crosschecks.items() for name in names} - seen["crosschecks"]),
     ("constant-time test", ct_tests - seen["ct"]),
     ("zeroing test", tests(zeroing_path) - seen["zeroing"]),
     ("Wycheproof file", wycheproof - seen["wycheproof"]),

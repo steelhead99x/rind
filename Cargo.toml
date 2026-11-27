@@ -13,6 +13,7 @@ members = [
   "rind-fips/module",
   "rind-object-store",
   "rind-openmls",
+  "rind-rand-core",
   "rind-rcgen",
   "rind-ring",
   "rind-rustls",
@@ -24,11 +25,26 @@ members = [
   "admin/spec-tests",
   "admin/wasm-fixture"
 ]
-# Vendored upstream forks, built only through `[patch.crates-io]`.
+# Vendored upstream forks, which members take as path dependencies.
 exclude = ["thirdparty/blind-rsa-signatures"]
 
 [workspace.package]
 rust-version = "1.90"
+
+[profile.dev]
+# Line tables keep panic and backtrace `file:line` and valgrind's frames at a
+# fraction of full debuginfo's link time and bytes; `profile.test` inherits it.
+debug = "line-tables-only"
+
+# The profile `just check` and CI test under (`cargo nextest run
+# --cargo-profile test-fast`). Dev and test stay at `opt-level = 0` for what
+# needs unoptimized code, such as `admin/ctgrind`'s debug build, whose
+# valgrind rows catch a secret-dependent branch an optimizer would hide.
+# The slowest tests run minutes unoptimized. Assertions and overflow checks
+# stay on, so a test still trips on what dev's would.
+[profile.test-fast]
+inherits = "test"
+opt-level = 1
 
 [profile.dev.build-override]
 # Left unset, cargo gives a build dependency debuginfo only when the same
@@ -44,7 +60,10 @@ debug = true
 # fiat-crypto's plain arithmetic is proven never to overflow but still checks
 # the flags, as does base64ct's on 8-bit values in 16-bit lanes, curve25519-dalek
 # checks its arithmetic and asserts on scalar digits, and subtle asserts that
-# each `Choice` is 0 or 1.
+# each `Choice` is 0 or 1. dalek's X25519 ladder also loops over the scalar's
+# bits as an iterator of `bool`, testing each secret bit against `None`'s
+# niche, which a bit never equals, until optimization folds the test away:
+# `opt-level = 1` does not, so dalek takes release's level.
 [profile.dev.package.fiat-crypto]
 overflow-checks = false
 
@@ -54,11 +73,7 @@ overflow-checks = false
 [profile.dev.package.curve25519-dalek]
 debug-assertions = false
 overflow-checks = false
+opt-level = 3
 
 [profile.dev.package.subtle]
 debug-assertions = false
-
-# rind's fork, ported to rsa 0.10.0: UPSTREAM.md's "blind-rsa-signatures 0.18
-# does not build on rsa 0.10.0".
-[patch.crates-io]
-blind-rsa-signatures = { path = "thirdparty/blind-rsa-signatures" }

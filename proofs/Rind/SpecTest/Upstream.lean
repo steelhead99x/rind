@@ -5,9 +5,11 @@ import Rind.SpecTest.Nist
 /-!
 # Stand-ins for the opaque constants
 
-`rfcx25519`, `edPow`, and `edMul` are opaque: under the composition rule
-each stands for HOL Light's definition, and nothing is assumed of it, so no
-executable twin can be proven equal to one. The spec tests run the specs
+`rfcx25519` is opaque: under the composition rule it stands for HOL Light's
+definition, and nothing is assumed of it, so no executable twin can be proven
+equal to it. `edPow` transliterates HOL Light's `group_pow`, which adds its
+point once per unit of its exponent, too slowly to run, and these twins stand
+in for it and for `edMul` together. The spec tests run the specs
 around them with these transliterations of the upstream definitions in their
 place, which checks those specs, such as Ed25519's hashing and encodings, and
 not the constants: HOL Light's `rfcx25519` as RFC 7748 section 5 computes it,

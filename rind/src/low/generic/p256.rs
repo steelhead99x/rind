@@ -481,6 +481,14 @@ fn fs(x: &[u64]) -> Fs {
 }
 
 fn fe_add(x: &Fe, y: &Fe) -> Fe {
+    #[cfg(rind_backend = "arm")]
+    return Fe(crate::low::arm::ecp_nistz256::add(&x.0, &y.0));
+    #[cfg(not(rind_backend = "arm"))]
+    fe_add_fiat(x, y)
+}
+
+#[cfg_attr(rind_backend = "arm", allow(dead_code))]
+fn fe_add_fiat(x: &Fe, y: &Fe) -> Fe {
     let mut r = Fe([0; LIMBS]);
     fp::fiat_p256_add(&mut r, x, y);
     r
@@ -491,6 +499,14 @@ fn fe_double(x: &Fe) -> Fe {
 }
 
 fn fe_sub(x: &Fe, y: &Fe) -> Fe {
+    #[cfg(rind_backend = "arm")]
+    return Fe(crate::low::arm::ecp_nistz256::sub(&x.0, &y.0));
+    #[cfg(not(rind_backend = "arm"))]
+    fe_sub_fiat(x, y)
+}
+
+#[cfg_attr(rind_backend = "arm", allow(dead_code))]
+fn fe_sub_fiat(x: &Fe, y: &Fe) -> Fe {
     let mut r = Fe([0; LIMBS]);
     fp::fiat_p256_sub(&mut r, x, y);
     r

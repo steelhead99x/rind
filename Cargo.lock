@@ -1898,9 +1898,9 @@ checksum = "e4eba85ea1d0a966a983acd07deee566e67395d2d96b6fb39e62b5a833f1eb0b"
 
 [[package]]
 name = "graviola"
-version = "0.4.4"
+version = "0.4.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a1a15622a211648cbf64f485e0369791466d133eb6578fd99e4a61230c88a6aa"
+checksum = "bc0377ccc5ef095424121430046e475cf06658e23475b1af526655cfad0b86b2"
 dependencies = [
  "cfg-if",
  "getrandom 0.4.3",
@@ -4769,6 +4769,7 @@ dependencies = [
  "slh-dsa",
  "voprf 0.5.0",
  "vrf-rfc9381",
+ "zeroize",
 ]
 
 [[package]]
@@ -4784,11 +4785,12 @@ dependencies = [
 
 [[package]]
 name = "rind-aws-lc-rs"
-version = "1.0.4"
+version = "1.0.3"
 dependencies = [
  "aws-lc-rs",
  "crabgrind 0.4.0",
  "hex",
+ "once_cell",
  "proptest",
  "rind",
  "rind-aws-lc-rs",
@@ -4866,10 +4868,13 @@ dependencies = [
 [[package]]
 name = "rind-cpuid"
 version = "0.1.0"
+dependencies = [
+ "libc",
+]
 
 [[package]]
 name = "rind-dart"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "crabgrind 0.4.0",
  "rind",
@@ -4927,6 +4932,9 @@ dependencies = [
  "ctr 0.10.1",
  "curve25519-dalek 5.0.0",
  "dimpl",
+ "frost-ed25519",
+ "frost-p256",
+ "frost-ristretto255",
  "ghash 0.6.0",
  "hkdf 0.13.0",
  "hmac 0.13.0",
@@ -4945,13 +4953,19 @@ dependencies = [
  "p384 0.14.0",
  "p521 0.13.3",
  "p521 0.14.0",
+ "pakery-crypto",
+ "pakery-spake2plus",
  "pbkdf2",
  "pkcs8 0.11.0",
+ "pyo3",
  "rand_core 0.6.4",
  "rcgen",
  "rind",
+ "rind-dart",
  "rind-dimpl",
+ "rind-fips",
  "rind-openssl",
+ "rind-python",
  "rind-rcgen",
  "rind-rustls",
  "rind-str0m",
@@ -5019,15 +5033,25 @@ dependencies = [
 
 [[package]]
 name = "rind-python"
-version = "0.1.3"
+version = "0.2.0"
 dependencies = [
  "pyo3",
+ "rind",
+ "zeroize",
+]
+
+[[package]]
+name = "rind-rand-core"
+version = "0.10.0"
+dependencies = [
+ "p256 0.14.0",
+ "rand_core 0.10.1",
  "rind",
 ]
 
 [[package]]
 name = "rind-rcgen"
-version = "0.14.5"
+version = "0.14.4"
 dependencies = [
  "base64ct",
  "crabgrind 0.4.0",
@@ -5042,7 +5066,7 @@ dependencies = [
 
 [[package]]
 name = "rind-ring"
-version = "0.17.5"
+version = "0.17.4"
 dependencies = [
  "aws-lc-rs",
  "crabgrind 0.4.0",
@@ -5054,6 +5078,7 @@ dependencies = [
  "serde",
  "serde_json",
  "untrusted 0.9.0",
+ "wasm-bindgen-test",
 ]
 
 [[package]]
@@ -5062,6 +5087,7 @@ version = "0.23.4"
 dependencies = [
  "crabgrind 0.4.0",
  "env_logger",
+ "getrandom 0.4.3",
  "hex",
  "http",
  "http-body-util",
@@ -5070,8 +5096,10 @@ dependencies = [
  "hyper-util",
  "rind",
  "rustls",
+ "rustls-pki-types",
  "tokio",
  "tokio-rustls",
+ "wasm-bindgen-test",
 ]
 
 [[package]]
@@ -5244,9 +5272,9 @@ dependencies = [
 
 [[package]]
 name = "rustls-pki-types"
-version = "1.15.1"
+version = "1.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f4925028c7eb5d1fcdaf196971378ed9d2c1c4efc7dc5d011256f76c99c0a96"
+checksum = "102f35f7de7b06d8c61f1cff6592f5253e0dea431c74867aad5dfd70f44663fb"
 dependencies = [
  "web-time",
  "zeroize",

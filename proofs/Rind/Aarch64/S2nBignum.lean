@@ -3,6 +3,7 @@ import Rind.Spec
 import Rind.Ed25519
 import Rind.Keccak
 import Rind.Nist
+import Rind.S2nGcm
 open Aeneas Aeneas.Std Result rind.spec
 
 /-!
@@ -71,20 +72,6 @@ axiom edwards25519_scalarmulbase_spec (res : Std.Array U64 8#usize)
     (scalar : Std.Array U64 4#usize) :
     low.aarch64.edwards25519_scalarmulbase.edwards25519_scalarmulbase res scalar ⦃ r =>
       pairNat r.val = edModEncodePair (edPow edB (wordsNat scalar.val)) ⦄
-
-/-- `EDWARDS25519_SCALARMULDOUBLE_ALT_SUBROUTINE_CORRECT`, whose `tables`
-preconditions hold because rind links s2n-bignum's constant table, which the
-routine addresses PC-relative,
-https://github.com/awslabs/s2n-bignum/blob/3f01260ff1bd2577abf0117ce45aa008bc243a80/arm/proofs/edwards25519_scalarmuldouble_alt.ml#L8432 -/
-@[step]
-axiom edwards25519_scalarmuldouble_spec (res : Std.Array U64 8#usize)
-    (scalar : Std.Array U64 4#usize) (point : Std.Array U64 8#usize)
-    (bscalar : Std.Array U64 4#usize) :
-    low.aarch64.edwards25519_scalarmuldouble.edwards25519_scalarmuldouble res scalar point
-      bscalar ⦃ r =>
-      ∀ P, edOnCurve P → edModDecodePair (pairNat point.val) = P →
-        pairNat r.val =
-          edModEncodePair (edMul (edPow P (wordsNat scalar.val)) (edPow edB (wordsNat bscalar.val))) ⦄
 
 /-- `BIGNUM_MADD_N25519_ALT_SUBROUTINE_CORRECT`,
 https://github.com/awslabs/s2n-bignum/blob/3f01260ff1bd2577abf0117ce45aa008bc243a80/arm/proofs/bignum_madd_n25519_alt.ml#L829 -/
@@ -405,6 +392,13 @@ axiom sha3_keccak_f1600_alt_spec (a : Std.Array U64 25#usize) (rc : Std.Array U6
     low.aarch64.sha3_keccak_f1600_alt.sha3_keccak_f1600 a rc ⦃ r =>
       r.val.map (·.bv) = keccak 24 (a.val.map (·.bv)) ⦄
 
+/-- `SHA3_KECCAK_F1600_ALT2_SUBROUTINE_CORRECT`,
+https://github.com/awslabs/s2n-bignum/blob/3f01260ff1bd2577abf0117ce45aa008bc243a80/arm/proofs/sha3_keccak_f1600_alt2.ml#L283 -/
+axiom sha3_keccak_f1600_alt2_spec (a : Std.Array U64 25#usize) (rc : Std.Array U64 24#usize)
+    (hrc : rc.val.map (·.bv) = keccakRoundConstants) :
+    low.aarch64.sha3_keccak_f1600_alt2.sha3_keccak_f1600 a rc ⦃ r =>
+      r.val.map (·.bv) = keccak 24 (a.val.map (·.bv)) ⦄
+
 /-- `SHA3_KECCAK2_F1600_SUBROUTINE_CORRECT`, whose two states are consecutive,
 as an array of them is,
 https://github.com/awslabs/s2n-bignum/blob/3f01260ff1bd2577abf0117ce45aa008bc243a80/arm/proofs/sha3_keccak2_f1600.ml#L313 -/
@@ -429,14 +423,160 @@ axiom sha3_keccak4_f1600_alt_spec (a : Std.Array (Std.Array U64 25#usize) 4#usiz
     low.aarch64.sha3_keccak4_f1600_alt.sha3_keccak4_f1600 a rc ⦃ r =>
       r.val.map (·.val.map (·.bv)) = (a.val.map (·.val.map (·.bv))).map (keccak 24) ⦄
 
+/-! ### AES-GCM's stitched kernels
+
+`low::aarch64::aes_gcm::stitched` runs one of these eight kernels, for an
+AES-128 or AES-256 key (an AES-192 key runs aws-lc's kernels, which no theorem
+here covers), on its whole blocks in place, `in_p = out_p`, with `len_bits` the blocks times 128, which
+`hn` keeps from wrapping. Each theorem's `bytes128` reads are a block's 16
+bytes little endian, `loadBytes`, as the vectors of round keys and table
+entries hold them. The `_alt` kernels, which the cores with SHA3 run, also
+require `val in_p + 16 * gcm_wb_blocks len_bits < 2 EXP 63`, which their
+restatements take as `KernelBuffersLow`. -/
+
+/-- That the address of the blocks rind hands s2n-bignum's `_alt` AES-GCM
+kernels, plus their length in bytes, is below 2^63, as their theorems require.
+The model has no addresses, so this names the condition for every `_alt` call
+a proof using it covers, not for one buffer: evidence about one allocation
+does not establish it for another, and `stitched`'s caller does not check it.
+Untagged user-space addresses on aarch64 Linux and macOS meet it; a pointer
+whose top byte sets bit 63, as the top-byte heap tags of Android's Bionic
+(`0xB4`) do, breaks it, whereas an MTE tag, in bits 59 to 56, does not by
+itself. -/
+opaque KernelBuffersLow : Prop
+
+open rind.s2n rind.simd in
+/-- What s2n-bignum's AES-GCM kernels require of their buffers: the tag
+`tag0` and the counter block `ctr_block nonce c`, each in SP 800-38D's byte
+order, reversed into lane order, the round keys `rk` reversed, and input block
+`i` `inblock i`. -/
+structure GcmKernelIn (blocks : Slice (Std.Array U8 16#usize)) (tag ivec : Std.Array U8 16#usize)
+    (keys : List (BitVec 128)) (tag0 : BitVec 128) (nonce : BitVec 96) (c : Nat) (rk : List (BitVec 128))
+    (inblock : Nat → BitVec 128) : Prop where
+  tag : loadBytes tag.val = wordReversefields 8 tag0
+  ivec : loadBytes ivec.val = wordReversefields 8 (ctrBlock nonce c)
+  key : keys = rk.map (wordReversefields 8)
+  input : ∀ i < blocks.length, loadBytes blocks.val[i]!.val = inblock i
+
+open rind.s2n rind.simd in
+/-- What the kernels ensure, for the cipher `enc` and the `n` blocks they
+hash, `hashed`: each output block, the tag, and the counter block. -/
+def GcmKernelOut (enc : BitVec 128 → List (BitVec 128) → BitVec 128) (hashed : Nat → BitVec 128) (n : Nat)
+    (tag0 : BitVec 128) (nonce : BitVec 96) (c : Nat) (rk : List (BitVec 128)) (inblock : Nat → BitVec 128)
+    (r : low.aarch64.aes_gcm.KernelOut) : Prop :=
+  r.1.length = n ∧
+  (∀ i < n, loadBytes r.1.val[i]!.val = aesCtrBlock enc c nonce rk i ^^^ inblock i) ∧
+  loadBytes r.2.1.val = wordReversefields 8 (nistGhash (enc 0#128 rk) tag0 (listOfSeq hashed n)) ∧
+  loadBytes r.2.2.val = wordReversefields 8 (ctrBlock nonce (n + c))
+
+open rind.s2n rind.simd in
+/-- `AES128_GCM_ENC_NOIBT_SUBROUTINE_CORRECT`,
+https://github.com/awslabs/s2n-bignum/blob/3f01260ff1bd2577abf0117ce45aa008bc243a80/arm/proofs/aes128_gcm_enc.ml#L3073 -/
+axiom aes128_gcm_enc_spec (blocks : Slice (Std.Array U8 16#usize)) (tag ivec : Std.Array U8 16#usize)
+    (keys : Std.Array core.core_arch.arm_shared.neon.uint8x16_t 11#usize)
+    (htable : Std.Array core.core_arch.arm_shared.neon.uint64x2_t 6#usize) (tag0 : BitVec 128) (nonce : BitVec 96)
+    (c : Nat) (rk : List (BitVec 128)) (inblock : Nat → BitVec 128) (hn : blocks.length < 2 ^ 57)
+    (hin : GcmKernelIn blocks tag ivec keys.val tag0 nonce c rk inblock)
+    (hh : htable.val = htable4 (ghashTwist (aes128Cipher 0#128 rk))) :
+    low.aarch64.aes128_gcm_enc.aes128_gcm_enc blocks tag ivec keys htable ⦃ r =>
+      GcmKernelOut aes128Cipher (nistCipherBlock aes128Cipher c nonce rk inblock) blocks.length tag0 nonce c rk
+        inblock r ⦄
+
+open rind.s2n rind.simd in
+/-- `AES128_GCM_DEC_NOIBT_SUBROUTINE_CORRECT`,
+https://github.com/awslabs/s2n-bignum/blob/3f01260ff1bd2577abf0117ce45aa008bc243a80/arm/proofs/aes128_gcm_dec.ml#L3395 -/
+axiom aes128_gcm_dec_spec (blocks : Slice (Std.Array U8 16#usize)) (tag ivec : Std.Array U8 16#usize)
+    (keys : Std.Array core.core_arch.arm_shared.neon.uint8x16_t 11#usize)
+    (htable : Std.Array core.core_arch.arm_shared.neon.uint64x2_t 6#usize) (tag0 : BitVec 128) (nonce : BitVec 96)
+    (c : Nat) (rk : List (BitVec 128)) (inblock : Nat → BitVec 128) (hn : blocks.length < 2 ^ 57)
+    (hin : GcmKernelIn blocks tag ivec keys.val tag0 nonce c rk inblock)
+    (hh : htable.val = htable4 (ghashTwist (aes128Cipher 0#128 rk))) :
+    low.aarch64.aes128_gcm_dec.aes128_gcm_dec blocks tag ivec keys htable ⦃ r =>
+      GcmKernelOut aes128Cipher (nistInputBlock inblock) blocks.length tag0 nonce c rk inblock r ⦄
+
+open rind.s2n rind.simd in
+/-- `AES128_GCM_ENC_ALT_NOIBT_SUBROUTINE_CORRECT`,
+https://github.com/awslabs/s2n-bignum/blob/3f01260ff1bd2577abf0117ce45aa008bc243a80/arm/proofs/aes128_gcm_enc_alt.ml#L1512 -/
+axiom aes128_gcm_enc_alt_spec (blocks : Slice (Std.Array U8 16#usize)) (tag ivec : Std.Array U8 16#usize)
+    (keys : Std.Array core.core_arch.arm_shared.neon.uint8x16_t 11#usize)
+    (htable : Std.Array core.core_arch.arm_shared.neon.uint64x2_t 12#usize) (tag0 : BitVec 128) (nonce : BitVec 96)
+    (c : Nat) (rk : List (BitVec 128)) (inblock : Nat → BitVec 128) (hn : blocks.length < 2 ^ 57)
+    (haddr : KernelBuffersLow)
+    (hin : GcmKernelIn blocks tag ivec keys.val tag0 nonce c rk inblock)
+    (hh : htable.val = htable8 (ghashTwist (aes128Cipher 0#128 rk))) :
+    low.aarch64.aes128_gcm_enc_alt.aes128_gcm_enc_alt blocks tag ivec keys htable ⦃ r =>
+      GcmKernelOut aes128Cipher (nistCipherBlock aes128Cipher c nonce rk inblock) blocks.length tag0 nonce c rk
+        inblock r ⦄
+
+open rind.s2n rind.simd in
+/-- `AES128_GCM_DEC_ALT_NOIBT_SUBROUTINE_CORRECT`,
+https://github.com/awslabs/s2n-bignum/blob/3f01260ff1bd2577abf0117ce45aa008bc243a80/arm/proofs/aes128_gcm_dec_alt.ml#L6844 -/
+axiom aes128_gcm_dec_alt_spec (blocks : Slice (Std.Array U8 16#usize)) (tag ivec : Std.Array U8 16#usize)
+    (keys : Std.Array core.core_arch.arm_shared.neon.uint8x16_t 11#usize)
+    (htable : Std.Array core.core_arch.arm_shared.neon.uint64x2_t 12#usize) (tag0 : BitVec 128) (nonce : BitVec 96)
+    (c : Nat) (rk : List (BitVec 128)) (inblock : Nat → BitVec 128) (hn : blocks.length < 2 ^ 57)
+    (haddr : KernelBuffersLow)
+    (hin : GcmKernelIn blocks tag ivec keys.val tag0 nonce c rk inblock)
+    (hh : htable.val = htable8 (ghashTwist (aes128Cipher 0#128 rk))) :
+    low.aarch64.aes128_gcm_dec_alt.aes128_gcm_dec_alt blocks tag ivec keys htable ⦃ r =>
+      GcmKernelOut aes128Cipher (nistInputBlock inblock) blocks.length tag0 nonce c rk inblock r ⦄
+
+open rind.s2n rind.simd in
+/-- `AES256_GCM_ENC_NOIBT_SUBROUTINE_CORRECT`,
+https://github.com/awslabs/s2n-bignum/blob/3f01260ff1bd2577abf0117ce45aa008bc243a80/arm/proofs/aes256_gcm_enc.ml#L4049 -/
+axiom aes256_gcm_enc_spec (blocks : Slice (Std.Array U8 16#usize)) (tag ivec : Std.Array U8 16#usize)
+    (keys : Std.Array core.core_arch.arm_shared.neon.uint8x16_t 15#usize)
+    (htable : Std.Array core.core_arch.arm_shared.neon.uint64x2_t 6#usize) (tag0 : BitVec 128) (nonce : BitVec 96)
+    (c : Nat) (rk : List (BitVec 128)) (inblock : Nat → BitVec 128) (hn : blocks.length < 2 ^ 57)
+    (hin : GcmKernelIn blocks tag ivec keys.val tag0 nonce c rk inblock)
+    (hh : htable.val = htable4 (ghashTwist (aes256Cipher 0#128 rk))) :
+    low.aarch64.aes256_gcm_enc.aes256_gcm_enc blocks tag ivec keys htable ⦃ r =>
+      GcmKernelOut aes256Cipher (nistCipherBlock aes256Cipher c nonce rk inblock) blocks.length tag0 nonce c rk
+        inblock r ⦄
+
+open rind.s2n rind.simd in
+/-- `AES256_GCM_DEC_NOIBT_SUBROUTINE_CORRECT`,
+https://github.com/awslabs/s2n-bignum/blob/3f01260ff1bd2577abf0117ce45aa008bc243a80/arm/proofs/aes256_gcm_dec.ml#L3935 -/
+axiom aes256_gcm_dec_spec (blocks : Slice (Std.Array U8 16#usize)) (tag ivec : Std.Array U8 16#usize)
+    (keys : Std.Array core.core_arch.arm_shared.neon.uint8x16_t 15#usize)
+    (htable : Std.Array core.core_arch.arm_shared.neon.uint64x2_t 6#usize) (tag0 : BitVec 128) (nonce : BitVec 96)
+    (c : Nat) (rk : List (BitVec 128)) (inblock : Nat → BitVec 128) (hn : blocks.length < 2 ^ 57)
+    (hin : GcmKernelIn blocks tag ivec keys.val tag0 nonce c rk inblock)
+    (hh : htable.val = htable4 (ghashTwist (aes256Cipher 0#128 rk))) :
+    low.aarch64.aes256_gcm_dec.aes256_gcm_dec blocks tag ivec keys htable ⦃ r =>
+      GcmKernelOut aes256Cipher (nistInputBlock inblock) blocks.length tag0 nonce c rk inblock r ⦄
+
+open rind.s2n rind.simd in
+/-- `AES256_GCM_ENC_ALT_NOIBT_SUBROUTINE_CORRECT`,
+https://github.com/awslabs/s2n-bignum/blob/3f01260ff1bd2577abf0117ce45aa008bc243a80/arm/proofs/aes256_gcm_enc_alt.ml#L1705 -/
+axiom aes256_gcm_enc_alt_spec (blocks : Slice (Std.Array U8 16#usize)) (tag ivec : Std.Array U8 16#usize)
+    (keys : Std.Array core.core_arch.arm_shared.neon.uint8x16_t 15#usize)
+    (htable : Std.Array core.core_arch.arm_shared.neon.uint64x2_t 12#usize) (tag0 : BitVec 128) (nonce : BitVec 96)
+    (c : Nat) (rk : List (BitVec 128)) (inblock : Nat → BitVec 128) (hn : blocks.length < 2 ^ 57)
+    (haddr : KernelBuffersLow)
+    (hin : GcmKernelIn blocks tag ivec keys.val tag0 nonce c rk inblock)
+    (hh : htable.val = htable8 (ghashTwist (aes256Cipher 0#128 rk))) :
+    low.aarch64.aes256_gcm_enc_alt.aes256_gcm_enc_alt blocks tag ivec keys htable ⦃ r =>
+      GcmKernelOut aes256Cipher (nistCipherBlock aes256Cipher c nonce rk inblock) blocks.length tag0 nonce c rk
+        inblock r ⦄
+
+open rind.s2n rind.simd in
+/-- `AES256_GCM_DEC_ALT_NOIBT_SUBROUTINE_CORRECT`,
+https://github.com/awslabs/s2n-bignum/blob/3f01260ff1bd2577abf0117ce45aa008bc243a80/arm/proofs/aes256_gcm_dec_alt.ml#L9119 -/
+axiom aes256_gcm_dec_alt_spec (blocks : Slice (Std.Array U8 16#usize)) (tag ivec : Std.Array U8 16#usize)
+    (keys : Std.Array core.core_arch.arm_shared.neon.uint8x16_t 15#usize)
+    (htable : Std.Array core.core_arch.arm_shared.neon.uint64x2_t 12#usize) (tag0 : BitVec 128) (nonce : BitVec 96)
+    (c : Nat) (rk : List (BitVec 128)) (inblock : Nat → BitVec 128) (hn : blocks.length < 2 ^ 57)
+    (haddr : KernelBuffersLow)
+    (hin : GcmKernelIn blocks tag ivec keys.val tag0 nonce c rk inblock)
+    (hh : htable.val = htable8 (ghashTwist (aes256Cipher 0#128 rk))) :
+    low.aarch64.aes256_gcm_dec_alt.aes256_gcm_dec_alt blocks tag ivec keys htable ⦃ r =>
+      GcmKernelOut aes256Cipher (nistInputBlock inblock) blocks.length tag0 nonce c rk inblock r ⦄
+
 /-- rind runs on this CPU: its entry guards' CPU-feature checks pass. Neither
 reads an input. -/
 def Runs : Prop :=
   (∃ e, low.entry.Entry.new_secret = ok e) ∧ (∃ e, low.entry.Entry.new_public = ok e)
-
-/-- Ed25519 verification's double scalar multiplication runs s2n-bignum's
-routine, as it does on every aarch64 CPU. -/
-def RunsDouble : Prop := True
 
 /-- The check for x86_64's AVX-512 IFMA X25519 and Ed25519 returned `o`, as
 on x86_64; every aarch64 CPU runs s2n-bignum's routines whatever it returns. -/

@@ -1,9 +1,4 @@
 //! RSA key pairs and public keys.
-//!
-//! ring's `KeyPair::from_components` and `KeyPairComponents` are not
-//! offered: building a key from big-endian private components means
-//! encoding them as DER here, which branches on their secret leading bytes.
-//! Load the key as PKCS#1 or PKCS#8 instead.
 
 use alloc::boxed::Box;
 use core::fmt;
@@ -11,7 +6,7 @@ use core::marker::PhantomData;
 
 use crate::{der, error, rand, signature};
 
-/// Signs with any [`signature::RsaEncoding`]; its modulus is 2048 to 4096 bits, a multiple of 512, as ring requires.
+/// Signs with any [`signature::RsaEncoding`]; its modulus is 2047 to 4096 bits, and each prime `ceil(n / 2)` bits and a multiple of 512, as ring requires.
 pub struct KeyPair {
     key: rind::rsa::KeyPair,
     public: PublicKey,
@@ -34,24 +29,65 @@ impl KeyPair {
             .and_then(Self::new)
     }
 
-    // rind takes moduli up to 8192 bits of any length; ring refuses the
-    // rest, and an exponent below 65537.
+    /// Loads a private key from its big-endian integers.
+    ///
+    /// Unlike ring, this takes private integers with leading zero bytes, as
+    /// aws-lc-rs does: refusing them would branch on their secret first
+    /// bytes. It refuses integers that disagree, which ring may take.
+    pub fn from_components<Public, Private>(
+        components: &KeyPairComponents<Public, Private>,
+    ) -> Result<Self, error::KeyRejected>
+    where
+        Public: AsRef<[u8]>,
+        Private: AsRef<[u8]>,
+    {
+        let public_key = &components.public_key;
+        let components = rind::rsa::KeyPairComponents {
+            public_key: rind::rsa::PublicKeyComponents {
+                n: public_key.n.as_ref(),
+                e: public_key.e.as_ref(),
+            },
+            d: components.d.as_ref(),
+            p: components.p.as_ref(),
+            q: components.q.as_ref(),
+            dp: components.dP.as_ref(),
+            dq: components.dQ.as_ref(),
+            qi: components.qInv.as_ref(),
+        };
+        rind::rsa::KeyPair::from_components(&components)
+            .map_err(error::KeyRejected::rind)
+            .and_then(Self::new)
+    }
+
+    // rind takes moduli up to 8192 bits of any length, with primes of any
+    // lengths; ring refuses the rest, and an exponent below 65537, in this
+    // order.
     fn new(key: rind::rsa::KeyPair) -> Result<Self, error::KeyRejected> {
         // rind's encoding of a key it loaded always parses.
         let public = PublicKey::new(key.public_key().as_ref())
             .or(Err(error::KeyRejected::invalid_encoding()))?;
-        let bits = public.modulus_bits();
-        if bits < 2048 {
+        // ring's floor counts the modulus's bytes, so it takes 2047 bits.
+        if public.modulus_len() < 2048 / 8 {
             return Err(error::KeyRejected::too_small());
         }
-        if bits > 4096 {
+        if public.modulus_bits() > 4096 {
             return Err(error::KeyRejected::too_large());
-        }
-        if bits % 512 != 0 {
-            return Err(error::KeyRejected::private_modulus_len_not_multiple_of_512_bits());
         }
         if public.exponent() < 65537 {
             return Err(error::KeyRejected::too_small());
+        }
+        // ring sizes a key by its primes, each `ceil(n_bits / 2)` bits and a
+        // multiple of 512, checking p's length, then its multiple, then q's.
+        let want = public.modulus_bits().div_ceil(2);
+        let [p, q] = key.prime_bits();
+        if p != want {
+            return Err(error::KeyRejected::inconsistent_components());
+        }
+        if want % 512 != 0 {
+            return Err(error::KeyRejected::private_modulus_len_not_multiple_of_512_bits());
+        }
+        if q != want {
+            return Err(error::KeyRejected::inconsistent_components());
         }
         Ok(Self { key, public })
     }
@@ -102,6 +138,38 @@ impl fmt::Debug for KeyPair {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RsaKeyPair")
             .field("public", &self.public)
+            .finish()
+    }
+}
+
+/// An RSA private key as its big-endian integers.
+#[derive(Clone, Copy)]
+#[allow(non_snake_case)]
+pub struct KeyPairComponents<Public, Private = Public> {
+    /// The modulus and public exponent.
+    pub public_key: PublicKeyComponents<Public>,
+    /// The private exponent.
+    pub d: Private,
+    /// The first prime factor of the modulus.
+    pub p: Private,
+    /// The second prime factor of the modulus.
+    pub q: Private,
+    /// `d` mod `p - 1`.
+    pub dP: Private,
+    /// `d` mod `q - 1`.
+    pub dQ: Private,
+    /// The inverse of `q` mod `p`.
+    pub qInv: Private,
+}
+
+impl<Public, Private> fmt::Debug for KeyPairComponents<Public, Private>
+where
+    PublicKeyComponents<Public>: fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // As ring, leaving out the private integers.
+        f.debug_struct("KeyPairComponents")
+            .field("public_key", &self.public_key)
             .finish()
     }
 }
@@ -234,7 +302,8 @@ pub(crate) mod verification {
         ($name:ident, $rind:path, $doc:expr) => {
             #[doc = $doc]
             pub static $name: RsaParameters = RsaParameters {
-                rind: &$rind,
+                // ring counts the modulus floor in whole bytes.
+                rind: &$rind.floor_in_bytes(),
                 id: stringify!($name),
                 unwind: core::marker::PhantomData,
             };
