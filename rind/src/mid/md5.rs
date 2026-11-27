@@ -9,7 +9,7 @@
 use crate::low::{Blockwise, Entry, UpdateBlocks, md5_compress_blocks, pad, split_tail};
 
 /// MD5's chaining value after a whole number of blocks.
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub(crate) struct Md5State {
     h: [u32; 4],
     // u64 so 32-bit targets can hash past 4 GiB; only its low 58 bits count.
@@ -65,7 +65,7 @@ impl UpdateBlocks for Md5State {
 }
 
 /// A context for incremental computation of MD5.
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub(crate) struct Md5Context {
     state: Md5State,
     blockwise: Blockwise<{ Self::BLOCK_SZ }>,
@@ -81,6 +81,7 @@ impl Md5Context {
     }
 
     /// Add `bytes` to the ongoing hash computation.
+    #[inline(always)]
     pub(crate) fn update(&mut self, bytes: &[u8]) {
         self.blockwise.update(bytes, &mut self.state);
     }
@@ -98,6 +99,7 @@ impl Md5Context {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 

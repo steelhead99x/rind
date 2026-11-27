@@ -379,7 +379,9 @@ impl VerifierRecord {
     /// with Matter's short passcodes it is enough to recover the passcode
     /// offline.
     pub fn l(&self) -> [u8; 65] {
-        let _entry = Entry::new_public();
+        // Kept like `w0`, as the paragraph above says, so under DIT too,
+        // though its arithmetic is timed as public.
+        let _entry = Entry::new_secret();
         self.l.to_uncompressed()
     }
 
@@ -1258,6 +1260,34 @@ mod tests {
         }
         assert_ne!(keys[0], keys[1]);
         assert_ne!(shares[0], shares[1]);
+    }
+
+    /// Debug output shows the public shares and the key's length, and no
+    /// secret.
+    #[test]
+    fn debug_shows_no_secret() {
+        let w0 = [0x11; 40];
+        let w1 = [0x22; 40];
+        let prover = ProverSecrets::new(&w0, &w1).unwrap();
+        assert_eq!(format!("{prover:?}"), "ProverSecrets { .. }");
+        let record = VerifierRecord::from_w1(&w0, &w1).unwrap();
+        assert_eq!(format!("{record:?}"), "VerifierRecord { .. }");
+        let session = Session {
+            context: b"ctx",
+            id_prover: b"a",
+            id_verifier: b"b",
+        };
+        let (share_p, prover) = prover.start(&RFC9383, &session).unwrap();
+        assert_eq!(format!("{prover:?}"), "ProverAwaiting { .. }");
+        assert_eq!(
+            format!("{share_p:?}"),
+            format!("Share({:?})", share_p.as_ref())
+        );
+        let (share_v, confirm_v, verifier) = record.start(&RFC9383, &session, &share_p).unwrap();
+        assert_eq!(format!("{verifier:?}"), "VerifierAwaiting { .. }");
+        assert_eq!(format!("{confirm_v:?}"), "Confirm { .. }");
+        let (_, key) = prover.finish(&share_v, &confirm_v).unwrap();
+        assert_eq!(format!("{key:?}"), "SharedKey { len: 32, .. }");
     }
 
     #[test]

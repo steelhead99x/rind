@@ -1,9 +1,20 @@
+#[cfg(target_arch = "xtensa")]
+fn main() {}
+
+#[cfg(not(target_arch = "xtensa"))]
 mod criterion;
+#[cfg(not(target_arch = "xtensa"))]
 use std::hint::black_box;
 
+#[cfg(not(target_arch = "xtensa"))]
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 
-#[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+#[cfg(all(
+    feature = "__bench_openssl",
+    target_family = "unix",
+    not(target_arch = "xtensa")
+))]
+#[cfg(not(target_arch = "xtensa"))]
 mod ossl {
     //! The openssl crate does not yet wrap SLH-DSA key generation.
 
@@ -43,10 +54,12 @@ mod ossl {
 
 // The message every library signs. SLH-DSA signs without rejection, so its
 // time does not depend on the randomness each signature draws.
+#[cfg(not(target_arch = "xtensa"))]
 const MESSAGE: &[u8] = b"rind SLH-DSA benchmark message";
 
 // One parameter set's key generation, signing, and verification, each library
 // by its own name for the set. aws-lc-rs and libcrux have no SLH-DSA.
+#[cfg(not(target_arch = "xtensa"))]
 macro_rules! slh_dsa {
     (
         $bench:ident, $id:literal, n: $n:literal,
@@ -78,7 +91,11 @@ macro_rules! slh_dsa {
             group.throughput(Throughput::Elements(1));
             sample_size(&mut group);
 
-            #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+            #[cfg(all(
+                feature = "__bench_openssl",
+                target_family = "unix",
+                not(target_arch = "xtensa")
+            ))]
             if ossl::available() {
                 group.bench_function("openssl", |b| {
                     b.iter(|| {
@@ -101,6 +118,7 @@ macro_rules! slh_dsa {
             });
 
             group.bench_function("rind", |b| {
+                let _dit = criterion::rind_dit();
                 use rind::slh_dsa::{KeyPair, $rind};
 
                 b.iter(|| {
@@ -115,7 +133,11 @@ macro_rules! slh_dsa {
             group.throughput(Throughput::Elements(1));
             sample_size(&mut group);
 
-            #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+            #[cfg(all(
+                feature = "__bench_openssl",
+                target_family = "unix",
+                not(target_arch = "xtensa")
+            ))]
             if ossl::available() {
                 group.bench_function("openssl", |b| {
                     use openssl::sign::Signer;
@@ -151,6 +173,7 @@ macro_rules! slh_dsa {
             });
 
             group.bench_function("rind", |b| {
+                let _dit = criterion::rind_dit();
                 use rind::slh_dsa::{KeyPair, $rind};
                 let key = KeyPair::<$rind>::generate().unwrap();
 
@@ -177,7 +200,11 @@ macro_rules! slh_dsa {
                 )
             };
 
-            #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+            #[cfg(all(
+                feature = "__bench_openssl",
+                target_family = "unix",
+                not(target_arch = "xtensa")
+            ))]
             if ossl::available() {
                 group.bench_function("openssl", |b| {
                     use openssl::pkey::PKey;
@@ -216,6 +243,7 @@ macro_rules! slh_dsa {
             });
 
             group.bench_function("rind", |b| {
+                let _dit = criterion::rind_dit();
                 use rind::slh_dsa::{PublicKey, $rind};
                 let key = PublicKey::<$rind>::from_spki(&spki).unwrap();
 
@@ -228,6 +256,7 @@ macro_rules! slh_dsa {
     };
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 slh_dsa!(
     sha2_128s, "slhdsa-sha2-128s", n: 16,
     rind: SlhDsaSha2_128s,
@@ -236,6 +265,7 @@ slh_dsa!(
     openssl: c"SLH-DSA-SHA2-128s",
 );
 
+#[cfg(not(target_arch = "xtensa"))]
 slh_dsa!(
     sha2_128f, "slhdsa-sha2-128f", n: 16,
     rind: SlhDsaSha2_128f,
@@ -244,6 +274,7 @@ slh_dsa!(
     openssl: c"SLH-DSA-SHA2-128f",
 );
 
+#[cfg(not(target_arch = "xtensa"))]
 slh_dsa!(
     shake_128s, "slhdsa-shake-128s", n: 16,
     rind: SlhDsaShake128s,
@@ -252,6 +283,7 @@ slh_dsa!(
     openssl: c"SLH-DSA-SHAKE-128s",
 );
 
+#[cfg(not(target_arch = "xtensa"))]
 slh_dsa!(
     shake_128f, "slhdsa-shake-128f", n: 16,
     rind: SlhDsaShake128f,
@@ -260,6 +292,7 @@ slh_dsa!(
     openssl: c"SLH-DSA-SHAKE-128f",
 );
 
+#[cfg(not(target_arch = "xtensa"))]
 slh_dsa!(
     sha2_256f, "slhdsa-sha2-256f", n: 32,
     rind: SlhDsaSha2_256f,
@@ -268,6 +301,7 @@ slh_dsa!(
     openssl: c"SLH-DSA-SHA2-256f",
 );
 
+#[cfg(not(target_arch = "xtensa"))]
 slh_dsa!(
     shake_256f, "slhdsa-shake-256f", n: 32,
     rind: SlhDsaShake256f,
@@ -276,7 +310,9 @@ slh_dsa!(
     openssl: c"SLH-DSA-SHAKE-256f",
 );
 
+#[cfg(not(target_arch = "xtensa"))]
 criterion_group!(
     benches, sha2_128s, sha2_128f, shake_128s, shake_128f, sha2_256f, shake_256f
 );
+#[cfg(not(target_arch = "xtensa"))]
 criterion_main!(benches);

@@ -1,11 +1,8 @@
-//! Values cargo-mutants can replace without a round-trip noticing: lengths
-//! and equality. Checked against ring, which rind-ring offers. Some tests also
-//! compare `Debug` output with ring's, though `Debug` and `Display` mutants
-//! stay excluded (quest/m2/confidence/mutants-adapters.md). aws-lc-rs has
-//! changed some of those `Debug` strings.
-//!
-//! ring is a native-only dev-dependency, so wasm leaves these out.
+//! Values cargo-mutants can replace without a round-trip noticing: lengths,
+//! equality, `Debug`, and `Display`. Checked against ring, which rind-ring
+//! offers. aws-lc-rs has changed some of those `Debug` strings.
 
+// aws-lc-rs and ring do not build for wasm.
 #![cfg(not(target_family = "wasm"))]
 
 use core::num::NonZeroU32;
@@ -236,6 +233,14 @@ fn signature_algorithms_match_ring() {
             "RSA_PSS_SHA384"
         );
     }
+}
+
+#[test]
+fn unspecified_matches_ring() {
+    assert_eq!(
+        ours::error::Unspecified.to_string(),
+        theirs::error::Unspecified.to_string()
+    );
 }
 
 #[test]

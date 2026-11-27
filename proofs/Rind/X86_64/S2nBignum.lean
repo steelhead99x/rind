@@ -1,4 +1,5 @@
 import Rind.X86_64.Funs
+import Rind.X86_64.VgCurve25519
 import Rind.Spec
 import Rind.Ed25519
 import Mathlib.Data.Nat.Size
@@ -15,6 +16,11 @@ rind transliterates (3f01260f), about the opaque Rust wrapper
 hold for every call from safe Rust: the `&mut` result cannot overlap an input
 or the routine's code, and the routine's stack lies below the caller's
 frame. Its total correctness (`ensures`) gives the `ok`.
+
+A leaf that needs a CPU feature (the ADX and BMI2 `bignum_mul_p25519`) has no
+check of its own, so its axiom holds only where its mux selected it: each such
+leaf's mux theorem takes that as its `Runs` hypothesis, and nothing else calls
+the leaf.
 
 The restatement, and that rind's inline assembly is s2n-bignum's object code
 with the wrapper passing the arguments the theorem names, are trusted.
@@ -124,6 +130,20 @@ https://github.com/awslabs/s2n-bignum/blob/3f01260ff1bd2577abf0117ce45aa008bc243
 axiom bignum_neg_p25519_spec (z x : Std.Array U64 4#usize) :
     low.x86_64.bignum_neg_p25519.bignum_neg_p25519 z x ⦃ r =>
       wordsNat x.val ≤ p25519 → wordsNat r.val = (p25519 - wordsNat x.val) % p25519 ⦄
+
+/-- `BIGNUM_MUL_P25519_SUBROUTINE_CORRECT`,
+https://github.com/awslabs/s2n-bignum/blob/3f01260ff1bd2577abf0117ce45aa008bc243a80/x86/proofs/bignum_mul_p25519.ml#L446 -/
+@[step]
+axiom bignum_mul_p25519_spec (z x y : Std.Array U64 4#usize) :
+    low.x86_64.bignum_mul_p25519.bignum_mul_p25519 z x y ⦃ r =>
+      wordsNat r.val = wordsNat x.val * wordsNat y.val % p25519 ⦄
+
+/-- `BIGNUM_MUL_P25519_ALT_SUBROUTINE_CORRECT`,
+https://github.com/awslabs/s2n-bignum/blob/3f01260ff1bd2577abf0117ce45aa008bc243a80/x86/proofs/bignum_mul_p25519_alt.ml#L381 -/
+@[step]
+axiom bignum_mul_p25519_alt_spec (z x y : Std.Array U64 4#usize) :
+    low.x86_64.bignum_mul_p25519_alt.bignum_mul_p25519_alt z x y ⦃ r =>
+      wordsNat r.val = wordsNat x.val * wordsNat y.val % p25519 ⦄
 
 /-- `BIGNUM_LT_SUBROUTINE_CORRECT`, for the slices' lengths as `m` and `n`,
 https://github.com/awslabs/s2n-bignum/blob/3f01260ff1bd2577abf0117ce45aa008bc243a80/x86/proofs/bignum_lt.ml#L412 -/
@@ -639,17 +659,103 @@ axiom bignum_negmodinv_spec (z x : Slice U64) (hx : x.length = z.length) :
         (wordsNat x.val % 2 = 1 →
           (wordsNat x.val * wordsNat r.val + 1) % 2 ^ (64 * z.length) = 0) ⦄
 
+/-- `BIGNUM_MONTREDC_SUBROUTINE_CORRECT`, for `z`'s length as `k` and `x`'s as
+`r`, whose `inverse_mod n (2^(64p))` is any `i` with `2^(64p)·i ≡ 1 (mod n)`,
+and whose bound on `r` holds for any slice of `u64`, of under `2^60`
+elements, which the theorem's caller establishes,
+https://github.com/awslabs/s2n-bignum/blob/3f01260ff1bd2577abf0117ce45aa008bc243a80/x86/proofs/bignum_montredc.ml#L1092 -/
+@[step]
+axiom bignum_montredc_spec (z x m : Slice U64) (p : U64) (hm : m.length = z.length)
+    (hp : p.val < 2 ^ 61) (hr : x.length < 2 ^ 61) :
+    low.x86_64.bignum_montredc.bignum_montredc z x m p ⦃ r =>
+      r.length = z.length ∧
+        (wordsNat m.val % 2 = 1 →
+          wordsNat x.val % 2 ^ (64 * (z.length + p.val)) ≤ 2 ^ (64 * p.val) * wordsNat m.val →
+          ∀ i, 2 ^ (64 * p.val) * i % wordsNat m.val = 1 % wordsNat m.val →
+            wordsNat r.val = i * (wordsNat x.val % 2 ^ (64 * (z.length + p.val))) % wordsNat m.val) ⦄
+
+/-- `BIGNUM_MODSUB_SUBROUTINE_CORRECT`, whose `rem` is Euclidean, as Lean's
+`Int` `%` is,
+https://github.com/awslabs/s2n-bignum/blob/3f01260ff1bd2577abf0117ce45aa008bc243a80/x86/proofs/bignum_modsub.ml#L292 -/
+@[step]
+axiom bignum_modsub_spec (z x y m : Slice U64) (hx : x.length = z.length)
+    (hy : y.length = z.length) (hm : m.length = z.length)
+    (ha : wordsNat x.val < wordsNat m.val) (hb : wordsNat y.val < wordsNat m.val) :
+    low.x86_64.bignum_modsub.bignum_modsub z x y m ⦃ r =>
+      r.length = z.length ∧
+        (wordsNat r.val : Int) = ((wordsNat x.val : Int) - wordsNat y.val) % wordsNat m.val ⦄
+
+/-- `BIGNUM_MUL_SUBROUTINE_CORRECT`, for the slices' lengths as `p`, `m`, and
+`n`,
+https://github.com/awslabs/s2n-bignum/blob/3f01260ff1bd2577abf0117ce45aa008bc243a80/x86/proofs/bignum_mul.ml#L477 -/
+@[step]
+axiom bignum_mul_spec (z x y : Slice U64) (hz : x.length + y.length ≤ z.length) :
+    low.x86_64.bignum_mul.bignum_mul z x y ⦃ r =>
+      r.length = z.length ∧ wordsNat r.val = wordsNat x.val * wordsNat y.val % 2 ^ (64 * z.length) ⦄
+
+/-- `BIGNUM_ADD_SUBROUTINE_CORRECT`, for the slices' lengths as `p`, `m`, and
+`n`, which returns the carry,
+https://github.com/awslabs/s2n-bignum/blob/3f01260ff1bd2577abf0117ce45aa008bc243a80/x86/proofs/bignum_add.ml#L697 -/
+@[step]
+axiom bignum_add_spec (z x y : Slice U64) :
+    low.x86_64.bignum_add.bignum_add z x y ⦃ r =>
+      r.2.length = z.length ∧
+        wordsNat r.2.val = (wordsNat x.val + wordsNat y.val) % 2 ^ (64 * z.length) ∧
+        2 ^ (64 * z.length) * r.1.val + wordsNat r.2.val =
+          wordsNat x.val % 2 ^ (64 * z.length) + wordsNat y.val % 2 ^ (64 * z.length) ⦄
+
+/-- `BIGNUM_DIGITSIZE_SUBROUTINE_CORRECT`, for the slice's length as `k`,
+https://github.com/awslabs/s2n-bignum/blob/3f01260ff1bd2577abf0117ce45aa008bc243a80/x86/proofs/bignum_digitsize.ml#L203 -/
+@[step]
+axiom bignum_digitsize_spec (x : Slice U64) :
+    low.x86_64.bignum_digitsize.bignum_digitsize x ⦃ r =>
+      r.val = ((wordsNat x.val).size + 63) / 64 ⦄
+
+/-- `BIGNUM_COPY_ROW_FROM_TABLE_SUBROUTINE_CORRECT`, whose bound on `width`
+holds for `z`, a slice of `u64` as long, which the theorem's caller
+establishes,
+https://github.com/awslabs/s2n-bignum/blob/3f01260ff1bd2577abf0117ce45aa008bc243a80/x86/proofs/bignum_copy_row_from_table.ml#L692 -/
+@[step]
+axiom bignum_copy_row_from_table_spec (z table : Slice U64) (height width idx : U64)
+    (hz : z.length = width.val) (ht : table.length = height.val * width.val)
+    (hw : 8 * width.val < 2 ^ 64) (hidx : idx.val < height.val) :
+    low.x86_64.bignum_copy_row_from_table.bignum_copy_row_from_table z table height width idx ⦃ r =>
+      r.length = z.length ∧
+        wordsNat r.val = wordsNat ((table.val.drop (idx.val * width.val)).take width.val) ⦄
+
 /-- rind runs on this CPU: its entry guards' CPU-feature checks pass, and its
 BMI2/ADX and AVX2 dispatches read the CPU. None reads an input. -/
 def Runs : Prop :=
   (∃ e, low.entry.Entry.new_secret = ok e) ∧ (∃ e, low.entry.Entry.new_public = ok e) ∧
     (∃ t, low.x86_64.cpu.HaveBmi2Adx.check = ok t) ∧ ∃ t, low.x86_64.cpu.HaveAvx2.check = ok t
 
+/-- The CPU check for pyca/verified-garbage's AVX-512 IFMA X25519 and Ed25519
+returned `o`: a token where X25519 and Ed25519 run VG's routines,
+`Rind.X86_64.VgCurve25519` restates, and `none` where they run s2n-bignum's
+and rind's glue. The check reads no input. -/
+def CurveIfma (o : Option low.x86_64.curve25519_ifma.Curve25519Ifma) : Prop :=
+  low.x86_64.curve25519_ifma.Curve25519Ifma.check = ok o
+
 /-- X25519 and Ed25519 run s2n-bignum's routines and rind's glue: the CPU
-lacks AVX-512 IFMA, on which they run pyca/verified-garbage's instead, whose
-proof rind has yet to import (`quest/m2/verified-garbage/curve25519-proof.md`).
-The check reads no input. -/
-def NoCurveIfma : Prop := low.x86_64.curve25519_ifma.Curve25519Ifma.check = ok none
+lacks AVX-512 IFMA. Ed25519's proofs on VG's routines are in
+`Rind.X86_64.Ed25519Ifma`. -/
+def NoCurveIfma : Prop := CurveIfma none
+
+/-- RFC 7748's X25519, as the dispatch computes it where `CurveIfma o`:
+VG's spec, `vgX25519`, on the CPUs that run VG's routines, and HOL Light's
+`rfcx25519` on the rest. -/
+def cpuX25519 : Option low.x86_64.curve25519_ifma.Curve25519Ifma → Nat → Nat → Nat
+  | none => rfcx25519
+  | some _ => vgX25519
+
+/-- The 32 bytes of four words' number, read back, are the number. -/
+theorem decodeLE_encodeLE_words (w : Std.Array U64 4#usize) :
+    VG.Spec.Ed25519.decodeLE (VG.Spec.Ed25519.encodeLE 32 (wordsNat w.val)) = wordsNat w.val := by
+  rw [decodeLE_encodeLE, Nat.mod_eq_of_lt]
+  have h := Nat.ofDigits_lt_base_pow_length (b := 2 ^ 64) (l := w.val.map (·.val)) (by norm_num)
+    (fun x hx => by obtain ⟨y, -, rfl⟩ := List.mem_map.mp hx; exact y.hBounds)
+  rw [List.length_map, w.property] at h
+  simpa [wordsNat] using h
 
 @[step]
 theorem new_secret_spec (h : Runs) : low.entry.Entry.new_secret ⦃ _ => True ⦄ := by
@@ -661,24 +767,35 @@ theorem new_public_spec (h : Runs) : low.entry.Entry.new_public ⦃ _ => True �
   obtain ⟨-, ⟨e, he⟩, -⟩ := h
   simp [he]
 
-/-- The dispatch runs one of the twins, whose contracts agree. -/
+/-- The dispatch runs VG's routine or one of s2n-bignum's twins, whose
+contracts agree. -/
 @[step]
-theorem curve25519_x25519_mux_spec (h : Runs) (hi : NoCurveIfma) (res scalar point : Std.Array U64 4#usize) :
+theorem curve25519_x25519_mux_spec {o : Option low.x86_64.curve25519_ifma.Curve25519Ifma} (h : Runs) (hi : CurveIfma o) (res scalar point : Std.Array U64 4#usize) :
     low.x86_64.adx_mux.curve25519_x25519 res scalar point ⦃ r =>
-      wordsNat r.val = rfcx25519 (wordsNat scalar.val) (wordsNat point.val) ⦄ := by
+      wordsNat r.val = cpuX25519 o (wordsNat scalar.val) (wordsNat point.val) ⦄ := by
   obtain ⟨-, -, ⟨t, ht⟩, -⟩ := h
   unfold low.x86_64.adx_mux.curve25519_x25519
   rw [hi, ht]
-  cases t <;> step*
+  rcases o with _ | ifma
+  · simp only [cpuX25519]
+    cases t <;> step*
+  · step as ⟨r, hr⟩
+    rw [← decodeLE_encodeLE_words r, hr]
+    rfl
 
 @[step]
-theorem curve25519_x25519base_mux_spec (h : Runs) (hi : NoCurveIfma) (res scalar : Std.Array U64 4#usize) :
+theorem curve25519_x25519base_mux_spec {o : Option low.x86_64.curve25519_ifma.Curve25519Ifma} (h : Runs) (hi : CurveIfma o) (res scalar : Std.Array U64 4#usize) :
     low.x86_64.adx_mux.curve25519_x25519base res scalar ⦃ r =>
-      wordsNat r.val = rfcx25519 (wordsNat scalar.val) 9 ⦄ := by
+      wordsNat r.val = cpuX25519 o (wordsNat scalar.val) 9 ⦄ := by
   obtain ⟨-, -, ⟨t, ht⟩, -⟩ := h
   unfold low.x86_64.adx_mux.curve25519_x25519base
   rw [hi, ht]
-  cases t <;> step*
+  rcases o with _ | ifma
+  · simp only [cpuX25519]
+    cases t <;> step*
+  · step as ⟨r, hr⟩
+    rw [← decodeLE_encodeLE_words r, hr, ← encodeLE_nine]
+    rfl
 
 @[step]
 theorem edwards25519_decode_mux_spec (h : Runs) (z : Std.Array U64 8#usize)
@@ -707,6 +824,15 @@ theorem bignum_madd_n25519_mux_spec (h : Runs) (z x y c : Std.Array U64 4#usize)
       wordsNat r.val = (wordsNat x.val * wordsNat y.val + wordsNat c.val) % n25519 ⦄ := by
   obtain ⟨-, -, ⟨t, ht⟩, -⟩ := h
   unfold low.x86_64.adx_mux.bignum_madd_n25519
+  rw [ht]
+  cases t <;> step*
+
+@[step]
+theorem bignum_mul_p25519_mux_spec (h : Runs) (z x y : Std.Array U64 4#usize) :
+    low.x86_64.adx_mux.bignum_mul_p25519 z x y ⦃ r =>
+      wordsNat r.val = wordsNat x.val * wordsNat y.val % p25519 ⦄ := by
+  obtain ⟨-, -, ⟨t, ht⟩, -⟩ := h
+  unfold low.x86_64.adx_mux.bignum_mul_p25519
   rw [ht]
   cases t <;> step*
 

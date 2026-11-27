@@ -1,0 +1,62 @@
+name: Prove
+description: Run an `admin/prove` check that the prove workflow caches, and on main save its key once it passes.
+
+inputs:
+  check:
+    description: The check's `admin/prove` arguments, `hol-light <arch>`, `cosim`, or `lean`, which `admin/prove key` takes too.
+    required: true
+  key:
+    description: The key the workflow computed for the check, empty where it computed none.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    # On a push to main, another run may have saved a HOL Light job's key
+    # since `keys` looked; `lean` looks its key up only here.
+    - name: Look up
+      id: cache
+      if: github.event_name == 'push' && inputs.key != ''
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: .tmp/prove/keys
+        key: ${{ inputs.key }}
+        lookup-only: true
+
+    # A key that differs from the one `keys` looked up would save an entry no
+    # lookup finds, so every push to main would check it again without turning red.
+    - name: Check
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        CHECK: ${{ inputs.check }}
+        LOOKED_UP: ${{ inputs.key }}
+      run: |
+        shell=hol-light
+        [[ $CHECK != lean ]] || shell=prove
+        nix develop ".#$shell" --command admin/prove $CHECK
+        key=$(<".tmp/prove/keys/${CHECK// /-}")
+        echo "checked $key"
+        if [[ -n $LOOKED_UP && $key != "$LOOKED_UP" ]]; then
+          echo "::error::admin/prove $CHECK checked $key, but keys looked up $LOOKED_UP"
+          exit 1
+        fi
+
+    # The key of what this job checked, rather than the input, so an entry
+    # names the inputs that passed.
+    - name: Passed
+      id: passed
+      if: steps.cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
+      shell: bash
+      env:
+        CHECK: ${{ inputs.check }}
+      run: |
+        key=$(<".tmp/prove/keys/${CHECK// /-}")
+        echo "key=$key" >>"$GITHUB_OUTPUT"
+
+    - name: Save
+      if: steps.passed.outcome == 'success'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: .tmp/prove/keys
+        key: ${{ steps.passed.outputs.key }}

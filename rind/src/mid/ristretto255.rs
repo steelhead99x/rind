@@ -118,11 +118,6 @@ impl Element {
         let (lo, hi) = bytes.split_at(32);
         let p1 = map(lo.try_into().unwrap());
         let p2 = map(hi.try_into().unwrap());
-        #[cfg(test)]
-        let p2 = match crate::test::OppositeHashes::held() {
-            true => p1.neg(),
-            false => p2,
-        };
         Self(p1.add(&p2))
     }
 

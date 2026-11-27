@@ -3,7 +3,7 @@
 use core::fmt;
 use core::hint::black_box;
 
-use super::aes::expand_key;
+use super::aes::{expand_dec_key, expand_key};
 use crate::Error;
 use crate::cipher::Algorithm;
 use crate::low::{self, AesDecKey, AesKey, Entry, Zeroable, aes_cbc, zeroise_value};
@@ -128,13 +128,8 @@ impl AesCbcDecryptingKey {
         if key.len() != algorithm.key_len {
             return Err(Error::WrongLength);
         }
-        // Mark a copy, as `expand_key` does.
-        let mut copy = [0u8; 32];
-        let copy_key = &mut copy[..key.len()];
-        copy_key.copy_from_slice(key);
-        low::ct::secret_slice(copy_key);
         Ok(Self {
-            key: AesDecKey::new(copy_key),
+            key: expand_dec_key(key),
             key_len: key.len(),
         })
     }
@@ -361,6 +356,10 @@ mod tests {
         assert_eq!(
             format!("{dec:?}"),
             "AesCbcDecryptingKey { algorithm: Algorithm { key_len: 32 }, .. }"
+        );
+        assert_eq!(
+            format!("{:?}", CbcIv::assume_unpredictable([0x42; 16])),
+            "CbcIv(..)"
         );
     }
 

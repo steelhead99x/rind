@@ -31,10 +31,13 @@ pub(crate) struct Rsaz(HaveAvx2);
 
 impl Rsaz {
     pub(crate) fn check() -> Option<Self> {
-        match HaveBmi2Adx::check() {
-            Some(_) => None,
-            None => HaveAvx2::check().map(Self),
+        if HaveBmi2Adx::check().is_some() {
+            return None;
         }
+        // Not `map(Self)`, whose translation Lean cannot check, so `proofs/`
+        // can prove RSA's private operation.
+        let token = HaveAvx2::check()?;
+        Some(Self(token))
     }
 
     /// `z = x^e mod m`, for an odd `m` and `x` below it, where `rr` is
@@ -81,6 +84,7 @@ struct Storage {
 static ONE: Red = limb(0, 1);
 static TWO80: Red = limb(2, 1 << 22);
 
+#[cfg_attr(coverage_nightly, coverage(off))] // const-evaluated only
 const fn limb(i: usize, v: u64) -> Red {
     let mut r = [0; 40];
     r[i] = v;
@@ -339,7 +343,7 @@ mod tests {
             .from_montgomery(&n);
 
         let mut got = [0; 16];
-        mod_exp(token, &mut got, x, e, m, &words(&rr), n0);
+        Rsaz(token).mod_exp(&mut got, x, e, m, &words(&rr), n0);
         [got, words(&want)]
     }
 

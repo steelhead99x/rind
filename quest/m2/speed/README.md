@@ -18,3 +18,5 @@ Considered and left out, so don't raise them again without new evidence:
 - A batch API for Ed25519, as above.
 - RSA key generation on armv7, 1.34 to 1.93 times aws-lc-rs's time in BENCHMARKS.md: nobody generates RSA keys on a 32-bit board often enough to care.
 - wasm's simd128, SVE2, and riscv64's vector crypto: no consumer on any of them, and no host to measure the last two.
+- Multi-threaded Argon2id (`p > 1` thread pool): decided 2026-11-21 (maintainer, /quest-plan) to leave out, focusing instead on single-thread loop/allocation wins, additive Cargo algorithm features for binary size (`default` stays all-on; `rind-rustls` opts into `default-features = false`), a benchmark-gated (`>= 5%` win) thread-local DRBG spike, AVX-512 8-way Keccak reuse / aarch64 PQ kernels, and Rust wrapper/stack overhead.
+

@@ -2,17 +2,30 @@
 //! of an exchange: the prover's share, the verifier's share and
 //! confirmation, the prover's confirmation and key, and the verifier's key.
 //! The steps before each run untimed.
+#[cfg(target_arch = "xtensa")]
+fn main() {}
+
+#[cfg(not(target_arch = "xtensa"))]
 mod criterion;
+#[cfg(not(target_arch = "xtensa"))]
 use std::hint::black_box;
 
+#[cfg(not(target_arch = "xtensa"))]
 use criterion::{BatchSize, Criterion, Throughput, criterion_group, criterion_main};
+#[cfg(not(target_arch = "xtensa"))]
 use getrandom::{SysRng, rand_core::UnwrapErr};
+#[cfg(not(target_arch = "xtensa"))]
 use rind::spake2plus::{ProverSecrets, RFC9383, Session, VerifierRecord};
+#[cfg(not(target_arch = "xtensa"))]
 use spake2plus::{Context, P256Sha256, Prover, ProverSecret, Verifier};
 
+#[cfg(not(target_arch = "xtensa"))]
 const CONTEXT: &[u8] = b"rind-bench";
+#[cfg(not(target_arch = "xtensa"))]
 const PROVER: &[u8] = b"client";
+#[cfg(not(target_arch = "xtensa"))]
 const VERIFIER: &[u8] = b"server";
+#[cfg(not(target_arch = "xtensa"))]
 const SESSION: Session<'static> = Session {
     context: CONTEXT,
     id_prover: PROVER,
@@ -21,9 +34,12 @@ const SESSION: Session<'static> = Session {
 
 // w0s and w1s, the password hash's output, which each library reduces into
 // the same w0 and w1.
+#[cfg(not(target_arch = "xtensa"))]
 const W0S: [u8; 40] = [0x11; 40];
+#[cfg(not(target_arch = "xtensa"))]
 const W1S: [u8; 40] = [0x22; 40];
 
+#[cfg(not(target_arch = "xtensa"))]
 fn context() -> Context<'static> {
     Context {
         context: CONTEXT,
@@ -32,12 +48,14 @@ fn context() -> Context<'static> {
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn rustcrypto_secret() -> ProverSecret<P256Sha256> {
     ProverSecret::from_pbkdf_output(&[W0S, W1S].concat()).unwrap()
 }
 
 // A rind prover and the other library's verifier agree on a key, so the rows
 // time the same protocol.
+#[cfg(not(target_arch = "xtensa"))]
 fn check_interop() {
     let prover = ProverSecrets::new(&W0S, &W1S).unwrap();
     let record = rustcrypto_secret().verifier_record();
@@ -55,6 +73,7 @@ fn check_interop() {
     assert_eq!(prover_key.as_ref(), verifier_key.as_bytes().as_ref());
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn bench(c: &mut Criterion) {
     check_interop();
     let secrets = ProverSecrets::new(&W0S, &W1S).unwrap();
@@ -67,6 +86,7 @@ fn bench(c: &mut Criterion) {
     let mut group = c.benchmark_group("spake2plus-p256-prover-start");
     group.throughput(Throughput::Elements(1));
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         b.iter(|| black_box(secrets.start(&RFC9383, &SESSION).unwrap()));
     });
     group.bench_function("rustcrypto", |b| {
@@ -79,6 +99,7 @@ fn bench(c: &mut Criterion) {
     let mut group = c.benchmark_group("spake2plus-p256-verifier-start");
     group.throughput(Throughput::Elements(1));
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         let (share_p, _) = secrets.start(&RFC9383, &SESSION).unwrap();
         b.iter(|| black_box(record.start(&RFC9383, &SESSION, &share_p).unwrap()));
     });
@@ -97,6 +118,7 @@ fn bench(c: &mut Criterion) {
     let mut group = c.benchmark_group("spake2plus-p256-prover-finish");
     group.throughput(Throughput::Elements(1));
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         b.iter_batched(
             || {
                 let (share_p, prover) = secrets.start(&RFC9383, &SESSION).unwrap();
@@ -133,6 +155,7 @@ fn bench(c: &mut Criterion) {
     let mut group = c.benchmark_group("spake2plus-p256-verifier-finish");
     group.throughput(Throughput::Elements(1));
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         b.iter_batched(
             || {
                 let (share_p, prover) = secrets.start(&RFC9383, &SESSION).unwrap();
@@ -165,5 +188,7 @@ fn bench(c: &mut Criterion) {
     });
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 criterion_group!(benches, bench);
+#[cfg(not(target_arch = "xtensa"))]
 criterion_main!(benches);

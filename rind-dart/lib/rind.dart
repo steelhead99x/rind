@@ -26,6 +26,8 @@ export 'src/bindings.dart'
         DigestAlgorithm,
         DigestContext,
         EncapsulationKey,
+        GcmIv,
+        GcmKey,
         HkdfAlgorithm,
         HkdfPrk,
         HkdfSalt,

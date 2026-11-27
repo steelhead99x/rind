@@ -95,6 +95,74 @@ final class AeadKey extends Handle {
   }
 }
 
+/// An AES-GCM IV of any length but zero, which the caller promises never to
+/// use twice with one key.
+final class GcmIv {
+  /// Takes [bytes], which must never repeat under one key; sealing throws
+  /// [RindError.wrongLength] if they are empty.
+  GcmIv.assumeUniqueForKey(Uint8List bytes)
+    : _bytes = Uint8List.fromList(bytes);
+
+  final Uint8List _bytes;
+}
+
+/// An AES-GCM key that takes IVs of any length, as WebCrypto's AES-GCM does,
+/// and makes 16-byte tags.
+///
+/// Prefer [AeadKey], whose 12-byte nonces are what protocols use: GCM
+/// hashes an IV of any other length into its counter, which weakens its
+/// bounds. Sealing two messages with one IV and key loses confidentiality
+/// and lets anyone forge messages.
+final class GcmKey extends Handle {
+  /// Expands [key] for [algorithm], throwing [RindError.wrongLength] unless
+  /// it is [CipherAlgorithm.keyLength] bytes.
+  GcmKey(CipherAlgorithm algorithm, Uint8List key)
+    : super(
+        newHandle(
+          (out) => _gcmKeyNew(algorithm._id, key.address, key.length, out),
+        ),
+        _gcmKeyFinalizer,
+      );
+
+  /// Encrypts [plaintext] and returns it followed by its 16-byte tag.
+  Uint8List seal(GcmIv iv, Uint8List plaintext, {Uint8List? aad}) {
+    aad ??= Uint8List(0);
+    final inOut = Uint8List(plaintext.length + 16)..setAll(0, plaintext);
+    check(
+      _gcmSeal(
+        pointer,
+        iv._bytes.address,
+        iv._bytes.length,
+        aad.address,
+        aad.length,
+        inOut.address,
+        inOut.length,
+      ),
+    );
+    return inOut;
+  }
+
+  /// Decrypts and verifies [sealed], a ciphertext followed by its tag, and
+  /// returns the plaintext, throwing [RindError.decryptFailed] if it does
+  /// not verify.
+  Uint8List open(GcmIv iv, Uint8List sealed, {Uint8List? aad}) {
+    aad ??= Uint8List(0);
+    final inOut = Uint8List.fromList(sealed);
+    final len = check(
+      _gcmOpen(
+        pointer,
+        iv._bytes.address,
+        iv._bytes.length,
+        aad.address,
+        aad.length,
+        inOut.address,
+        inOut.length,
+      ),
+    );
+    return Uint8List.sublistView(inOut, 0, len);
+  }
+}
+
 /// An XChaCha20-Poly1305 key that picks a random 192-bit nonce for every
 /// seal, long enough that random nonces never collide in practice.
 final class RandomizedNonceKey extends Handle {

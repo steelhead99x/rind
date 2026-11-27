@@ -57,24 +57,21 @@ impl Curve25519Ifma {
     #[inline(never)]
     pub(crate) fn x25519(self, res: &mut [u64; 4], scalar: &[u64; 4], point: &[u64; 4]) {
         let _mcdt = low::Mcdt::enter();
-        let (scalar, point) = (bytes(scalar), bytes(point));
-        let mut out = [0u8; 32];
         let mut scratch = Scratch::<512>::new();
-        // SAFETY: `out`, `scalar`, and `point` are 32 bytes and `scratch`
+        // SAFETY: `res`, `scalar`, and `point` are 32 bytes and `scratch`
         // 4096, distinct objects, so none overlaps another, the return
         // address, or the stack below it, or wraps the address space. The
         // token proves the CPU features.
         unsafe {
             asm_call!(unsafe extern "sysv64" (vg::vg_x25519_exchange_ifma::vg_x25519_exchange_ifma)(
-                &mut out,
-                &scalar,
-                &point,
+                as_bytes_mut(res),
+                as_bytes(scalar),
+                as_bytes(point),
                 scratch.as_mut_ptr()
             ))
         };
-        // Its return value says whether `out` is zero, which the caller
+        // Its return value says whether `res` is zero, which the caller
         // checks itself, as on every other CPU.
-        *res = words(&out);
     }
 
     /// `X25519(scalar, 9)`, the public key of `scalar` (RFC 7748 section
@@ -84,21 +81,18 @@ impl Curve25519Ifma {
     #[inline(never)]
     pub(crate) fn x25519_base(self, res: &mut [u64; 4], scalar: &[u64; 4]) {
         let _mcdt = low::Mcdt::enter();
-        let scalar = bytes(scalar);
-        let mut out = [0u8; 32];
         let mut scratch = Scratch::<1024>::new();
-        // SAFETY: `out` and `scalar` are 32 bytes and `scratch` 8192,
+        // SAFETY: `res` and `scalar` are 32 bytes and `scratch` 8192,
         // distinct objects, so none overlaps another, the return address, or
         // the stack below it, or wraps the address space. The token proves
         // the CPU features.
         unsafe {
             asm_call!(unsafe extern "sysv64" (vg::vg_x25519_base_ifma::vg_x25519_base_ifma)(
-                &mut out,
-                &scalar,
+                as_bytes_mut(res),
+                as_bytes(scalar),
                 scratch.as_mut_ptr()
             ))
         };
-        *res = words(&out);
     }
 
     /// Ed25519's key pair for `seed` (RFC 8032 section 5.1.5): the seed's
@@ -188,22 +182,16 @@ impl Curve25519Ifma {
     }
 }
 
-/// Little-endian words as bytes.
-fn bytes(words: &[u64; 4]) -> [u8; 32] {
-    let mut out = [0u8; 32];
-    for (b, w) in out.as_chunks_mut::<8>().0.iter_mut().zip(words) {
-        *b = w.to_le_bytes();
-    }
-    out
+/// Little-endian words' memory as the 32 bytes they encode: x86_64 stores
+/// each word little-endian, so VG reads and writes the encoding RFC 7748
+/// takes without a copy.
+fn as_bytes(words: &[u64; 4]) -> *const [u8; 32] {
+    core::ptr::from_ref(words).cast()
 }
 
-/// Bytes as little-endian words.
-fn words(bytes: &[u8; 32]) -> [u64; 4] {
-    let mut out = [0u64; 4];
-    for (w, b) in out.iter_mut().zip(bytes.as_chunks::<8>().0) {
-        *w = u64::from_le_bytes(*b);
-    }
-    out
+/// [`as_bytes`] for an output.
+fn as_bytes_mut(words: &mut [u64; 4]) -> *mut [u8; 32] {
+    core::ptr::from_mut(words).cast()
 }
 
 #[cfg(test)]
@@ -214,7 +202,16 @@ mod tests {
     use super::*;
 
     fn random(rng: &mut Rng) -> [u8; 32] {
-        bytes(&rng.words(256))
+        let mut out = [0; 32];
+        for (b, w) in out
+            .as_chunks_mut::<8>()
+            .0
+            .iter_mut()
+            .zip(rng.words::<4>(256))
+        {
+            *b = w.to_le_bytes();
+        }
+        out
     }
 
     /// `2^255 - 19 + d`, the non-canonical encodings of `d`, and with the

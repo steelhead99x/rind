@@ -224,13 +224,34 @@ theorem stream_finish_spec (a : high.hmac.Algorithm) (hr : RunsHmac a) (key : Li
   · exact hmac_finish_spec (sha384_hashSpec hc) key p _ hs hm
   · exact hmac_finish_spec (sha512_hashSpec hc) key p _ hs hm
 
-/-- `Context::sign` is HMAC of what the context was given. -/
+/-- Signing is HMAC of what the computation was given, and restarts it under
+the same key. -/
+theorem stream_sign_spec (a : high.hmac.Algorithm) (hr : RunsHmac a) (key : List Byte)
+    (p : List U8) (s : high.hmac.Streaming) (hs : StreamOf a key p s)
+    (hm : hmacBlock a + p.length ≤ maxInput) :
+    high.hmac.Streaming.sign s ⦃ r =>
+      outLen r.1.algorithm = tagLen a ∧ digestBytes r.1 = hmacOf a key (bv p) ∧
+        StreamOf a key [] r.2 ⦄ := by
+  obtain ⟨-, hc⟩ := hr
+  cases s <;> obtain ⟨rfl, hs⟩ := hs <;> simp only [high.hmac.Streaming.sign]
+  · exact spec_bind_ok (hmac_ctx_sign_spec (sha1_hashSpec hc) key p _ hs hm)
+      fun _ h => ⟨h.1, h.2.1, rfl, h.2.2⟩
+  · exact spec_bind_ok (hmac_ctx_sign_spec (sha256_hashSpec hc) key p _ hs hm)
+      fun _ h => ⟨h.1, h.2.1, rfl, h.2.2⟩
+  · exact spec_bind_ok (hmac_ctx_sign_spec (sha384_hashSpec hc) key p _ hs hm)
+      fun _ h => ⟨h.1, h.2.1, rfl, h.2.2⟩
+  · exact spec_bind_ok (hmac_ctx_sign_spec (sha512_hashSpec hc) key p _ hs hm)
+      fun _ h => ⟨h.1, h.2.1, rfl, h.2.2⟩
+
+/-- `Context::sign` is HMAC of what the context was given, and leaves the
+context under the same key with an empty message. -/
 theorem context_sign_spec (a : high.hmac.Algorithm) (hr : RunsHmac a) (key : List Byte)
     (p : List U8) (s : high.hmac.Context) (hs : StreamOf a key p s)
     (hm : hmacBlock a + p.length ≤ maxInput) :
-    high.hmac.Context.sign s ⦃ d =>
-      outLen d.algorithm = tagLen a ∧ digestBytes d = hmacOf a key (bv p) ⦄ := by
-  have := stream_finish_spec a hr key p s hs hm
+    high.hmac.Context.sign s ⦃ r =>
+      outLen r.1.algorithm = tagLen a ∧ digestBytes r.1 = hmacOf a key (bv p) ∧
+        StreamOf a key [] r.2 ⦄ := by
+  have := stream_sign_spec a hr key p s hs hm
   obtain ⟨⟨e, he⟩, -⟩ := hr
   unfold high.hmac.Context.sign
   rw [he, bind_ok]

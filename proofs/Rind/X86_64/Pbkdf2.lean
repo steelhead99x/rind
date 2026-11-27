@@ -8,8 +8,8 @@ open Aeneas Aeneas.Std Result rind.spec
 it, over HMAC with any of `high::hmac`'s hashes, down to
 `Rind.X86_64.HmacApi`, for a `Secret` on rind's loop, `Rind`. On aarch64 a
 `Secret` runs pyca/verified-garbage's routine instead where the CPU has the
-instructions it takes, which `mid::pbkdf2_vg` wraps and this translation leaves
-opaque. `Secret` is translated in the second Aeneas pass.
+instructions it takes, which `mid::pbkdf2_vg` wraps: `Rind.Aarch64.Pbkdf2Vg`
+proves that branch. `Secret` is translated in the second Aeneas pass.
 `admin/prove` writes the aarch64 proof from this file by renaming the target.
 -/
 

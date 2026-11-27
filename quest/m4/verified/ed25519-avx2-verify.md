@@ -12,4 +12,4 @@ Ed25519 verification on x86_64 CPUs with AVX2 but without ADX (Haswell, and virt
 
 ## Required
 
-- [Ed25519 verification on x86_64 is proven again](/quest/m4/verified/ed25519-half-scalar.md) - the half-size split and identity test that this tier's verification runs around the multiplication
+- [Ed25519 verification on x86_64 and aarch64 is proven again](/quest/m4/verified/ed25519-half-scalar.md) - the half-size split and identity test that this tier's verification runs around the multiplication

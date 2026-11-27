@@ -12,7 +12,7 @@ use crate::low::{Blockwise, Entry, UpdateBlocks};
 ///
 /// Finishing needs no buffer, so a one-shot hash, or HMAC from its keyed
 /// states, works on this alone.
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub(crate) struct Sha1State {
     h: [u32; 5],
     // u64 so 32-bit targets can hash past 4 GiB.
@@ -76,7 +76,7 @@ impl UpdateBlocks for Sha1State {
 }
 
 /// A context for incremental computation of SHA1.
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub(crate) struct Sha1Context {
     state: Sha1State,
     blockwise: Blockwise<{ Self::BLOCK_SZ }>,
@@ -97,6 +97,7 @@ impl Sha1Context {
     }
 
     /// Add `bytes` to the ongoing hash computation.
+    #[inline(always)]
     pub(crate) fn update(&mut self, bytes: &[u8]) {
         self.blockwise.update(bytes, &mut self.state);
     }
@@ -114,6 +115,7 @@ impl Sha1Context {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 

@@ -142,7 +142,7 @@ impl TlsRecordSealingKey {
 impl fmt::Debug for TlsRecordSealingKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("TlsRecordSealingKey")
-            .field("key", &self.key)
+            .field("key", &AsUnbound(&self.key))
             .field("protocol", &self.protocol)
             .finish()
     }
@@ -208,9 +208,19 @@ impl TlsRecordOpeningKey {
 impl fmt::Debug for TlsRecordOpeningKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("TlsRecordOpeningKey")
-            .field("key", &self.key)
+            .field("key", &AsUnbound(&self.key))
             .field("protocol", &self.protocol)
             .finish()
+    }
+}
+
+/// Shows a TLS key as aws-lc-rs's `Debug` does, which names the key it
+/// holds `UnboundKey`.
+struct AsUnbound<'a>(&'a LessSafeKey);
+
+impl fmt::Debug for AsUnbound<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt_debug("UnboundKey", f)
     }
 }
 

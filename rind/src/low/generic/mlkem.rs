@@ -31,6 +31,7 @@ pub(crate) fn mlkem_unpack(_a: &mut [i16; 256]) {}
 /// Compress ML-KEM polynomial coefficients to 4 bits each, and pack them
 ///
 /// Input a[256] (signed 16-bit words, each in `[0, Q)`); output r[128] (bytes)
+#[cfg(any(not(rind_backend = "aarch64"), test))]
 pub(crate) fn mlkem_compress_d4(r: &mut [u8; 128], a: &[i16; 256]) {
     compress::<4, 128>(r, a);
 }
@@ -38,6 +39,7 @@ pub(crate) fn mlkem_compress_d4(r: &mut [u8; 128], a: &[i16; 256]) {
 /// Compress ML-KEM polynomial coefficients to 5 bits each, and pack them
 ///
 /// Input a[256] (signed 16-bit words, each in `[0, Q)`); output r[160] (bytes)
+#[cfg(any(not(rind_backend = "aarch64"), test))]
 pub(crate) fn mlkem_compress_d5(r: &mut [u8; 160], a: &[i16; 256]) {
     compress::<5, 160>(r, a);
 }
@@ -45,6 +47,7 @@ pub(crate) fn mlkem_compress_d5(r: &mut [u8; 160], a: &[i16; 256]) {
 /// Compress ML-KEM polynomial coefficients to 10 bits each, and pack them
 ///
 /// Input a[256] (signed 16-bit words, each in `[0, Q)`); output r[320] (bytes)
+#[cfg(any(not(rind_backend = "aarch64"), test))]
 pub(crate) fn mlkem_compress_d10(r: &mut [u8; 320], a: &[i16; 256]) {
     compress::<10, 320>(r, a);
 }
@@ -52,6 +55,7 @@ pub(crate) fn mlkem_compress_d10(r: &mut [u8; 320], a: &[i16; 256]) {
 /// Compress ML-KEM polynomial coefficients to 11 bits each, and pack them
 ///
 /// Input a[256] (signed 16-bit words, each in `[0, Q)`); output r[352] (bytes)
+#[cfg(any(not(rind_backend = "aarch64"), test))]
 pub(crate) fn mlkem_compress_d11(r: &mut [u8; 352], a: &[i16; 256]) {
     compress::<11, 352>(r, a);
 }
@@ -59,6 +63,7 @@ pub(crate) fn mlkem_compress_d11(r: &mut [u8; 352], a: &[i16; 256]) {
 /// FIPS 203's `ByteEncode_D(Compress_D(a))` into the `L = 32 * D` bytes of
 /// `r`: each eight coefficients become `D` bytes, little-endian bit order per
 /// `BitsToBytes`.
+#[cfg(any(not(rind_backend = "aarch64"), test))]
 fn compress<const D: usize, const L: usize>(r: &mut [u8; L], a: &[i16; 256]) {
     debug_assert_eq!(L, 32 * D);
     for i in 0..32 {
@@ -70,7 +75,9 @@ fn compress<const D: usize, const L: usize>(r: &mut [u8; L], a: &[i16; 256]) {
     }
 }
 
+#[cfg(any(not(rind_backend = "aarch64"), test))]
 const Q: i16 = 3329;
+#[cfg(any(not(rind_backend = "aarch64"), test))]
 const Q_HALF: i16 = (Q + 1) / 2;
 
 /// `Compress_D(x) = round((2^D / q) * x) mod 2^D`, for x in [0, Q)
@@ -79,6 +86,7 @@ const Q_HALF: i16 = (Q + 1) / 2;
 /// (cf. KyberSlash): `(x * 2^D + q / 2) * M >> S` is `floor` of the quotient
 /// by `q` for each `D`'s `M` and `S`, which `compress_is_exact` checks over
 /// the whole input range.
+#[cfg(any(not(rind_backend = "aarch64"), test))]
 #[expect(
     clippy::manual_range_contains,
     reason = "Aeneas's library has no `Range::contains`"
@@ -101,6 +109,7 @@ fn compress_one<const D: usize>(x: i16) -> u16 {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 

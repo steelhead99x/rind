@@ -42,30 +42,32 @@ pub(crate) static KEYS: Keys = Keys;
 
 impl KeyProvider for Keys {
     fn load_private_key(&self, der: &[u8]) -> Result<Box<dyn SigningKey>, CryptoError> {
-        type Load = fn(&'static EcdsaSigningAlgorithm, &[u8]) -> Result<EcdsaKeyPair, rind::Error>;
-        let load = |load: Load, der: &[u8]| {
-            CURVES.into_iter().find_map(|(group, hash, algorithm)| {
-                let key = load(algorithm, der).ok()?;
-                Some(Box::new(Key { key, group, hash }) as Box<dyn SigningKey>)
-            })
-        };
-        let der_key = |der: &[u8]| {
-            load(EcdsaKeyPair::from_pkcs8, der).or_else(|| load(EcdsaKeyPair::from_sec1, der))
+        let boxed =
+            |key, (group, hash, _)| Box::new(Key { key, group, hash }) as Box<dyn SigningKey>;
+        let der_key = |der: &[u8]| match rind::KeyPair::from_pkcs8(der) {
+            Ok(rind::KeyPair::EcdsaP256(key)) => Some(boxed(key, CURVES[0])),
+            Ok(rind::KeyPair::EcdsaP384(key)) => Some(boxed(key, CURVES[1])),
+            // SEC1 has no rind call that reads its curve, so this tries each.
+            _ => CURVES
+                .into_iter()
+                .find_map(|curve| Some(boxed(EcdsaKeyPair::from_sec1(curve.2, der).ok()?, curve))),
         };
         // dimpl's own providers also take a PEM-wrapped key, under any label.
         der_key(der)
-            .or_else(|| {
-                let relabeled = relabel(der)?;
-                let mut rest = relabeled.as_slice();
-                let (_, key) = pem::from_buf(&mut rest).ok()??;
-                // A second footer would otherwise outlive the section.
-                if !rest.is_empty() {
-                    return None;
-                }
-                der_key(&key)
-            })
+            .or_else(|| der_key(&parse_pem(&relabel(der)?)?))
             .ok_or(CryptoError::InvalidPrivateKey)
     }
+}
+
+/// Reads the one PEM section in `bytes`. Its own frame, never inlined, so that
+/// `admin/ctgrind.supp` can name where rustls-pki-types' public delimiter
+/// tests run, whichever of its frames a build inlines.
+#[inline(never)]
+fn parse_pem(bytes: &[u8]) -> Option<Vec<u8>> {
+    let mut rest = bytes;
+    let (_, key) = pem::from_buf(&mut rest).ok()??;
+    // A second footer would otherwise outlive the section.
+    rest.is_empty().then_some(key)
 }
 
 struct Key {
@@ -94,7 +96,7 @@ impl SigningKey for Key {
         let signature = self
             .key
             .sign(data)
-            .map_err(|_| CryptoError::OperationFailed(CryptoOperation::Sign))?;
+            .or(Err(CryptoError::OperationFailed(CryptoOperation::Sign)))?;
         out.clear();
         out.extend_from_slice(signature.as_ref());
         Ok(())

@@ -12,7 +12,8 @@ topics:
   - ffi
   - encryption
 
-# No web: rind has no wasm build, so the package refuses that target.
+# No web: the package calls rind through `dart:ffi`, which Dart's web
+# compilers lack, so it refuses that target.
 platforms:
   android:
   ios:

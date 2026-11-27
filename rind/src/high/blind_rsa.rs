@@ -38,6 +38,7 @@ impl fmt::Debug for Algorithm {
 
 /// `id-RSASSA-PSS` with `RSASSA-PSS-params` naming SHA-384, MGF1 with
 /// SHA-384, and the salt length `SALT`, each present.
+#[cfg_attr(coverage_nightly, coverage(off))] // const-evaluated only
 const fn pss_sha384_algorithm_id<const SALT: u8>() -> [u8; 61] {
     let mut id = *b"\x06\x09\x2a\x86\x48\x86\xf7\x0d\x01\x01\x0a\
         \x30\x30\
@@ -131,19 +132,19 @@ impl KeyPair {
     /// more for 8192 bits, with no upper bound. Its timing reveals only which
     /// candidate primes it discards.
     pub fn generate(algorithm: &'static Algorithm, size: RsaKeySize) -> Result<Self, Error> {
-        Ok(Self::new(algorithm, rsa::SigningKey::generate(size)?))
+        Self::new(algorithm, rsa::SigningKey::generate(size)?)
     }
 
     /// Loads a PKCS#8 v1 RSA private key for `algorithm`, named
     /// `rsaEncryption`, `id-RSAES-OAEP`, or `id-ea-rsa`.
     pub fn from_pkcs8(algorithm: &'static Algorithm, der: &[u8]) -> Result<Self, Error> {
-        Ok(Self::new(algorithm, rsa::SigningKey::from_pkcs8_der(der)?))
+        Self::new(algorithm, rsa::SigningKey::from_pkcs8_der(der)?)
     }
 
-    fn new(algorithm: &'static Algorithm, key: rsa::SigningKey) -> Self {
-        // A private key's modulus is at least 2048 bits.
-        let public = PublicKey::new_unchecked(algorithm, key.public_key());
-        Self { key, public }
+    fn new(algorithm: &'static Algorithm, key: rsa::SigningKey) -> Result<Self, Error> {
+        // A private key's modulus may be 2047 bits, which the public key refuses.
+        let public = PublicKey::checked(algorithm, key.public_key())?;
+        Ok(Self { key, public })
     }
 
     /// Returns the public key, which clients blind messages to.
@@ -361,6 +362,17 @@ impl Blinding {
     }
 }
 
+impl Drop for Blinding {
+    fn drop(&mut self) {
+        // The unblinder holds the blind's inverse, as good as the blind,
+        // which links the signature to the message the server signed.
+        low::zeroise_value(self);
+    }
+}
+
+// A public key, words, and bytes, all valid at zero.
+impl low::Zeroable for Blinding {}
+
 impl fmt::Debug for Blinding {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Blinding")
@@ -473,7 +485,8 @@ mod tests {
                     &hex(&vector["p"]),
                     &hex(&vector["q"]),
                 ),
-            );
+            )
+            .unwrap();
             let public_key = PublicKey::from_components(
                 algorithm,
                 &PublicKeyComponents {
@@ -572,6 +585,25 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// A generated key signs, and its PKCS#8 encoding loads the same key.
+    #[test]
+    fn generated_keys_round_trip() {
+        let algorithm = &RSABSSA_SHA384_PSS_RANDOMIZED;
+        let key_pair = KeyPair::generate(algorithm, RsaKeySize::Rsa2048).unwrap();
+        let loaded = KeyPair::from_pkcs8(algorithm, key_pair.to_pkcs8().as_ref()).unwrap();
+        assert_eq!(
+            loaded.public_key().to_spki().as_ref(),
+            key_pair.public_key().to_spki().as_ref()
+        );
+        let (blinded, blinding) = key_pair.public_key().blind(b"hello").unwrap();
+        let blind_signature = loaded.blind_sign(blinded.as_ref()).unwrap();
+        let signature = blinding.finalize(blind_signature.as_ref()).unwrap();
+        key_pair
+            .public_key()
+            .verify(b"hello", signature.as_ref())
+            .unwrap();
     }
 
     /// A signature verifies only for its own variant, and a Randomized one
@@ -761,6 +793,15 @@ mod tests {
             PublicKey::from_spki(&RSABSSA_SHA384_PSS_RANDOMIZED, small.as_ref()).err(),
             Some(KeyFormatError::RsaModulus.into())
         );
+        // As is the 2047-bit private key `rsa::KeyPair` loads.
+        assert_eq!(
+            KeyPair::from_pkcs8(
+                &RSABSSA_SHA384_PSS_RANDOMIZED,
+                include_bytes!("rsa/rsa2047.pkcs8.der")
+            )
+            .err(),
+            Some(KeyFormatError::RsaModulus.into())
+        );
     }
 
     #[test]
@@ -774,6 +815,20 @@ mod tests {
         assert_eq!(
             format!("{blinding:?}"),
             "Blinding { algorithm: RSABSSA-SHA384-PSS-Randomized, .. }"
+        );
+    }
+
+    #[test]
+    fn debug_shows_public_values() {
+        let key_pair = KeyPair::from_pkcs8(&RSABSSA_SHA384_PSS_RANDOMIZED, KEYS[0]).unwrap();
+        assert_eq!(
+            format!("{:?}", key_pair.public_key()),
+            "PublicKey { algorithm: RSABSSA-SHA384-PSS-Randomized, bits: 2048 }"
+        );
+        let (blinded, _) = key_pair.public_key().blind(b"hello").unwrap();
+        assert_eq!(
+            format!("{blinded:?}"),
+            format!("BlindedMessage({:?})", blinded.as_ref())
         );
     }
 

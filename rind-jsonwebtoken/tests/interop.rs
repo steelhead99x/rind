@@ -187,6 +187,26 @@ fn common_point(algorithm: Algorithm) -> DecodingKey {
         .decoding
 }
 
+/// aws-lc-rs refuses a 2047-bit modulus, which rind loads, so the provider
+/// refuses it to sign, whether when it builds the signer or when it signs, and
+/// to give its public components, with its reason.
+#[test]
+fn a_2047_bit_private_key_is_refused_as_aws_lc_refuses_it() {
+    let der = include_bytes!("../../rind/src/high/rsa/rsa2047.der");
+    assert!(rind::rsa::KeyPair::from_pkcs1(der).is_ok());
+    let key = EncodingKey::from_rsa_der(der);
+    for algorithm in [Algorithm::RS256, Algorithm::RS512, Algorithm::PS384] {
+        for provider in [AWS_LC, rind()] {
+            let signed = (provider.signer_factory)(&algorithm, &key)
+                .is_ok_and(|signer| signer.try_sign(MESSAGE).is_ok());
+            assert!(!signed, "{algorithm:?}");
+        }
+    }
+    let theirs = (AWS_LC.key_utils.rsa_pub_components_from_private_key)(der).unwrap_err();
+    let ours = (rind().key_utils.rsa_pub_components_from_private_key)(der).unwrap_err();
+    assert_eq!(ours.kind(), theirs.kind());
+}
+
 #[test]
 fn key_utils_match_aws_lc() {
     let (private, public) = common::rsa_key();

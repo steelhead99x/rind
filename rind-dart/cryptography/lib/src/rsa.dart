@@ -146,32 +146,28 @@ final class _RsaPkcs1 extends RsaSsaPkcs1v15 {
   }) async => _rsaVerify(_verification, message, signature);
 }
 
-/// RSA-PSS, which rind signs only with a salt as long as the hash, and
-/// verifies with any salt when [nonceLengthInBytes] is another length.
+/// RSA-PSS with a salt of [nonceLengthInBytes], which verifies only
+/// signatures of that salt length, as WebCrypto's does.
 final class _RsaPss extends RsaPss {
-  _RsaPss(this.hashAlgorithm, this.nonceLengthInBytes)
-    : _signing = switch (hashAlgorithm) {
-        Sha256() => rsa.SigningAlgorithm.pssSha256,
-        Sha384() => rsa.SigningAlgorithm.pssSha384,
-        Sha512() => rsa.SigningAlgorithm.pssSha512,
+  _RsaPss(this.hashAlgorithm, int nonceLengthInBytes)
+    : nonceLengthInBytes = RangeError.checkValueInInterval(
+        nonceLengthInBytes,
+        0,
+        65535,
+        'nonceLengthInBytes',
+      ),
+      _signing = switch (hashAlgorithm) {
+        Sha256() => rsa.PssSigningAlgorithm.sha256(nonceLengthInBytes),
+        Sha384() => rsa.PssSigningAlgorithm.sha384(nonceLengthInBytes),
+        Sha512() => rsa.PssSigningAlgorithm.sha512(nonceLengthInBytes),
         _ => throw _unsupported('RSA-PSS with $hashAlgorithm'),
       },
-      _verification = nonceLengthInBytes == hashAlgorithm.hashLengthInBytes
-          ? switch (hashAlgorithm) {
-              Sha256() => rsa.VerificationAlgorithm.pssSha256,
-              Sha384() => rsa.VerificationAlgorithm.pssSha384,
-              _ => rsa.VerificationAlgorithm.pssSha512,
-            }
-          : switch (hashAlgorithm) {
-              Sha256() => rsa.VerificationAlgorithm.pssSha256AnySalt,
-              Sha384() => rsa.VerificationAlgorithm.pssSha384AnySalt,
-              _ => rsa.VerificationAlgorithm.pssSha512AnySalt,
-            },
-      super.constructor() {
-    if (nonceLengthInBytes < 0) {
-      throw RangeError.range(nonceLengthInBytes, 0, null, 'nonceLengthInBytes');
-    }
-  }
+      _verification = switch (hashAlgorithm) {
+        Sha256() => rsa.PssVerificationAlgorithm.sha256(nonceLengthInBytes),
+        Sha384() => rsa.PssVerificationAlgorithm.sha384(nonceLengthInBytes),
+        _ => rsa.PssVerificationAlgorithm.sha512(nonceLengthInBytes),
+      },
+      super.constructor();
 
   @override
   final HashAlgorithm hashAlgorithm;
@@ -179,7 +175,7 @@ final class _RsaPss extends RsaPss {
   @override
   final int nonceLengthInBytes;
 
-  final rsa.SigningAlgorithm _signing;
+  final rsa.PssSigningAlgorithm _signing;
   final rsa.VerificationAlgorithm _verification;
 
   @override
@@ -190,12 +186,6 @@ final class _RsaPss extends RsaPss {
 
   @override
   Future<Signature> sign(List<int> message, {required KeyPair keyPair}) async {
-    if (nonceLengthInBytes != hashAlgorithm.hashLengthInBytes) {
-      throw _unsupported(
-        'RSA-PSS signing with a $nonceLengthInBytes-byte salt; it salts with '
-        'as many bytes as the hash, ${hashAlgorithm.hashLengthInBytes}',
-      );
-    }
     final pair = await _rsaKey(keyPair);
     return Signature(
       pair.key.sign(_signing, _bytes(message)),

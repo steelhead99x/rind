@@ -3,16 +3,19 @@ public import Aeneas
 public import Rind.X86_64.Types
 public import Rind.X86_64.AesGcmModel
 public import Rind.X86_64.PointSelectModel
+public import Rind.X86_64.GatherModel
 @[expose] public section
 open Aeneas Aeneas.Std Result
 set_option linter.dupNamespace false
 
 /-!
 The rind functions the x86_64 translation leaves opaque, beside those
-`Rind.X86_64.AesGcmModel` and `Rind.X86_64.PointSelectModel` model. No proof assumes anything about them beyond what
+`Rind.X86_64.AesGcmModel`, `Rind.X86_64.PointSelectModel`, and
+`Rind.X86_64.GatherModel` model. No proof assumes anything about them beyond what
 `Rind.X86_64.S2nBignum`, `Rind.X86_64.AwsLc`, `Rind.X86_64.ValeAesGcm`,
-`Rind.X86_64.VgRsa`, and `Rind.X86_64.VgChaCha20` state for s2n-bignum's,
-aws-lc's, Vale's, and pyca/verified-garbage's routines, what
+`Rind.X86_64.VgRsa`, `Rind.X86_64.VgChaCha20`, and `Rind.X86_64.RsaMont`'s
+`nohw_spec` state for s2n-bignum's, aws-lc's, Vale's, and
+pyca/verified-garbage's routines, what
 `Rind.X86_64.CtEqual` states for the constant-time compares, and what each theorem
 takes as a hypothesis.
 -/
@@ -169,10 +172,25 @@ opaque low.x86_64.aes_gcm_vaes.VaesKernel.avx2
 opaque low.generic.zeroise.zeroise_value {T : Type} (ZeroableInst : low.generic.zeroise.Zeroable T) :
   T → Result T
 
-/-! ChaCha20-Poly1305's routines: aws-lc's one-pass seal and open, behind
-their Rust wrapper, whose contract `Rind.X86_64.ChaCha20Poly1305`'s `OnePass`
-states as a hypothesis, and the separate passes CPUs without SSE4.1 run,
-which no theorem is about. -/
+/-! ChaCha20-Poly1305's routines: pyca/verified-garbage's AVX-512 IFMA seal
+and open, behind one wrapper each, whose contracts
+`Rind.X86_64.VgChaCha20Poly1305` restates; aws-lc's
+one-pass seal and open, behind their Rust wrapper, whose contract
+`Rind.X86_64.ChaCha20Poly1305`'s `OnePass` states as a hypothesis; and the
+separate passes CPUs without SSE4.1 run, which no theorem is about. -/
+
+opaque low.x86_64.cpu.HaveIfmaForVgChaCha20Poly1305.check
+  : Result (Option low.x86_64.cpu.HaveIfmaForVgChaCha20Poly1305)
+
+opaque low.x86_64.chacha20poly1305.seal_ifma
+  : low.x86_64.cpu.HaveIfmaForVgChaCha20Poly1305 → Std.Array Std.U8 32#usize →
+    Std.Array Std.U8 12#usize → Slice Std.U8 → Slice Std.U8 →
+    Result ((Std.Array Std.U8 16#usize) × (Slice Std.U8))
+
+opaque low.x86_64.chacha20poly1305.open_ifma
+  : low.x86_64.cpu.HaveIfmaForVgChaCha20Poly1305 → Std.Array Std.U8 32#usize →
+    Std.Array Std.U8 12#usize → Slice Std.U8 → Slice Std.U8 → Std.Array Std.U8 16#usize →
+    Result (Bool × (Slice Std.U8))
 
 opaque low.x86_64.chacha20poly1305.one_pass
   : low.x86_64.cpu.HaveSse41 → Option low.x86_64.cpu.HaveAvx2 → Std.Array Std.U8 32#usize →
@@ -188,10 +206,9 @@ opaque low.generic.chacha20poly1305.open
     Std.Array Std.U8 16#usize → Result (Bool × (Slice Std.U8))
 
 /-! `cipher::ChaCha20`'s routines: pyca/verified-garbage's, behind one
-wrapper each, whose contracts `Rind.X86_64.VgChaCha20` restates; the
-two-block AVX2 kernel, whose contract it takes as the hypothesis `Kernel`;
-and aws-lc's SSSE3 routine and HACL*'s rounds over a message, which no
-theorem is about yet. -/
+wrapper each, whose contracts `Rind.X86_64.VgChaCha20` restates, and aws-lc's
+SSSE3 routine, whose HOL Light theorem `Rind.X86_64.ChaCha20Cipher`
+restates. -/
 
 opaque low.x86_64.cpu.HaveAvx512Vl.check : Result (Option low.x86_64.cpu.HaveAvx512Vl)
 
@@ -209,15 +226,16 @@ opaque low.x86_64.chacha20.VgState.apply_avx512vl
   : low.x86_64.chacha20.VgState → low.x86_64.cpu.HaveAvx512Vl → Slice Std.U8 →
     Result (Std.U32 × low.x86_64.chacha20.VgState × (Slice Std.U8))
 
-opaque low.x86_64.chacha20.cipher_avx2
-  : Std.Array Std.U32 8#usize → Std.Array Std.U32 4#usize → Slice Std.U8 → Result (Slice Std.U8)
-
 opaque low.x86_64.chacha20.cipher_ssse3_4x
   : low.x86_64.cpu.HaveSsse3 → Std.Array Std.U32 8#usize → Std.Array Std.U32 4#usize →
     Slice Std.U8 → Result (Slice Std.U8)
 
-opaque low.generic.chacha20.cipher
-  : Std.Array Std.U32 8#usize → Std.Array Std.U32 4#usize → Slice Std.U8 → Result (Slice Std.U8)
+/-! rind's eight-way AVX-512 Keccak-f, which `RunsSha3` takes to compute
+Keccak-f on each state. -/
+
+opaque low.x86_64.sha3_keccak8_f1600.permute
+  : Array (Array Std.U64 25#usize) 8#usize → Array Std.U64 24#usize →
+    low.x86_64.cpu.HaveAvx512Vl → Result (Array (Array Std.U64 25#usize) 8#usize)
 
 /-! s2n-bignum's Ed25519 routines, transliterated to inline assembly. -/
 
@@ -262,8 +280,19 @@ opaque low.x86_64.bignum_neg_p25519.bignum_neg_p25519
 opaque low.x86_64.bignum_cmp_lt.bignum_cmp_lt
   : Slice Std.U64 → Slice Std.U64 → Result Std.U64
 
-/-! Ed25519 verification's half-size check, which no theorem covers yet:
-the multi-scalar multiplication's dispatch and the field product it needs. -/
+opaque low.x86_64.bignum_mul_p25519.bignum_mul_p25519
+  :
+  Array Std.U64 4#usize → Array Std.U64 4#usize → Array Std.U64 4#usize →
+    Result (Array Std.U64 4#usize)
+
+opaque low.x86_64.bignum_mul_p25519_alt.bignum_mul_p25519_alt
+  :
+  Array Std.U64 4#usize → Array Std.U64 4#usize → Array Std.U64 4#usize →
+    Result (Array Std.U64 4#usize)
+
+/-! Ed25519 verification's multi-scalar multiplication, whose contract
+`Rind.X86_64.Ed25519Verify` takes as the hypothesis `RunsMsm` until a proof
+covers it. -/
 
 opaque low.x86_64.adx_mux.edwards25519_msm
   :
@@ -271,16 +300,29 @@ opaque low.x86_64.adx_mux.edwards25519_msm
     4#usize) 2#usize → Array (Array Std.U64 16#usize) 2#usize → Result
     (Array Std.U64 12#usize)
 
-opaque low.x86_64.adx_mux.bignum_mul_p25519
-  :
-  Array Std.U64 4#usize → Array Std.U64 4#usize → Array Std.U64 4#usize →
-    Result (Array Std.U64 4#usize)
+/-! The wipe, which writes zeros over a slice through raw pointers, which Aeneas
+cannot translate, so this models it: it returns, leaving the zeros `wiped`
+stands for. `admin/prove` fails unless this quote is still that Rust:
 
-/-! The wipe a drop runs, which no theorem calls. -/
+```rust
+pub(crate) fn zeroise<T: Zeroable>(v: &mut [T]) {
+    // SAFETY: `v` is `size_of_val(v)` writable bytes, and `T: Zeroable`
+    // makes all-zero bytes a valid `T`.
+    unsafe { zero_bytes(v.as_mut_ptr().cast(), size_of_val(v)) };
+}
 
-opaque low.generic.zeroise.zeroise
-  {T : Type _} (ZeroableInst : low.generic.zeroise.Zeroable T) :
-  Slice T → Result (Slice T)
+```
+-/
+
+/-- What `zeroise` leaves in `v`: all-bits-zero, which `Zeroable` makes a
+valid `T` but cannot name, so it is opaque, its value `v` only witnessing
+that it has one. No proof reads a slice after its wipe. -/
+opaque low.generic.zeroise.wiped {T : Type _} (v : Slice T) : Slice T := v
+
+/-- `zeroise`, which returns. -/
+def low.generic.zeroise.zeroise {T : Type _} (_ZeroableInst : low.generic.zeroise.Zeroable T)
+    (v : Slice T) : Result (Slice T) :=
+  ok (low.generic.zeroise.wiped v)
 
 /-- `ZeroableRef::new`, as `Rind.X86_64.Dispatch` models a `ZeroableRef`: its
 value. -/
@@ -311,6 +353,11 @@ states. -/
 opaque low.x86_64.rsa_ifma.RsaIfma.public
   : low.x86_64.rsa_ifma.RsaIfma → Slice Std.U8 → Slice Std.U64 → Slice Std.U8 → Slice Std.U8 →
     Result (Bool × Slice Std.U8)
+
+/-- pyca/verified-garbage's RSA `R² mod n`, behind the Rust that sizes its
+scratch and calls it, which `Rind.X86_64.VgRsa` states. -/
+opaque low.x86_64.rsa_vg.Precompute.precompute
+  : low.x86_64.rsa_vg.Precompute → Slice Std.U64 → Slice Std.U8 → Result (Bool × Slice Std.U64)
 
 opaque low.x86_64.rsa_ifma.IfmaCrt.crt
   : low.x86_64.rsa_ifma.IfmaCrt → Slice Std.U8 → Slice Std.U8 → Slice Std.U8 → Slice Std.U8 →
@@ -482,6 +529,26 @@ opaque low.x86_64.p384_montjmixadd_alt.p384_montjmixadd_alt
   :
   Array Std.U64 18#usize → Array Std.U64 18#usize → Array Std.U64 12#usize
     → Result (Array Std.U64 18#usize)
+
+/-! Whether the CPU runs pyca/verified-garbage's P-384 `d·G`, for key
+generation and ECDSA's nonces, and its ECDSA verification, which read no
+input, and its routines behind their Rust wrappers, whose contracts
+`Rind.X86_64.VgP384` states. -/
+
+opaque low.x86_64.p384_vg.MulBase.check
+  : Result (Option low.x86_64.p384_vg.MulBase)
+
+opaque low.x86_64.p384_vg.MulBase.public_key
+  : low.x86_64.p384_vg.MulBase → Array Std.U8 48#usize →
+    Result (Option (Array Std.U8 97#usize))
+
+opaque low.x86_64.p384_vg.Verify.check
+  : Result (Option low.x86_64.p384_vg.Verify)
+
+opaque low.x86_64.p384_vg.Verify.ecdsa_verify
+  :
+  low.x86_64.p384_vg.Verify → Array Std.U8 97#usize → Array Std.U8 48#usize →
+    Array Std.U8 96#usize → Result Bool
 
 opaque low.x86_64.p384_montjscalarmul.p384_montjscalarmul
   :
@@ -676,9 +743,9 @@ opaque low.generic.reuse_cache.ReuseCache.Insts.CoreCloneClone.clone
 opaque mid.p256.PrivateKey.new_random
   : Result (core.result.Result mid.p256.PrivateKey error.Error)
 
-/-! Whether the CPU runs pyca/verified-garbage's P-256, and rind's calls of it,
-which the P-256 proofs take as not running: Lean proves VG's routines in that
-project, not here. -/
+/-! Whether the CPU runs pyca/verified-garbage's P-256, which reads no input,
+and its routines behind their Rust wrappers, whose contracts
+`Rind.X86_64.VgP256` states. -/
 
 opaque low.x86_64.p256_vg.P256.check : Result (Option low.x86_64.p256_vg.P256)
 
@@ -686,16 +753,18 @@ opaque low.x86_64.p256_vg.P256.check_public_key : Result (Option low.x86_64.p256
 
 opaque low.x86_64.p256_vg.P256.check_ecdh : Result (Option low.x86_64.p256_vg.P256)
 
-opaque mid.p256.PrivateKey.vg_public_key
-  : mid.p256.PrivateKey → low.x86_64.p256_vg.P256 → Result (Array Std.U8 65#usize)
+opaque low.x86_64.p256_vg.P256.public_key
+  : low.x86_64.p256_vg.P256 → Array Std.U8 32#usize → Result (Option (Array Std.U8 65#usize))
 
-opaque mid.p256.PrivateKey.vg_diffie_hellman
-  : mid.p256.PrivateKey → low.x86_64.p256_vg.P256 → mid.p256.PublicKey →
-    Result (core.result.Result mid.p256.SharedSecret error.Error)
+opaque low.x86_64.p256_vg.P256.ecdh
+  :
+  low.x86_64.p256_vg.P256 → Array Std.U8 32#usize → Array Std.U8 65#usize → Result (Option
+    (Array Std.U8 32#usize))
 
-opaque mid.p256.vg_verify
-  : low.x86_64.p256_vg.P256 → mid.p256.AffineMontPoint → mid.p256.Scalar → mid.p256.Scalar →
-    mid.p256.Scalar → Result (core.result.Result Unit error.Error)
+opaque low.x86_64.p256_vg.P256.verify
+  :
+  low.x86_64.p256_vg.P256 → Array Std.U8 65#usize → Array Std.U8 32#usize → Array Std.U8
+    64#usize → Result Bool
 
 /-! The other curves, which X25519's results never depend on. -/
 
@@ -818,8 +887,28 @@ opaque low.x86_64.bignum_montmul.bignum_montmul
   Slice Std.U64 → Slice Std.U64 → Slice Std.U64 → Slice Std.U64 →
     Result (Slice Std.U64)
 
+opaque low.x86_64.bignum_montredc.bignum_montredc
+  : Slice Std.U64 → Slice Std.U64 → Slice Std.U64 → Std.U64 → Result (Slice Std.U64)
+
+opaque low.x86_64.bignum_modsub.bignum_modsub
+  : Slice Std.U64 → Slice Std.U64 → Slice Std.U64 → Slice Std.U64 → Result (Slice Std.U64)
+
+opaque low.x86_64.bignum_mul.bignum_mul
+  : Slice Std.U64 → Slice Std.U64 → Slice Std.U64 → Result (Slice Std.U64)
+
+opaque low.x86_64.bignum_add.bignum_add
+  : Slice Std.U64 → Slice Std.U64 → Slice Std.U64 → Result (Std.U64 × (Slice Std.U64))
+
+opaque low.x86_64.bignum_digitsize.bignum_digitsize
+  : Slice Std.U64 → Result Std.Usize
+
+opaque low.x86_64.bignum_copy_row_from_table.bignum_copy_row_from_table
+  : Slice Std.U64 → Slice Std.U64 → Std.U64 → Std.U64 → Std.U64 → Result (Slice Std.U64)
+
 /-! aws-lc's Montgomery products, behind their Rust wrappers, which
-`Rind.X86_64.RsaMont`'s `AwsLcMont` states for the theorems that need them. -/
+`Rind.X86_64.RsaMont` states: `nohw_spec` restates rind's HOL Light proof of
+`bn_mul_mont_nohw`, `mul4x_spec` its Lean proof of `bn_mul4x_mont`, and
+`AwsLcMont` the others for the theorems that need them. -/
 
 opaque low.x86_64.mont.nohw
   :
@@ -836,8 +925,106 @@ opaque low.x86_64.mont.sqr8x
   Slice Std.U64 → Slice Std.U64 → Slice Std.U64 → Std.U64 → Option
     low.x86_64.cpu.HaveBmi2Adx → Result (Slice Std.U64)
 
+/-! aws-lc's `bn_power5` and `bn_powerx5`, which `mont_exp`'s Rust runs at each
+width that is a multiple of eight words, but for 16 and 32 with BMI2 and ADX,
+and the RSAZ exponentiations, which `PosInt` runs in place of `mont_exp` only
+without ADX or at the widths its AVX-512 IFMA path takes. No proof covers
+them, and none reaches them: each theorem's hypotheses rule out the paths
+that call them. -/
+
+opaque low.x86_64.mont_exp.power5
+  : Slice Std.U64 → Slice low.x86_64.mont_exp.Row → Slice Std.U64 → Std.U64 → Std.U64 →
+    Option low.x86_64.cpu.HaveBmi2Adx → Result (Slice Std.U64)
+
+opaque low.x86_64.mont_exp.power5_table
+  : Slice Std.U64 → Std.Usize → Std.Usize → Result (alloc.vec.Vec low.x86_64.mont_exp.Row)
+
+opaque low.posint.PosInt.mod_exp_rsaz {N : Std.Usize}
+  : low.posint.PosInt N → low.x86_64.rsaz.Rsaz → low.posint.PosInt N → low.posint.PosInt N →
+    low.posint.PosInt N → Std.U64 → Result (Option (low.posint.PosInt N))
+
+opaque low.posint.PosInt.mod_exp_pair_rsaz {N : Std.Usize}
+  : low.x86_64.rsaz_avx512.RsazAvx512 → low.posint.ModExp N → low.posint.ModExp N →
+    Result ((low.posint.PosInt N) × (low.posint.PosInt N))
+
+/-! ML-KEM's polynomial routines, behind their Rust wrappers, which pick a
+path from the CPU: with AVX2, s2n-bignum's routines, mlkem-native's code
+with the AVX2 layout's tables, and mlkem-native's AVX2 compression;
+without it, `low::generic::mlkem_poly`, a port of mlkem-native's portable
+C, and for 12-bit unpacking and compression `low::generic::mlkem`'s Rust,
+whose unpacking `Rind/Aarch64/MlKemGeneric.lean` proves on aarch64; its
+reordering is a no-op, since that path keeps the natural order. -/
+
+opaque low.x86_64.mlkem.mlkem_ntt
+  : Array Std.I16 256#usize → Result (Array Std.I16 256#usize)
+
+opaque low.x86_64.mlkem.mlkem_intt
+  : Array Std.I16 256#usize → Result (Array Std.I16 256#usize)
+
+opaque low.x86_64.mlkem.mlkem_mulcache_compute
+  : Array Std.I16 128#usize → Array Std.I16 256#usize → Result (Array Std.I16 128#usize)
+
+opaque low.x86_64.mlkem.mlkem_rej_uniform_vartime
+  : Array Std.I16 256#usize → Slice Std.U8 → Result (Std.U64 × (Array Std.I16 256#usize))
+
+opaque low.x86_64.mlkem.mlkem_basemul_k2
+  : Array Std.I16 256#usize → Array Std.I16 512#usize → Array Std.I16 512#usize →
+    Array Std.I16 256#usize → Result (Array Std.I16 256#usize)
+
+opaque low.x86_64.mlkem.mlkem_basemul_k3
+  : Array Std.I16 256#usize → Array Std.I16 768#usize → Array Std.I16 768#usize →
+    Array Std.I16 384#usize → Result (Array Std.I16 256#usize)
+
+opaque low.x86_64.mlkem.mlkem_basemul_k4
+  : Array Std.I16 256#usize → Array Std.I16 1024#usize → Array Std.I16 1024#usize →
+    Array Std.I16 512#usize → Result (Array Std.I16 256#usize)
+
+opaque low.x86_64.mlkem.mlkem_reduce
+  : Array Std.I16 256#usize → Result (Array Std.I16 256#usize)
+
+opaque low.x86_64.mlkem.mlkem_tomont
+  : Array Std.I16 256#usize → Result (Array Std.I16 256#usize)
+
+opaque low.x86_64.mlkem.mlkem_frombytes
+  : Array Std.I16 256#usize → Array Std.U8 384#usize → Result (Array Std.I16 256#usize)
+
+opaque low.x86_64.mlkem.mlkem_tobytes
+  : Array Std.U8 384#usize → Array Std.I16 256#usize → Result (Array Std.U8 384#usize)
+
+opaque low.x86_64.mlkem.mlkem_compress_d4
+  : Array Std.U8 128#usize → Array Std.I16 256#usize → Result (Array Std.U8 128#usize)
+
+opaque low.x86_64.mlkem.mlkem_compress_d5
+  : Array Std.U8 160#usize → Array Std.I16 256#usize → Result (Array Std.U8 160#usize)
+
+opaque low.x86_64.mlkem.mlkem_compress_d10
+  : Array Std.U8 320#usize → Array Std.I16 256#usize → Result (Array Std.U8 320#usize)
+
+opaque low.x86_64.mlkem.mlkem_compress_d11
+  : Array Std.U8 352#usize → Array Std.I16 256#usize → Result (Array Std.U8 352#usize)
+
+opaque low.x86_64.mlkem.mlkem_unpack
+  : Array Std.I16 256#usize → Result (Array Std.I16 256#usize)
+
+/-- ML-KEM-1024's eight-way matrix sampler, which hands the eight-way Keccak
+function pointers Aeneas cannot translate. No ✓ covers ML-KEM-1024. -/
+opaque mid.mlkem.sample_ntt.sample_ntt_8x
+  : Array Std.U8 32#usize → Bool → Slice (Array Std.I16 256#usize) →
+    Result (Slice (Array Std.I16 256#usize))
+
+/-- ML-KEM-1024's eight-way CBD sampler, which hands the eight-way SHAKE256
+a function pointer Aeneas cannot translate. No ✓ covers ML-KEM-1024. -/
+opaque mid.mlkem.sample_poly_cbd2_8x
+  : Array Std.U8 32#usize → Std.U8 → Std.Usize →
+    Result (Array (Array Std.I16 256#usize) 8#usize)
+
 /-! pyca/verified-garbage's ML-KEM-768 routines, behind their Rust wrappers,
-whose contracts `Rind.X86_64.VgMlKem` states. -/
+whose contracts `Rind.X86_64.VgMlKem` states, and the checks for the CPU
+features they need. -/
+
+opaque low.x86_64.mlkem768_vg.Encaps.check : Result (Option low.x86_64.mlkem768_vg.Encaps)
+
+opaque low.x86_64.mlkem768_vg.KeyPair.check : Result (Option low.x86_64.mlkem768_vg.KeyPair)
 
 opaque low.x86_64.mlkem768_vg.Encaps.check_ek
   : low.x86_64.mlkem768_vg.Encaps → Array Std.U8 1184#usize → Result Bool
@@ -876,7 +1063,8 @@ opaque high.rsa.VerifyingKey.to_pkcs1_der
     Std.U8) error.Error) × (Slice Std.U8))
 
 /-- Whether the CPU runs pyca/verified-garbage's AVX-512 IFMA X25519 and
-Ed25519, and those routines, which the proofs here take as not running. -/
+Ed25519, and the wrappers of those routines, whose contracts
+`Rind.X86_64.VgCurve25519` restates. -/
 opaque low.x86_64.curve25519_ifma.Curve25519Ifma.check : Result (Option low.x86_64.curve25519_ifma.Curve25519Ifma)
 
 opaque low.x86_64.curve25519_ifma.Curve25519Ifma.x25519
@@ -895,7 +1083,5 @@ opaque low.x86_64.curve25519_ifma.Curve25519Ifma.ed25519_sign
 
 opaque low.x86_64.curve25519_ifma.Curve25519Ifma.ed25519_verify
   : low.x86_64.curve25519_ifma.Curve25519Ifma → Array Std.U8 32#usize → Slice Std.U8 → Array Std.U8 64#usize → Result Bool
-
-opaque low.x86_64.curve25519_ifma.Curve25519Ifma.Insts.CoreCloneClone.clone : low.x86_64.curve25519_ifma.Curve25519Ifma → Result low.x86_64.curve25519_ifma.Curve25519Ifma
 
 end rind.x86_64

@@ -16,38 +16,64 @@ use crate::low::pbkdf2_vg::Pbkdf2;
 use crate::low::{Entry, Zeroable, ZeroableRef, ct, ct_equal, zeroise};
 
 /// One hash's PBKDF2 on VG's routine.
-pub(crate) struct Algorithm {
-    routine: fn() -> Option<&'static Pbkdf2>,
-    // Writes HMAC's key for a secret to the start of the block, returning
-    // its length.
-    hmac_key: fn(&[u8], &mut [u8; 128]) -> usize,
-    tag_len: usize,
+#[derive(Clone, Copy)]
+pub(crate) enum Algorithm {
+    Sha1,
+    Sha256,
+    Sha384,
+    Sha512,
 }
 
-macro_rules! algorithm {
-    ($name:ident, $routine:ident, $context:ident, $block:expr) => {
-        pub(crate) static $name: Algorithm = Algorithm {
-            routine: Pbkdf2::$routine,
-            hmac_key: |secret, key| {
-                if secret.len() > $block {
-                    let mut ctx = $context::new();
-                    ctx.update(secret);
-                    key[..$context::OUTPUT_SZ].copy_from_slice(&ctx.finish());
-                    $context::OUTPUT_SZ
-                } else {
-                    key[..secret.len()].copy_from_slice(secret);
-                    secret.len()
-                }
-            },
-            tag_len: $context::OUTPUT_SZ,
+impl Algorithm {
+    // VG's routine for this hash, if this CPU runs it.
+    fn routine(self) -> Option<&'static Pbkdf2> {
+        match self {
+            Self::Sha1 => Pbkdf2::sha1(),
+            Self::Sha256 => Pbkdf2::sha256(),
+            Self::Sha384 => Pbkdf2::sha384(),
+            Self::Sha512 => Pbkdf2::sha512(),
+        }
+    }
+
+    // The hash's output length, which is HMAC's tag length.
+    fn tag_len(self) -> usize {
+        match self {
+            Self::Sha1 => Sha1Context::OUTPUT_SZ,
+            Self::Sha256 => Sha256Context::OUTPUT_SZ,
+            Self::Sha384 => Sha384Context::OUTPUT_SZ,
+            Self::Sha512 => Sha512Context::OUTPUT_SZ,
+        }
+    }
+
+    // Writes HMAC's key for `secret` to the start of `key`, returning its
+    // length: the secret, or its hash where it is longer than a block.
+    fn hmac_key(self, secret: &[u8], key: &mut [u8; 128]) -> usize {
+        let block = match self {
+            Self::Sha1 => Sha1Context::BLOCK_SZ,
+            Self::Sha256 => Sha256Context::BLOCK_SZ,
+            Self::Sha384 | Self::Sha512 => Sha512Context::BLOCK_SZ,
         };
-    };
+        if secret.len() <= block {
+            key[..secret.len()].copy_from_slice(secret);
+            return secret.len();
+        }
+        macro_rules! hash {
+            ($context:ident) => {{
+                let mut ctx = $context::new();
+                ctx.update(secret);
+                let digest = ctx.finish();
+                key[..digest.len()].copy_from_slice(&digest);
+                digest.len()
+            }};
+        }
+        match self {
+            Self::Sha1 => hash!(Sha1Context),
+            Self::Sha256 => hash!(Sha256Context),
+            Self::Sha384 => hash!(Sha384Context),
+            Self::Sha512 => hash!(Sha512Context),
+        }
+    }
 }
-
-algorithm!(SHA1, sha1, Sha1Context, Sha1Context::BLOCK_SZ);
-algorithm!(SHA256, sha256, Sha256Context, Sha256Context::BLOCK_SZ);
-algorithm!(SHA384, sha384, Sha384Context, Sha512Context::BLOCK_SZ);
-algorithm!(SHA512, sha512, Sha512Context, Sha512Context::BLOCK_SZ);
 
 /// A secret keyed for VG's routine. The caller wipes it with the value that
 /// holds it: all-zero is a valid value.
@@ -62,14 +88,14 @@ impl Zeroable for Key {}
 
 impl Key {
     /// Keys `algorithm` with `secret`, if this CPU runs its VG routine.
-    pub(crate) fn new(algorithm: &'static Algorithm, secret: &[u8]) -> Option<Self> {
-        let routine = (algorithm.routine)()?;
+    pub(crate) fn new(algorithm: Algorithm, secret: &[u8]) -> Option<Self> {
+        let routine = algorithm.routine()?;
         let _entry = Entry::new_secret();
         let mut key = [0u8; 128];
-        let len = (algorithm.hmac_key)(secret, &mut key);
+        let len = algorithm.hmac_key(secret, &mut key);
         Some(Self {
             routine: ZeroableRef::new(routine),
-            tag_len: algorithm.tag_len,
+            tag_len: algorithm.tag_len(),
             key,
             len,
         })

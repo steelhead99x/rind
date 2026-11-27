@@ -4,18 +4,10 @@ name: ESP32-S3 SHA-256 layout
 # checks the ESP32-S3 image: block and driver in IRAM, K in `.dram1`, no
 # call in the block, no relocation into flash text. The toolchain is the
 # one the board image uses (esp rustc 1.97.0.0).
+# Weekly, at its own hour: see TESTING.md, "Scheduled workflows".
 on:
-  pull_request:
-    paths:
-      - rind/src/lib.rs
-      - rind/src/low/mod.rs
-      - rind/src/low/portable/sha.rs
-      - rind/src/low/portable/sha256_iram.rs
-      - rind/src/low/generic/sha256_k.rs
-      - rind/src/low/generic/sha256.rs
-      - admin/esp32s3-sha256-layout
-      - admin/esp32s3-sha256-layout.py
-      - .github/workflows/esp32s3-sha256-layout.yml
+  schedule:
+    - cron: "23 12 * * 0"
   workflow_dispatch:
 
 permissions:
@@ -34,44 +26,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install the ESP32-S3 toolchain
-        run: |
-          set -eu
-          root="$HOME/.espressif"
-          mkdir -p "$root"
-          base=https://github.com/esp-rs/rust-build/releases/download/v1.97.0.0
-          curl -fsSL -o /tmp/rust.tar.xz "$base/rust-1.97.0.0-x86_64-unknown-linux-gnu.tar.xz"
-          curl -fsSL -o /tmp/rust-src.tar.xz "$base/rust-src-1.97.0.0.tar.xz"
-          curl -fsSL -o /tmp/xtensa.tar.xz \
-            https://github.com/espressif/crosstool-NG/releases/download/esp-16.1.0_20260609/xtensa-esp-elf-16.1.0_20260609-x86_64-linux-gnu.tar.xz
-          # SHA-256 digests published with these pinned GitHub release assets.
-          # Verify all downloads before extracting or executing any of them.
-          sha256sum -c << 'EOF'
-          a99bfee69221e9ff6d86388f6811ee688cd405e6a0400a3cd1784e8d463e9d99  /tmp/rust.tar.xz
-          568d688b9f8f332ec4d04657544fad23e99ce11e9e6cf5835979e68a28c68b73  /tmp/rust-src.tar.xz
-          f708752ebb35cab21f184b2574114ed1187619db0edb8a4ba913c06ca2fa675e  /tmp/xtensa.tar.xz
-          EOF
-          tar -xJf /tmp/rust.tar.xz -C "$root"
-          tar -xJf /tmp/xtensa.tar.xz -C "$root"
-          if [ ! -x "$root/xtensa-esp-elf/bin/xtensa-esp32s3-elf-gcc" ]; then
-            found=$(find "$root" -type f -name xtensa-esp32s3-elf-gcc | head -1)
-            test -n "$found"
-            ln -sfn "$(dirname "$(dirname "$found")")" "$root/xtensa-esp-elf"
-          fi
-          src=$(mktemp -d)
-          tar -xJf /tmp/rust-src.tar.xz -C "$src"
-          core=$(find "$src" -type d -path '*/library/core' | head -1)
-          test -n "$core"
-          rust_src=$(dirname "$(dirname "$core")")
-          sys="$root/rust-nightly-x86_64-unknown-linux-gnu/rustc/lib/rustlib/src"
-          mkdir -p "$sys"
-          rm -rf "$sys/rust"
-          cp -a "$rust_src" "$sys/rust"
-          stdlib="$root/rust-nightly-x86_64-unknown-linux-gnu/rust-std-x86_64-unknown-linux-gnu/lib/rustlib/x86_64-unknown-linux-gnu/lib"
-          ln -sfn "$stdlib" \
-            "$root/rust-nightly-x86_64-unknown-linux-gnu/rustc/lib/rustlib/x86_64-unknown-linux-gnu/lib"
-          "$root/rust-nightly-x86_64-unknown-linux-gnu/rustc/bin/rustc" --version
-          "$root/xtensa-esp-elf/bin/xtensa-esp32s3-elf-gcc" --version
+      - uses: ./.github/actions/esp32s3-toolchain
 
       - name: Check placement
         run: admin/esp32s3-sha256-layout

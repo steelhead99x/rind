@@ -225,6 +225,7 @@ unsafe impl<Id: AlgorithmIdentifier> Send for EncapsulationKey<Id> {}
 unsafe impl<Id: AlgorithmIdentifier> Sync for EncapsulationKey<Id> {}
 
 const _: () = {
+    #[cfg_attr(coverage_nightly, coverage(off))] // const-evaluated only
     const fn send_sync<T: Send + Sync>() {}
     send_sync::<Algorithm<AlgorithmId>>();
     send_sync::<rind::kem::DecapsulationKey<MlKem512>>();

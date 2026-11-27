@@ -13,7 +13,10 @@ export 'src/rsa.dart'
         KeyPair,
         KeySize,
         OaepAlgorithm,
+        PssSigningAlgorithm,
+        PssVerificationAlgorithm,
         PublicKey,
         SigningAlgorithm,
+        SigningScheme,
         VerificationAlgorithm;
 export 'src/error.dart' show RindError, RindException;

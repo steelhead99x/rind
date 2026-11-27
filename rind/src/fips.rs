@@ -77,6 +77,10 @@ impl SelfTest {
     /// Runs this self-test, returning the name of the first function whose
     /// answer was wrong.
     pub fn run(self) -> Result<(), &'static str> {
+        // Some tests compute through crate-internal primitives, such as the
+        // SHA-256 they compare outputs with, which make no `Entry` of their
+        // own; the inputs are all fixed, so a public one covers them.
+        let _entry = crate::low::Entry::new_public();
         match self {
             Self::Sha1 => kat::sha1(),
             Self::Sha256 => kat::sha256(),
@@ -186,6 +190,9 @@ errors! {
         DuplicateIdentifier,
         UnknownIdentifier,
         MismatchedCommitments,
+        UnknownPkcs8Algorithm,
+        UnsupportedCurve,
+        X25519CannotSign,
     ],
     asn1: [
         UnexpectedTag,

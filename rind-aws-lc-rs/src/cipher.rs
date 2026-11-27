@@ -543,3 +543,18 @@ impl fmt::Debug for PaddedBlockDecryptingKey {
             .finish_non_exhaustive()
     }
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    /// Only this crate can name the key aws-lc-rs's `TryInto` gives, so only
+    /// it can call the conversion, which keeps the key.
+    #[test]
+    fn unbound_keys_convert_to_the_held_key() {
+        let key = UnboundCipherKey::new(&AES_128, &[7; 16]).unwrap();
+        let held: private::SymmetricCipherKey = key.try_into().unwrap();
+        assert_eq!(held.0.algorithm(), &AES_128);
+    }
+}

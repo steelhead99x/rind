@@ -641,6 +641,7 @@ unsafe extern "sysv64" fn sha256_block_data_order_nohw(
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
     use crate::low::x86_64::cpu::{HaveAvx, HaveAvx2, HaveSha256, HaveSsse3};

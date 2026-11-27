@@ -15,7 +15,7 @@ rind already has these:
 - ctgrind, `admin/ct-sde`, and `admin/ct-qemu` for secret-dependent branches and addresses;
 - `admin/ct-vartime`, in `just ci`, for variable-time instructions, which those three can't see.
 
-[OSS-Fuzz](/quest/m4/oss-fuzz.md) is planned in m4 and isn't repeated here.
+[OSS-Fuzz](/quest/m2/confidence/oss-fuzz.md) moved here from m4 on 2026-11-21 (maintainer, /quest-plan), beside the 2026-11-21 audit's new fuzzing, sanitizer, constant-time, zeroing, and coverage children. Pure-Rust adapter fuzzers and a periodic full-workspace mutation sweep were considered and left out (rejected: low risk over already-fuzzed primitives; high host cost vs. the weekly diff sweep).
 
 The 2026-11-09 audit found no exploitable bug and no panic reachable from public input, and planned the eleven children from the hostile-input fuzz target down: each is a hole it confirmed in the code that no test, fuzzer, or proof sees today.
 
@@ -24,6 +24,11 @@ Three coverage children joined on 2026-11-12, with the maintainer, from the nigh
 Two constant-time children joined on 2026-11-12, with the maintainer, from reading pyca/verified-garbage: Intel's MXCSR-dependent timing and DOITM, and Apple's DIT barrier.
 
 Two children joined on 2026-11-14 from [the upstream-updates run](/quest/m2/upstream-updates.md): secret-branch checks for the portable-only targets, after libsodium's and RUSTSEC-2026-0426's compiler-inserted branches, and the HPKE revision's edge-case vectors.
+
+Four children joined on 2026-11-18, with the maintainer (/quest-plan), after a survey of how other libraries verify themselves:
+- an oracle sharing no code with rind, one quest for the differential tests and one for the fuzz targets, since aws-lc-rs runs the same s2n-bignum, mlkem-native, and mldsa-native code on the hot tiers;
+- tests of the Lean specs against vectors and against rind;
+- the removal of dudect, which adds noise and no signal.
 
 - Fix what a check finds in its own quest's PR when it's small; otherwise plan a follow-up.
 - Slow suites run in their own workflows, not in `just ci`.

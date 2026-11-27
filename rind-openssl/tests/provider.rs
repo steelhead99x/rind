@@ -385,7 +385,7 @@ fn rind_offers_the_x25519_tls_group() {
     check(unsafe {
         OSSL_PROVIDER_get_capabilities(
             provider,
-            c"TLS-SIGALG".as_ptr(),
+            c"TLS-KEM".as_ptr(),
             collect_group,
             (&raw mut none).cast(),
         )

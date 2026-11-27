@@ -146,7 +146,7 @@ impl Context {
     }
 
     /// Returns the tag of the message.
-    pub fn sign(self) -> Tag {
+    pub fn sign(mut self) -> Tag {
         Tag::new(self.inner.sign().as_ref())
     }
 }

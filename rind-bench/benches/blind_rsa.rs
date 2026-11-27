@@ -2,18 +2,30 @@
 //! Pass's publicly verifiable tokens: the client's blind, the server's
 //! signature, the client's finalize, and anyone's verify. Both libraries use
 //! the same key.
+#[cfg(target_arch = "xtensa")]
+fn main() {}
+
+#[cfg(not(target_arch = "xtensa"))]
 mod criterion;
+#[cfg(not(target_arch = "xtensa"))]
 use std::hint::black_box;
 
+#[cfg(not(target_arch = "xtensa"))]
 use blind_rsa_signatures::{DefaultRng, Deterministic, PSS, Sha384};
+#[cfg(not(target_arch = "xtensa"))]
 use criterion::{BatchSize, Criterion, Throughput, criterion_group, criterion_main};
+#[cfg(not(target_arch = "xtensa"))]
 use rind::blind_rsa::{KeyPair, PublicKey, RSABSSA_SHA384_PSS_DETERMINISTIC as ALGORITHM};
 
+#[cfg(not(target_arch = "xtensa"))]
 const MESSAGE: &[u8] = b"a Privacy Pass token input";
 
+#[cfg(not(target_arch = "xtensa"))]
 type RcSecretKey = blind_rsa_signatures::SecretKey<Sha384, PSS, Deterministic>;
+#[cfg(not(target_arch = "xtensa"))]
 type RcPublicKey = blind_rsa_signatures::PublicKey<Sha384, PSS, Deterministic>;
 
+#[cfg(not(target_arch = "xtensa"))]
 struct Keys {
     rind: KeyPair,
     rind_public: PublicKey,
@@ -21,6 +33,7 @@ struct Keys {
     rustcrypto_public: RcPublicKey,
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn keys() -> Keys {
     let rind = KeyPair::generate(&ALGORITHM, rind::rsa::KeySize::Rsa2048).unwrap();
     let rustcrypto = RcSecretKey::from_der(rind.to_pkcs8().as_ref()).unwrap();
@@ -59,12 +72,14 @@ fn keys() -> Keys {
     keys
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn bench(c: &mut Criterion) {
     let keys = keys();
 
     let mut group = c.benchmark_group("blind-rsa2048-blind");
     group.throughput(Throughput::Elements(1));
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         b.iter(|| black_box(keys.rind_public.blind(MESSAGE).unwrap()));
     });
     group.bench_function("rustcrypto", |b| {
@@ -81,6 +96,7 @@ fn bench(c: &mut Criterion) {
     let mut group = c.benchmark_group("blind-rsa2048-sign");
     group.throughput(Throughput::Elements(1));
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         let (blinded, _) = keys.rind_public.blind(MESSAGE).unwrap();
         b.iter(|| black_box(keys.rind.blind_sign(blinded.as_ref()).unwrap()));
     });
@@ -98,6 +114,7 @@ fn bench(c: &mut Criterion) {
     let mut group = c.benchmark_group("blind-rsa2048-finalize");
     group.throughput(Throughput::Elements(1));
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         b.iter_batched(
             || {
                 let (blinded, blinding) = keys.rind_public.blind(MESSAGE).unwrap();
@@ -130,6 +147,7 @@ fn bench(c: &mut Criterion) {
         .finalize(keys.rind.blind_sign(blinded.as_ref()).unwrap().as_ref())
         .unwrap();
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         b.iter(|| {
             keys.rind_public
                 .verify(MESSAGE, signature.as_ref())
@@ -146,5 +164,7 @@ fn bench(c: &mut Criterion) {
     });
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 criterion_group!(benches, bench);
+#[cfg(not(target_arch = "xtensa"))]
 criterion_main!(benches);

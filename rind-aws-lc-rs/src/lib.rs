@@ -1,12 +1,16 @@
 #![doc = include_str!("../README.md")]
+#![no_std]
 // aws-lc-rs's API has these shapes, which a drop-in keeps.
 #![allow(clippy::len_without_is_empty, clippy::new_without_default)]
 #![warn(missing_docs, unreachable_pub)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 use core::fmt;
 
 extern crate alloc;
+#[cfg(test)]
+extern crate std;
 
 pub mod aead;
 pub mod agreement;
@@ -30,7 +34,9 @@ pub mod signature;
 
 mod buffer;
 mod der;
+mod evp;
 mod pqdsa;
+mod rsa_check;
 mod wipe;
 
 /// Does nothing: rind needs no initialization. aws-lc-rs initializes AWS-LC here.

@@ -16,50 +16,40 @@ use super::vg;
 
 /// One hash's VG routine, which this CPU runs: only its constructors make
 /// one, after checking the CPU.
-pub(crate) struct Pbkdf2 {
-    routine: unsafe extern "C" fn(*const u8, usize, *const u8, usize, u32, *mut u8, usize),
-    hash_len: usize,
+pub(crate) struct Pbkdf2(Hash);
+
+// A fieldless enum rather than a function pointer, so Aeneas translates the
+// dispatch and `proofs/` states one axiom per routine.
+enum Hash {
+    Sha1,
+    Sha256,
+    Sha384,
+    Sha512,
 }
-
-static SHA1: Pbkdf2 = Pbkdf2 {
-    routine: vg::vg_pbkdf2_hmac_sha1_sha2::vg_pbkdf2_hmac_sha1_sha2,
-    hash_len: 20,
-};
-
-static SHA256: Pbkdf2 = Pbkdf2 {
-    routine: vg::vg_pbkdf2_hmac_sha256_sha2::vg_pbkdf2_hmac_sha256_sha2,
-    hash_len: 32,
-};
-
-static SHA384: Pbkdf2 = Pbkdf2 {
-    routine: vg::vg_pbkdf2_hmac_sha384_sha512::vg_pbkdf2_hmac_sha384_sha512,
-    hash_len: 48,
-};
-
-static SHA512: Pbkdf2 = Pbkdf2 {
-    routine: vg::vg_pbkdf2_hmac_sha512_sha512::vg_pbkdf2_hmac_sha512_sha512,
-    hash_len: 64,
-};
 
 impl Pbkdf2 {
     /// PBKDF2-HMAC-SHA1, if the CPU has the crypto extension.
     pub(crate) fn sha1() -> Option<&'static Self> {
-        HaveCryptoExt::check().map(|_| &SHA1)
+        HaveCryptoExt::check()?;
+        Some(&Self(Hash::Sha1))
     }
 
     /// PBKDF2-HMAC-SHA256, if the CPU has the crypto extension.
     pub(crate) fn sha256() -> Option<&'static Self> {
-        HaveCryptoExt::check().map(|_| &SHA256)
+        HaveCryptoExt::check()?;
+        Some(&Self(Hash::Sha256))
     }
 
     /// PBKDF2-HMAC-SHA384, if the CPU has the SHA-512 instructions.
     pub(crate) fn sha384() -> Option<&'static Self> {
-        HaveSha3::check().map(|_| &SHA384)
+        HaveSha3::check()?;
+        Some(&Self(Hash::Sha384))
     }
 
     /// PBKDF2-HMAC-SHA512, if the CPU has the SHA-512 instructions.
     pub(crate) fn sha512() -> Option<&'static Self> {
-        HaveSha3::check().map(|_| &SHA512)
+        HaveSha3::check()?;
+        Some(&Self(Hash::Sha512))
     }
 
     /// Fills `out` with the key PBKDF2 derives from `password` and `salt`
@@ -74,10 +64,27 @@ impl Pbkdf2 {
         iterations: NonZeroU32,
         out: &mut [u8],
     ) {
+        type Routine =
+            unsafe extern "C" fn(*const u8, usize, *const u8, usize, u32, *mut u8, usize);
+        let (routine, hash_len): (Routine, usize) = match self.0 {
+            Hash::Sha1 => (vg::vg_pbkdf2_hmac_sha1_sha2::vg_pbkdf2_hmac_sha1_sha2, 20),
+            Hash::Sha256 => (
+                vg::vg_pbkdf2_hmac_sha256_sha2::vg_pbkdf2_hmac_sha256_sha2,
+                32,
+            ),
+            Hash::Sha384 => (
+                vg::vg_pbkdf2_hmac_sha384_sha512::vg_pbkdf2_hmac_sha384_sha512,
+                48,
+            ),
+            Hash::Sha512 => (
+                vg::vg_pbkdf2_hmac_sha512_sha512::vg_pbkdf2_hmac_sha512_sha512,
+                64,
+            ),
+        };
         // By multiplying, not dividing, so `admin/ct-vartime` finds no
         // division.
         assert!(
-            self.hash_len
+            hash_len
                 .checked_mul(u32::MAX as usize)
                 .is_none_or(|most| out.len() <= most)
         );
@@ -87,7 +94,7 @@ impl Pbkdf2 {
         // as just checked; and the constructor checked that the CPU has the
         // instructions the routine needs.
         unsafe {
-            (self.routine)(
+            routine(
                 password.as_ptr(),
                 password.len(),
                 salt.as_ptr(),

@@ -166,6 +166,18 @@ impl fmt::Debug for VerificationAlgorithm {
 }
 
 impl VerificationAlgorithm {
+    /// This algorithm with its modulus floor counted in whole bytes, as ring
+    /// does: a modulus a bit short of the floor, such as 2047 bits for a
+    /// floor of 2048, still verifies as long as it fills the floor's bytes.
+    pub const fn floor_in_bytes(&self) -> Self {
+        Self {
+            verification: self.verification,
+            // The fewest bits that still round up to the floor's bytes.
+            min_bits: 8 * self.min_bits.div_ceil(8) - 7,
+            verify: self.verify,
+        }
+    }
+
     /// RSASSA-PSS with SHA-256, MGF1-SHA-256, and a salt of `salt_length`,
     /// for moduli of 2048 to 8192 bits long enough for it.
     pub const fn pss_sha256(salt_length: PssSaltLength) -> Self {
@@ -189,6 +201,7 @@ const fn verification(scheme: RsaScheme, min_bits: usize) -> VerificationAlgorit
     algorithm(RsaVerification::Scheme(scheme), scheme.min_bits(min_bits))
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))] // const-evaluated only
 const fn sha1_verification(min_bits: usize) -> VerificationAlgorithm {
     algorithm(RsaVerification::Pkcs1Sha1, min_bits)
 }
@@ -270,7 +283,38 @@ pub struct PublicKeyComponents<B> {
     pub e: B,
 }
 
-/// An RSA public key, with a modulus of 1024 to 8192 bits, which verifies
+/// An RSA private key as its big-endian integers, as a JWK carries them,
+/// rather than DER.
+#[derive(Clone, Copy)]
+pub struct KeyPairComponents<B> {
+    /// The modulus and public exponent, without leading zero bytes.
+    pub public_key: PublicKeyComponents<B>,
+    /// The private exponent.
+    pub d: B,
+    /// The first prime factor of the modulus.
+    pub p: B,
+    /// The second prime factor of the modulus.
+    pub q: B,
+    /// `d` mod `p - 1`.
+    pub dp: B,
+    /// `d` mod `q - 1`.
+    pub dq: B,
+    /// The inverse of `q` mod `p`.
+    pub qi: B,
+}
+
+impl<B> fmt::Debug for KeyPairComponents<B>
+where
+    PublicKeyComponents<B>: fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("KeyPairComponents")
+            .field("public_key", &self.public_key)
+            .finish_non_exhaustive()
+    }
+}
+
+/// An RSA public key, with a modulus of 1017 to 8192 bits, which verifies
 /// with any [`VerificationAlgorithm`] whose floor it meets.
 ///
 /// Its bytes are its PKCS#1 `RSAPublicKey` DER, however it was loaded.
@@ -333,6 +377,12 @@ impl PublicKey {
         self.key.modulus_len_bits().div_ceil(8)
     }
 
+    /// The modulus's length in bits, for a caller that enforces its own floor,
+    /// such as one mirroring a library that refuses a key under 2048 bits.
+    pub fn modulus_bits(&self) -> usize {
+        self.key.modulus_len_bits()
+    }
+
     /// Verifies `signature` over `message` with `algorithm`, refusing a
     /// malformed signature, and refusing the key if its modulus is below
     /// the algorithm's floor.
@@ -346,15 +396,6 @@ impl PublicKey {
             return Err(KeyFormatError::RsaModulus.into());
         }
         (algorithm.verify)(&self.key, algorithm.verification.salt(), signature, message)
-    }
-}
-
-#[cfg(any(test, rind_fips))]
-impl PublicKey {
-    /// The modulus length in bits: what the FIPS module checks against
-    /// FIPS 186-5's sizes.
-    pub(crate) fn modulus_bits(&self) -> usize {
-        self.key.modulus_len_bits()
     }
 }
 
@@ -386,7 +427,7 @@ impl fmt::Debug for Signature {
     }
 }
 
-/// A two-prime RSA private key, with a modulus of 2048 to 8192 bits, and its
+/// A two-prime RSA private key, with a modulus of 2047 to 8192 bits, and its
 /// public key.
 pub struct KeyPair {
     key: rsa::SigningKey,
@@ -414,6 +455,23 @@ impl KeyPair {
         Self::new(rsa::SigningKey::from_pkcs1_der(der)?)
     }
 
+    /// Loads a private key from its big-endian integers, as a JWK carries
+    /// them, refusing one whose integers disagree.
+    pub fn from_components(
+        components: &KeyPairComponents<impl AsRef<[u8]>>,
+    ) -> Result<Self, Error> {
+        Self::new(rsa::SigningKey::from_components(&rsa::Components {
+            n: components.public_key.n.as_ref(),
+            e: components.public_key.e.as_ref(),
+            d: components.d.as_ref(),
+            p: components.p.as_ref(),
+            q: components.q.as_ref(),
+            dp: components.dp.as_ref(),
+            dq: components.dq.as_ref(),
+            qi: components.qi.as_ref(),
+        })?)
+    }
+
     fn new(key: rsa::SigningKey) -> Result<Self, Error> {
         let public = PublicKey::from_key(key.public_key())?;
         Ok(Self { key, public })
@@ -422,6 +480,15 @@ impl KeyPair {
     /// Returns the public key, which verifies what this key pair signs.
     pub fn public_key(&self) -> &PublicKey {
         &self.public
+    }
+
+    /// The bit lengths of the primes `p` and `q`, for a loader that sizes
+    /// keys by them, as ring does.
+    ///
+    /// Loading a key already reveals them, as aws-lc treats them as public,
+    /// and the encoding's framing shows their byte lengths.
+    pub fn prime_bits(&self) -> [usize; 2] {
+        self.key.prime_bits()
     }
 
     /// Signs `message` with `algorithm`, as long as the modulus.

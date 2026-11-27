@@ -193,8 +193,8 @@ impl<C: Curve> SigningKey<C> {
     }
 
     /// [`Self::sign()`] with `random` in place of the system's, so the FIPS
-    /// module's self-test knows its answer.
-    #[cfg(any(test, rind_fips))]
+    /// module's self-test knows its answer. Compiled as `crate::fips` is.
+    #[cfg(all(any(test, rind_fips), feature = "ml-dsa", feature = "slh-dsa"))]
     pub(crate) fn sign_with_random<'a, H: SignatureHash>(
         &self,
         message: &[u8],
@@ -863,6 +863,35 @@ mod tests {
             ),
             Err(Error::WrongLength)
         );
+    }
+
+    /// A SEC1 private key's scalar may carry leading zero bytes, which
+    /// aws-lc accepts too, but no nonzero byte beyond the order's length.
+    #[test]
+    fn sec1_scalar_with_leading_zeroes() {
+        fn check<C: Curve>(sec1_der: &[u8]) {
+            let key = SigningKey::<C>::from_sec1_der(sec1_der).unwrap();
+            let mut scalar = [0u8; MAX_SCALAR_LEN];
+            let scalar = key.to_scalar(&mut scalar).unwrap();
+            let public_key = key.public_key_uncompressed();
+            let mut buf = [0u8; 256];
+            for (lead, accepted) in [(0, true), (1, false)] {
+                let mut long = vec![0, lead];
+                long.extend_from_slice(scalar);
+                let der =
+                    sec1::encode(&long, public_key.as_ref(), Some(C::oid()), &mut buf).unwrap();
+                let loaded = SigningKey::<C>::from_sec1_der(der);
+                match accepted {
+                    true => assert!(loaded.unwrap().is_public_key(public_key.as_ref())),
+                    false => {
+                        assert_eq!(loaded.err(), Some(KeyFormatError::ScalarOutOfRange.into()))
+                    }
+                }
+            }
+        }
+        check::<curve::P256>(include_bytes!("ecdsa/secp256r1.der"));
+        check::<curve::P384>(include_bytes!("ecdsa/secp384r1.der"));
+        check::<curve::P521>(include_bytes!("ecdsa/secp521r1.der"));
     }
 
     fn check_pairwise_pkcs8<C: Curve>(pkcs8_der: &[u8]) {

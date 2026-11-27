@@ -5,8 +5,9 @@
 //! `admin/import-aws-lc`: the SHA-256 instructions where the CPU has them,
 //! and scalar code otherwise.
 //!
-//! rind's HOL Light proof, `proofs/hol-light/aarch64/sha256_block_data_order_hw.ml`,
-//! covers the routine for the SHA-256 instructions as rind's build emits it.
+//! rind's Lean proof, `proofs/Rind/Aarch64/Sha256HwAsm.lean`, covers the
+//! routine for the SHA-256 instructions as rind's Linux build emits it, its
+//! leakage contract included; Apple's build assembles its own copy.
 //! The scalar routine is not formally verified: its correctness rests on its
 //! use and testing in OpenSSL, BoringSSL, and aws-lc, and on rind's tests of
 //! it against the other, CAVP, and aws-lc-rs.

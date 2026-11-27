@@ -173,6 +173,11 @@ mod tests {
     };
 
     #[test]
+    fn debug_shows_no_secret() {
+        assert_eq!(format!("{:?}", Secret::new(b"password")), "Secret(..)");
+    }
+
+    #[test]
     fn params() {
         assert_eq!(
             Params::new(8, 1, 1),

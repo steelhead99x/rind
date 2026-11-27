@@ -73,7 +73,7 @@ theorem serialize_eq (s : State) : serialize s = s.toList.flatMap BitVec.toLEByt
   funext x
   exact (toLEBytes_eq x).symm
 
-theorem getLsbD_fromLEBytes (m : List (BitVec 8)) (k : Nat) :
+private theorem getLsbD_fromLEBytes (m : List (BitVec 8)) (k : Nat) :
     (BitVec.fromLEBytes m).getLsbD k = (m[k / 8]!).getLsbD (k % 8) := by
   have := BitVec.fromLEBytes_getElem! m k
   rw [BitVec.getElem!_eq_testBit_toNat] at this

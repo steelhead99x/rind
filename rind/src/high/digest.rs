@@ -18,7 +18,7 @@ pub struct Algorithm {
     // The only paths to the hash's code, so a binary links only the hashes
     // whose algorithms it names.
     hash: fn(&[u8]) -> Digest,
-    start: fn() -> State,
+    start: fn(&mut State, &[u8]),
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -142,20 +142,44 @@ pub fn digest(algorithm: &'static Algorithm, data: &[u8]) -> Digest {
 ///
 /// A clone forks the computation, so messages sharing a prefix hash it once.
 #[derive(Clone)]
-pub struct Context(State);
+pub struct Context(Computation);
+
+/// A [`Context`]'s algorithm and state.
+///
+/// `Copy`, so a clone copies the whole value at once rather than each field,
+/// through a temporary, around the padding after `algorithm`.
+#[derive(Clone, Copy)]
+#[repr(C)]
+struct Computation {
+    algorithm: &'static Algorithm,
+    state: State,
+}
 
 // `repr(u8)` lays every variant out as the tag then its `Hashing`, so `ops`
 // sits at one offset in each, and, on 64-bit targets, each context 16
-// bytes in.
+// bytes in, and 32 bytes into a `Context`, after its algorithm.
 //
-// Aligned to a cache line, so the layouts of the contexts it holds decide
-// which loads and stores cross one. A load cannot take its bytes from a
-// store still in flight that crosses a line, or from two stores, and waits
-// for them to reach the cache. That cost a SHA-256 context, against a
-// one-shot hash, 16 ns at 16 bytes on Zen 5.
-#[derive(Clone)]
-#[repr(u8, align(64))]
+// A load cannot take its bytes from a store still in flight that it only
+// partly overlaps, or that crosses a cache line, and waits for the stores to
+// reach the cache: on Zen 5 that cost a SHA-256 context 16 ns at 16 bytes.
+// So the hot paths write each context with the stores its finish loads
+// back, and never move one after:
+//
+// - 16-byte aligned, with the contexts' 16-byte lanes on 16-byte offsets,
+//   so no lane crosses a cache line, and a `Box` of it takes `malloc`'s
+//   ordinary path rather than the slower aligned one a cache line's
+//   alignment needs.
+// - Started as `Fresh`, so moving a new context, as into a `Box`, moves no
+//   hash state through `memcpy`, whose wide loads would wait on the stores
+//   that built it.
+// - `Copy`, so a clone is one copy of the source rather than a copy of its
+//   variant into a temporary and then of the temporary.
+#[derive(Clone, Copy)]
+#[repr(u8, align(16))]
 enum State {
+    /// Nothing hashed yet: the first update starts the context's algorithm
+    /// in place.
+    Fresh,
     Md5(Hashing<Md5Context>),
     Sha1(Hashing<Sha1Context>),
     Sha256(Hashing<Sha256Context>),
@@ -168,8 +192,9 @@ enum State {
 }
 
 impl State {
-    fn update(&mut self, data: &[u8]) {
+    fn update(&mut self, algorithm: &Algorithm, data: &[u8]) {
         match self {
+            Self::Fresh => (algorithm.start)(self, data),
             Self::Md5(hashing) => hashing.update(data),
             Self::Sha1(hashing) => hashing.update(data),
             Self::Sha256(hashing) => hashing.update(data),
@@ -182,8 +207,9 @@ impl State {
         }
     }
 
-    fn finish(&mut self) -> Digest {
+    fn finish(&self, algorithm: &Algorithm) -> Digest {
         match self {
+            Self::Fresh => (algorithm.hash)(&[]),
             Self::Md5(hashing) => hashing.finish(),
             Self::Sha1(hashing) => hashing.finish(),
             Self::Sha256(hashing) => hashing.finish(),
@@ -202,7 +228,7 @@ impl State {
 ///
 /// `ops` comes first, so every variant holds it at one offset and the match
 /// folds to a single load rather than a jump per variant.
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 #[repr(C)]
 struct Hashing<C: Variant> {
     ops: &'static Ops<C>,
@@ -211,46 +237,47 @@ struct Hashing<C: Variant> {
 
 struct Ops<C> {
     update: fn(&mut C, &[u8]),
-    finish: fn(&mut C) -> Digest,
+    finish: fn(&C) -> Digest,
 }
 
 impl<C: Variant> Hashing<C> {
-    fn start() -> State {
-        C::state(Self {
+    /// Starts `state` hashing with `C`, from `data`, building the context
+    /// where `state` lives.
+    fn start(state: &mut State, data: &[u8]) {
+        *state = C::state(Self {
             ops: const {
                 &Ops {
                     update: C::update,
-                    finish: C::finish_reset,
+                    finish: C::finish,
                 }
             },
             context: C::NEW,
-        })
+        });
+        if let Some(hashing) = C::hashing(state) {
+            hashing.context.update(data);
+        }
     }
 
     fn update(&mut self, data: &[u8]) {
         (self.ops.update)(&mut self.context, data)
     }
 
-    fn finish(&mut self) -> Digest {
-        (self.ops.finish)(&mut self.context)
+    fn finish(&self) -> Digest {
+        (self.ops.finish)(&self.context)
     }
 }
 
 /// A hash's context, as a [`State`] variant holds it.
-trait Variant: HashContext + 'static {
+trait Variant: HashContext + Copy + 'static {
     /// A context before any input.
-    // A constant rather than a function, so starting or resetting a context
-    // copies it from read-only memory instead of building it on the stack.
+    // A constant rather than a function, so starting a context copies it
+    // from read-only memory instead of building it on the stack.
     const NEW: Self;
 
     fn state(hashing: Hashing<Self>) -> State;
 
-    /// The digest of the message so far, leaving `self` as [`Self::NEW`].
-    fn finish_reset(&mut self) -> Digest {
-        let digest = self.finish();
-        *self = Self::NEW;
-        digest
-    }
+    /// The `Hashing` `state` holds, if it is this hash's.
+    fn hashing(state: &mut State) -> Option<&mut Hashing<Self>>;
 }
 
 macro_rules! variant {
@@ -260,6 +287,13 @@ macro_rules! variant {
 
             fn state(hashing: Hashing<Self>) -> State {
                 State::$variant(hashing)
+            }
+
+            fn hashing(state: &mut State) -> Option<&mut Hashing<Self>> {
+                match state {
+                    State::$variant(hashing) => Some(hashing),
+                    _ => None,
+                }
             }
         }
     };
@@ -288,10 +322,11 @@ variant!(
 );
 
 /// MD5's context, which no [`Hash`] has: nothing keyed or signed takes MD5.
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 struct Md5Context(md5::Md5Context);
 
 impl HashContext for Md5Context {
+    #[inline(always)]
     fn update(&mut self, bytes: &[u8]) {
         self.0.update(bytes)
     }
@@ -304,10 +339,11 @@ impl HashContext for Md5Context {
 variant!(Md5Context, Md5, Md5Context(md5::Md5Context::new()));
 
 /// SHA-512/256's context, which no [`Hash`] has.
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 struct Sha512_256Context(sha2::Sha512_256Context);
 
 impl HashContext for Sha512_256Context {
+    #[inline(always)]
     fn update(&mut self, bytes: &[u8]) {
         self.0.update(bytes)
     }
@@ -321,7 +357,7 @@ impl HashContext for Sha512_256Context {
 /// SHA-1 and SHA-2.
 macro_rules! sha3_context {
     ($name:ident, $variant:ident, $algorithm:ident) => {
-        #[derive(Clone)]
+        #[derive(Clone, Copy)]
         struct $name(sha3::$name);
 
         impl HashContext for $name {
@@ -351,40 +387,37 @@ fn one_shot<C: Variant>(data: &[u8]) -> Digest {
 
 impl Context {
     /// Starts hashing with `algorithm`.
+    // Inlined, so a context built in place, as by `Box::new`, writes just
+    // its algorithm and tag there.
+    #[inline]
     pub fn new(algorithm: &'static Algorithm) -> Self {
-        Self((algorithm.start)())
+        Self(Computation {
+            algorithm,
+            state: State::Fresh,
+        })
     }
 
     /// Adds `data` to the message.
     pub fn update(&mut self, data: &[u8]) {
         // The compressors enter instead, so an update that only buffers skips
         // the cost of enabling DIT.
-        self.0.update(data);
+        self.0.state.update(self.0.algorithm, data);
     }
 
     /// Returns the digest of the message, and starts a new one with the same algorithm.
     pub fn finish(&mut self) -> Digest {
         let _entry = Entry::new_secret();
-        self.0.finish()
+        let digest = self.0.state.finish(self.0.algorithm);
+        self.0.state = State::Fresh;
+        digest
     }
 }
 
 impl fmt::Debug for Context {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // An `Id`, not the static, so formatting links no hash's code.
-        let algorithm = match &self.0 {
-            State::Md5(_) => Id::Md5,
-            State::Sha1(_) => Id::Sha1,
-            State::Sha256(_) => Id::Sha256,
-            State::Sha384(_) => Id::Sha384,
-            State::Sha512(_) => Id::Sha512,
-            State::Sha512_256(_) => Id::Sha512_256,
-            State::Sha3_256(_) => Id::Sha3_256,
-            State::Sha3_384(_) => Id::Sha3_384,
-            State::Sha3_512(_) => Id::Sha3_512,
-        };
         f.debug_struct("Context")
-            .field("algorithm", &algorithm)
+            .field("algorithm", &self.0.algorithm.id)
             .finish_non_exhaustive()
     }
 }
@@ -735,15 +768,16 @@ mod tests {
         }
     }
 
-    // Each context starts on a 16-byte boundary of a cache-line-aligned
+    // Each context starts on a 16-byte boundary of a 16-byte-aligned
     // `Context`, which `mid::sha2`'s layout test builds on.
     #[cfg(target_pointer_width = "64")]
     #[test]
     fn layout() {
-        assert_eq!(align_of::<Context>(), 64);
+        assert_eq!(align_of::<Context>(), 16);
         for algorithm in [&SHA256, &SHA384, &SHA512, &SHA512_256] {
-            let ctx = Context::new(algorithm);
-            let context: *const u8 = match &ctx.0 {
+            let mut ctx = Context::new(algorithm);
+            ctx.update(&[]);
+            let context: *const u8 = match &ctx.0.state {
                 State::Sha256(hashing) => core::ptr::from_ref(&hashing.context).cast(),
                 State::Sha384(hashing) => core::ptr::from_ref(&hashing.context).cast(),
                 State::Sha512(hashing) => core::ptr::from_ref(&hashing.context).cast(),
@@ -758,7 +792,8 @@ mod tests {
     }
 
     // `finish` leaves a fresh context: each message after it hashes alone,
-    // whether a partial block, several blocks, or nothing was left buffered.
+    // whether a partial block, several blocks, or nothing was left buffered,
+    // and a context finished before any update gives the empty message's.
     #[test]
     fn finish_resets() {
         for algorithm in [
@@ -773,6 +808,7 @@ mod tests {
             &SHA3_512,
         ] {
             let mut ctx = Context::new(algorithm);
+            assert_eq!(ctx.finish().as_ref(), digest(algorithm, &[]).as_ref());
             for message in [&[0x61u8; 3][..], &[0x62; 300], &[], &[0x63; 128]] {
                 ctx.update(message);
                 assert_eq!(

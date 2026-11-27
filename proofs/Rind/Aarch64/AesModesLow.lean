@@ -331,7 +331,7 @@ theorem leBytesToQuad32_leQuad32ToBytes' (q : Quad32) : leBytesToQuad32 (leQuad3
 theorem length_leQuad32ToBytes (q : Quad32) : (leQuad32ToBytes q).length = 16 := by
   simp [leQuad32ToBytes]
 
-theorem bvs_length (a : Std.Array U8 16#usize) : (bvs a.val).length = 16 := by simp
+theorem bvs_length_16 (a : Std.Array U8 16#usize) : (bvs a.val).length = 16 := by simp
 
 /-- A block's bytes, which `cbcEncrypt` and `cbcDecrypt` read. -/
 abbrev blockBytes (a : Std.Array U8 16#usize) : List (BitVec 8) := bvs a.val
@@ -840,7 +840,7 @@ theorem dec_block {N : Usize} (alg : Algorithm) (hN : N.val = nr alg + 1) (key :
     (a : Std.Array U8 16#usize) (cB rest : List (BitVec 8)) (hcB : cB.length = 16) :
     blockBytes (storeBytes (decRounds rk (loadBytes a.val) ^^^ (rk.val[N.val - 1]! ^^^ leBytesToQuad32 cB))) ++
       cbcDecrypt alg key (blockBytes a) rest = cbcDecrypt alg key cB (blockBytes a ++ rest) := by
-  rw [cbcDecrypt_cons _ _ _ _ _ (bvs_length a), aesBlockDecrypt, zipWith_leQuad32ToBytes _ _ hcB,
+  rw [cbcDecrypt_cons _ _ _ _ _ (bvs_length_16 a), aesBlockDecrypt, zipWith_leQuad32ToBytes _ _ hcB,
     bvs_storeBytes, ← BitVec.xor_assoc, decRounds_eq alg hN _ rk hrk, loadBytes_eq]
 
 /-- A run of blocks of CBC decryption, each chained from the one before it,
@@ -863,7 +863,7 @@ theorem dec_chain {N : Usize} (alg : Algorithm) (hN : N.val = nr alg + 1) (key :
   | a :: xs, d :: ds, cB, hcB, hl, hd => by
     have h0 : d = storeBytes (decRounds rk (loadBytes a.val) ^^^ (rk.val[N.val - 1]! ^^^ leBytesToQuad32 cB)) := by
       simpa using hd 0 (by simp)
-    have ih := dec_chain alg hN key rk hrk R xs ds (blockBytes a) (bvs_length a) (by simpa using hl) (by
+    have ih := dec_chain alg hN key rk hrk R xs ds (blockBytes a) (bvs_length_16 a) (by simpa using hl) (by
       intro j hj
       have := hd (j + 1) (by simp; omega)
       cases j with
@@ -965,7 +965,7 @@ theorem hw_decrypt_spec {N : Usize} (alg : Algorithm) (hN : N.val = nr alg + 1) 
           chunks.val[it.start.val]! :: chunks.val.drop (it.start.val + 1) := by
         rw [List.drop_eq_getElem_cons hlt, getElem!_pos]
       simp only [Slice.set_val_eq]
-      refine ⟨by simp [hlen], by rw [drop_set_succ, ← List.drop_drop, hdrop, List.drop_drop], _, bvs_length _,
+      refine ⟨by simp [hlen], by rw [drop_set_succ, ← List.drop_drop, hdrop, List.drop_drop], _, bvs_length_16 _,
         by rw [hnext, loadBytes_eq], ?_⟩
       rw [hW, take_set_succ _ _ _ (by omega), hp]
       simp only [List.flatMap_cons, List.flatMap_nil, List.flatMap_append, List.append_nil, List.append_assoc]
@@ -1015,7 +1015,7 @@ theorem hw_decrypt_spec {N : Usize} (alg : Algorithm) (hN : N.val = nr alg + 1) 
       have hp : tail.val.drop it.start.val = tail.val[it.start.val]! :: tail.val.drop (it.start.val + 1) := by
         rw [List.drop_eq_getElem_cons hlt, getElem!_pos]
       rw [hs', Slice.set_val_eq]
-      refine ⟨by simp [hlen], by rw [drop_set_succ, ← List.drop_drop, hdrop, List.drop_drop], _, bvs_length _,
+      refine ⟨by simp [hlen], by rw [drop_set_succ, ← List.drop_drop, hdrop, List.drop_drop], _, bvs_length_16 _,
         loadBytes_eq _, ?_⟩
       rw [hW, take_set_succ _ _ _ (by omega), hp]
       simp only [List.flatMap_cons, List.flatMap_nil, List.flatMap_append, List.append_nil, List.append_assoc]
@@ -1444,7 +1444,7 @@ theorem by8_spec {T : Type} (inst : low.generic.ctr.Ctr8 T) (key : T) (nonce : S
         hlen1]
       simp only [show (128#usize).val = 128 by simp]
       have ht : i - chunks.val.length * 128 < tail.val.length := by omega
-      rw [hW _ ht, htl', getElem!_drop', ← hcl', show chunks.val.length * 128 + (i - chunks.val.length * 128) = i by omega,
+      rw [hW _ ht, htl', rind.spec.getElem!_drop', ← hcl', show chunks.val.length * 128 + (i - chunks.val.length * 128) = i by omega,
         show 8 * chunks.val.length + (i - chunks.val.length * 128) / 16 = i / 16 by omega,
         show (i - chunks.val.length * 128) % 16 = i % 16 by omega]
   step as ⟨b, hb⟩

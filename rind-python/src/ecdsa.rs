@@ -5,7 +5,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 use rind::ecdsa;
 
-use crate::{Bytes, PublicKeyCell, algorithm, bytes, constants, error, submodule};
+use crate::{Bytes, PublicKeyCell, Secret, algorithm, bytes, constants, error, submodule};
 
 algorithm!(
     /// An algorithm a `KeyPair` signs with.
@@ -86,13 +86,13 @@ impl KeyPair {
 
     /// Loads a key pair for `algorithm` from PKCS#8 DER.
     #[staticmethod]
-    fn from_pkcs8(algorithm: &Bound<'_, SigningAlgorithm>, der: Bytes<'_>) -> PyResult<Self> {
+    fn from_pkcs8(algorithm: &Bound<'_, SigningAlgorithm>, der: Secret<'_>) -> PyResult<Self> {
         Self::wrap(ecdsa::KeyPair::from_pkcs8(algorithm.get().inner, &der))
     }
 
     /// Loads a key pair for `algorithm` from SEC1 `ECPrivateKey` DER.
     #[staticmethod]
-    fn from_sec1(algorithm: &Bound<'_, SigningAlgorithm>, der: Bytes<'_>) -> PyResult<Self> {
+    fn from_sec1(algorithm: &Bound<'_, SigningAlgorithm>, der: Secret<'_>) -> PyResult<Self> {
         Self::wrap(ecdsa::KeyPair::from_sec1(algorithm.get().inner, &der))
     }
 
@@ -102,7 +102,7 @@ impl KeyPair {
     #[staticmethod]
     fn from_scalar_and_public_key(
         algorithm: &Bound<'_, SigningAlgorithm>,
-        scalar: Bytes<'_>,
+        scalar: Secret<'_>,
         public_key: Bytes<'_>,
     ) -> PyResult<Self> {
         let algorithm = algorithm.get().inner;

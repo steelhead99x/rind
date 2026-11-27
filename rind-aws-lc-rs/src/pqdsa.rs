@@ -13,7 +13,7 @@ use crate::encoding::{AsDer, Pkcs8V1Der, PublicKeyX509Der};
 use crate::error::{KeyRejected, Unspecified, unspecified};
 use crate::signature::{KeyPair, ParsedKey, private, verification_algorithm};
 use crate::wipe::Wiped;
-use crate::{Hex, der, pkcs8};
+use crate::{Hex, der, evp, pkcs8, rsa_check};
 
 /// An ML-DSA parameter set.
 #[allow(non_camel_case_types)]
@@ -487,7 +487,10 @@ fn other_parameter_set(id: &AlgorithmID, pkcs8: &[u8]) -> KeyRejected {
 /// through [`strict_mldsa_pkcs8`].
 fn load_mldsa_pkcs8(id: &AlgorithmID, pkcs8: &[u8]) -> Result<Key, rind::Error> {
     let rebuilt = strict_mldsa_pkcs8(id, pkcs8);
-    new_key!(id, from_pkcs8(rebuilt.as_deref().unwrap_or(pkcs8)))
+    new_key!(
+        id,
+        from_pkcs8(rebuilt.as_ref().map_or(pkcs8, |doc| doc.as_slice()))
+    )
 }
 
 /// Whether `pkcs8` is a private key of a type aws-lc-rs parses that is not
@@ -531,9 +534,13 @@ fn parses_as_other_private_key(pkcs8: &[u8]) -> bool {
         [0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x04, 0x03] => {
             ml_kem_private_key(document, 3168)
         }
-        // X9.57 `id-dsa`, which rind cannot back, decided from its OID and
-        // the document's public framing, without reading the private key.
-        [0x2a, 0x86, 0x48, 0xce, 0x38, 0x04, 0x01] => der::pkcs8_parts(document).is_some(),
+        // X9.57 `id-dsa`, which rind cannot back. `dsa_priv_decode`
+        // (`p_dsa_asn1.c`) rejects a v2 public key.
+        [0x2a, 0x86, 0x48, 0xce, 0x38, 0x04, 0x01] => {
+            der::pkcs8_parts(document).is_some_and(|parts| {
+                !parts.has_public_key && evp::dsa_private_key(parts.parameters, parts.private_key)
+            })
+        }
         _ => false,
     }
 }
@@ -552,6 +559,40 @@ fn rsa_pss_private_key(pkcs8: &[u8]) -> bool {
         || unbacked_rsa_size(parts.private_key)
 }
 
+/// Whether `spki` is a public key of a type aws-lc parses that is neither
+/// RSA nor RSA-PSS, which aws-lc-rs refuses as `WrongAlgorithm`
+/// (`parse_rfc5280_public_key` in aws-lc-rs 1.19.0
+/// `aws-lc-rs/src/evp_pkey.rs`). Each `*_pub_decode` in aws-lc's
+/// `crypto/evp_extra` is followed: Ed25519, X25519, ML-DSA, and ML-KEM
+/// check only that the parameters are absent and the key's length; EC, DSA,
+/// and DH keys are checked as [`evp`] describes.
+pub(crate) fn parses_as_other_public_key(spki: &der::SpkiParts<'_>) -> bool {
+    let len = |expected: usize| spki.parameters.is_empty() && spki.key.len() == expected;
+    match spki.oid {
+        // RFC 8410 Ed25519 and X25519.
+        [0x2b, 0x65, 0x70] | [0x2b, 0x65, 0x6e] => len(32),
+        // FIPS 204 ML-DSA-44, ML-DSA-65, and ML-DSA-87.
+        [0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x03, 0x11] => len(1312),
+        [0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x03, 0x12] => len(1952),
+        [0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x03, 0x13] => len(2592),
+        // FIPS 203 ML-KEM-512, ML-KEM-768, and ML-KEM-1024.
+        [0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x04, 0x01] => len(800),
+        [0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x04, 0x02] => len(1184),
+        [0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x04, 0x03] => len(1568),
+        // RFC 5480 `id-ecPublicKey`.
+        [0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01] => evp::ec_public_key(spki.parameters, spki.key),
+        // X9.57 `id-dsa`.
+        [0x2a, 0x86, 0x48, 0xce, 0x38, 0x04, 0x01] => {
+            evp::dsa_public_key(spki.parameters, spki.key)
+        }
+        // PKCS #3 `dhKeyAgreement`.
+        [0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x03, 0x01] => {
+            evp::dh_public_key(spki.parameters, spki.key)
+        }
+        _ => false,
+    }
+}
+
 /// `rsa_priv_decode`: NULL parameters, no v2 public key, and components that
 /// agree, which rind checks for a modulus of 2048 to 8192 bits.
 fn rsa_private_key(pkcs8: &[u8]) -> bool {
@@ -564,12 +605,16 @@ fn rsa_private_key(pkcs8: &[u8]) -> bool {
     rind::rsa::KeyPair::from_pkcs8(pkcs8).is_ok() || unbacked_rsa_size(parts.private_key)
 }
 
-/// Whether a two-prime PKCS#1 `RSAPrivateKey`'s modulus is outside the 2048
-/// to 8192 bits rind signs with. rind cannot back such a key, so it is
-/// refused as another algorithm from its public framing and modulus length
-/// alone, without reading the private components.
+/// Whether a two-prime PKCS#1 `RSAPrivateKey` is outside the 2048 to 8192
+/// bits rind signs with and still parses in aws-lc: its framing, and
+/// `RSA_check_key`'s relations between its private components, checked in
+/// constant time by [`rsa_check::consistent`]. rind cannot back such a key,
+/// so a consistent one is another algorithm and an inconsistent one does not
+/// parse.
 fn unbacked_rsa_size(pkcs1: &[u8]) -> bool {
-    der::rsa_private_key_modulus_bits(pkcs1).is_some_and(|bits| !(2048..=8192).contains(&bits))
+    der::rsa_private_key_parts(pkcs1).is_some_and(|parts| {
+        !(2048..=8192).contains(&der::bits(parts.n)) && rsa_check::consistent(&parts)
+    })
 }
 
 /// An ML-KEM private key in RFC 9935's seed form or expanded form.
@@ -593,7 +638,7 @@ fn ml_kem_private_key(pkcs8: &[u8], expanded_len: usize) -> bool {
 /// already is one. aws-lc ignores bytes after the document, bytes after the
 /// single private-key element, and the v2 public key (`pqdsa_priv_decode`
 /// does not read `pubkey`).
-fn strict_mldsa_pkcs8(id: &AlgorithmID, pkcs8: &[u8]) -> Option<Vec<u8>> {
+fn strict_mldsa_pkcs8(id: &AlgorithmID, pkcs8: &[u8]) -> Option<Wiped<Vec<u8>>> {
     let parts = der::pkcs8_parts(pkcs8)?;
     if !parts.parameters.is_empty() {
         return None;
@@ -608,59 +653,70 @@ fn strict_mldsa_pkcs8(id: &AlgorithmID, pkcs8: &[u8]) -> Option<Vec<u8>> {
     encode_mldsa_pkcs8(id, element)
 }
 
-fn encode_mldsa_pkcs8(id: &AlgorithmID, private_key: &[u8]) -> Option<Vec<u8>> {
-    let oid = der_tlv(0x06, &id.oid())?;
-    let algorithm = der_tlv(0x30, &oid)?;
-    let key = der_tlv(0x04, private_key)?;
-    let mut body = vec![0x02, 0x01, 0x00];
-    body.extend(algorithm);
-    body.extend(key);
-    der_tlv(0x30, &body)
+/// The ML-DSA PKCS#8 document around `private_key`, in a wiped buffer.
+fn encode_mldsa_pkcs8(id: &AlgorithmID, private_key: &[u8]) -> Option<Wiped<Vec<u8>>> {
+    let oid = der::secret_tlv(0x06, &[&id.oid()])?;
+    let algorithm = der::secret_tlv(0x30, &[&oid])?;
+    let key = der::secret_tlv(0x04, &[private_key])?;
+    der::secret_tlv(0x30, &[&[0x02, 0x01, 0x00], &algorithm, &key])
 }
 
-fn der_tlv(tag: u8, body: &[u8]) -> Option<Vec<u8>> {
-    let mut out = Vec::with_capacity(body.len() + 4);
-    out.push(tag);
-    if body.len() < 0x80 {
-        out.push(body.len() as u8);
-    } else if body.len() <= 0xff {
-        out.extend([0x81, body.len() as u8]);
-    } else {
-        let len = u16::try_from(body.len()).ok()?;
-        out.push(0x82);
-        out.extend(len.to_be_bytes());
-    }
-    out.extend_from_slice(body);
-    Some(out)
-}
-
-/// P-256, P-384, and P-521 through rind, under the one curve the parameters
-/// name, including a scalar shorter than the field. secp256k1, secp224r1, and
-/// brainpoolP256r1, which rind cannot back, are decided from their OID alone,
-/// without reading the secret scalar.
+/// `eckey_priv_decode`: no v2 public key, then parameters naming one of
+/// aws-lc's built-in curves, by name or explicitly, and an `ECPrivateKey`
+/// whose own parameters, if any, name the same curve. A P-256, P-384, or
+/// P-521 key goes through rind under the curve's name, including a scalar
+/// shorter than the field; a key on another curve through
+/// [`evp::unbacked_ec_private_key`].
 fn ec_private_key(pkcs8: &[u8]) -> bool {
     use rind::ecdsa::sign::{P256_SHA256_ASN1, P384_SHA384_ASN1, P521_SHA512_ASN1};
-    let Some(oid) = der::pkcs8_parts(pkcs8).and_then(|parts| curve_oid(parts.parameters)) else {
+    let Some(parts) = der::pkcs8_parts(pkcs8) else {
         return false;
     };
-    let algorithm = match oid {
+    let Some((curve, [])) = evp::ec_group(parts.parameters) else {
+        return false;
+    };
+    let algorithm = match curve.oid {
         [0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07] => &P256_SHA256_ASN1,
         [0x2b, 0x81, 0x04, 0x00, 0x22] => &P384_SHA384_ASN1,
         [0x2b, 0x81, 0x04, 0x00, 0x23] => &P521_SHA512_ASN1,
-        [0x2b, 0x81, 0x04, 0x00, 0x0a]
-        | [0x2b, 0x81, 0x04, 0x00, 0x21]
-        | [0x2b, 0x24, 0x03, 0x03, 0x02, 0x08, 0x01, 0x01, 0x07] => return true,
-        _ => return false,
+        _ => {
+            return !parts.has_public_key
+                && evp::sec1(parts.private_key).is_some_and(|key| {
+                    same_curve(curve, &key) && evp::unbacked_ec_private_key(curve, &key)
+                });
+        }
     };
-    rind::ecdsa::KeyPair::from_pkcs8(algorithm, pkcs8).is_ok()
-        || padded_ec_scalar(pkcs8)
-            .is_some_and(|padded| rind::ecdsa::KeyPair::from_pkcs8(algorithm, &padded).is_ok())
+    let loads = |pkcs8: &[u8]| {
+        rind::ecdsa::KeyPair::from_pkcs8(algorithm, pkcs8).is_ok()
+            || padded_ec_scalar(pkcs8)
+                .is_some_and(|padded| rind::ecdsa::KeyPair::from_pkcs8(algorithm, &padded).is_ok())
+    };
+    if loads(pkcs8) {
+        return true;
+    }
+    // aws-lc also takes explicit parameters and hybrid points, which rind's
+    // parser does not.
+    !parts.has_public_key
+        && evp::sec1(parts.private_key).is_some_and(|key| {
+            same_curve(curve, &key)
+                && evp::canonical_ec_pkcs8(curve, parts.parameters, &key)
+                    .is_some_and(|canonical| loads(&canonical))
+        })
+}
+
+/// Whether an `ECPrivateKey`'s own parameters, if any, name `curve`, as
+/// `EC_KEY_parse_private_key` requires.
+fn same_curve(curve: &evp::Curve, key: &evp::Sec1<'_>) -> bool {
+    key.parameters.is_none_or(|inner| {
+        evp::ec_group(inner)
+            .is_some_and(|(inner, rest)| core::ptr::eq(inner, curve) && rest.is_empty())
+    })
 }
 
 /// A scalar shorter than the field, left-padded with zeros, for P-256,
 /// P-384, or P-521. aws-lc accepts that encoding when the value is below
 /// the order (`EC_KEY_parse_private_key`).
-fn padded_ec_scalar(pkcs8: &[u8]) -> Option<Vec<u8>> {
+fn padded_ec_scalar(pkcs8: &[u8]) -> Option<Wiped<Vec<u8>>> {
     let parts = der::pkcs8_parts(pkcs8)?;
     if parts.has_public_key {
         return None;
@@ -677,21 +733,15 @@ fn padded_ec_scalar(pkcs8: &[u8]) -> Option<Vec<u8>> {
     if scalar.is_empty() || scalar.len() >= field {
         return None;
     }
-    let mut padded_scalar = vec![0u8; field - scalar.len()];
-    padded_scalar.extend_from_slice(scalar);
+    // Every buffer that holds the scalar is wiped on drop and never grows.
+    let zeros = alloc::vec![0u8; field - scalar.len()];
     let tail = rest.get(scalar_enc.len()..)?;
-    let mut inner = version.to_vec();
-    inner.extend(der_tlv(0x04, &padded_scalar)?);
-    inner.extend_from_slice(tail);
-    let sec1 = der_tlv(0x30, &inner)?;
-    let mut algorithm = der_tlv(0x06, &[0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01])?;
-    algorithm.extend_from_slice(parts.parameters);
-    let algorithm = der_tlv(0x30, &algorithm)?;
-    let key = der_tlv(0x04, &sec1)?;
-    let mut body = vec![0x02, 0x01, 0x00];
-    body.extend(algorithm);
-    body.extend(key);
-    der_tlv(0x30, &body)
+    let padded = der::secret_tlv(0x04, &[&zeros, scalar])?;
+    let sec1 = der::secret_tlv(0x30, &[version, &padded, tail])?;
+    let ec_public_key = [0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01];
+    let algorithm = der::secret_tlv(0x30, &[&ec_public_key, parts.parameters])?;
+    let key = der::secret_tlv(0x04, &[&sec1])?;
+    der::secret_tlv(0x30, &[&[0x02, 0x01, 0x00], &algorithm, &key])
 }
 
 fn field_len(oid: &[u8]) -> Option<usize> {
@@ -713,7 +763,7 @@ fn curve_oid(parameters: &[u8]) -> Option<&[u8]> {
 
 /// Absent parameters, an empty `RSASSA-PSS-params`, or one explicit hash
 /// `RSASSA_PSS_parse_params` accepts (`crypto/rsa_extra/rsassa_pss_asn1.c`).
-fn pss_parameters_ok(parameters: &[u8]) -> bool {
+pub(crate) fn pss_parameters_ok(parameters: &[u8]) -> bool {
     if parameters.is_empty() || parameters == [0x30, 0x00] {
         return true;
     }

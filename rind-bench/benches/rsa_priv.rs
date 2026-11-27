@@ -1,10 +1,17 @@
+#[cfg(target_arch = "xtensa")]
+fn main() {}
+
+#[cfg(not(target_arch = "xtensa"))]
 mod criterion;
+#[cfg(not(target_arch = "xtensa"))]
 use std::hint::black_box;
 
+#[cfg(not(target_arch = "xtensa"))]
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 
 /// libcrux's RSA-PSS key, which holds the modulus and private exponent
 /// alone, so it signs without the CRT.
+#[cfg(not(target_arch = "xtensa"))]
 fn libcrux_key(private_key: &[u8]) -> libcrux_rsa::PrivateKey<256> {
     use rsa::pkcs1::DecodeRsaPrivateKey;
     use rsa::traits::{PrivateKeyParts, PublicKeyParts};
@@ -22,6 +29,7 @@ fn libcrux_key(private_key: &[u8]) -> libcrux_rsa::PrivateKey<256> {
 
 /// verified-garbage's key of a PKCS#1 or PKCS#8 private key's components,
 /// since it takes them in place of DER.
+#[cfg(not(target_arch = "xtensa"))]
 fn vg_key(private_key: &[u8]) -> verified_garbage::rsa::PrivateKey {
     use rsa::pkcs1::DecodeRsaPrivateKey;
     use rsa::pkcs8::DecodePrivateKey;
@@ -48,6 +56,7 @@ fn vg_key(private_key: &[u8]) -> verified_garbage::rsa::PrivateKey {
     .unwrap()
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn rsa2048_pkcs1_sha256_sign(c: &mut Criterion) {
     let private_key = include_bytes!("../../rind/src/high/rsa/rsa2048.der");
     let message =
@@ -96,6 +105,7 @@ fn rsa2048_pkcs1_sha256_sign(c: &mut Criterion) {
     });
 
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         use rind::rsa::{KeyPair, sign};
         let key = KeyPair::from_pkcs1(private_key).unwrap();
 
@@ -136,7 +146,11 @@ fn rsa2048_pkcs1_sha256_sign(c: &mut Criterion) {
         })
     });
 
-    #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+    #[cfg(all(
+        feature = "__bench_openssl",
+        target_family = "unix",
+        not(target_arch = "xtensa")
+    ))]
     group.bench_function("openssl", |b| {
         use openssl::hash::MessageDigest;
         use openssl::pkey::PKey;
@@ -151,6 +165,7 @@ fn rsa2048_pkcs1_sha256_sign(c: &mut Criterion) {
     });
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn rsa2048_pss_sha256_sign(c: &mut Criterion) {
     let private_key = include_bytes!("../../rind/src/high/rsa/rsa2048.der");
     let message =
@@ -185,6 +200,7 @@ fn rsa2048_pss_sha256_sign(c: &mut Criterion) {
     });
 
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         use rind::rsa::{KeyPair, sign};
         let key = KeyPair::from_pkcs1(private_key).unwrap();
 
@@ -251,7 +267,11 @@ fn rsa2048_pss_sha256_sign(c: &mut Criterion) {
         })
     });
 
-    #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+    #[cfg(all(
+        feature = "__bench_openssl",
+        target_family = "unix",
+        not(target_arch = "xtensa")
+    ))]
     group.bench_function("openssl", |b| {
         use openssl::hash::MessageDigest;
         use openssl::pkey::PKey;
@@ -273,6 +293,7 @@ fn rsa2048_pss_sha256_sign(c: &mut Criterion) {
 /// Signing at the other sizes, whose primes take a different Montgomery
 /// multiplication from RSA-2048's on some CPUs: 2056 bits for primes of an
 /// odd number of words, and 2560 for a multiple of four but not eight.
+#[cfg(not(target_arch = "xtensa"))]
 fn rsa_pkcs1_sha256_sign_sizes(c: &mut Criterion) {
     let keys: [(u32, &[u8]); 6] = [
         (
@@ -339,6 +360,7 @@ fn rsa_pkcs1_sha256_sign_sizes(c: &mut Criterion) {
         });
 
         group.bench_function("rind", |b| {
+            let _dit = criterion::rind_dit();
             use rind::rsa::{KeyPair, sign};
             let key = KeyPair::from_pkcs8(private_key).unwrap();
 
@@ -370,6 +392,7 @@ fn rsa_pkcs1_sha256_sign_sizes(c: &mut Criterion) {
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn rsa2048_oaep_sha256_decrypt(c: &mut Criterion) {
     // Encrypted here, since OAEP ciphertexts are randomized.
     use rind::rsa::{DecryptingKey, OAEP_SHA256};
@@ -415,6 +438,7 @@ fn rsa2048_oaep_sha256_decrypt(c: &mut Criterion) {
     });
 
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         let key = DecryptingKey::from_pkcs1(&OAEP_SHA256, private_key).unwrap();
 
         b.iter(|| {
@@ -434,6 +458,7 @@ fn rsa2048_oaep_sha256_decrypt(c: &mut Criterion) {
 
 /// Loading a key checks its components agree, which should stay small next
 /// to a signature at every size.
+#[cfg(not(target_arch = "xtensa"))]
 fn rsa_load(c: &mut Criterion) {
     let keys: [(u32, &[u8]); 2] = [
         (2048, include_bytes!("../../rind/src/high/rsa/rsa2048.der")),
@@ -451,6 +476,7 @@ fn rsa_load(c: &mut Criterion) {
         });
 
         group.bench_function("rind", |b| {
+            let _dit = criterion::rind_dit();
             use rind::rsa::KeyPair;
 
             b.iter(|| black_box(KeyPair::from_pkcs1(black_box(private_key)).unwrap()))
@@ -483,6 +509,7 @@ fn rsa_load(c: &mut Criterion) {
         });
 
         group.bench_function("rind-sign", |b| {
+            let _dit = criterion::rind_dit();
             use rind::rsa::{KeyPair, sign};
             let key = KeyPair::from_pkcs1(private_key).unwrap();
             b.iter(|| black_box(key.sign(&sign::PKCS1_SHA256, b"hello")).unwrap())
@@ -490,6 +517,7 @@ fn rsa_load(c: &mut Criterion) {
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 criterion_group!(
     benches,
     rsa2048_pkcs1_sha256_sign,
@@ -498,4 +526,5 @@ criterion_group!(
     rsa2048_oaep_sha256_decrypt,
     rsa_load
 );
+#[cfg(not(target_arch = "xtensa"))]
 criterion_main!(benches);

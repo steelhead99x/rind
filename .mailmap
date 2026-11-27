@@ -1,4 +1,3 @@
-# Display-only: show commits made on a machine-local address under the steelhead99x noreply identity. History is not rewritten.
-steelhead99x <224322244+steelhead99x@users.noreply.github.com> steelhead99x <224322244+steelhead99x@users.noreply.github.com>
-steelhead99x <224322244+steelhead99x@users.noreply.github.com> kD <224322244+steelhead99x@users.noreply.github.com>
-steelhead99x <224322244+steelhead99x@users.noreply.github.com> steelhead99x <steelhead99x@users.noreply.github.com>
+# Display-only: show every steelhead99x noreply address under one identity.
+steelhead99x <224322244+steelhead99x@users.noreply.github.com>
+steelhead99x <224322244+steelhead99x@users.noreply.github.com> <steelhead99x@users.noreply.github.com>

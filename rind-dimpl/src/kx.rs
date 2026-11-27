@@ -32,8 +32,9 @@ impl SupportedKxGroup for Group {
     }
 
     fn start_exchange(&self, mut pub_key: Buf) -> Result<Box<dyn ActiveKeyExchange>, CryptoError> {
-        let key = PrivateKey::generate(self.algorithm)
-            .map_err(|_| CryptoError::OperationFailed(CryptoOperation::GenerateEphemeralKey))?;
+        let key = PrivateKey::generate(self.algorithm).or(Err(CryptoError::OperationFailed(
+            CryptoOperation::GenerateEphemeralKey,
+        )))?;
         pub_key.clear();
         pub_key.extend_from_slice(key.public_key().as_ref());
         Ok(Box::new(Exchange {

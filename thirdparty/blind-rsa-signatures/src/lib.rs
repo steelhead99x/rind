@@ -79,13 +79,14 @@ pub mod reexports {
 /// left-padding the number with zeroes to the specified length.
 fn to_bytes_be_padded(n: &BoxedUint, len: usize) -> Vec<u8> {
     let bytes = n.to_be_bytes();
-    if len > bytes.len() {
-        let mut result = vec![0u8; len];
-        result[len - bytes.len()..].copy_from_slice(&bytes);
-        result
-    } else {
-        bytes.to_vec()
-    }
+    // The bytes span whole limbs, more than `len` for a modulus whose size
+    // is not a multiple of the limb, such as 2056 bits: the excess is
+    // leading zeros, as every value here is below the modulus.
+    let (excess, bytes) = bytes.split_at(bytes.len().saturating_sub(len));
+    assert!(excess.iter().all(|&b| b == 0), "the value does not fit in {} bytes", len);
+    let mut result = vec![0u8; len];
+    result[len - bytes.len()..].copy_from_slice(bytes);
+    result
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]

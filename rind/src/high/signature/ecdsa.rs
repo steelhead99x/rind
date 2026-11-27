@@ -314,6 +314,7 @@ impl fmt::Debug for VerificationAlgorithm {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))] // const-evaluated only
 const fn ecdsa_verification(
     curve: CurveId,
     hash: HashId,
@@ -601,6 +602,9 @@ impl KeyPair {
         ecdsa: Ecdsa,
         source: EcdsaSource<'_>,
     ) -> Result<Self, Error> {
+        // One `Entry` over loading the scalar and deriving its point, so the
+        // call toggles DIT once.
+        let _entry = low::Entry::new_secret();
         let signing = match source {
             EcdsaSource::Generate => ecdsa::SigningKey::<C>::generate(),
             EcdsaSource::Pkcs8(der) => ecdsa::SigningKey::from_pkcs8_der(der),

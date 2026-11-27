@@ -55,7 +55,7 @@ Future<void> main() async {
 | `Sha1`, `Sha256`, `Sha384`, `Sha512` | all of it |
 | `Hmac` | over SHA-1, SHA-256, SHA-384, SHA-512 |
 | `Hkdf`, `Pbkdf2` | with those HMACs |
-| `AesGcm` | 128, 192, and 256-bit keys, 12-byte nonces |
+| `AesGcm` | 128, 192, and 256-bit keys, nonces of any length but zero |
 | `Chacha20.poly1305Aead`, `Xchacha20.poly1305Aead` | all of it, but XChaCha20-Poly1305 picks its own nonces |
 | `AesCbc`, `AesCtr` | 128, 192, and 256-bit keys, with any MAC and padding |
 | `Chacha20` | with any MAC that uses none of its keystream, such as `Hmac` |
@@ -73,7 +73,6 @@ implementation, as it does under every backend.
 Within what works, it differs from the Dart implementation and WebCrypto in
 these ways:
 
-- `AesGcm` takes only 12-byte nonces.
 - `AesCtr` counts over the whole 16-byte counter block, as the Dart
   implementation does, while WebCrypto counts over only its last
   `counterBits` bits. They differ only once those bits wrap.
@@ -81,9 +80,7 @@ these ways:
   throws `UnsupportedError` when given one, as does `encryptStream`, which
   always passes one. It decrypts under any nonce.
 - `Ecdh` and `Ecdsa` generate key pairs but make none from seeds.
-- `RsaPss` signs only with a salt as long as the hash, so its default 16-byte
-  salt signs nothing; with another salt length, it verifies any salt.
-  `RsaSsaPkcs1v15` verifies SHA-1 signatures but makes none.
+- `RsaSsaPkcs1v15` verifies SHA-1 signatures but makes none.
 - RSA keys under 2048 bits, private keys without `dp`, `dq`, and `qi`, and
   key pairs whose parts disagree throw `ArgumentError`, as do public keys
   rind refuses, such as an X25519 key of small order or a point off its

@@ -3,9 +3,9 @@
 //! ring's OpenSSH ChaCha20-Poly1305 (`chacha20_poly1305_openssh`) is not
 //! offered: rind refuses it, having no SSH consumer.
 
+use alloc::sync::Arc;
 use core::fmt;
 use core::ops::RangeFrom;
-use std::sync::Arc;
 
 use crate::{error, hkdf};
 

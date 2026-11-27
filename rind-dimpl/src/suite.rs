@@ -75,7 +75,7 @@ impl Cipher for Aead {
     fn encrypt(&mut self, plaintext: &mut Buf, aad: Aad, nonce: Nonce) -> Result<(), CryptoError> {
         self.0
             .seal_in_place_append_tag(aead::Nonce::assume_unique_for_key(nonce.0), &aad, plaintext)
-            .map_err(|_| CryptoError::OperationFailed(CryptoOperation::Encrypt))
+            .or(Err(CryptoError::OperationFailed(CryptoOperation::Encrypt)))
     }
 
     fn decrypt(

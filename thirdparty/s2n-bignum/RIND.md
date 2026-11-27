@@ -60,10 +60,15 @@ Each bullet names one file.
   Manual's AArch32 pseudocode (DDI 0487, part F).
 - `aarch32/proofs/decode.ml`: rind's. Their A32 encodings.
 - `aarch32/proofs/aarch32.ml`: rind's. The step relation, symbolic-execution
-  tactics, and AAPCS argument and clobber lists.
+  tactics, AAPCS argument and clobber lists, and the tactics that promote a
+  core theorem to one of a subroutine, with the small routines that check
+  them and the step conversion as the file loads.
+- `aarch32/proofs/sha1.ml`: rind's. The crypto extension's SHA-1 steps, which
+  the aarch64 model lacks, with the conversions that evaluate them.
 - `aarch32/proofs/consttime.ml`: rind's. s2n-bignum's safety tactics
   specialized to the model.
-- `aarch32/proofs/base.ml`: rind's. What a proof on the model loads.
+- `aarch32/proofs/base.ml`: rind's. What a proof on the model loads, the
+  aarch64 model's AES and SHA-256 definitions among it.
 - `aarch32/proofs/simulator.ml`: rind's. The model's cosimulation against
   qemu-arm.
 - `aarch32/proofs/cosim_runner.c`: rind's. The cosimulation's executor, a
@@ -95,8 +100,9 @@ What aws-lc's x86_64 ChaCha20-Poly1305 and ChaCha20 routines need,
 AES-CTR and AES-CBC routines, `aes_hw_ctr32_encrypt_blocks` and
 `aes_hw_cbc_encrypt`, its P-256 mixed additions,
 `ecp_nistz256_point_add_affine` and `ecp_nistz256_point_add_affinex`, and
-what OpenSSL's `sha512_block_data_order_avx2` adds to them: BMI1's `ANDN`,
-BMI2's `RORX`, and `PUSH m64`. With them every instruction of those
+what OpenSSL's `sha512_block_data_order_avx2` and
+`sha256_block_data_order_avx2` add to them: BMI1's `ANDN`, BMI2's `RORX`,
+`PUSH m64`, and VEX `VPSHUFD`. With them every instruction of those
 routines, as rind's release build emits them,
 decodes. Posting them to awslabs/s2n-bignum needs the maintainer's approval
 ([kixel-ai/rind#448](https://github.com/kixel-ai/rind/pull/448)).
@@ -104,6 +110,7 @@ decodes. Posting them to awslabs/s2n-bignum needs the maintainer's approval
 | Instruction | Encoding | Note |
 | --- | --- | --- |
 | `VPALIGNR xmm/ymm, xmm/ymm, xmm/ymm/m, imm8` | VEX.128/256.66.0F3A.WIG 0F /r ib | `PALIGNR` in each 128-bit lane |
+| `VPSHUFD xmm/ymm, xmm/ymm/m, imm8` | VEX.128/256.66.0F.WIG 70 /r ib | `PSHUFD` in each 128-bit lane |
 | `PSLLD xmm, imm8` | 66 0F 72 /6 ib | |
 | `PSRLD xmm, imm8` | 66 0F 72 /2 ib | |
 | `PSLLDQ xmm, imm8` | 66 0F 73 /7 ib | semantics as in [awslabs/s2n-bignum#439](https://github.com/awslabs/s2n-bignum/pull/439) |
@@ -140,31 +147,138 @@ upstream's own since `64e533b`, take a 16-byte memory source only aligned.
 `aarch32/proofs/` models the A32 instructions armv7's proofs need, after
 s2n-bignum's RV32IM model in `riscv/proofs/` and on the 32-bit infrastructure
 [awslabs/s2n-bignum#452](https://github.com/awslabs/s2n-bignum/pull/452)
-added. The state is R0-R12, SP, LR, PC, the N, Z, C, and V flags, memory, and
-the event trace s2n-bignum's safety proofs read.
+added. The state is R0-R12, SP, LR, PC, the N, Z, C, and V flags, Q0-Q15,
+memory, and the event trace s2n-bignum's safety proofs read. D0-D31 are the
+halves of Q0-Q15, D2n the low one, so a write to a D register keeps its
+pair; nothing armv7's assembly runs reads the VFP S registers or FPSCR, which
+the model omits. PC holds the T bit as its bit 0, as LR and `BX`'s operand
+do: `BX` and a load into PC step to a target that is aligned to four bytes
+or has bit 0 set, `aarch32_bx_target`, and the fetch takes only an aligned
+PC, so a state in T32 steps nowhere (`AARCH32_T32_STOPS`). That is all a
+T32 caller needs: a subroutine's theorem assumes `aarch32_bx_target` of its
+return address and ends where its return lands, so it holds for a caller in
+either instruction set, as `armv7-linux-androideabi` and the `thumbv7`
+targets call the A32 routines from Thumb-2 Rust.
 
 | Instructions | Forms |
 | --- | --- |
-| `AND`, `EOR`, `SUB`, `RSB`, `ADD`, `ADC`, `SBC`, `RSC`, `ORR`, `BIC`, and their `S` forms | register with an immediate shift, or a modified immediate |
+| `AND`, `EOR`, `SUB`, `RSB`, `ADD`, `ADC`, `SBC`, `RSC`, `ORR`, `BIC`, and their `S` forms | register with an immediate shift, register shifted by a register, or a modified immediate |
 | `TST`, `TEQ`, `CMP`, `CMN` | the same operands |
 | `MOV`, `MVN`, and their `S` forms | the same operands |
 | `MOVW`, `MOVT` | 16-bit immediate |
-| `LDR`, `LDRB`, `STR`, `STRB` | 12-bit immediate offset, pre-indexed, or post-indexed |
-| `B` | 24-bit offset |
+| `MUL`, `UMULL`, `UMLAL` | without `S` |
+| `REV` | |
+| `LDR`, `LDRB`, `STR`, `STRB` | 12-bit immediate or shifted register offset, pre-indexed, or post-indexed |
+| `LDRD`, `STRD` | 8-bit immediate offset, pre-indexed, or post-indexed |
+| `LDM`, `STM`, `PUSH` and `POP` among them | each of the four addressing modes, with or without write-back |
+| `B`, `BL` | 24-bit offset |
+| `BX` | |
+| `NOP`, `DMB` | `DMB` under any option |
 
-Each takes any condition but the unconditional space. The decoder refuses
-everything else: Thumb, register-shifted registers, PC as an operand or
-destination, `LDRT` and the other unprivileged forms, write-back to the
-transferred register, and every other encoding. Loads and stores may be
-unaligned, as Linux and Android leave them.
+The Advanced SIMD and crypto-extension instructions are every form armv7's
+assembly in `rind/src/low/arm/` runs: 2,991 distinct words, the crypto
+extension's among them though the assembly spells them as `.byte` or
+`.inst`.
+
+| Instructions | Forms |
+| --- | --- |
+| `VAND`, `VBIC`, `VORR` (`VMOV` among them), `VEOR`, `VBSL`, `VMVN` | D or Q registers |
+| `VADD`, `VSUB`, `VTST`, `VMUL` | integer lanes of each size; `VTST` and `VMUL` not of 64 bits |
+| `VSHL` | by register, signed or unsigned, or by an immediate |
+| `VSHR`, `VSRI`, `VSLI`, `VSHRN`, `VSHLL` (`VMOVL` among them) | by an immediate; `VSHLL`'s A1 encoding only, so the A2 one that a shift equal to the input lane width uses, such as `VSHLL.I8 Q0, D0, #8`, is refused and has no step theorem |
+| `VMOV`, `VMVN`, `VORR`, `VBIC` | a modified immediate |
+| `VREV16`, `VREV32`, `VREV64`, `VTRN`, `VZIP`, `VSWP`, `VEXT`, `VTBL` | `VZIP` not of 32-bit lanes in D registers, `VTBL` of one to four registers |
+| `VDUP` | of a scalar or a core register |
+| `VMOV` | a core register to a lane |
+| `VMULL`, `VMLAL` | 32-bit lanes, signed or unsigned, of registers or by a scalar; `VMULL.P8` and `VMULL.P64` |
+| `AESE`, `AESD`, `AESMC`, `AESIMC`, `SHA1C`, `SHA1P`, `SHA1M`, `SHA1H`, `SHA1SU0`, `SHA1SU1`, `SHA256H`, `SHA256H2`, `SHA256SU0`, `SHA256SU1` | |
+| `VLD1`, `VST1` | one to four registers, or one lane, with or without an alignment qualifier and write-back; `VLD1` alone of every lane of one or two registers |
+| `VLDM`, `VSTM`, `VPUSH`, `VPOP` | D registers, increment after or decrement before |
+| `VLDR`, `VSTR` | one D register at a base plus or minus an offset, without write-back |
+
+An AES round, a SHA-256 step, and a 64-bit polynomial multiply are the
+aarch64 model's definitions, since AArch32's pseudocode is the same, and the
+SHA-1 steps `sha1.ml`'s. The step conversion unfolds a lane operation to an
+operation on each lane's subword of its registers. An odd Q register, the
+encodings the manual makes UNPREDICTABLE, such as `VTRN` or `VSWP` of a
+register with itself or `VLDM` of a list past D31, and every other Advanced
+SIMD, VFP, or crypto encoding are refused.
+
+Each but `DMB` and the Advanced SIMD instructions in the unconditional space
+takes any condition but the unconditional space. An instruction
+whose condition fails changes nothing but the events it records, which are
+the ones it records when it runs, as s2n-bignum's safety proofs require of
+every instruction: a branch (`B`, `BL`, `BX`, or a load into PC) its jump to
+the next instruction, as s2n-bignum's other models' conditional branches do,
+and a load or store an access of no bytes at the address it would have used,
+which `memaccess_inbounds` accepts of any list of ranges that is not empty.
+Its length differs from a taken access's, so a condition that depends on a
+secret shows in the trace, as a branch's does.
+Such an instruction does not fault, wherever its address points, as the CPU
+transfers nothing, but one whose bytes would run past 0xffffffff leaves the
+model as if it ran, which is sound whatever the CPU does. R15 is an operand, the instruction's
+address plus 8, of a data-processing instruction with an immediate or an
+immediate shift, as `ADR` is, and the base of a word load, a literal load. It
+is a destination only of a word load from another base with an immediate
+offset and of `LDM`, each a branch. The decoder refuses everything else:
+Thumb, R15 anywhere else, `LDRT` and the other unprivileged forms, write-back
+to a transferred register, SP in an `LDM` or `STM` list, the flag-setting
+multiplies, `BLX`, and every other encoding.
+
+A step either has one next state or, where the instruction would leave what
+the model holds, any: a proof that reaches such a step proves nothing, as in
+s2n-bignum's other models. That is `BX`, or a load into PC, of a target with
+bit 1 set and bit 0 clear, which is unpredictable; `LDRD`, `STRD`, `LDM`, `STM`, `VLDM`, `VSTM`, `VLDR`, or `VSTR` at
+an address not aligned to four bytes, or `VLD1` or `VST1` at one its
+alignment qualifier does not hold of, which faults; and `LDR` into PC from
+such an address,
+which is unpredictable where unaligned loads are allowed, not a fault; and a
+transfer whose bytes would run past 0xffffffff, which is unpredictable. So a
+subroutine's theorem assumes `aarch32_bx_target` of its return address and,
+where it uses the stack, `aligned 4` of SP. Other loads and stores may be unaligned, as Linux and
+Android leave them. The step conversion decides `aarch32_nowrap a n`, that
+`n` bytes from `a` stay below 2^32, from `aligned 4` for a word, from the
+values the assumptions' `val x = n` give the address's terms, or from an
+assumption `aarch32_nowrap` of a region holding the transfer, whose length
+may be symbolic where the assumptions' arithmetic bounds it, as a theorem
+states of each buffer and stack frame that an access reaches whose bytes it
+cannot show stay below 2^32: an access of more than one byte at an address
+not known aligned to four, such as a `VLD1.16` lane, or a transfer of more than
+one word.
+
+`AARCH32_MK_EXEC_RULE` gives a word that does not decode no theorem rather
+than failing, since A32 routines keep literal pools and tables among their
+instructions, and the step conversion folds a constant offset from R15 into
+`word (pc + n)`, where a proof states what the pool holds, or into
+`word_sub (word pc) (word n)` for an address before `pc`, the code's first
+byte.
+`AARCH32_ADD_RETURN_NOSTACK_TAC` and `AARCH32_ADD_RETURN_STACK_TAC` are
+`RISCV_ADD_RETURN_NOSTACK_TAC` and `RISCV_ADD_RETURN_STACK_TAC` for the AAPCS:
+a return by `bx lr`, or a prologue and epilogue around the core, by default
+one `push` and one `pop` that returns. The AAPCS lets a subroutine change
+Q0-Q3 and Q8-Q15 and keeps Q4-Q7, D8-D15, which the stack wrapper restores
+from a `vpush` in the prologue when `qreglist` names them.
 
 `simulator.ml` cosimulates the model as s2n-bignum's
-`riscv/proofs/simulator.ml` does its own: directed cases at the shifts' and
-carries' edges, a backward branch, and unaligned word loads and stores, then
-random instructions from every row above, each with a random condition and
-state, branches forward and back and word offsets unaligned, which
-`cosim_runner.c` and `cosim_start.S` run under qemu-arm, and the model must
-prove reach the same state. `admin/prove cosim` runs 1000 random cases,
-printing the seed, which
+`riscv/proofs/simulator.ml` does its own: directed cases at the shifts',
+carries', and multiply's edges, a backward branch, unaligned word loads and
+stores, a push and load of every register, and skipped transfers at an
+address that would fault, then random instructions from every row above,
+each with a random condition and state, and transfers whose condition fails
+through any address short of the top, then the Advanced SIMD and crypto
+forms, each from a form's fixed bits and random ones the decoder accepts,
+`VSHL`'s amounts and `VTBL`'s indices small half the time, and their loads and
+stores through SP or a register at the buffer's offsets their alignment
+allows, which `cosim_runner.c` and `cosim_start.S` run under qemu-arm with
+`-cpu max`, which has the crypto extension, transporting Q0-Q15 too, and the
+model must prove reach the same state. The executor reports where it holds the
+instruction and its scratch buffer, so the cases reach every form, though the
+lane transfers' write-back is always by the size of the transfer, never by a
+register: `BX`,
+`POP`, and `LDR` into PC branch to a landing slot whose address a register or
+the buffer holds, a literal load reads the buffer, `LDM` and `STM` go through
+SP or a register that may be in the list, and each theorem says what an
+instruction that reads R15 computes. `admin/prove cosim` runs up to 1500
+cases in all, the directed ones among them, and its timeout may stop it sooner; it prints the seed, which
 `S2N_BIGNUM_SEMATEST_SEED` repeats. Offering the model upstream is also a
 post to awslabs/s2n-bignum, which needs the maintainer's approval.

@@ -8,9 +8,11 @@ use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::sign::CertifiedKey;
 use rustls::{
-    ClientConfig, ClientConnection, ConnectionCommon, HandshakeKind, NamedGroup, RootCertStore,
-    ServerConfig, ServerConnection,
+    ClientConfig, ClientConnection, HandshakeKind, NamedGroup, RootCertStore, ServerConfig,
+    ServerConnection,
 };
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+use wasm_bindgen_test::wasm_bindgen_test as test;
 
 #[test]
 fn all_suites() {
@@ -185,22 +187,23 @@ fn client_config(provider: Arc<CryptoProvider>, key_type: KeyType) -> Arc<Client
 /// Moves one `write_tls` to the peer. A short `read_tls` is not a complete
 /// delivery: rustls reads once into its deframer, and the unread tail would
 /// otherwise be overwritten on the next write.
-fn transfer<A, B>(from: &mut ConnectionCommon<A>, to: &mut ConnectionCommon<B>) {
-    let mut buf = [0u8; 1024];
-    let wr = from.write_tls(&mut &mut buf[..]).unwrap();
-    let mut off = 0;
-    while off < wr {
-        let n = to.read_tls(&mut &buf[off..wr]).unwrap();
-        assert!(
-            n > 0,
-            "TLS peer read none of the {} bytes still queued",
-            wr - off
-        );
-        off += n;
-        // An incomplete record stays buffered. Process after each read so a
-        // full deframer cannot refuse the rest of this write.
-        to.process_new_packets().unwrap();
-    }
+macro_rules! transfer {
+    ($from:expr, $to:expr, $buf:expr) => {{
+        let wr = $from.write_tls(&mut &mut $buf[..]).unwrap();
+        let mut off = 0;
+        while off < wr {
+            let n = $to.read_tls(&mut &$buf[off..wr]).unwrap();
+            assert!(
+                n > 0,
+                "TLS peer read none of the {} bytes still queued",
+                wr - off
+            );
+            off += n;
+            // An incomplete record stays buffered. Process after each read so a
+            // full deframer cannot refuse the rest of this write.
+            $to.process_new_packets().unwrap();
+        }
+    }};
 }
 
 /// Drains both directions. A confidentiality limit of zero keeps `wants_write`
@@ -210,8 +213,9 @@ fn drain(client: &mut ClientConnection, server: &mut ServerConnection, what: &st
     while client.wants_write() || server.wants_write() {
         rounds += 1;
         assert!(rounds <= 64, "{what} did not finish");
-        transfer(client, server);
-        transfer(server, client);
+        let mut buf = [0u8; 1024];
+        transfer!(client, server, buf);
+        transfer!(server, client, buf);
     }
 }
 
@@ -232,8 +236,9 @@ fn exercise(client_config: Arc<ClientConfig>, server_config: Arc<ServerConfig>) 
     {
         rounds += 1;
         assert!(rounds <= 64, "handshake did not finish");
-        transfer(&mut client, &mut server);
-        transfer(&mut server, &mut client);
+        let mut buf = [0u8; 1024];
+        transfer!(client, server, buf);
+        transfer!(server, client, buf);
     }
 
     client.writer().write_all(b"hello world").unwrap();
@@ -249,8 +254,8 @@ fn exercise(client_config: Arc<ClientConfig>, server_config: Arc<ServerConfig>) 
     let mut got = Vec::new();
     while got.len() < b"goodbye".len() {
         let mut buf = [0u8; 16];
-        // `WouldBlock` is what a reply that never arrives looks like; say so
-        // rather than panic with the bare error.
+        // `WouldBlock` is what a reply that never arrives looks like. `unwrap`
+        // would panic with that error and hide the assertion below.
         let n = client
             .reader()
             .read(&mut buf)
@@ -310,40 +315,43 @@ impl KeyType {
         }
     }
 
-    fn slug(self) -> &'static str {
+    /// This key's `ca.cert`, `end.fullchain`, and `end.key`, compiled in,
+    /// since the browser's target has no file system.
+    fn files(self) -> [&'static [u8]; 3] {
+        macro_rules! files {
+            ($slug:literal) => {
+                [
+                    include_bytes!(concat!("keys/", $slug, "/ca.cert")),
+                    include_bytes!(concat!("keys/", $slug, "/end.fullchain")),
+                    include_bytes!(concat!("keys/", $slug, "/end.key")),
+                ]
+            };
+        }
         match self {
-            Self::Rsa2048 => "rsa-2048",
-            Self::Rsa3072 => "rsa-3072",
-            Self::Rsa4096 => "rsa-4096",
-            Self::EcdsaP256 => "ecdsa-p256",
-            Self::EcdsaP384 => "ecdsa-p384",
-            Self::EcdsaP521 => "ecdsa-p521",
-            Self::Ed25519 => "ed25519",
+            Self::Rsa2048 => files!("rsa-2048"),
+            Self::Rsa3072 => files!("rsa-3072"),
+            Self::Rsa4096 => files!("rsa-4096"),
+            Self::EcdsaP256 => files!("ecdsa-p256"),
+            Self::EcdsaP384 => files!("ecdsa-p384"),
+            Self::EcdsaP521 => files!("ecdsa-p521"),
+            Self::Ed25519 => files!("ed25519"),
         }
     }
 
-    /// This key's file `name`, from any directory, as the iOS simulator runs
-    /// the tests.
-    fn file(self, name: &str) -> String {
-        let dir = env!("CARGO_MANIFEST_DIR");
-        format!("{dir}/tests/keys/{}/{name}", self.slug())
-    }
-
     fn cert_chain(self) -> Vec<CertificateDer<'static>> {
-        CertificateDer::pem_file_iter(self.file("end.fullchain"))
-            .unwrap()
+        CertificateDer::pem_slice_iter(self.files()[1])
             .collect::<Result<Vec<_>, _>>()
             .unwrap()
     }
 
     fn key(self) -> PrivateKeyDer<'static> {
-        PrivateKeyDer::from_pem_file(self.file("end.key")).unwrap()
+        PrivateKeyDer::from_pem_slice(self.files()[2]).unwrap()
     }
 
     fn ca_certs(self) -> Arc<RootCertStore> {
         let mut roots = RootCertStore::empty();
         roots
-            .add(CertificateDer::from_pem_file(self.file("ca.cert")).unwrap())
+            .add(CertificateDer::from_pem_slice(self.files()[0]).unwrap())
             .unwrap();
         roots.into()
     }

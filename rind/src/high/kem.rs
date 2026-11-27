@@ -6,7 +6,7 @@ use core::marker::PhantomData;
 use crate::Error;
 use crate::error::KeyFormatError;
 use crate::low;
-use crate::mid::mlkem::{self, Array, Params};
+use crate::mid::mlkem::{self, FixedArray, Params};
 pub use crate::mid::mlkem::{MlKem512, MlKem768, MlKem1024};
 
 /// An ML-KEM parameter set: [`MlKem512`], [`MlKem768`], or [`MlKem1024`].
@@ -24,21 +24,75 @@ impl Algorithm for MlKem1024 {}
 pub struct DecapsulationKey<A: Algorithm> {
     key: mlkem::DecapKey<A>,
     public: EncapsulationKey<A>,
+    seed: SeedSlot,
 }
 
+/// The seed `d || z` a key was generated or loaded from, if it was: all
+/// zero bytes is none.
+struct SeedSlot {
+    bytes: [u8; SEED_LEN],
+    /// Whether `bytes` holds a seed: a word rather than a `bool`, so the
+    /// key has no padding beside it, which no wipe would reach.
+    held: usize,
+}
+
+impl low::Zeroable for SeedSlot {}
+
+/// The length of a seed, FIPS 203's `d || z`.
+const SEED_LEN: usize = 64;
+
 impl<A: Algorithm> DecapsulationKey<A> {
-    fn new(key: mlkem::DecapKey<A>) -> Self {
+    fn from_parts(key: mlkem::DecapKey<A>, seed: Option<[u8; SEED_LEN]>) -> Self {
         Self {
             public: EncapsulationKey {
                 key: key.encapsulation_key(),
             },
             key,
+            seed: SeedSlot {
+                bytes: seed.unwrap_or([0; SEED_LEN]),
+                held: seed.is_some().into(),
+            },
         }
     }
 
     /// Generates a decapsulation key from the system random source.
     pub fn generate() -> Result<Self, Error> {
-        mlkem::DecapKey::generate().map(Self::new)
+        let (key, seed) = mlkem::DecapKey::generate()?;
+        Ok(Self::from_parts(key, Some(seed)))
+    }
+
+    /// Expands a 64-byte seed, FIPS 203's `d || z`, into its key, as
+    /// `ML-KEM.KeyGen_internal` does.
+    pub fn from_seed(seed: &[u8]) -> Result<Self, Error> {
+        let seed: [u8; SEED_LEN] = seed.try_into().map_err(|_| KeyFormatError::WrongLength)?;
+        Ok(Self::from_parts(
+            mlkem::DecapKey::from_seed(&seed),
+            Some(seed),
+        ))
+    }
+
+    /// Returns the 64-byte seed [`Self::from_seed`] loads, unless the key was
+    /// loaded from its expanded form, which has none.
+    pub fn to_seed(&self) -> Option<Seed> {
+        (self.seed.held != 0).then(|| Seed(self.seed.bytes))
+    }
+
+    /// Parses FIPS 203's expanded encoding of a decapsulation key,
+    /// `dkPKE || ek || H(ek) || z`, as [`Self::to_bytes`] writes it.
+    ///
+    /// Fails with [`Error::KeyRejected`] for the wrong length, a coefficient
+    /// not below q, or an `H(ek)` that is not its encapsulation key's
+    /// (FIPS 203's decapsulation input check). Prefer [`Self::from_seed`]:
+    /// a key loaded so has no seed to give back.
+    pub fn new(bytes: &[u8]) -> Result<Self, Error> {
+        let bytes = A::DecapKeyBytes::from_slice(bytes).ok_or(KeyFormatError::WrongLength)?;
+        mlkem::DecapKey::parse(&bytes).map(|key| Self::from_parts(key, None))
+    }
+
+    /// Encodes the key as FIPS 203's expanded form, which [`Self::new`]
+    /// parses.
+    pub fn to_bytes(&self) -> DecapsulationKeyBytes<A> {
+        DecapsulationKeyBytes(self.key.as_bytes())
     }
 
     /// Returns the encapsulation key to send to the peer.
@@ -57,10 +111,54 @@ impl<A: Algorithm> DecapsulationKey<A> {
 
 impl<A: Algorithm> Drop for DecapsulationKey<A> {
     // The private key's own drop wipes it, so this wipes the encapsulation
-    // key, once it frees its decoded form.
+    // key, once it frees its decoded form, and the seed.
     fn drop(&mut self) {
         self.public.key.free_decoded();
         low::zeroise_value(&mut self.public);
+        low::zeroise_value(&mut self.seed);
+    }
+}
+
+/// An ML-KEM decapsulation key's 64-byte seed, `d || z`, wiped on drop.
+pub struct Seed([u8; SEED_LEN]);
+
+impl AsRef<[u8]> for Seed {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+impl fmt::Debug for Seed {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("Seed").finish_non_exhaustive()
+    }
+}
+
+impl Drop for Seed {
+    fn drop(&mut self) {
+        low::zeroise(&mut self.0);
+    }
+}
+
+/// A decapsulation key in FIPS 203's expanded encoding, wiped on drop.
+pub struct DecapsulationKeyBytes<A: Algorithm>(A::DecapKeyBytes);
+
+impl<A: Algorithm> AsRef<[u8]> for DecapsulationKeyBytes<A> {
+    fn as_ref(&self) -> &[u8] {
+        self.0.as_ref()
+    }
+}
+
+impl<A: Algorithm> fmt::Debug for DecapsulationKeyBytes<A> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("DecapsulationKeyBytes")
+            .finish_non_exhaustive()
+    }
+}
+
+impl<A: Algorithm> Drop for DecapsulationKeyBytes<A> {
+    fn drop(&mut self) {
+        low::zeroise(self.0.as_mut());
     }
 }
 
@@ -254,18 +352,50 @@ mod tests {
         )
     }
 
-    /// The expanded decapsulation key `dk`, or `None` where rind would never
-    /// hold it: the wrong length, a coefficient of `s` not below q, or the
-    /// wrong `H(ek)`.
+    /// The expanded decapsulation key `dk`, or `None` if rind refuses it.
     fn expanded<A: Algorithm>(dk: &[u8]) -> Option<DecapsulationKey<A>> {
-        A::DecapKeyBytes::from_slice(dk)
-            .filter(|dk| reduced(&dk.as_ref()[..384 * A::K]))
-            .and_then(|dk| mlkem::DecapKey::from_bytes(&dk))
-            .map(DecapsulationKey::new)
+        DecapsulationKey::new(dk).ok()
     }
 
     fn decapsulate<A: Algorithm>(key: &DecapsulationKey<A>, c: &[u8]) -> Result<Vec<u8>, Error> {
         Ciphertext::new(c).map(|c| secret_bytes(&key.decapsulate(&c)))
+    }
+
+    /// A cloned ciphertext decapsulates to the same secret.
+    #[test]
+    fn cloned_ciphertext_decapsulates() {
+        fn check<A: Algorithm>() {
+            let key = DecapsulationKey::<A>::generate().unwrap();
+            let (ciphertext, secret) = key.public_key().encapsulate().unwrap();
+            let clone = ciphertext.clone();
+            assert_eq!(clone.as_ref(), ciphertext.as_ref());
+            assert_eq!(
+                secret_bytes(&key.decapsulate(&clone)),
+                secret_bytes(&secret)
+            );
+        }
+        each_set!(check);
+    }
+
+    /// Under `admin/ctgrind`, memcheck fails this if loading a key from its
+    /// seed or its expanded form, both marked secret whole, branches on
+    /// their secret parts.
+    #[test]
+    fn keys_load_in_constant_time() {
+        fn check<A: Algorithm>() {
+            let seed = [0x5a; 64];
+            low::ct::secret_slice(&seed);
+            let key = DecapsulationKey::<A>::from_seed(&seed).unwrap();
+            let expanded = key.to_bytes().as_ref().to_vec();
+            low::ct::secret_slice(&expanded);
+            let loaded = DecapsulationKey::<A>::new(&expanded).unwrap();
+            let (ciphertext, secret) = key.public_key().encapsulate().unwrap();
+            assert_eq!(
+                secret_bytes(&loaded.decapsulate(&ciphertext)),
+                secret_bytes(&secret)
+            );
+        }
+        each_set!(check);
     }
 
     #[test]
@@ -274,10 +404,16 @@ mod tests {
             let file = format!("mlkem_{}_keygen_seed_test.json", size::<A>());
             for test in wycheproof::<KemTest>(&file) {
                 assert_eq!(test.result, Expected::Valid, "{}", test.id);
-                let key = keygen::<A>(&test.seed);
-                assert_eq!(low::ct::into_public(key.as_bytes()).as_ref(), &test.dk);
-                let key = DecapsulationKey::new(key);
+                let key = DecapsulationKey::<A>::from_seed(&test.seed).unwrap();
+                assert_eq!(low::ct::into_public(key.to_bytes()).as_ref(), &test.dk);
                 assert_eq!(key.public_key().as_ref(), &test.ek);
+                assert_eq!(key.to_seed().unwrap().as_ref(), &test.seed);
+                // The expanded key loads back to the same key, without its
+                // seed.
+                let loaded = DecapsulationKey::<A>::new(&test.dk).unwrap();
+                assert_eq!(loaded.public_key().as_ref(), &test.ek);
+                assert!(loaded.to_seed().is_none());
+                assert_eq!(low::ct::into_public(loaded.to_bytes()).as_ref(), &test.dk);
             }
         }
         each_set!(check);
@@ -313,7 +449,7 @@ mod tests {
                     continue;
                 }
 
-                let key = DecapsulationKey::new(keygen::<A>(&test.seed));
+                let key = DecapsulationKey::<A>::from_seed(&test.seed).unwrap();
                 assert_eq!(key.public_key().as_ref(), &test.ek, "{}", test.id);
                 let result = decapsulate(&key, &test.c);
                 match (test.result, &result) {
@@ -326,8 +462,8 @@ mod tests {
         each_set!(check);
     }
 
-    // Decapsulation from the expanded key, which rind holds but imports only
-    // here.
+    // Decapsulation from the expanded key, which `DecapsulationKey::new`
+    // refuses where Wycheproof calls it invalid.
     #[test]
     fn wycheproof_semi_expanded_decaps() {
         fn check<A: Algorithm>() {
@@ -454,7 +590,7 @@ mod tests {
             rng.read(&mut m);
             rng.read(&mut ct);
 
-            let key = DecapsulationKey::new(keygen::<MlKem768>(&seed));
+            let key = DecapsulationKey::<MlKem768>::from_seed(&seed).unwrap();
             let (secret, ciphertext) = encaps(key.public_key(), &m);
             assert_eq!(decapsulate(&key, ciphertext.as_ref()).unwrap(), secret);
             let rejected = decapsulate(&key, &ct).unwrap();
@@ -476,17 +612,6 @@ mod tests {
                 _ => {}
             }
         }
-    }
-
-    /// Whether every 12-bit coefficient of `poly_bytes` is below q.
-    fn reduced(poly_bytes: &[u8]) -> bool {
-        poly_bytes.chunks(3).all(|b| {
-            let (lo, hi) = (
-                u16::from(b[0]) | (u16::from(b[1] & 15) << 8),
-                (u16::from(b[1]) >> 4) | (u16::from(b[2]) << 4),
-            );
-            lo < 3329 && hi < 3329
-        })
     }
 
     // BoringSSL's key generation, encapsulation, and decapsulation vectors,
@@ -527,8 +652,8 @@ mod tests {
                 }
             }
 
-            // rind imports no decapsulation key, so the vectors of a malformed
-            // one have no counterpart.
+            // A malformed key is refused as it loads, rather than failing its
+            // decapsulation.
             for test in tests(&file("decap_tests")) {
                 let Some(key) = expanded::<A>(&test.bytes("private_key")) else {
                     assert_eq!(test.str("result"), "fail", "{test}");
@@ -552,7 +677,7 @@ mod tests {
     }
 
     // BoringSSL's EVP tests: rind has the raw encodings, not the SPKI or
-    // PKCS#8 ones, and imports no key, so of the keys it takes the seeds.
+    // PKCS#8 ones, so of the keys it takes the seeds.
     #[test]
     fn boringssl_evp() {
         use crate::test::file_test::tests;
@@ -572,7 +697,7 @@ mod tests {
                         // A seed-only PKCS#8 key ends in its 64-byte seed.
                         None => test.bytes("PKCS8")[22..].to_vec(),
                     };
-                    let key = DecapsulationKey::new(keygen::<A>(&seed));
+                    let key = DecapsulationKey::<A>::from_seed(&seed).unwrap();
                     if test.get("RawPublic").is_some() {
                         assert_eq!(key.public_key().as_ref(), test.bytes("RawPublic"), "{test}");
                     }
@@ -619,7 +744,7 @@ mod tests {
     }
 
     // Exporting our decapsulation key needs crate access, so this
-    // differential test lives here rather than in `tests/crosschecks.rs`.
+    // differential test lives here rather than in `tests/crosschecks_pq.rs`.
     #[cfg(not(any(miri, target_family = "wasm")))]
     mod crosscheck {
         use aws_lc_rs::kem::{self, AlgorithmId, ML_KEM_512, ML_KEM_768, ML_KEM_1024};
@@ -646,7 +771,7 @@ mod tests {
             let ours = DecapsulationKey::<A>::generate().unwrap();
             let theirs = kem::DecapsulationKey::new(
                 algorithm::<A>(),
-                low::ct::into_public(ours.key.as_bytes()).as_ref(),
+                low::ct::into_public(ours.to_bytes()).as_ref(),
             )
             .unwrap();
             let (ciphertext, secret) =
@@ -669,9 +794,114 @@ mod tests {
             Ok(())
         }
 
+        // aws-lc-rs's key, generated there and loaded here from its expanded
+        // encoding, decapsulates what aws-lc-rs encapsulates to it as
+        // aws-lc-rs does, and encodes back to the same bytes.
+        fn loaded_from_theirs<A: Algorithm>() -> Result<(), TestCaseError> {
+            let theirs = kem::DecapsulationKey::generate(algorithm::<A>()).unwrap();
+            let bytes = theirs.key_bytes().unwrap();
+            let ours = DecapsulationKey::<A>::new(bytes.as_ref()).unwrap();
+            prop_assert!(ours.to_seed().is_none());
+            let encoded = low::ct::into_public(ours.to_bytes());
+            prop_assert_eq!(encoded.as_ref(), bytes.as_ref());
+            let public = theirs.encapsulation_key().unwrap();
+            let public_bytes = public.key_bytes().unwrap();
+            prop_assert_eq!(ours.public_key().as_ref(), public_bytes.as_ref());
+            let (ciphertext, secret) = public.encapsulate().unwrap();
+            prop_assert_eq!(
+                &decapsulate(&ours, ciphertext.as_ref()).unwrap()[..],
+                secret.as_ref()
+            );
+            Ok(())
+        }
+
+        /// RustCrypto's ML-KEM, which shares no code with any tier rind
+        /// runs, from the same seed and message: the same keys, ciphertext,
+        /// and secret, and the same implicit-rejection secret for a
+        /// ciphertext with one byte altered.
+        macro_rules! matches_rustcrypto {
+            ($ours:ty, $theirs:ty, $seed:expr, $m:expr, $alter:expr) => {{
+                use ml_kem::{Decapsulate, KeyExport};
+
+                let (seed, m, (index, xor)): ([u8; 64], [u8; 32], (Index, u8)) =
+                    ($seed, $m, $alter);
+                let ours = DecapsulationKey::<$ours>::from_seed(&seed).unwrap();
+                let ours_seed = ours.to_seed().unwrap();
+                prop_assert_eq!(ours_seed.as_ref(), &seed[..]);
+                let theirs = ml_kem::DecapsulationKey::<$theirs>::from_seed(seed.into());
+                let theirs_public = theirs.encapsulation_key();
+                prop_assert_eq!(ours.public_key().as_ref(), &theirs_public.to_bytes()[..]);
+
+                let (secret, ciphertext) = encaps(ours.public_key(), &m);
+                let (theirs_ciphertext, theirs_secret) =
+                    theirs_public.encapsulate_deterministic(&m.into());
+                prop_assert_eq!(ciphertext.as_ref(), &theirs_ciphertext[..]);
+                prop_assert_eq!(&secret[..], &theirs_secret[..]);
+
+                // Each decapsulates it to that secret, and an altered one to
+                // the same implicit rejection.
+                let ours_decapsulated = decapsulate(&ours, ciphertext.as_ref()).unwrap();
+                prop_assert_eq!(&ours_decapsulated[..], &secret[..]);
+                let theirs_decapsulated =
+                    theirs.decapsulate(ciphertext.as_ref().try_into().unwrap());
+                prop_assert_eq!(&theirs_decapsulated[..], &secret[..]);
+
+                let mut altered = ciphertext.as_ref().to_vec();
+                let index = index.index(altered.len());
+                altered[index] ^= xor;
+                let ours_rejected = decapsulate(&ours, &altered).unwrap();
+                let theirs_rejected = theirs.decapsulate(altered.as_slice().try_into().unwrap());
+                prop_assert_eq!(&ours_rejected[..], &theirs_rejected[..]);
+                prop_assert_ne!(ours_rejected, secret);
+
+                // The key reloaded from its expanded form does the same.
+                let expanded =
+                    DecapsulationKey::<$ours>::new(low::ct::into_public(ours.to_bytes()).as_ref())
+                        .unwrap();
+                prop_assert_eq!(
+                    &decapsulate(&expanded, ciphertext.as_ref()).unwrap()[..],
+                    &theirs_decapsulated[..]
+                );
+                prop_assert_eq!(
+                    &decapsulate(&expanded, &altered).unwrap()[..],
+                    &theirs_rejected[..]
+                );
+            }};
+        }
+
         // Each case generates a key, which is slow under emulation.
         proptest! {
             #![proptest_config(ProptestConfig::with_cases(32))]
+
+            #[test]
+            fn matches_rustcrypto_512(seed in any::<[u8; 64]>(), m in any::<[u8; 32]>(), alter in (any::<Index>(), 1..=255u8)) {
+                matches_rustcrypto!(MlKem512, ml_kem::MlKem512, seed, m, alter);
+            }
+
+            #[test]
+            fn matches_rustcrypto_768(seed in any::<[u8; 64]>(), m in any::<[u8; 32]>(), alter in (any::<Index>(), 1..=255u8)) {
+                matches_rustcrypto!(MlKem768, ml_kem::MlKem768, seed, m, alter);
+            }
+
+            #[test]
+            fn matches_rustcrypto_1024(seed in any::<[u8; 64]>(), m in any::<[u8; 32]>(), alter in (any::<Index>(), 1..=255u8)) {
+                matches_rustcrypto!(MlKem1024, ml_kem::MlKem1024, seed, m, alter);
+            }
+
+            #[test]
+            fn loaded_from_theirs_512(_case in any::<u8>()) {
+                loaded_from_theirs::<MlKem512>()?;
+            }
+
+            #[test]
+            fn loaded_from_theirs_768(_case in any::<u8>()) {
+                loaded_from_theirs::<MlKem768>()?;
+            }
+
+            #[test]
+            fn loaded_from_theirs_1024(_case in any::<u8>()) {
+                loaded_from_theirs::<MlKem1024>()?;
+            }
 
             #[test]
             fn encapsulated_by_theirs_512(alter in prop::option::of((any::<Index>(), 1..=255u8))) {

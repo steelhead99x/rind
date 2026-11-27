@@ -991,6 +991,31 @@ fn signatures_are_checked_against_the_certificate() {
     );
 }
 
+/// A certificate whose public key is off its curve is refused as one, before
+/// any signature is checked.
+#[test]
+fn certificates_with_invalid_points_are_refused() {
+    let key = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+    let cert = rcgen::CertificateParams::new(Vec::<String>::new())
+        .unwrap()
+        .self_signed(&key)
+        .unwrap();
+    let mut cert = cert.der().to_vec();
+    let point = key.public_key_raw();
+    let at = cert.windows(point.len()).position(|w| w == point).unwrap();
+    cert[at + point.len() - 1] ^= 1;
+    assert_eq!(
+        rind().signature_verification.verify_signature(
+            &cert,
+            b"transcript",
+            &[0; 64],
+            HashAlgorithm::SHA256,
+            SignatureAlgorithm::ECDSA
+        ),
+        Err(CryptoError::InvalidPublicKey(NamedGroup::Secp256r1))
+    );
+}
+
 #[test]
 fn only_ecdsa_keys_load() {
     let provider = rind();
@@ -1144,11 +1169,6 @@ fn signing_keys_match_aws_lc() {
             key.supported_hash_algorithms(),
             aws_lc.supported_hash_algorithms()
         );
-        // dimpl's aws-lc-rs provider names its type; rind names the group and hash.
-        // An empty `Debug` has neither.
-        let rendered = format!("{key:?}");
-        assert!(rendered.contains("Key"), "{rendered}");
-        assert!(rendered.contains("SHA"), "{rendered}");
     }
 }
 
@@ -1201,4 +1221,32 @@ fn random_fill_replaces_the_buffer() {
     let mut buf = [0x5a; 32];
     rind().secure_random.fill(&mut buf).unwrap();
     assert_ne!(buf, [0x5a; 32]);
+}
+
+/// dimpl requires `Debug` of each object, which names it and its parameters
+/// but no key.
+#[test]
+fn debug_names_objects_without_their_keys() {
+    let provider = rind();
+    let hash = provider.hash_provider.create_hash(HashAlgorithm::SHA256);
+    assert_eq!(format!("{hash:?}"), "Running { .. }");
+
+    let kx = provider
+        .kx_groups
+        .iter()
+        .find(|kx| kx.name() == NamedGroup::X25519)
+        .unwrap();
+    let exchange = kx.start_exchange(Buf::new()).unwrap();
+    assert_eq!(format!("{exchange:?}"), "Exchange { group: X25519, .. }");
+
+    let (_, key) = certificate(&rcgen::PKCS_ECDSA_P256_SHA256);
+    let key = provider.key_provider.load_private_key(&key).unwrap();
+    assert_eq!(
+        format!("{key:?}"),
+        "Key { group: Secp256r1, hash: SHA256, .. }"
+    );
+
+    let suite = provider.dtls13_cipher_suites[0];
+    let cipher = suite.create_cipher(&vec![7; suite.key_len()]).unwrap();
+    assert_eq!(format!("{cipher:?}"), "Aead");
 }

@@ -654,3 +654,93 @@ fn stays_secret() {
     run::<Ristretto255>("ristretto255-sha512");
     run::<P256>("p256-sha256");
 }
+
+/// Debug output shows public values and hides every secret: a share's
+/// scalar and a signer's nonces.
+#[test]
+fn debug_shows_no_secret() {
+    let (shares, commitment) = deal(&P256_SHA256, 2, 2).unwrap();
+    let share = &shares[0];
+    let hex = |bytes: &[u8]| format!("{bytes:?}");
+    assert_eq!(format!("{P256_SHA256:?}"), "FROST(P-256, SHA-256)");
+    assert_eq!(format!("{ED25519_SHA512:?}"), "FROST(Ed25519, SHA-512)");
+    assert_eq!(
+        format!("{RISTRETTO255_SHA512:?}"),
+        "FROST(ristretto255, SHA-512)"
+    );
+    let identifier = share.identifier();
+    assert_eq!(
+        format!("{identifier:?}"),
+        format!("Identifier({})", hex(identifier.as_ref()))
+    );
+    let public_key = commitment.public_key();
+    assert_eq!(
+        format!("{public_key:?}"),
+        format!(
+            "PublicKey {{ suite: FROST(P-256, SHA-256), bytes: {} }}",
+            hex(public_key.as_ref())
+        )
+    );
+    assert_eq!(
+        format!("{commitment:?}"),
+        format!(
+            "VssCommitment {{ suite: FROST(P-256, SHA-256), bytes: {} }}",
+            hex(commitment.as_ref())
+        )
+    );
+    assert_eq!(
+        format!("{share:?}"),
+        format!("SigningShare {{ identifier: {identifier:?}, public_key: {public_key:?}, .. }}")
+    );
+    assert_eq!(format!("{:?}", share.to_scalar()), "Scalar(..)");
+
+    let (nonces, commitments) = SigningNonces::commit(share).unwrap();
+    assert_eq!(
+        format!("{commitments:?}"),
+        format!("Commitments({})", hex(commitments.as_ref()))
+    );
+    assert_eq!(
+        format!("{nonces:?}"),
+        format!("SigningNonces {{ commitments: {commitments:?}, .. }}")
+    );
+    let (other_nonces, other) = SigningNonces::commit(&shares[1]).unwrap();
+    let package =
+        SigningPackage::new(public_key, &[commitments.clone(), other.clone()], b"m").unwrap();
+    assert_eq!(package.public_key(), public_key);
+    assert_eq!(
+        format!("{package:?}"),
+        format!(
+            "SigningPackage {{ public_key: {public_key:?}, commitments: {:?}, .. }}",
+            [&commitments, &other]
+        )
+    );
+    let signature_shares = [
+        nonces.sign(share, &package).unwrap(),
+        other_nonces.sign(&shares[1], &package).unwrap(),
+    ];
+    assert_eq!(
+        format!("{:?}", signature_shares[0]),
+        format!("SignatureShare({})", hex(signature_shares[0].as_ref()))
+    );
+    let signature = package.aggregate(&signature_shares).unwrap();
+    assert_eq!(
+        format!("{signature:?}"),
+        format!("Signature({})", hex(signature.as_ref()))
+    );
+}
+
+/// Identifiers hash as they compare: equal ones together, and one suite's
+/// apart from another's with the same bytes.
+#[test]
+fn identifiers_hash_as_they_compare() {
+    use std::collections::HashSet;
+    let mut set = HashSet::new();
+    for suite in SUITES {
+        let (shares, _) = deal(suite, 2, 3).unwrap();
+        for share in &shares {
+            assert!(set.insert(*share.identifier()));
+            assert!(!set.insert(*share.identifier()));
+        }
+    }
+    assert_eq!(set.len(), 9);
+}

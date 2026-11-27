@@ -18,7 +18,7 @@ module = ""
 [dependencies]
 dimpl = { version = "0.9", default-features = false }
 rcgen = { version = "0.14", default-features = false }
-rind = { version = "0.3.2", path = "../rind" }
+rind = { version = "0.3.2", path = "../rind", default-features = false }
 rind-dimpl = { version = "0.9.4", path = "../rind-dimpl" }
 rind-rcgen = { version = "0.14.3", path = "../rind-rcgen" }
 # Its default features compile aws-lc-rs.
@@ -30,3 +30,5 @@ time = { version = "0.3", default-features = false, features = ["std"] }
 # features, as `admin/ctgrind` does; otherwise they build as no-ops.
 crabgrind = { version = "0.4", default-features = false }
 str0m-aws-lc-rs = "0.7"
+# Reads the generated certificate's serial and validity.
+x509-parser = { version = "0.18", default-features = false }

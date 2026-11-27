@@ -89,6 +89,10 @@ pub(crate) trait SignatureHash: Hash {}
 /// an impl on a `mid` type returning [`Digest`] reads as `mid` using `high`.
 pub(crate) trait HashContext: Clone {
     /// Hash the given `bytes`.
+    // `#[inline(always)]` in the block-buffered hashes, down through
+    // `Blockwise::update`, so `digest::Hashing::start` knows the buffer it
+    // just wrote is empty instead of loading back the count it stored, a
+    // load Zen 5 failed to forward.
     fn update(&mut self, bytes: &[u8]);
 
     /// Complete the computation.
@@ -140,10 +144,11 @@ impl Hash for LegacySha1 {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub(crate) struct Sha1Context(pub(super) sha1::Sha1Context);
 
 impl HashContext for Sha1Context {
+    #[inline(always)]
     fn update(&mut self, bytes: &[u8]) {
         self.0.update(bytes)
     }
@@ -168,7 +173,7 @@ impl HashState for Sha1State {
     }
 
     fn resume(&self) -> Self::Context {
-        Sha1Context(sha1::Sha1Context::resume(self.0.clone()))
+        Sha1Context(sha1::Sha1Context::resume(self.0))
     }
 }
 
@@ -198,10 +203,11 @@ impl Hash for Sha256 {
 
 impl SignatureHash for Sha256 {}
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub(crate) struct Sha256Context(pub(super) sha2::Sha256Context);
 
 impl HashContext for Sha256Context {
+    #[inline(always)]
     fn update(&mut self, bytes: &[u8]) {
         self.0.update(bytes)
     }
@@ -226,7 +232,7 @@ impl HashState for Sha256State {
     }
 
     fn resume(&self) -> Self::Context {
-        Sha256Context(sha2::Sha256Context::resume(self.0.clone()))
+        Sha256Context(sha2::Sha256Context::resume(self.0))
     }
 }
 
@@ -256,10 +262,11 @@ impl Hash for Sha384 {
 
 impl SignatureHash for Sha384 {}
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub(crate) struct Sha384Context(pub(super) sha2::Sha384Context);
 
 impl HashContext for Sha384Context {
+    #[inline(always)]
     fn update(&mut self, bytes: &[u8]) {
         self.0.update(bytes)
     }
@@ -287,7 +294,7 @@ impl HashState for Sha384State {
     }
 
     fn resume(&self) -> Self::Context {
-        Sha384Context(sha2::Sha384Context::resume(self.0.clone()))
+        Sha384Context(sha2::Sha384Context::resume(self.0))
     }
 }
 
@@ -317,10 +324,11 @@ impl Hash for Sha512 {
 
 impl SignatureHash for Sha512 {}
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub(crate) struct Sha512Context(pub(super) sha2::Sha512Context);
 
 impl HashContext for Sha512Context {
+    #[inline(always)]
     fn update(&mut self, bytes: &[u8]) {
         self.0.update(bytes)
     }
@@ -345,6 +353,6 @@ impl HashState for Sha512State {
     }
 
     fn resume(&self) -> Self::Context {
-        Sha512Context(sha2::Sha512Context::resume(self.0.clone()))
+        Sha512Context(sha2::Sha512Context::resume(self.0))
     }
 }

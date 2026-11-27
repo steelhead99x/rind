@@ -20,7 +20,8 @@ rind's copy of it rather than written again.
 `linux32` flavor and run through cpp for ARM mode, cut down to the integer and
 NEON permutations and the round constants they load. Neither permutation is
 global in OpenSSL, so rind's `global_asm!` makes each global under a
-crate-version qualified symbol.
+crate-version qualified symbol. Likewise P-256's `ecp_nistz256-armv4`, cut down
+to its Montgomery multiplication and squaring, which load no table.
 """
 
 import importlib.machinery
@@ -49,6 +50,25 @@ IMPORTS_ARM = [
         "routines": ["KeccakF1600", "KeccakF1600_neon"],
         # The file's other symbols, which only it uses.
         "locals": ["iotas32", "KeccakF1600_int", "KeccakF1600_enter", "iotas64"],
+    },
+    {
+        "perlasm": "crypto/ec/asm/ecp_nistz256-armv4.pl",
+        "out": "ecp_nistz256-armv4.s",
+        "tag": "nistz",
+        "copyright": "Copyright 2015-2025 The OpenSSL Project Authors. All Rights Reserved.",
+        # P-256's Montgomery squaring, multiplication and its shared body, then
+        # modular addition and subtraction.
+        # Nothing else in the file: no point routine, gather, or table.
+        "spans": [
+            ("ecp_nistz256_sqr_mont", "ecp_nistz256_sqr_mont"),
+            ("ecp_nistz256_mul_mont", "__ecp_nistz256_mul_mont"),
+            ("ecp_nistz256_add", "ecp_nistz256_add"),
+            ("__ecp_nistz256_add", "__ecp_nistz256_add"),
+            ("ecp_nistz256_sub", "ecp_nistz256_sub"),
+            ("__ecp_nistz256_sub", "__ecp_nistz256_sub"),
+        ],
+        "routines": ["ecp_nistz256_sqr_mont", "ecp_nistz256_mul_mont", "ecp_nistz256_add", "ecp_nistz256_sub"],
+        "locals": ["__ecp_nistz256_mul_mont", "__ecp_nistz256_add", "__ecp_nistz256_sub"],
     },
 ]
 
@@ -94,7 +114,7 @@ def generate(openssl, perlasm):
 
 def span(lines, first, last):
     """From `first`'s `.type` through `last`'s `.size`."""
-    start = [i for i, line in enumerate(lines) if line.split()[:2] == [".type", f"{first},"]]
+    start = [i for i, line in enumerate(lines) if line.replace(",", " ").split()[:2] == [".type", first]]
     if len(start) != 1:
         sys.exit(f"missing .type: {first}")
     end = aws_lc.find(lines, [".size", f"{last},.-{last}"], start[0])

@@ -1,6 +1,6 @@
 [package]
 name = "rind-aws-lc-rs"
-version = "1.0.4"
+version = "1.0.3"
 edition = "2024"
 repository = "https://github.com/kixel-ai/rind"
 homepage = "https://rind.kixel.ai"
@@ -65,9 +65,6 @@ omitted = [
   "kem::DecapsulationKey::key_bytes",
   "kem::DecapsulationKeyBytes",
   "rand::unsealed",
-  "rsa::KeyPair::from_components",
-  "signature::RsaKeyPair::from_components",
-  "rsa::KeyPairComponents",
   "rsa::KeyPair::sign_digest",
   "signature::RsaKeyPair::sign_digest",
   "rsa::Pkcs1*",
@@ -75,7 +72,6 @@ omitted = [
   "signature::ECDSA_*_SHA1_*",
   "signature::ECDSA_*_SHA3_*",
   "signature::ECDSA_P521_SHA224_*",
-  "io::der",
   "test",
   "test_file",
   "try_fips_self_test",
@@ -98,7 +94,10 @@ test_logging = []
 unstable = []
 
 [dependencies]
-rind = { version = "0.3.2", path = "../rind" }
+rind = { version = "0.3.2", path = "../rind", default-features = false, features = ["ml-dsa"] }
+# Caches an RSA key per algorithm without `std`'s `OnceLock`; rustls already
+# depends on it the same way.
+once_cell = { version = "1.21", default-features = false, features = ["alloc", "race"] }
 untrusted = "0.7.1"
 zeroize = "1.9"
 
@@ -113,5 +112,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 [lints.rust]
-# aws-lc-rs's own tests (tests/aws-lc-rs) skip their slow cases under it.
-unexpected_cfgs = { level = "warn", check-cfg = ["cfg(disable_slow_tests)"] }
+unexpected_cfgs = { level = "warn", check-cfg = [
+  "cfg(coverage_nightly)",
+  # aws-lc-rs's own tests (tests/aws-lc-rs) skip their slow cases under it.
+  "cfg(disable_slow_tests)",
+] }

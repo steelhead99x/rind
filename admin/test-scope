@@ -1,0 +1,320 @@
+#!/usr/bin/env python3
+
+# Usage: admin/test-scope args CHANGED_FILE MERGE_BASE
+#        admin/test-scope units CARGO_ARGS...
+#        admin/test-scope check
+#
+# Scopes `just check`'s rind tests to the primitive families a diff touches,
+# by the map in admin/test-scope.toml.
+#
+# `args` prints the arguments, one per line, for a `cargo nextest run -p rind`
+# that runs only the touched families' tests and the shared ones: Cargo target
+# selectors that skip building the differential test binaries no touched
+# family needs, and a filter over the rest. It prints nothing, for a run of
+# every test, when a changed path under rind/ lies outside rind/src/{low,mid,
+# high}/, belongs to no family, or changes a public item's signature in mid/
+# or high/, whose change can break a test binary the scoped run never builds.
+#
+# `units` fails when a [units] name, module path and all, is no unit test
+# `cargo nextest list` finds in rind's library, which a rename in rind/src/
+# makes without triggering `check`; `just check` and `just ci` run it on every
+# change to rind, with the package and target arguments of the run that tests
+# rind, so the listing builds nothing that run does not, such as a test
+# binary a crate's `test = false` leaves out.
+#
+# `check` fails unless the map covers every test and file: every test under
+# rind/tests/ is listed, every listed test and unit test exists, every family
+# names a file, and, for each set of families a file under rind/src/{low,mid,
+# high}/ belongs to, `cargo nextest list` with that set's arguments selects
+# exactly the tests the map gives it. Build it as `just check` builds rind's
+# tests, under the same profile and wrapper, so the two share their build.
+
+import json, pathlib, re, subprocess, sys, tomllib
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+MAP = pathlib.Path(__file__).with_suffix(".toml")
+LAYERS = ("low", "mid", "high")
+SHARED = "shared"
+NEXTEST = ["cargo", "nextest", "list", "--locked", "--cargo-profile", "test-fast", "--message-format", "json", "--run-ignored", "all"]
+
+
+def load():
+    data = tomllib.loads(MAP.read_text())
+    families = {name: re.compile("|".join(f"(?:{p})" for p in patterns)) for name, patterns in data["families"].items()}
+    known = set(families) | {SHARED}
+    errors = []
+    for where, entries in [("units", data["units"])] + [(f"tests.{b}", e) for b, e in data["tests"].items()]:
+        for name, owners in entries.items():
+            if not re.fullmatch(r"\*|(\w+::)*\w*", name) or (where == "units" and not re.fullmatch(r"(\w+::)+\w+", name)):
+                errors.append(f"{where}: '{name}' is not a test name, a module prefix ending in '::', or '*'")
+            if not owners:
+                errors.append(f"{where}: '{name}' names no family; a test for every scoped run is [\"{SHARED}\"]")
+            for owner in owners:
+                if owner not in known:
+                    errors.append(f"{where}: '{name}' names unknown family '{owner}'")
+    if errors:
+        sys.exit("\n".join(f"error: {MAP.name}: {e}" for e in errors))
+    return families, data["units"], data["tests"]
+
+
+def file_families(families, path):
+    """The families a path under rind/src/{low,mid,high}/ belongs to, or None outside them."""
+    parts = path.split("/")
+    if parts[:2] != ["rind", "src"] or len(parts) < 4 or parts[2] not in LAYERS:
+        return None
+    names = parts[3:-1] + [parts[-1].split(".", 1)[0]]
+    return {f for f, regex in families.items() if any(regex.fullmatch(n) for n in names)}
+
+
+def unit_families(families, test):
+    """The families whose names a unit test's module path holds."""
+    modules = test.split("::")[:-1]
+    return {f for f, regex in families.items() if any(regex.fullmatch(m) for m in modules)}
+
+
+def matches(entry, test):
+    return entry == "*" or test == entry or (entry.endswith("::") and test.startswith(entry))
+
+
+def binaries():
+    """The integration test targets, which Cargo finds as rind/tests/*.rs."""
+    return sorted(p.stem for p in (ROOT / "rind/tests").glob("*.rs"))
+
+
+def module_regex(families, names):
+    return "(^|::)(" + "|".join(families[n].pattern for n in sorted(names)) + ")::"
+
+
+def arguments(families, units, tests, touched):
+    """Target selectors and a filter that run what the map gives the touched families."""
+    owners = touched | {SHARED}
+    others = set(families) - touched
+    # A unit test runs unless only untouched families own it.
+    lib = "kind(lib)"
+    if others:
+        lib += f" & (test(/{module_regex(families, touched)}/) | !test(/{module_regex(families, others)}/))"
+    terms = [f"({lib})"]
+    terms += [f"(kind(lib) & test(={name}))" for name, fams in units.items() if owners & set(fams)]
+    needed = set()
+    for binary, entries in tests.items():
+        for entry, fams in entries.items():
+            if not owners & set(fams):
+                continue
+            needed.add(binary)
+            if entry == "*":
+                terms.append(f"binary(={binary})")
+            elif entry.endswith("::"):
+                terms.append(f"(binary(={binary}) & test(/^{entry}/))")
+            else:
+                terms.append(f"(binary(={binary}) & test(={entry}))")
+    selectors = ["--lib"]
+    for binary in binaries():
+        if not binary.startswith("crosschecks_") or binary in needed:
+            selectors += ["--test", binary]
+    return selectors + ["-E", " | ".join(terms)]
+
+
+# The first line of a public item, or of an impl, which changes the API it
+# implements; the attributes above it are part of its signature too.
+ITEM = re.compile(r"\s*(pub(\s|$)|impl\b)")
+ATTRIBUTE = re.compile(r"\s*#\[")
+ENDS_LINE = re.compile(r"[{;}]\s*$")
+WHOLE_BODY = re.compile(r"\b(trait|enum)\b")
+
+
+def signature_lines(text):
+    """Line numbers, from 1, of the public signatures in a Rust file.
+
+    An item's signature runs from its attributes to the line opening its body
+    or ending it, and through the whole body of a trait or enum, whose methods
+    and variants are public without a `pub` of their own.
+    """
+    lines = text.splitlines()
+    found = set()
+    i = 0
+    while i < len(lines):
+        if not ITEM.match(lines[i]):
+            i += 1
+            continue
+        start = i
+        # Each attribute above, a multi-line one from its closing `]` up to
+        # its `#[`, with no comment or item end between.
+        while start > 0 and (ATTRIBUTE.match(lines[start - 1]) or lines[start - 1].rstrip().endswith("]")):
+            k = start - 1
+            while k > 0 and not ATTRIBUTE.match(lines[k]) and not lines[k].lstrip().startswith("//") and not ENDS_LINE.search(lines[k - 1]):
+                k -= 1
+            if not ATTRIBUTE.match(lines[k]):
+                break
+            start = k
+        indent = len(lines[i]) - len(lines[i].lstrip())
+        j = i
+        while j + 1 < len(lines) and not ENDS_LINE.search(lines[j]):
+            j += 1
+        if WHOLE_BODY.search(lines[i]) and lines[j].rstrip().endswith("{"):
+            while j + 1 < len(lines) and not lines[j].startswith(" " * indent + "}"):
+                j += 1
+        found.update(range(start + 1, j + 2))
+        i = j + 1
+    return found
+
+
+def git(*args):
+    return subprocess.run(["git", "-C", str(ROOT), *args], check=True, capture_output=True, text=True).stdout
+
+
+def changes_signature(merge_base, path):
+    """Whether the diff since MERGE_BASE adds, removes, or edits a line of a public signature in PATH."""
+    old = subprocess.run(["git", "-C", str(ROOT), "show", f"{merge_base}:{path}"], capture_output=True, text=True)
+    old_lines = signature_lines(old.stdout) if old.returncode == 0 else set()
+    new_path = ROOT / path
+    new_lines = signature_lines(new_path.read_text()) if new_path.exists() else set()
+    if old.returncode != 0 or not new_path.exists():
+        return bool(old_lines or new_lines)
+    diff = git("diff", "--no-ext-diff", "-U0", merge_base, "--", path)
+    for hunk in re.finditer(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@", diff, re.M):
+        old_start, old_count, new_start, new_count = (int(g) if g is not None else 1 for g in hunk.groups())
+        if old_lines & set(range(old_start, old_start + old_count)):
+            return True
+        if new_lines & set(range(new_start, new_start + new_count)):
+            return True
+    return False
+
+
+def scope(families, changed, merge_base):
+    """The families a diff touches, or None when it needs every test."""
+    touched = set()
+    for path in changed:
+        if not path.startswith("rind/"):
+            continue
+        fams = file_families(families, path)
+        if not fams:
+            return None, f"{path} belongs to no family"
+        if path.endswith(".rs") and path.split("/")[2] != "low" and changes_signature(merge_base, path):
+            return None, f"{path} changes a public signature"
+        touched |= fams
+    if not touched:
+        return None, "the diff changes nothing under rind/"
+    return touched, None
+
+
+def units_command(cargo_args):
+    _, units, _ = load()
+    lib = {name for binary, name in listing(cargo_args, packages=()) if binary == "rind"}
+    if stale := [name for name in units if name not in lib]:
+        sys.exit("\n".join(f"error: {MAP.name}: [units] names {name}, which is no unit test of rind" for name in stale))
+
+
+def args_command(changed_file, merge_base):
+    families, units, tests = load()
+    changed = [line for line in pathlib.Path(changed_file).read_text().splitlines() if line]
+    touched, why = scope(families, changed, merge_base)
+    if touched is None:
+        print(f"test-scope: every rind test, since {why}", file=sys.stderr)
+        return
+    print(f"test-scope: rind's tests for {' '.join(sorted(touched))}", file=sys.stderr)
+    print("\n".join(arguments(families, units, tests, touched)))
+
+
+def listing(args, packages=("-p", "rind")):
+    """Each test of rind's that `cargo nextest list` selects, as (binary, name)."""
+    out = subprocess.run(NEXTEST + [*packages, *args], cwd=ROOT, check=True, stdout=subprocess.PIPE, text=True).stdout
+    found = set()
+    for suite in json.loads(out)["rust-suites"].values():
+        if suite["package-name"] != "rind":
+            continue
+        binary = suite["binary-name"] if suite["kind"] != "lib" else "rind"
+        for name, case in suite["testcases"].items():
+            if case["filter-match"]["status"] == "matches":
+                found.add((binary, name))
+    return found
+
+
+# Rust snippets and the lines of each that signature_lines finds.
+SIGNATURES = [
+    ("fn private() {\n    body();\n}\n", set()),
+    ("pub(crate) fn internal() {}\n", set()),
+    ("/// Doc.\n#[must_use]\npub fn f(\n    a: u8,\n) -> u8 {\n    a\n}\n", {2, 3, 4, 5}),
+    ("pub fn one() -> u8 { 1 }\nfn after() {}\n", {1}),
+    ("pub trait T {\n    fn m(&self);\n}\nfn after() {}\n", {1, 2, 3}),
+    ("impl Clone for X {\n    fn clone(&self) -> Self {\n        *self\n    }\n}\n", {1}),
+    ("pub static S: A = A {\n    field: 1,\n};\n", {1}),
+    ("fn a() {}\n#[cfg(any(\n    x,\n))]\n#[inline]\npub fn f() {}\n", {2, 3, 4, 5, 6}),
+    ("/// See [x]\npub fn g() {}\n", {2}),
+    ("#[must_use] // why\npub fn h() {}\n", {1, 2}),
+]
+
+
+def check_command():
+    families, units, tests = load()
+    errors = []
+    for text, want in SIGNATURES:
+        if signature_lines(text) != want:
+            errors.append(f"signature_lines finds {sorted(signature_lines(text))}, not {sorted(want)}, in {text!r}")
+    every = listing(["--tests"])
+    lib = {name for binary, name in every if binary == "rind"}
+
+    listed = {binary for binary, _ in every if binary != "rind"}
+    for binary in sorted(set(binaries()) - set(tests)):
+        errors.append(f"rind/tests/{binary}.rs has no [tests.{binary}] table")
+    for binary in sorted(set(tests) - set(binaries())):
+        errors.append(f"[tests.{binary}] names no file rind/tests/{binary}.rs")
+    if listed - set(binaries()):
+        errors.append(f"nextest lists test binaries with no rind/tests/NAME.rs: {sorted(listed - set(binaries()))}")
+    for binary, name in sorted(every):
+        if binary != "rind" and not any(matches(e, name) for e in tests.get(binary, {})):
+            errors.append(f"{binary}::{name} is in no family and not shared; list it under [tests.{binary}]")
+    for binary, entries in tests.items():
+        for entry in entries:
+            if entry != "*" and not any(b == binary and matches(entry, n) for b, n in every):
+                errors.append(f"[tests.{binary}] '{entry}' matches no test")
+    for name in units:
+        if name not in lib:
+            errors.append(f"[units] '{name}' is no unit test of rind")
+
+    sets = {}
+    for path in git("ls-files", "--cached", "--others", "--exclude-standard", "--", *(f"rind/src/{l}/" for l in LAYERS)).splitlines():
+        fams = frozenset(file_families(families, path))
+        sets.setdefault(fams, path)
+    for family in sorted(set(families) - set().union(*sets)):
+        errors.append(f"family '{family}' names no file under rind/src/{{{','.join(LAYERS)}}}/")
+    if errors:
+        sys.exit("\n".join(f"error: {e}" for e in errors))
+
+    for touched in sorted((s for s in sets if s), key=sorted):
+        owners = touched | {SHARED}
+        want = set()
+        for binary, name in every:
+            if binary == "rind":
+                owned = unit_families(families, name)
+                if not owned or owned & touched or owners & set(units.get(name, [])):
+                    want.add((binary, name))
+            elif any(matches(e, name) and owners & set(f) for e, f in tests[binary].items()):
+                want.add((binary, name))
+        got = listing(arguments(families, units, tests, set(touched)))
+        label = f"{' '.join(sorted(touched))} (as for {sets[touched]})"
+        for binary, name in sorted(want - got):
+            errors.append(f"{label}: the scoped run skips {binary}::{name}")
+        for binary, name in sorted(got - want):
+            errors.append(f"{label}: the scoped run selects {binary}::{name}, which the map does not give it")
+        print(f"test-scope: {label}: {len(got)} of {len(every)} tests", file=sys.stderr)
+    shared = sets.get(frozenset())
+    if shared:
+        print(f"test-scope: files in no family, such as {shared}, run every test", file=sys.stderr)
+    if errors:
+        sys.exit("\n".join(f"error: {e}" for e in errors))
+
+
+def main():
+    match sys.argv[1:]:
+        case ["args", changed_file, merge_base]:
+            args_command(changed_file, merge_base)
+        case ["units", *cargo_args] if cargo_args:
+            units_command(cargo_args)
+        case ["check"]:
+            check_command()
+        case _:
+            sys.exit("usage: admin/test-scope args CHANGED_FILE MERGE_BASE | units CARGO_ARGS... | check")
+
+
+if __name__ == "__main__":
+    main()

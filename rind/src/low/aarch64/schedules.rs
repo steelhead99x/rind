@@ -57,15 +57,6 @@ pub(crate) fn agree() {
         super::edwards25519_scalarmulbase::edwards25519_scalarmulbase(&mut w, x);
         super::edwards25519_scalarmulbase_narrow::edwards25519_scalarmulbase(&mut n, x);
         assert_eq!(w, n, "ed25519 base {i}");
-        let point = w;
-        let (mut w, mut n) = ([0; 8], [0; 8]);
-        super::edwards25519_scalarmuldouble::edwards25519_scalarmuldouble(
-            &mut w, x, &point, &limbs[1],
-        );
-        super::edwards25519_scalarmuldouble_narrow::edwards25519_scalarmuldouble(
-            &mut n, x, &point, &limbs[1],
-        );
-        assert_eq!(w, n, "ed25519 double {i}");
     }
 
     for (i, bytes) in [[0u8; 32], [0xff; 32], {
@@ -544,11 +535,6 @@ fn random(g_affine: &[u64; 8], g256: &[u64; 12], g384: &[u64; 18], g521: &[u64; 
             assert_eq!(compress_edwards(&nr), want, "random dalek ed25519 base {i}");
         }
         let point = nr;
-        super::edwards25519_scalarmuldouble::edwards25519_scalarmuldouble(&mut w, &y, &point, &c);
-        super::edwards25519_scalarmuldouble_narrow::edwards25519_scalarmuldouble(
-            &mut nr, &y, &point, &c,
-        );
-        assert_eq!(w, nr, "random ed25519 double {i}");
         // A valid encoding, and 32 random bytes, which mostly are not.
         for (j, bytes) in [compress_edwards(&point), words_to_bytes(&c)]
             .iter()
@@ -819,7 +805,6 @@ fn matches_portable(g_affine: &[u64; 8], g256: &[u64; 12], g384: &[u64; 18], g52
     }
 
     ed25519_decode();
-    ed25519_double(&[[0; 4], one, nm1, alice_words]);
     let mut invsqrt_in = field.to_vec();
     invsqrt_in.push([2, 0, 0, 0]);
     invsqrt_oracle(&p, &invsqrt_in);
@@ -1136,39 +1121,6 @@ fn canonical_edwards(bytes: &[u8; 32]) -> Option<[u8; 32]> {
     CompressedEdwardsY(*bytes)
         .decompress()
         .map(|point| point.compress().0)
-}
-
-fn ed25519_double(scalars: &[[u64; 4]]) {
-    use curve25519_dalek::edwards::{CompressedEdwardsY, EdwardsPoint};
-    use curve25519_dalek::scalar::Scalar;
-
-    let mut points = Vec::new();
-    for scalar in scalars {
-        let mut point = [0; 8];
-        super::edwards25519_scalarmulbase_narrow::edwards25519_scalarmulbase(&mut point, scalar);
-        points.push(point);
-    }
-    for (i, point) in points.iter().enumerate() {
-        let dalek = CompressedEdwardsY(compress_edwards(point))
-            .decompress()
-            .expect("base multiple decodes");
-        for (j, n) in scalars.iter().enumerate() {
-            for (k, m) in scalars.iter().enumerate() {
-                let mut got = [0; 8];
-                super::edwards25519_scalarmuldouble_narrow::edwards25519_scalarmuldouble(
-                    &mut got, n, point, m,
-                );
-                let want = EdwardsPoint::vartime_double_scalar_mul_basepoint(
-                    &Scalar::from_bytes_mod_order(words_to_bytes(n)),
-                    &dalek,
-                    &Scalar::from_bytes_mod_order(words_to_bytes(m)),
-                )
-                .compress()
-                .0;
-                assert_eq!(compress_edwards(&got), want, "ed25519 double {i},{j},{k}");
-            }
-        }
-    }
 }
 
 /// Legendre symbol by Euler's criterion, then `x * z^2 = 1` for a square,

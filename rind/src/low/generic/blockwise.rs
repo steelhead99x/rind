@@ -4,12 +4,14 @@
 // `used` first, so a context that holds its chaining value then this can
 // start the buffer on a 16-byte boundary on 64-bit targets: see
 // `copy_lanes`.
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 #[repr(C)]
 pub(crate) struct Blockwise<const N: usize> {
     used: usize,
     buffer: [u8; N],
 }
+
+impl<const N: usize> crate::low::Zeroable for Blockwise<N> {}
 
 impl<const N: usize> Blockwise<N> {
     pub(crate) const fn new() -> Self {
@@ -23,6 +25,8 @@ impl<const N: usize> Blockwise<N> {
     /// holding the rest: what is short of a whole block, or the last whole
     /// block until more follows, so a hash can compress it with its padding
     /// in one call.
+    // Inlined for the reason `high::hash::HashContext::update` gives.
+    #[inline(always)]
     pub(crate) fn update(&mut self, bytes: &[u8], state: &mut impl UpdateBlocks) {
         let used = self.used;
         // A short update, such as a one-byte one, only copies. Storing
@@ -57,11 +61,7 @@ impl<const N: usize> Blockwise<N> {
     }
 
     // Only Poly1305 uses it.
-    #[cfg(any(
-        rind_backend = "x86_64",
-        all(rind_backend = "portable", target_pointer_width = "64"),
-        all(rind_backend = "aarch64", test)
-    ))]
+    #[cfg(any(rind_backend = "x86_64", rind_backend = "portable", test))]
     pub(crate) fn add_leading<'a>(&mut self, bytes: &'a [u8]) -> &'a [u8] {
         if self.used == 0 {
             return bytes;
@@ -76,11 +76,7 @@ impl<const N: usize> Blockwise<N> {
     }
 
     // Only Poly1305 uses it.
-    #[cfg(any(
-        rind_backend = "x86_64",
-        all(rind_backend = "portable", target_pointer_width = "64"),
-        all(rind_backend = "aarch64", test)
-    ))]
+    #[cfg(any(rind_backend = "x86_64", rind_backend = "portable", test))]
     pub(crate) fn take(&mut self) -> Option<[u8; N]> {
         if self.used == N {
             self.used = 0;
@@ -91,11 +87,7 @@ impl<const N: usize> Blockwise<N> {
     }
 
     // Only Poly1305's tail reads it.
-    #[cfg(any(
-        rind_backend = "x86_64",
-        all(rind_backend = "portable", target_pointer_width = "64"),
-        all(rind_backend = "aarch64", test)
-    ))]
+    #[cfg(any(rind_backend = "x86_64", rind_backend = "portable", test))]
     pub(crate) fn peek_remaining(&self) -> Option<&[u8]> {
         if self.used > 0 {
             Some(&self.buffer[..self.used])
@@ -110,11 +102,7 @@ impl<const N: usize> Blockwise<N> {
     }
 
     // Only Poly1305 uses it.
-    #[cfg(any(
-        rind_backend = "x86_64",
-        all(rind_backend = "portable", target_pointer_width = "64"),
-        all(rind_backend = "aarch64", test)
-    ))]
+    #[cfg(any(rind_backend = "x86_64", rind_backend = "portable", test))]
     pub(crate) fn add_trailing(&mut self, trailing: &[u8]) {
         self.buffer[..trailing.len()].copy_from_slice(trailing);
         self.used += trailing.len();

@@ -22,6 +22,7 @@ use pyo3::ffi;
 use pyo3::prelude::*;
 use pyo3::sync::PyOnceLock;
 use pyo3::types::{PyBytes, PyDict};
+use zeroize::Zeroize;
 
 mod aead;
 mod agreement;
@@ -147,6 +148,37 @@ impl core::ops::Deref for Bytes<'_> {
     }
 }
 
+/// A bytes-like secret argument, such as a key, seed, password, or private
+/// key's encoding: a [`Bytes`] whose copy, if it made one, is wiped when
+/// dropped. Messages and public values stay [`Bytes`], unwiped, as rind
+/// leaves them.
+pub(crate) struct Secret<'a>(Bytes<'a>);
+
+impl<'a, 'py> FromPyObject<'a, 'py> for Secret<'a> {
+    type Error = PyErr;
+
+    fn extract(obj: Borrowed<'a, 'py, PyAny>) -> PyResult<Self> {
+        Bytes::extract(obj).map(Self)
+    }
+}
+
+impl core::ops::Deref for Secret<'_> {
+    type Target = [u8];
+
+    fn deref(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+impl Drop for Secret<'_> {
+    fn drop(&mut self) {
+        // A borrowed `bytes` is Python's to free.
+        if let Cow::Owned(copy) = &mut self.0.0 {
+            copy.zeroize();
+        }
+    }
+}
+
 /// Declares the Python class of a module's algorithm constants, each
 /// wrapping a rind algorithm, with any further methods.
 macro_rules! algorithm {
@@ -266,9 +298,10 @@ fn has_aes_hardware() -> bool {
     rind::cpu::has_aes_hardware()
 }
 
+/// The `_rind` extension module.
 #[pymodule]
 #[pyo3(name = "_rind")]
-fn pyrind(m: &Bound<'_, PyModule>) -> PyResult<()> {
+pub fn pyrind(m: &Bound<'_, PyModule>) -> PyResult<()> {
     let py = m.py();
     m.add("Error", py.get_type::<Error>())?;
     m.add("WrongLength", py.get_type::<WrongLength>())?;

@@ -9,17 +9,24 @@
 //! accepts only for a key it refuses by design. RSA-PSS with any salt length,
 //! which aws-lc-rs does not expose, is checked against aws-lc's, and SLH-DSA,
 //! which aws-lc lacks, against RustCrypto's.
+//!
+//! An independent oracle must accept every signature rind accepts: this
+//! tier's for Ed25519 and the NIST curves, and RustCrypto's `rsa` and
+//! `ml-dsa`. Each is laxer than aws-lc-rs somewhere, so a signature only it
+//! accepts is no finding.
 
 use aws_lc_rs::digest;
 use aws_lc_rs::signature::{self as theirs, UnparsedPublicKey};
 use curve25519_dalek::edwards::CompressedEdwardsY;
 use der::{spki_parameters, trailing};
 use libfuzzer_sys::fuzz_target;
+use oracle::Nist;
 use rind::ml_dsa::{MlDsa44, MlDsa65, MlDsa87};
 use rind::rsa::{PssSaltLength, VerificationAlgorithm as RsaVerificationAlgorithm};
 use rind::{Error, ecdsa, ed25519, ml_dsa, rsa};
 
 mod der;
+mod oracle;
 
 fuzz_target!(|data: &[u8]| {
     let Some((&selector, rest)) = data.split_first() else {
@@ -43,7 +50,15 @@ fuzz_target!(|data: &[u8]| {
         Theirs::SlhDsa(verify) => verify(key, message, signature),
     };
     match ours.verify(key, message, signature) {
-        Ok(verified) => assert_eq!(verified, accepted),
+        Ok(verified) => {
+            assert_eq!(verified, accepted);
+            if let Some(independent) = independent(selector).filter(|_| verified) {
+                assert!(
+                    independent(key, message, signature),
+                    "the independent oracle refused a signature rind verifies"
+                );
+            }
+        }
         Err(e) => assert!(
             !accepted || refused(ours, key),
             "refused a key aws-lc-rs verifies with: {e:?}"
@@ -368,6 +383,118 @@ fn algorithm(selector: u8) -> Option<(Ours, Theirs)> {
         ),
         _ => return None,
     })
+}
+
+/// The independent oracle's verdict on a signature, `(key, message,
+/// signature)`.
+type Independent = fn(&[u8], &[u8], &[u8]) -> bool;
+
+/// The independent oracle for the algorithm `selector` picks, or `None` for
+/// SLH-DSA, which `algorithm` already checks against RustCrypto's alone.
+fn independent(selector: u8) -> Option<Independent> {
+    use sha2::{Sha256, Sha384, Sha512};
+    Some(match selector {
+        0 => |key, message, signature| {
+            <&[u8; 32]>::try_from(key)
+                .is_ok_and(|key| oracle::ed25519::verify(key, message, signature))
+        },
+        1 => |k, m, s| nist::<Sha256>(&oracle::p256(), 32, true, k, m, s),
+        2 => |k, m, s| nist::<Sha384>(&oracle::p256(), 32, true, k, m, s),
+        3 => |k, m, s| nist::<Sha512>(&oracle::p256(), 32, true, k, m, s),
+        4 => |k, m, s| nist::<Sha256>(&oracle::p384(), 48, true, k, m, s),
+        5 => |k, m, s| nist::<Sha384>(&oracle::p384(), 48, true, k, m, s),
+        6 => |k, m, s| nist::<Sha512>(&oracle::p384(), 48, true, k, m, s),
+        7 => |k, m, s| nist::<Sha256>(&oracle::p521(), 66, true, k, m, s),
+        8 => |k, m, s| nist::<Sha384>(&oracle::p521(), 66, true, k, m, s),
+        9 => |k, m, s| nist::<Sha512>(&oracle::p521(), 66, true, k, m, s),
+        10 => |k, m, s| nist::<Sha256>(&oracle::p256(), 32, false, k, m, s),
+        11 => |k, m, s| nist::<Sha384>(&oracle::p384(), 48, false, k, m, s),
+        12 => |k, m, s| nist::<Sha512>(&oracle::p521(), 66, false, k, m, s),
+        13 => |k, m, s| pkcs1::<Sha256>(k, m, s),
+        14 => |k, m, s| pkcs1::<Sha384>(k, m, s),
+        15 => |k, m, s| pkcs1::<Sha512>(k, m, s),
+        16 => |k, m, s| pss::<Sha256>(Some(32), k, m, s),
+        17 => |k, m, s| pss::<Sha384>(Some(48), k, m, s),
+        18 => |k, m, s| pss::<Sha512>(Some(64), k, m, s),
+        19 | 20 => |k, m, s| pkcs1::<sha1::Sha1>(k, m, s),
+        21 => |k, m, s| pkcs1::<Sha256>(k, m, s),
+        22 => |k, m, s| pkcs1::<Sha512>(k, m, s),
+        23 => |k, m, s| pkcs1::<Sha384>(k, m, s),
+        24 => |k, m, s| pss::<Sha256>(Some(0), k, m, s),
+        // The longest salt the modulus allows, which RustCrypto finds as it
+        // finds any.
+        25 | 28 => |k, m, s| pss::<Sha512>(None, k, m, s),
+        26 => |k, m, s| pss::<Sha256>(None, k, m, s),
+        27 => |k, m, s| pss::<Sha384>(None, k, m, s),
+        29 => |k, m, s| ml_dsa::<::ml_dsa::MlDsa44>(k, m, s),
+        30 => |k, m, s| ml_dsa::<::ml_dsa::MlDsa65>(k, m, s),
+        31 => |k, m, s| ml_dsa::<::ml_dsa::MlDsa87>(k, m, s),
+        _ => return None,
+    })
+}
+
+/// Whether the curve's oracle verifies an ECDSA signature, DER-encoded when
+/// `der` and fixed-width otherwise, over the message's digest under `D`.
+fn nist<D: sha2::Digest>(
+    oracle: &impl Nist,
+    len: usize,
+    der: bool,
+    key: &[u8],
+    message: &[u8],
+    signature: &[u8],
+) -> bool {
+    der::fixed_width(signature, len, der)
+        .is_some_and(|signature| oracle.verify(key, &D::digest(message), &signature))
+}
+
+/// RustCrypto's RSA key from PKCS#1 or the PKCS#1 key inside a
+/// `SubjectPublicKeyInfo`. rind and aws-lc take the `rsaEncryption`
+/// identifier with its `NULL` parameters or none, and RustCrypto's SPKI
+/// reader only with them, so the key is taken out of the SPKI, which rind
+/// has already checked.
+fn rustcrypto_rsa(key: &[u8]) -> Option<::rsa::PublicKey> {
+    use ::rsa::pkcs1::DecodeRsaPublicKey;
+    ::rsa::PublicKey::from_pkcs1_der(key)
+        .ok()
+        .or_else(|| ::rsa::PublicKey::from_pkcs1_der(der::spki_key(key)?).ok())
+}
+
+/// Whether RustCrypto verifies a PKCS#1 v1.5 signature under `D`.
+fn pkcs1<D: sha2::Digest + sha2::digest::const_oid::AssociatedOid>(
+    key: &[u8],
+    message: &[u8],
+    signature: &[u8],
+) -> bool {
+    rustcrypto_rsa(key).is_some_and(|key| key.pkcs1v15_verify::<D>(message, signature).is_ok())
+}
+
+/// Whether RustCrypto verifies a PSS signature under `D` with the salt
+/// length, or any.
+fn pss<D: sha2::Digest + sha2::digest::FixedOutputReset>(
+    salt_len: Option<usize>,
+    key: &[u8],
+    message: &[u8],
+    signature: &[u8],
+) -> bool {
+    let scheme = ::rsa::pss::Pss::<D> {
+        blinded: false,
+        digest: D::new(),
+        salt_len,
+    };
+    rustcrypto_rsa(key)
+        .is_some_and(|key| key.verify(scheme, &D::digest(message), signature).is_ok())
+}
+
+/// Whether RustCrypto verifies an ML-DSA signature, pure with the empty
+/// context.
+fn ml_dsa<P: ::ml_dsa::MlDsaParams>(key: &[u8], message: &[u8], signature: &[u8]) -> bool {
+    let (Ok(key), Ok(signature)) = (
+        key.try_into(),
+        ::ml_dsa::Signature::<P>::try_from(signature),
+    ) else {
+        return false;
+    };
+    ::ml_dsa::VerifyingKey::<P>::decode(key).verify_with_context(message, &[], &signature)
 }
 
 // PSS with salt lengths other than the hash's, at both ends of the range.

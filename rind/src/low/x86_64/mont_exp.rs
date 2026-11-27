@@ -29,14 +29,17 @@
 //!   17 and 20 words, and its `bn_mul_mont_gather5` jumps into its routine
 //!   for a multiple of eight, so it can't be carried alone.
 //!
-//! aws-lc's routines and rind's AVX2 gather are not formally verified: their
-//! correctness rests on aws-lc's routines' use in OpenSSL and aws-lc, and on
-//! rind's tests of them against s2n-bignum's `bignum_montmul` and
-//! `bignum_copy_row_from_table`, Wycheproof, and aws-lc-rs. `bn_power5`'s
+//! aws-lc's routines are not formally verified: their correctness rests on
+//! their use in OpenSSL and aws-lc, and on rind's tests of them against
+//! s2n-bignum's `bignum_montmul`, Wycheproof, and aws-lc-rs. rind's AVX2
+//! gather returns the row it picks by `gather_avx2_spec` in
+//! `proofs/Rind/X86_64/RsaGather.lean`, over a hand model of its intrinsics,
+//! and is tested against `bignum_copy_row_from_table`. `bn_power5`'s
 //! products are almost Montgomery: below `R`, not `m`, given inputs below
 //! `R`. So the last product, by `R mod m`, is below `2m`, and one
 //! subtraction reduces it.
 
+use alloc::vec::Vec;
 use core::arch::x86_64::*;
 
 use super::bignum_copy_row_from_table::bignum_copy_row_from_table;
@@ -89,12 +92,13 @@ fn mont_exp_by(
     let (spare, term) = scratch.split_at_mut(k);
     powers[..k].copy_from_slice(one);
     powers[w..w + k].copy_from_slice(x);
+    // Rows are sliced inline, not by a closure, which Aeneas cannot
+    // translate, so `proofs/` can prove RSA's private operation.
     for i in 2..32 {
         let (done, rest) = powers.split_at_mut(i * w);
-        let row = |j: usize| &done[j * w..j * w + k];
         match i % 2 {
-            0 => mont_sqr(&mut rest[..k], row(i / 2), m, n0),
-            _ => mont_mul(&mut rest[..k], row(i - 1), x, m, n0),
+            0 => mont_sqr(&mut rest[..k], &done[i / 2 * w..][..k], m, n0),
+            _ => mont_mul(&mut rest[..k], &done[(i - 1) * w..][..k], x, m, n0),
         }
     }
     let powers = &*powers;
@@ -108,14 +112,7 @@ fn mont_exp_by(
     // At 16 and 32 words with ADX, the verified Karatsuba products below run
     // instead.
     if k.is_multiple_of(8) && (adx.is_none() || !matches!(k, 16 | 32)) {
-        let mut table = alloc::vec![Row([0; 32]); k];
-        // Indexed rather than `chunks_exact`, which divides by `w`, and
-        // `admin/ct-vartime` refuses a division here.
-        for i in 0..32 {
-            for (row, &word) in table.iter_mut().zip(&powers[i * w..]) {
-                row.0[i] = word;
-            }
-        }
+        let mut table = power5_table(powers, w, k);
         while lsb > 0 {
             lsb -= 5;
             power5(z, &table, m, n0, bits(e, lsb, 5), adx);
@@ -127,7 +124,7 @@ fn mont_exp_by(
     } else {
         while lsb > 0 {
             lsb -= 5;
-            for _ in 0..5 {
+            for _ in 0..5usize {
                 mont_sqr(spare, z, m, n0);
                 z.copy_from_slice(spare);
             }
@@ -137,6 +134,23 @@ fn mont_exp_by(
         }
     }
     low::zeroise(&mut heap);
+}
+
+/// The 32 powers of `powers`, rows of `w` words of which the first `k` are
+/// the value, laid out as `bn_scatter5` does for `bn_power5`.
+// Inlined before it is optimized, where the compiler sees `powers` hold 32
+// rows: optimized alone, it bounds the loop by dividing the length by `w`.
+#[inline(always)]
+fn power5_table(powers: &[u64], w: usize, k: usize) -> Vec<Row> {
+    let mut table = alloc::vec![Row([0; 32]); k];
+    // Indexed rather than `chunks_exact`, which divides by `w`, and
+    // `admin/ct-vartime` refuses a division here.
+    for i in 0..32 {
+        for (row, &word) in table.iter_mut().zip(&powers[i * w..]) {
+            row.0[i] = word;
+        }
+    }
+    table
 }
 
 /// Copies power `i` of the 32 rows of `powers` into `z`, each row as long as

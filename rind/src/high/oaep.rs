@@ -42,6 +42,7 @@ impl fmt::Debug for OaepAlgorithm {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))] // const-evaluated only
 const fn oaep<H: Hash>(hash: OaepHash) -> OaepAlgorithm {
     OaepAlgorithm {
         hash,
@@ -81,24 +82,24 @@ impl DecryptingKey {
     /// more for 8192 bits, with no upper bound. Its timing reveals only which
     /// candidate primes it discards.
     pub fn generate(algorithm: &'static OaepAlgorithm, size: RsaKeySize) -> Result<Self, Error> {
-        Ok(Self::new(algorithm, rsa::SigningKey::generate(size)?))
+        Self::new(algorithm, rsa::SigningKey::generate(size)?)
     }
 
     /// Loads a PKCS#8 v1 RSA private key for `algorithm`, named
     /// `rsaEncryption`, `id-RSAES-OAEP`, or `id-ea-rsa`.
     pub fn from_pkcs8(algorithm: &'static OaepAlgorithm, der: &[u8]) -> Result<Self, Error> {
-        Ok(Self::new(algorithm, rsa::SigningKey::from_pkcs8_der(der)?))
+        Self::new(algorithm, rsa::SigningKey::from_pkcs8_der(der)?)
     }
 
     /// Loads a PKCS#1 `RSAPrivateKey` for `algorithm`.
     pub fn from_pkcs1(algorithm: &'static OaepAlgorithm, der: &[u8]) -> Result<Self, Error> {
-        Ok(Self::new(algorithm, rsa::SigningKey::from_pkcs1_der(der)?))
+        Self::new(algorithm, rsa::SigningKey::from_pkcs1_der(der)?)
     }
 
-    fn new(algorithm: &'static OaepAlgorithm, key: rsa::SigningKey) -> Self {
-        // A private key's modulus is at least 2048 bits.
-        let public = EncryptingKey::new_unchecked(algorithm, key.public_key());
-        Self { key, public }
+    fn new(algorithm: &'static OaepAlgorithm, key: rsa::SigningKey) -> Result<Self, Error> {
+        // A private key's modulus may be 2047 bits, which the public key refuses.
+        let public = EncryptingKey::checked(algorithm, key.public_key())?;
+        Ok(Self { key, public })
     }
 
     fn algorithm(&self) -> &'static OaepAlgorithm {
@@ -386,6 +387,16 @@ mod tests {
     fn refuses_small_public_keys() {
         assert_eq!(
             EncryptingKey::new(&OAEP_SHA256, include_bytes!("rsa/rsa2047.pub.der")).err(),
+            Some(KeyFormatError::RsaModulus.into())
+        );
+        // The private key rind-ring loads at 2047 bits is refused as well,
+        // else its public key would be one this refuses.
+        assert_eq!(
+            DecryptingKey::from_pkcs8(&OAEP_SHA256, include_bytes!("rsa/rsa2047.pkcs8.der")).err(),
+            Some(KeyFormatError::RsaModulus.into())
+        );
+        assert_eq!(
+            DecryptingKey::from_pkcs1(&OAEP_SHA256, include_bytes!("rsa/rsa2047.der")).err(),
             Some(KeyFormatError::RsaModulus.into())
         );
     }

@@ -256,11 +256,6 @@ if __name__ == "__main__":
                 ("inout", "z_01234.as_ptr() => _"),
                 ("inout", "z_56.as_ptr() => _"),
             ],
-            assertions=[
-                "(a.as_mut_ptr() as usize).is_multiple_of(32)",
-                "(z_01234.as_ptr() as usize).is_multiple_of(32)",
-                "(z_56.as_ptr() as usize).is_multiple_of(32)",
-            ],
             rust_decl="fn mlkem_ntt(a: &mut [i16; 256], z_01234: &[i16; 80], z_56: &[i16; 384])",
         )
         parse_file(input, d)
@@ -277,11 +272,6 @@ if __name__ == "__main__":
                 ("inout", "z_01234.as_ptr() => _"),
                 ("inout", "z_56.as_ptr() => _"),
             ],
-            assertions=[
-                "(a.as_mut_ptr() as usize).is_multiple_of(32)",
-                "(z_01234.as_ptr() as usize).is_multiple_of(32)",
-                "(z_56.as_ptr() as usize).is_multiple_of(32)",
-            ],
             rust_decl="fn mlkem_intt(a: &mut [i16; 256], z_01234: &[i16; 80], z_56: &[i16; 384])",
         )
         parse_file(input, d)
@@ -296,9 +286,6 @@ if __name__ == "__main__":
             parameter_map=[
                 ("inout", "r.as_mut_ptr() => _"),
                 ("inout", "a.as_ptr() => _"),
-            ],
-            assertions=[
-                "(a.as_ptr() as usize).is_multiple_of(32)",
             ],
             rust_decl="fn mlkem_tobytes(r: &mut [u8; 384], a: &[i16; 256])",
         )

@@ -2,16 +2,13 @@
 
 //! The s2n-bignum routines `low::PosInt` uses that need no multiplication,
 //! with their contracts, in portable Rust for armv7 and the portable
-//! backend; `mont` has those that multiply.
+//! backend; `mont` has those that multiply, and `safegcd` inversion and
+//! coprimality.
 //!
 //! Each runs in time that depends only on its lengths, never on its values:
 //! loops run a count fixed by those, and selects are masks. Arithmetic on
 //! values wraps, though the bounds rule out overflow, since a debug build's
 //! overflow check would branch on them.
-//!
-//! The algorithms are the textbook ones, each stated with its bound where
-//! it is defined: Stein's binary gcd and inversion (HAC 14.54 and 14.61)
-//! rearranged to run a fixed number of steps.
 
 /// The widest value any of these takes: an 8192-bit modulus.
 pub(super) const MAX_WORDS: usize = 128;
@@ -57,38 +54,6 @@ pub(crate) fn bignum_cmp_lt(x: &[u64], y: &[u64]) -> u64 {
         borrow = u64::from(b1 | b2);
     }
     borrow
-}
-
-/// Test bignums for coprimality, gcd(x,y) = 1
-///
-/// Inputs x[m], y[n]; output function return; temporary buffer t[>=2*max(m,n)]
-pub(crate) fn bignum_coprime(x: &[u64], y: &[u64], t: &mut [u64]) -> bool {
-    let w = x.len().max(y.len());
-    let (a, rest) = t.split_at_mut(w);
-    let b = &mut rest[..w];
-
-    // One of x and y must be odd, or 2 divides both. The odd one is `a`,
-    // which stays odd: where `b` is odd, each step swaps them if `b` is the
-    // smaller and subtracts `a` from `b`, then it halves `b`. Each step
-    // lowers log2(a) + log2(b) by at least one until `b` is zero, so 64(m + n)
-    // steps leave the gcd in `a`.
-    let x_odd = word(x, 0) & 1;
-    let y_odd = word(y, 0) & 1;
-    for i in 0..w {
-        a[i] = select(x_odd, word(x, i), word(y, i));
-        b[i] = select(x_odd, word(y, i), word(x, i));
-    }
-    for _ in 0..64 * (x.len() + y.len()) {
-        let odd = b[0] & 1;
-        cswap(a, b, mask(odd & bignum_cmp_lt(b, a)));
-        gcd_step(a, b, odd);
-    }
-
-    let mut not_one = word(a, 0) ^ 1;
-    for w in a.iter().skip(1) {
-        not_one |= w;
-    }
-    (nonzero(not_one) ^ 1) & (x_odd | y_odd) == 1
 }
 
 /// Given table: uint64_t[height*width], copy table[idx*width...(idx+1)*width-1]
@@ -151,38 +116,6 @@ pub(crate) fn bignum_modadd(z: &mut [u64], x: &[u64], y: &[u64], m: &[u64]) {
     sub_masked(z, m, mask(carry | (below ^ 1)));
 }
 
-/// Invert modulo m, z = (1/a) mod b, assuming b is an odd number > 1, coprime a
-///
-/// Inputs a[k], b[k]; output z[k]; temporary buffer t[>=3*k]
-///
-/// `_t` is s2n-bignum's scratch space, which this does not need.
-pub(crate) fn bignum_modinv(z: &mut [u64], a: &[u64], b: &[u64], _t: &mut [u64]) {
-    let k = b.len();
-    let mut x = [0; MAX_WORDS];
-    let x = &mut x[..k];
-    x.copy_from_slice(a);
-    let mut y = [0; MAX_WORDS];
-    let y = &mut y[..k];
-    y.copy_from_slice(b);
-    let mut u = [0; MAX_WORDS];
-    let u = &mut u[..k];
-    u[0] = 1;
-    let v = z;
-    v.fill(0);
-
-    // `bignum_coprime`'s steps, with `y` odd, keeping u * a = x and
-    // v * a = y (mod b). Once x is zero, y is gcd(a, b) = 1, so v = 1/a.
-    for _ in 0..128 * k {
-        let odd = x[0] & 1;
-        let swap = mask(odd & bignum_cmp_lt(x, y));
-        cswap(x, y, swap);
-        cswap(u, v, swap);
-        gcd_step(y, x, odd);
-        mod_sub_masked(u, v, b, mask(odd));
-        mod_halve(u, b);
-    }
-}
-
 /// Subtract modulo m, z := (x - y) mod m, assuming x and y reduced
 ///
 /// Inputs x[k], y[k], m[k]; output z[k]
@@ -215,38 +148,10 @@ pub(crate) fn bignum_optsub(z: &mut [u64], x: &[u64], y: &[u64], p: u64) {
     sub_masked(z, y, mask(nonzero(p)));
 }
 
-/// One step of the binary gcd, for an odd `a`: where `subtract` is one,
-/// `b := b - a`, which must not go negative; then `b := b / 2`.
-fn gcd_step(a: &[u64], b: &mut [u64], subtract: u64) {
-    sub_masked(b, a, mask(subtract));
-    for i in 0..b.len() {
-        b[i] = b[i] >> 1 | word(b, i + 1) << 63;
-    }
-}
-
-/// Swaps `x` and `y` where `swap` is all ones.
-fn cswap(x: &mut [u64], y: &mut [u64], swap: u64) {
-    for (x, y) in x.iter_mut().zip(y) {
-        let t = (*x ^ *y) & swap;
-        *x ^= t;
-        *y ^= t;
-    }
-}
-
 /// `x := x - y mod m` where `keep` is all ones, for `x` and `y` below `m`.
 fn mod_sub_masked(x: &mut [u64], y: &[u64], m: &[u64], keep: u64) {
     let borrow = sub_masked(x, y, keep);
     add_masked(x, m, mask(borrow));
-}
-
-/// `x := x / 2 mod m`, for `x` below the odd `m`: adds `m` to an odd `x`
-/// first, keeping the carry as the sum's top bit.
-fn mod_halve(x: &mut [u64], m: &[u64]) {
-    let carry = add_masked(x, m, mask(x[0] & 1));
-    for i in 0..x.len() {
-        let above = x.get(i + 1).copied().unwrap_or(carry);
-        x[i] = x[i] >> 1 | above << 63;
-    }
 }
 
 /// `x := x + y` where `keep` is all ones, returning the carry.
@@ -398,60 +303,6 @@ pub(super) mod tests {
             low::bignum_negmodinv(&mut theirs, &m[..1]);
             prop_assert_eq!(into_public(ours), into_public(theirs));
         }
-
-        #[test]
-        fn gcd(x in words(0, 6), y in words(0, 6), (m, a, _) in modulus(20)) {
-            let w = x.len().max(y.len());
-            let ours = bignum_coprime(&secret(&x), &secret(&y), &mut vec![0; 2 * w]);
-            let theirs = low::bignum_coprime(&x, &y, &mut vec![0; 2 * w]);
-            prop_assert_eq!(into_public(ours), into_public(theirs));
-
-            let k = m.len();
-            if low::bignum_coprime(&a, &m, &mut vec![0; 2 * k]) {
-                let (mut ours, mut theirs) = (vec![0; k], vec![0; k]);
-                bignum_modinv(&mut ours, &secret(&a), &secret(&m), &mut []);
-                low::bignum_modinv(&mut theirs, &a, &m, &mut vec![0; 3 * k]);
-                prop_assert_eq!(public(&ours), theirs);
-            }
-        }
-    }
-
-    /// 3 against 2^(64k - 1) and 3 * 2^(64k - 2), which set the gcd only
-    /// after a step per bit of the wider, and inverses of 1 and -1, up to the
-    /// widest the buffers hold.
-    #[test]
-    fn long_gcd() {
-        for k in [1, 2, 20, MAX_WORDS] {
-            let mut top = vec![0; k];
-            top[k - 1] = 1 << 63;
-            let t = &mut vec![0; 2 * k];
-            assert!(bignum_coprime(&[3], &top, t));
-            assert!(bignum_coprime(&top, &[3], t));
-            top[k - 1] = 3 << 62;
-            assert!(!bignum_coprime(&[3], &top, t));
-
-            let full = vec![u64::MAX; k];
-            let mut one = vec![0; k];
-            one[0] = 1;
-            let mut z = vec![0; k];
-            bignum_modinv(&mut z, &one, &full, &mut []);
-            assert_eq!(z, one);
-            let mut minus_one = full.clone();
-            minus_one[0] -= 1;
-            bignum_modinv(&mut z, &minus_one, &full, &mut []);
-            assert_eq!(z, minus_one);
-        }
-    }
-
-    /// The widest values, which the fixed buffers must hold.
-    #[test]
-    fn widest() {
-        let m = [u64::MAX; MAX_WORDS];
-        let x = [u64::MAX - 1; MAX_WORDS];
-        let (mut ours, mut theirs) = ([0; MAX_WORDS], [0; MAX_WORDS]);
-        bignum_modinv(&mut ours, &x, &m, &mut []);
-        low::bignum_modinv(&mut theirs, &x, &m, &mut [0; MAX_WORDS * 3]);
-        assert_eq!(ours, theirs);
     }
 
     // Only the top bit set is where an exclusive or of `x` and `-x` would

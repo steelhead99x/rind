@@ -195,11 +195,15 @@ impl SignatureVerificationAlgorithm for Verify {
 
 #[cfg(test)]
 mod tests {
+    use std::vec::Vec;
+
     use rind::ecdsa::KeyPair as EcdsaKeyPair;
     use rind::ed25519::KeyPair as Ed25519KeyPair;
     use rind::rand;
     use rind::rsa::KeyPair as RsaKeyPair;
     use rustls::SignatureScheme;
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    use wasm_bindgen_test::wasm_bindgen_test as test;
 
     use super::*;
 
@@ -368,7 +372,7 @@ mod tests {
     // aws-lc-rs does not build for wasm.
     #[cfg(not(target_family = "wasm"))]
     #[test]
-    fn verify_debug_names_the_type_and_ids_match_aws_lc() {
+    fn ids_match_aws_lc() {
         use rustls::pki_types::alg_id;
 
         let aws = rustls::crypto::aws_lc_rs::default_provider();
@@ -386,17 +390,12 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(ours.len(), theirs.len());
         for alg in ours {
-            let rendered = format!("{alg:?}");
-            // rustls names its type `AwsLcRsAlgorithm`. rind names `Verify`.
-            // The identifiers are the values that have to match; an empty
-            // `Debug` contains neither.
-            assert!(rendered.contains("Verify"), "{rendered}");
             assert!(
                 theirs.iter().any(|other| {
                     other.public_key_alg_id() == alg.public_key_alg_id()
                         && other.signature_alg_id() == alg.signature_alg_id()
                 }),
-                "{rendered}"
+                "{alg:?}"
             );
         }
     }

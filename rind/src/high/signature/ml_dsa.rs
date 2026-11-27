@@ -230,16 +230,18 @@ impl<P: ParameterSet> KeyPair<P> {
     }
 }
 
+impl<P: ParameterSet> KeyPair<P> {
+    /// The parameter set's OID.
+    pub(crate) const fn oid() -> &'static asn1::ObjectId {
+        P::ALGORITHM.oid
+    }
+}
+
 #[cfg(test)]
 impl<P: ParameterSet> KeyPair<P> {
     /// The key pair the mid layer holds.
     pub(crate) fn inner(&self) -> &mldsa::KeyPair<P> {
         &self.pair
-    }
-
-    /// The parameter set's OID.
-    pub(crate) fn oid() -> &'static asn1::ObjectId {
-        P::ALGORITHM.oid
     }
 }
 
