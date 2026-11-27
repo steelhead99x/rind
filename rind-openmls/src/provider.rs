@@ -15,6 +15,8 @@ const CIPHERSUITES: [Ciphersuite; 3] = [
 ];
 
 /// OpenMLS's cryptography and randomness on rind.
+///
+/// `Clone` needs the `test-utils` feature, as upstream's does.
 #[derive(Debug, Default)]
 #[cfg_attr(feature = "test-utils", derive(Clone))]
 pub struct RustCrypto {

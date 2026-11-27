@@ -38,14 +38,15 @@ fn hw_decrypt(key: &HwDecKey, iv: &[u8; 16], blocks: &mut [[u8; 16]]) {
 fn hw_cbc(key: *const u8, iv: &[u8; 16], blocks: &mut [[u8; 16]], encrypt: bool) {
     // The routine leaves the next IV here; CBC callers here start afresh.
     let mut ivec = *iv;
+    let io = blocks.as_mut_ptr().cast::<u8>();
     // SAFETY: `blocks` is `16 * blocks.len()` readable and writable bytes,
     // which aws-lc allows to alias, and `key` the `AES_KEY` for the
     // direction. Only a `HaveAesHardware` token builds it, proving the AES-NI
     // and SSSE3 the routine uses. It returns at once for zero bytes.
     unsafe {
         asm_call!(unsafe extern "sysv64" aes_hw_cbc_encrypt(
-            blocks.as_ptr().cast(),
-            blocks.as_mut_ptr().cast(),
+            io,
+            io,
             16 * blocks.len(),
             key,
             &mut ivec,

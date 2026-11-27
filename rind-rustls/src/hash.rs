@@ -1,3 +1,5 @@
+use alloc::boxed::Box;
+
 use rind::digest;
 use rustls::crypto::hash;
 
@@ -57,6 +59,8 @@ impl hash::Context for Context {
 #[cfg(test)]
 mod test {
     use rustls::crypto::hash::Hash;
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    use wasm_bindgen_test::wasm_bindgen_test as test;
 
     use super::*;
 

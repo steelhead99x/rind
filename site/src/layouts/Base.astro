@@ -4,6 +4,7 @@
 // refuses one), a link to the page's Markdown twin, and the card a pasted link
 // shows.
 import { card } from "../lib/card";
+import { favicon } from "../lib/favicon";
 import { type Page, origin, twinPath } from "../lib/pages";
 
 interface Props {
@@ -34,8 +35,7 @@ const { page, title = page.title } = Astro.props;
 		<meta property="og:image:height" content={String(card.height)} />
 		<meta property="og:image:alt" content="rind, with a curled strip of green graviola peel forming the r" />
 		<meta name="twitter:card" content="summary_large_image" />
-		{/* No favicon yet; this stops the browser asking for one. */}
-		<link rel="icon" href="data:," />
+		<link rel="icon" href={favicon} type="image/svg+xml" />
 	</head>
 	<body>
 		<slot />

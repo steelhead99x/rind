@@ -7,9 +7,10 @@ public import Rind.Aarch64.Neon
 open Aeneas Aeneas.Std Result
 set_option linter.dupNamespace false
 
-/-! The rind types the aarch64 translation leaves opaque. `Rind.Aarch64.Dispatch` and
-`Rind.Aarch64.DigestDispatch` model the last five, and `Rind.Aarch64.DigestAlgorithm`
-`Algorithm` and `Digest`, and `Rind.Aarch64.Neon` the vector types. -/
+/-! The rind types the aarch64 translation leaves opaque. `Rind.Aarch64.Dispatch`,
+`Rind.Aarch64.DigestDispatch`, and `Rind.Aarch64.AeadDispatch` model the last
+six, and `Rind.Aarch64.DigestAlgorithm` `Algorithm` and `Digest`, and
+`Rind.Aarch64.Neon` the vector types. -/
 
 namespace rind.aarch64
 
@@ -57,9 +58,27 @@ opaque low.aarch64.vpaes_armv8.VpaesDecKey : Type
 here: the CPU has the SHA-3 instructions. -/
 opaque low.aarch64.mlkem768_vg.Encaps : Type
 
+/-- The token proving pyca/verified-garbage's ML-KEM-768 key generation and
+decapsulation run here, which they never do on aarch64: an empty enum. -/
+@[reducible] def low.generic.mlkem768_vg.KeyPair : Type := Empty
+
 /-- The token proving the CPU has SVE2, on which ChaCha20-Poly1305's one pass
-runs pyca/verified-garbage's routines. -/
+and `cipher::ChaCha20` run pyca/verified-garbage's routines. -/
 opaque low.aarch64.cpu.HaveSve2 : Type
+
+/-- pyca/verified-garbage's ChaCha20 streaming state, as its routines see it:
+the 768 bytes of memory they keep it in, all that VG's spec reads of it, as
+`Rind.VgChaCha20` proves. Rust leaves it uninitialised: `init` writes the bytes
+`apply` reads on entry, and `apply` writes its scratch before reading it, so
+the model gives the rest any bytes.
+`admin/prove` fails unless this quote is still the type:
+
+```rust
+struct VgState(MaybeUninit<[u64; 96]>);
+
+```
+-/
+@[reducible] def low.aarch64.chacha20.VgState : Type := Std.Array Std.U8 768#usize
 
 /-- MD5's chaining state, which no proof covers. -/
 opaque mid.md5.Md5State : Type
@@ -94,5 +113,10 @@ model calls directly. -/
 nothing, since `Hashing::start` builds the only one, of `C`'s own
 `HashContext` functions, which the model calls directly. -/
 @[reducible] def high.digest.Ops (_C : Type) : Type := Unit
+
+/-- An expanded AEAD key with its cipher's functions, as `Rind.Aarch64.AeadDispatch`
+models it: the key, since `Sealer::expand` builds every one with `C`'s own
+`seal` and `open`, which the model calls directly. -/
+@[reducible] def aead.Sealer (C : Type) : Type := C
 
 end rind.aarch64

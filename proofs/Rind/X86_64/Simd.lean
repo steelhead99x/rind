@@ -8,7 +8,7 @@ set_option linter.style.nameCheck false
 open Aeneas Aeneas.Std Result
 
 /-!
-# x86_64's vectors and the intrinsics rind's AES-GCM and point select call
+# x86_64's vectors and the intrinsics rind's AES-GCM, point select, and RSA gather call
 
 `core::arch` implements each intrinsic with an LLVM builtin, which Aeneas
 cannot translate, so these model them by hand, each as Intel's Software
@@ -37,6 +37,12 @@ def lane32x8 (x : BitVec 256) (i : Nat) : BitVec 32 := x.extractLsb' (32 * i) 32
 /-- The 256-bit vector of eight 32-bit lanes, lane 0 lowest. -/
 def ofLanes32x8 (f : Nat → BitVec 32) : BitVec 256 :=
   f 7 ++ f 6 ++ f 5 ++ f 4 ++ f 3 ++ f 2 ++ f 1 ++ f 0
+
+/-- A 256-bit vector's 64-bit lane `i`. -/
+def lane64x4 (x : BitVec 256) (i : Nat) : BitVec 64 := x.extractLsb' (64 * i) 64
+
+/-- The 256-bit vector of four 64-bit lanes, lane 0 lowest. -/
+def ofLanes64x4 (f : Nat → BitVec 64) : BitVec 256 := f 3 ++ f 2 ++ f 1 ++ f 0
 
 end rind.simd
 
@@ -240,6 +246,21 @@ def core.core_arch.x86.avx2._mm256_and_si256 (a b : core.core_arch.x86.__m256i) 
 def core.core_arch.x86.avx2._mm256_xor_si256 (a b : core.core_arch.x86.__m256i) :
     Result core.core_arch.x86.__m256i :=
   ok (a ^^^ b)
+
+/-- `_mm256_set1_epi64x`: each 64-bit lane `a`. -/
+def core.core_arch.x86.avx._mm256_set1_epi64x (a : Std.I64) : Result core.core_arch.x86.__m256i :=
+  ok (ofLanes64x4 fun _ => a.bv)
+
+/-- `_mm256_cmpeq_epi64`, `VPCMPEQQ`: each 64-bit lane all ones where the
+lanes are equal, and zero where not. -/
+def core.core_arch.x86.avx2._mm256_cmpeq_epi64 (a b : core.core_arch.x86.__m256i) :
+    Result core.core_arch.x86.__m256i :=
+  ok (ofLanes64x4 fun i => if lane64x4 a i = lane64x4 b i then BitVec.allOnes 64 else 0)
+
+/-- `_mm256_add_epi64`, `VPADDQ`: each 64-bit lane's sum, wrapping. -/
+def core.core_arch.x86.avx2._mm256_add_epi64 (a b : core.core_arch.x86.__m256i) :
+    Result core.core_arch.x86.__m256i :=
+  ok (ofLanes64x4 fun i => lane64x4 a i + lane64x4 b i)
 
 namespace rind.simd
 

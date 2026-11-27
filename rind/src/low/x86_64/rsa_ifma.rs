@@ -58,47 +58,90 @@ impl Drop for IfmaCrt {
     }
 }
 
-/// `vg_rsa_public_precomputed_checked`'s arguments: `out`, `n_len`, `pre`,
-/// `pre_len`, `e`, `e_len`, `input`, `input_len`, `scratch`, `scratch_len`.
-type PublicFn = unsafe extern "sysv64" fn(
-    *mut u8,
-    usize,
-    *const u64,
-    usize,
-    *const u8,
-    usize,
-    *const u8,
-    usize,
-    *mut u64,
-    usize,
-) -> u32;
+/// Enters `vg_rsa_public_precomputed_checked_ifma` with the arguments its
+/// contract, `pdChkContract`, names. VG declares its internal routines
+/// without parameters, so Rust may only call one through an entry that
+/// declares them; the jump leaves every register, and the return address, as
+/// the caller set them.
+#[unsafe(naked)]
+unsafe extern "sysv64" fn public_vg(
+    _out: *mut u8,
+    _n_len: usize,
+    _pre: *const u64,
+    _pre_len: usize,
+    _e: *const u8,
+    _e_len: usize,
+    _input: *const u8,
+    _input_len: usize,
+    _scratch: *mut u64,
+    _scratch_len: usize,
+) -> u32 {
+    core::arch::naked_asm!(
+        "jmp {f}",
+        f = sym vg::vg_rsa_public_precomputed_checked_ifma::vg_rsa_public_precomputed_checked_ifma,
+    );
+}
 
-/// `vg_rsa_private_crt_precomputed`'s arguments: `out`, `out_len`, `n`,
-/// `n_len`, `input`, `input_len`, `p`, `p_len`, `q`, `q_len`, `dp`,
-/// `dp_len`, `dq`, `dq_len`, `qinv`, `qinv_len`, `scratch`, `scratch_len`,
-/// `pre`, `pre_len`.
-type CrtFn = unsafe extern "sysv64" fn(
-    *mut u8,
-    usize,
-    *const u8,
-    usize,
-    *const u8,
-    usize,
-    *const u8,
-    usize,
-    *const u8,
-    usize,
-    *const u8,
-    usize,
-    *const u8,
-    usize,
-    *const u8,
-    usize,
-    *mut u64,
-    usize,
-    *const u64,
-    usize,
-) -> u32;
+/// As [`public_vg`], for `vg_rsa_private_crt_precomputed_ifma` and
+/// `crtContractP`.
+#[unsafe(naked)]
+unsafe extern "sysv64" fn crt_vg(
+    _out: *mut u8,
+    _out_len: usize,
+    _n: *const u8,
+    _n_len: usize,
+    _input: *const u8,
+    _input_len: usize,
+    _p: *const u8,
+    _p_len: usize,
+    _q: *const u8,
+    _q_len: usize,
+    _dp: *const u8,
+    _dp_len: usize,
+    _dq: *const u8,
+    _dq_len: usize,
+    _qinv: *const u8,
+    _qinv_len: usize,
+    _scratch: *mut u64,
+    _scratch_len: usize,
+    _pre: *const u64,
+    _pre_len: usize,
+) -> u32 {
+    core::arch::naked_asm!(
+        "jmp {f}",
+        f = sym vg::vg_rsa_private_crt_precomputed_ifma::vg_rsa_private_crt_precomputed_ifma,
+    );
+}
+
+/// As [`crt_vg`], for `vg_rsa_private_crt_precomputed_ifma512`.
+#[unsafe(naked)]
+unsafe extern "sysv64" fn crt_vg512(
+    _out: *mut u8,
+    _out_len: usize,
+    _n: *const u8,
+    _n_len: usize,
+    _input: *const u8,
+    _input_len: usize,
+    _p: *const u8,
+    _p_len: usize,
+    _q: *const u8,
+    _q_len: usize,
+    _dp: *const u8,
+    _dp_len: usize,
+    _dq: *const u8,
+    _dq_len: usize,
+    _qinv: *const u8,
+    _qinv_len: usize,
+    _scratch: *mut u64,
+    _scratch_len: usize,
+    _pre: *const u64,
+    _pre_len: usize,
+) -> u32 {
+    core::arch::naked_asm!(
+        "jmp {f}",
+        f = sym vg::vg_rsa_private_crt_precomputed_ifma512::vg_rsa_private_crt_precomputed_ifma512,
+    );
+}
 
 /// The widest modulus, in 64-bit words.
 const MAX_WORDS: usize = 128;
@@ -137,14 +180,6 @@ impl RsaIfma {
         assert!(pre.len() == 2 * w && x.len() == k && (1..=k).contains(&e.len()));
         let mut scratch = [Line([0; 8]); (8 * MAX_WORDS + 48) / 8];
         let scratch = &mut Line::words(&mut scratch)[..8 * w + 48];
-        // SAFETY: VG declares its internal functions without parameters, as
-        // only its own code calls them, and `PublicFn` is the signature its
-        // contract gives this one.
-        let f: PublicFn = unsafe {
-            core::mem::transmute::<unsafe extern "sysv64" fn(), PublicFn>(
-                vg::vg_rsa_public_precomputed_checked_ifma::vg_rsa_public_precomputed_checked_ifma,
-            )
-        };
         // SAFETY: `out` is `k` writable bytes, `pre` `2w` readable words,
         // `e` and `x` `e.len()` and `k` readable bytes, and `scratch`
         // `8w + 48` writable words, with `64 <= k <= 1024` and
@@ -153,7 +188,7 @@ impl RsaIfma {
         // address space. Its contract asks nothing of `pre`'s values, of
         // which only the result depends. The token proves the CPU features.
         let r = unsafe {
-            asm_call!(unsafe extern "sysv64" (f)(
+            asm_call!(unsafe extern "sysv64" public_vg(
                 out.as_mut_ptr(),
                 k,
                 pre.as_ptr(),
@@ -172,13 +207,14 @@ impl RsaIfma {
 
 impl IfmaCrt {
     /// The values VG's CRT takes for the key of `n`, `p`, and `q`, little-endian
-    /// words: if the CPU runs it, and it is the fastest there, for 2048- and
+    /// words, given `n`'s `R^2 mod n` for `R = 2^(64w)` and `n`'s `w` words:
+    /// if the CPU runs it, and it is the fastest there, for 2048- and
     /// 4096-bit moduli of primes as wide as each other, as aws-lc's dual RSAZ
     /// requires, and 3072-bit ones on CPUs with AVX512_FP16. Otherwise, or if
     /// `n` is even or not `p q`, a value
     /// that [`IfmaCrt::runs`] refuses.
-    pub(crate) fn new(n: &[u64], p: &[u64], q: &[u64]) -> Self {
-        Self::try_new(n, p, q).unwrap_or(Self {
+    pub(crate) fn new(n: &[u64], n_montifier: &[u64], p: &[u64], q: &[u64]) -> Self {
+        Self::try_new(n, n_montifier, p, q).unwrap_or(Self {
             w: 0,
             pre: [0; 6 * MAX_PRIME_WORDS],
             p: [0; MAX_PRIME_WORDS],
@@ -186,20 +222,21 @@ impl IfmaCrt {
         })
     }
 
-    fn try_new(n: &[u64], p: &[u64], q: &[u64]) -> Option<Self> {
+    fn try_new(n: &[u64], n_montifier: &[u64], p: &[u64], q: &[u64]) -> Option<Self> {
         let token = HaveAvx512ForRsa::check()?;
         let w = p.len();
         let sized = matches!(w, 16 | 32) || (w == 24 && token.fp16());
-        if !sized || q.len() != w || n.len() != 2 * w {
+        if !sized || q.len() != w || n.len() != 2 * w || n_montifier.len() != 2 * w {
             return None;
         }
-        Self::precompute(n, p, q)
+        Self::precompute(n, n_montifier, p, q)
     }
 
     /// [`IfmaCrt::try_new`] past its CPU and size checks, for `p` and `q` of
-    /// `w` words and `n` of `2 w`. It runs on any CPU, so `admin/ctgrind`
-    /// checks it, as Valgrind hides AVX-512 IFMA from `try_new`.
-    fn precompute(n: &[u64], p: &[u64], q: &[u64]) -> Option<Self> {
+    /// `w` words and `n` and `n_montifier` of `2 w`. It runs on any CPU, so
+    /// `admin/ctgrind` checks it, as Valgrind hides AVX-512 IFMA from
+    /// `try_new`.
+    fn precompute(n: &[u64], n_montifier: &[u64], p: &[u64], q: &[u64]) -> Option<Self> {
         let w = p.len();
         let n = low::PosInt::<{ 2 * MAX_PRIME_WORDS }>::from_words(n).ok()?;
         let p = low::PosInt::<MAX_PRIME_WORDS>::from_words(p).ok()?;
@@ -226,7 +263,7 @@ impl IfmaCrt {
         ifma.q[..w].copy_from_slice(q.as_words());
         let (pre_n, pre_p) = ifma.pre[..6 * w].split_at_mut(4 * w);
         pre_n[..2 * w].copy_from_slice(n.as_words());
-        pre_n[2 * w..].copy_from_slice(n.pub_montifier().as_words());
+        pre_n[2 * w..].copy_from_slice(n_montifier);
         pre_p[..w].copy_from_slice(p.montifier().as_words());
         pre_p[w..].copy_from_slice(q.montifier().as_words());
         Some(ifma)
@@ -270,21 +307,9 @@ impl IfmaCrt {
         // private key.
         let mut lines = alloc::vec![Line([0; 8]); (16 * k + 32).div_ceil(8)];
         let scratch = &mut Line::words(&mut lines)[..16 * k + 32];
-        let f: CrtFn = match token.fp16() {
-            // SAFETY: VG declares its internal functions without parameters,
-            // as only its own code calls them, and `CrtFn` is the signature
-            // its contract gives this one.
-            true => unsafe {
-                core::mem::transmute::<unsafe extern "sysv64" fn(), CrtFn>(
-                    vg::vg_rsa_private_crt_precomputed_ifma512::vg_rsa_private_crt_precomputed_ifma512,
-                )
-            },
-            // SAFETY: as above.
-            false => unsafe {
-                core::mem::transmute::<unsafe extern "sysv64" fn(), CrtFn>(
-                    vg::vg_rsa_private_crt_precomputed_ifma::vg_rsa_private_crt_precomputed_ifma,
-                )
-            },
+        let f = match token.fp16() {
+            true => crt_vg512,
+            false => crt_vg,
         };
         // SAFETY: `out` is `k` writable bytes, `n_bytes` and `x` `k` readable
         // bytes, `p`, `dp`, `qinv`, `q`, and `dq` `p_len`, `scratch` `16k + 32`
@@ -372,10 +397,13 @@ mod tests {
             let n: low::PosInt<{ 2 * MAX_PRIME_WORDS }> = low::PosInt::mul(&pi, &qi);
             low::ct::secret_slice(&p);
             low::ct::secret_slice(&q);
-            let ifma = IfmaCrt::precompute(n.as_words(), &p[..w], &q[..w]).unwrap();
+            let montifier = n.pub_montifier();
+            let ifma =
+                IfmaCrt::precompute(n.as_words(), montifier.as_words(), &p[..w], &q[..w]).unwrap();
             assert_eq!(ifma.w, w);
             let pre = low::ct::into_public(ifma.pre);
             assert_eq!(&pre[..2 * w], n.as_words());
+            assert_eq!(&pre[2 * w..4 * w], montifier.as_words());
             assert_eq!(
                 &pre[4 * w..5 * w],
                 low::ct::into_public(pi.montifier()).as_words()
@@ -440,7 +468,7 @@ mod tests {
         let pi = low::PosInt::<MAX_PRIME_WORDS>::from_words(&p[..w]).unwrap();
         let qi = low::PosInt::<MAX_PRIME_WORDS>::from_words(&q[..w]).unwrap();
         let n: low::PosInt<{ 2 * MAX_PRIME_WORDS }> = low::PosInt::mul(&pi, &qi);
-        let ifma = IfmaCrt::new(n.as_words(), &p[..w], &q[..w]);
+        let ifma = IfmaCrt::new(n.as_words(), n.pub_montifier().as_words(), &p[..w], &q[..w]);
         assert!(ifma.runs(), "AVX-512 IFMA");
         let token = HaveAvx512ForRsa::check().unwrap();
         assert_eq!(token.fp16(), fp16, "the SDE model takes the other routine");

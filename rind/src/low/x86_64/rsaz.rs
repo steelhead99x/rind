@@ -31,10 +31,13 @@ pub(crate) struct Rsaz(HaveAvx2);
 
 impl Rsaz {
     pub(crate) fn check() -> Option<Self> {
-        match HaveBmi2Adx::check() {
-            Some(_) => None,
-            None => HaveAvx2::check().map(Self),
+        if HaveBmi2Adx::check().is_some() {
+            return None;
         }
+        // Not `map(Self)`, whose translation Lean cannot check, so `proofs/`
+        // can prove RSA's private operation.
+        let token = HaveAvx2::check()?;
+        Some(Self(token))
     }
 
     /// `z = x^e mod m`, for an odd `m` and `x` below it, where `rr` is

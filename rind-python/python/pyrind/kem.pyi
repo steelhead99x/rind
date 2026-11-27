@@ -18,7 +18,7 @@ class DecapsulationKey:
     def generate(algorithm: Algorithm) -> DecapsulationKey:
         """Generates a key for `algorithm`."""
     def public_key(self) -> EncapsulationKey:
-        """The public key to send the sender."""
+        """The public key to send the sender, the same object each call."""
     def decapsulate(self, ciphertext: Buffer) -> bytes:
         """Recovers the shared secret from the sender's `ciphertext`."""
 

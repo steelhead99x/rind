@@ -8,7 +8,7 @@ use std::io::{BufReader, BufWriter, Read, Write};
 
 use rind::rsa;
 
-use crate::dudect::{ticks, ticks_per_second};
+use crate::clock::{ticks, ticks_per_second};
 
 /// Decrypts every ciphertext in `ciphertexts` with the PKCS#8 key in `key`,
 /// writing each call's ticks to `out` as a little-endian u64, and prints the

@@ -1,0 +1,285 @@
+#!/usr/bin/env python3
+
+# Usage: admin/dit-qemu [--exe <test binary>]
+#
+# The instruction-level DIT check. `rind/src/low/entry/tests.rs` lists each
+# public call that handles a secret; its test `dit_qemu_every_secret_call`
+# runs each one between two marks. This builds the debug aarch64 test binary,
+# runs that test under qemu-aarch64's `max` CPU (which has FEAT_DIT) with
+# `admin/dit-qemu-plugin.c`, which reads PSTATE.DIT at every instruction
+# between the marks, and fails unless, for every call:
+#
+# - some instruction ran with DIT set, so the call set it at all;
+# - no instruction ran with DIT clear between two that ran with it set (a
+#   hole: a second toggle inside one call, or something clearing DIT under a
+#   live `Entry`), whichever function it ran in, core's and libc's included;
+# - before DIT was first set, no rind kernel (`rind::low::`, outside the
+#   `Entry` and feature detection that set DIT, or `rind::mid::`) ran more
+#   than a prologue's worth of instructions (`FRAME`), unless the call's entry
+#   in `PRE_ENTRY` below lists it with a reason;
+# - after DIT was last cleared, no rind kernel ran more than an epilogue's
+#   worth of instructions (`FRAME`), outside the `Entry` drop that clears
+#   it, key wipes, and what the call's entry in `POST_ENTRY` lists, so a call
+#   that clears DIT early and then does secret work before it returns fails
+#   too, though it leaves no hole.
+#
+# The `Entry` and `assert_held` checks the other tests make read PSTATE.DIT
+# only where rind's code calls them; this reads it under every instruction.
+#
+# Three planted windows close the list: one opens a hole, one clears DIT and
+# then runs a kernel, and one never sets DIT. Each must fail its check, so a
+# plugin that reads nothing, or a parser that drops what it read, fails here.
+#
+# Run it in `nix develop .#dit-qemu`, which has the aarch64 cross toolchain,
+# qemu-aarch64, and the plugin (as `RIND_DIT_QEMU_PLUGIN`).
+
+import json, os, re, shutil, subprocess, sys, tempfile
+
+TARGET = "aarch64-unknown-linux-gnu"
+TEST = "low::entry::tests::dit_qemu_every_secret_call"
+PLANTED_HOLE = "planted: a hole"
+PLANTED_OFF = "planted: no DIT"
+PLANTED_TAIL = "planted: a secret tail"
+PLANTED = (PLANTED_HOLE, PLANTED_OFF, PLANTED_TAIL)
+
+# What may run before a call first sets DIT: its own checks of public
+# arguments, and the `Entry` that sets it.
+ALWAYS_BEFORE = re.compile(
+    r"^<*rind::low::(entry::|cpu_denied|enter_cpu_state)"
+    # Feature detection and the DIT toggle in aarch64's `cpu`, not its
+    # constant-time compares, wipes or prefetches, which take secrets.
+    r"|^<*rind::low::aarch64::cpu::(enter_cpu_state|leave_cpu_state|Have\w+>::check\w*$"
+    r"|wide_multiplier|features|detect\w*|wide_toggle|midr_fixture|read_midr|wide_from_midr"
+    r"|narrow_part|dit::|dit_on|test_toggle|cpu_forced|missing_cpu_feature)"
+    r"|^<*rind::low::entry::tests::"
+    # Identity functions that mark a value secret or public for ctgrind and
+    # BINSEC: they copy the caller's bytes and compute nothing, as moving a
+    # key into its struct does.
+    r"|^<*rind::low::ct::(into_secret|into_public|secret_slice|public_slice)\b"
+    r"|^<*rind::low::ct_binsec::(classify|declassify)\b"
+    # A key type's wipe on drop stores zeros: it loads none of the secret
+    # and computes nothing on it, so no instruction's timing or the data
+    # prefetcher's input depends on the secret. Run outside a guard, a
+    # drop sets no DIT (see benchmarks/apple-dit-coverage.md).
+    r"|^<*rind::low::generic::zeroise::"
+    r"|^<*rind::low::aarch64::cpu::zero_bytes$"
+)
+# Secret code, which must not run before DIT is set unless listed below. A
+# method's name starts with `<` (`<rind::mid::aes::Aes>::encrypt_block`).
+KERNEL = re.compile(r"^<*rind::(low|mid)::")
+
+# What may run after a call last clears DIT: the `Entry` drop and the write
+# that clear it, and key wipes and frees, which store zeros and release
+# memory without computing on the secret (as `ALWAYS_BEFORE` says).
+ALWAYS_AFTER = re.compile(
+    r"^<*rind::low::(entry::|aarch64::cpu::(dit::|leave_cpu_state|maybe_disable|zero_bytes|features))"
+    r"|^<*rind::low::entry::tests::"
+    r"|^<*rind::low::generic::(zeroise::|reuse_cache::)"
+    r"| as core::ops::drop::Drop>::drop$"
+    r"|^<rind::mid::mlkem::EncapKey<.*>>::free_decoded$"
+    r"|^<rind::mid::mldsa::Polys>::free$"
+    r"|^<rind::mid::mldsa::PublicKey<.*>>::free_expansion$"
+)
+# Instructions a kernel may run before DIT is set or after it is cleared,
+# outside the allow-lists: a debug build's prologue up to the function's
+# secret `Entry` (moving arguments to the stack), or its epilogue after the
+# `Entry` drops (copying the return value out, restoring the frame). The
+# most any listed call's kernel runs there is 25 (`<rind::mid::pbkdf2_vg::Key>::new`
+# before its `Entry`); real work on a secret is far more (the planted
+# window's `chacha20_block` runs hundreds).
+FRAME = 32
+
+# Call name to (symbol pattern, reason) pairs: kernels a call runs on public
+# data before its secret `Entry`.
+PRE_ENTRY = {
+    "agreement X25519 agree": [
+        (r"^<*rind::mid::(x25519::PublicKey|util::little_endian)", "parses the peer's public key"),
+    ],
+    "digest::Context::update": [
+        (
+            r"^<*rind::low::generic::blockwise::Blockwise",
+            "copies the message into the block buffer, computing nothing; each compression takes its own secret Entry",
+        ),
+    ],
+    "hmac::Context::update": [
+        (
+            r"^<*rind::(low::generic::blockwise::Blockwise|mid::sha2::Sha256(Context|State))",
+            "buffers the public message and copies the keyed state; each compression takes its own secret Entry",
+        ),
+    ],
+    "hmac::Context::sign": [
+        (
+            r"^<*rind::(low::generic::blockwise::Blockwise|mid::sha2::Sha256(Context|State))",
+            "copies the keyed state before the secret Entry that finishes it",
+        ),
+    ],
+    "agreement P-384 agree": [
+        (
+            r"^<*rind::mid::(p384|util::big_endian)|^<*rind::low::aarch64::bignum_",
+            "decodes the peer's public point and checks it is on the curve, under a public Entry",
+        ),
+    ],
+}
+
+# Call name to (symbol pattern, reason) pairs: kernels a call runs on public
+# data after its secret `Entry`.
+POST_ENTRY = {
+    "kem::DecapsulationKey::generate ML-KEM-768": [
+        (
+            r"^<rind::mid::mlkem::DecapKey<.*>>::encapsulation_key$",
+            "copies out the public encapsulation key, under a public Entry",
+        ),
+    ],
+}
+
+
+def build():
+    out = subprocess.run(
+        ["cargo", "test", "-p", "rind", "--lib", "--no-run", "--target", TARGET]
+        + ["--message-format=json-render-diagnostics"],
+        stdout=subprocess.PIPE,
+        check=True,
+        encoding="utf-8",
+    ).stdout
+    for line in out.splitlines():
+        js = json.loads(line)
+        if js.get("reason") == "compiler-artifact" and js.get("executable"):
+            if js["target"]["name"] == "rind":
+                return js["executable"]
+    sys.exit("dit-qemu: no rind test binary")
+
+
+def demangle(symbols):
+    """Rust names for `symbols`, through `c++filt`, which reads both of
+    Rust's manglings, without the crate hashes."""
+    symbols = list(symbols)
+    filt = shutil.which("c++filt")
+    if not filt or not symbols:
+        return {s: s for s in symbols}
+    out = subprocess.run(
+        [filt], input="\n".join(symbols) + "\n", stdout=subprocess.PIPE, check=True, encoding="utf-8"
+    ).stdout.splitlines()
+    clean = [re.sub(r"\[[0-9a-f]+\]", "", re.sub(r"::h[0-9a-f]{16}$", "", s)) for s in out]
+    return dict(zip(symbols, clean))
+
+
+def parse(path):
+    windows = []
+    for line in open(path):
+        kind, rest = line.rstrip("\n").split(" ", 1)
+        if kind == "W":
+            on, pre, holes, post = (int(x) for x in rest.split())
+            windows.append({"on": on, "pre": pre, "holes": holes, "post": post, "H": {}, "P": {}, "T": {}})
+        else:
+            count, symbol = rest.split(" ", 1)
+            windows[-1][kind][symbol] = int(count)
+    return windows
+
+
+def main():
+    sys.stdout.reconfigure(line_buffering=True)
+    plugin = os.environ.get("RIND_DIT_QEMU_PLUGIN")
+    if not plugin:
+        sys.exit("dit-qemu: run it in `nix develop .#dit-qemu`")
+    args = sys.argv[1:]
+    if args[:1] == ["--exe"]:
+        exe = args[1]
+    elif not args:
+        exe = build()
+    else:
+        sys.exit("usage: admin/dit-qemu [--exe <test binary>]")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        trace = os.path.join(tmp, "windows")
+        run = subprocess.run(
+            ["qemu-aarch64", "-cpu", "max", "-plugin", "{},out={}".format(plugin, trace), exe]
+            + ["--ignored", "--exact", TEST, "--test-threads=1", "--nocapture"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            encoding="utf-8",
+        )
+        if run.returncode != 0:
+            sys.exit("dit-qemu: {} failed under qemu:\n{}".format(TEST, run.stdout))
+        windows = parse(trace)
+    names = re.findall(r"dit-qemu: (.*)", run.stdout)
+    if len(names) != len(windows) or len(names) <= len(PLANTED):
+        sys.exit("dit-qemu: {} calls but {} windows".format(len(names), len(windows)))
+    names_of = demangle({s for w in windows for k in "HPT" for s in w[k]})
+
+    failures = []
+    for name, w in zip(names, windows):
+        holes = sorted(((c, names_of[s]) for s, c in w["H"].items()), reverse=True)
+        early = sorted(
+            (c, names_of[s])
+            for s, c in w["P"].items()
+            if KERNEL.search(names_of[s]) and not ALWAYS_BEFORE.search(names_of[s]) and c > FRAME
+        )
+        allowed_after = [re.compile(p) for p, _ in POST_ENTRY.get(name, [])]
+        late = sorted(
+            (
+                (c, names_of[s])
+                for s, c in w["T"].items()
+                if KERNEL.search(names_of[s])
+                and not ALWAYS_AFTER.search(names_of[s])
+                and c > FRAME
+            ),
+            reverse=True,
+        )
+        late = [(c, s) for c, s in late if not any(p.search(s) for p in allowed_after)]
+        allowed = [re.compile(p) for p, _ in PRE_ENTRY.get(name, [])]
+        early = [(c, s) for c, s in early if not any(p.search(s) for p in allowed)]
+        problems = []
+        if w["on"] == 0:
+            problems.append("never set DIT")
+        if w["holes"]:
+            problems.append(
+                "{} instructions ran with DIT clear after it was set, in: {}".format(
+                    w["holes"], ", ".join("{} ({})".format(s, c) for c, s in holes[:12])
+                )
+            )
+        if early:
+            problems.append(
+                "ran secret code before setting DIT: {}".format(
+                    ", ".join("{} ({})".format(s, c) for c, s in early[:12])
+                )
+            )
+        if late:
+            problems.append(
+                "ran secret code after clearing DIT: {}".format(
+                    ", ".join("{} ({})".format(s, c) for c, s in late[:12])
+                )
+            )
+        if name == PLANTED_HOLE:
+            ok = w["holes"] > 0 and w["on"] > 0
+            print("{:<60} {}".format(name, "caught" if ok else "MISSED"))
+            if not ok:
+                failures.append("{}: the plugin saw no hole".format(name))
+        elif name == PLANTED_TAIL:
+            ok = w["on"] > 0 and not w["holes"] and bool(late)
+            print("{:<60} {}".format(name, "caught" if ok else "MISSED"))
+            if not ok:
+                failures.append("{}: no kernel seen after DIT was cleared".format(name))
+        elif name == PLANTED_OFF:
+            ok = w["on"] == 0 and w["pre"] > 0
+            print("{:<60} {}".format(name, "caught" if ok else "MISSED"))
+            if not ok:
+                failures.append("{}: the plugin saw DIT set".format(name))
+        else:
+            print(
+                "{:<60} {:>9} with DIT, {:>6} before it, {}".format(
+                    name, w["on"], w["pre"], "ok" if not problems else "FAIL"
+                )
+            )
+            failures += ["{}: {}".format(name, p) for p in problems]
+    if any(p not in names for p in PLANTED):
+        failures.append("the planted windows did not run")
+    if failures:
+        sys.exit("dit-qemu: failed:\n  " + "\n  ".join(failures))
+    print(
+        "dit-qemu: {} calls ran every instruction after setting DIT with it set, "
+        "and no kernel after clearing it".format(len(names) - len(PLANTED))
+    )
+
+
+if __name__ == "__main__":
+    main()

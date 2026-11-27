@@ -1,0 +1,277 @@
+#!/usr/bin/env python3
+
+# Usage: admin/dit-disasm [--self-test]
+#
+# The disassembly check for the barrier after `msr DIT, #1`
+# (`rind/src/low/aarch64/cpu.rs`, `dit::barrier_after_set`). It builds rind's
+# release rlib for each build in BUILDS, disassembles it with llvm-objdump,
+# and follows every path from each `msr DIT, #1` through the instructions
+# that only pick the barrier (loading the feature bits, testing them,
+# branching, feature detection, and stack accesses LLVM schedules there) to
+# the first that does anything else. It
+# fails unless every path ends as the build expects:
+#
+# - Apple's targets (`aarch64-apple-darwin`): in `sb`, or in `dsb nsh` then
+#   `isb`, and both appear, since which one runs depends on FEAT_SB at run
+#   time. That is Apple's documented sequence.
+# - Other aarch64 targets (`aarch64-unknown-linux-gnu`): in no barrier at
+#   all. The Arm
+#   architecture needs none (Arm ARM DDI 0487 M.d, C5.1.3.3 and B1.5.6).
+# - `--cfg rind_dit_barrier="apple"` on Linux: Apple's sequence again. A scan
+#   that read no barrier would pass the row above for nothing; this one must
+#   find both.
+#
+# Each build must hold at least one `msr DIT, #1`, so a build that sets DIT
+# nowhere fails rather than passing, and each site must have at least one
+# ending, so a site whose paths only loop fails too. A self-test of planted
+# control flow (a loop with no exit among them) runs first; `--self-test`
+# runs only that.
+#
+# Run it in `nix develop .#dit-disasm`, which has llvm-objdump and both
+# targets' standard libraries.
+
+import json, os, re, subprocess, sys
+
+# (name, target, extra RUSTFLAGS, expected endings)
+SB, DSB_ISB, NONE = "sb", "dsb nsh; isb", "no barrier"
+# A call to the function holding `sb`, which `check` counts as `sb` only once
+# it has seen an `sb` in that function's own instructions.
+SB_CALL = "a call to speculation_barrier"
+BUILDS = [
+    ("apple", "aarch64-apple-darwin", "", {SB, DSB_ISB}),
+    ("linux", "aarch64-unknown-linux-gnu", "", {NONE}),
+    (
+        "linux-apple-barrier",
+        "aarch64-unknown-linux-gnu",
+        '--cfg rind_dit_barrier="apple"',
+        {SB, DSB_ISB},
+    ),
+]
+
+# Instructions that only pick the barrier: load and test the feature bits,
+# branch, and set registers to constants. LLVM may also schedule a spill to
+# the stack there, such as the flag an `Entry` keeps, or the epilogue before a
+# tail call of the function holding `sb` (`STACK_ACCESS`).
+TRANSPARENT = re.compile(r"^(adrp|add|mov|movz|ldrb|ldr|cmp|cbz|cbnz|tbz|tbnz|b|b\.\w+)$")
+STACK_ACCESS = re.compile(r"^(str|strb|stur|stp|ldr|ldur|ldp)$")
+STACK = re.compile(r"\[(sp|x29)\b")
+BRANCH = re.compile(r"^(b|b\.\w+|cbz|cbnz|tbz|tbnz)$")
+FUNCTION = re.compile(r"^([0-9a-f]+) <(.+)>:$")
+INSN = re.compile(r"^\s+([0-9a-f]+):\s+(\S+)\s*(.*?)\s*(?:[;/]{1,2}.*)?$")
+RELOC = re.compile(r"^\s+[0-9a-f]+:\s+(?:R_AARCH64_\w+|ARM64_RELOC_\w+)\s+(\S+)")
+TARGET = re.compile(r"0x([0-9a-f]+) <")
+# How far a path may run before it must have ended.
+STEPS = 32
+
+
+def run(cmd, **kw):
+    return subprocess.run(cmd, stdout=subprocess.PIPE, check=True, encoding="utf-8", **kw).stdout
+
+
+def objdump():
+    sysroot = run(["rustc", "--print", "sysroot"]).strip()
+    host = re.search(r"^host: (\S+)$", run(["rustc", "-vV"]), re.M)[1]
+    path = os.path.join(sysroot, "lib", "rustlib", host, "bin", "llvm-objdump")
+    if not os.path.exists(path):
+        sys.exit("dit-disasm: no llvm-objdump; run it in `nix develop .#dit-disasm`")
+    return path
+
+
+def build(name, target, flags):
+    cmd = ["cargo", "build", "-p", "rind", "--lib", "--release", "--target", target]
+    base = os.environ.get("CARGO_TARGET_DIR") or "target"
+    cmd += ["--target-dir", os.path.join(base, "dit-disasm", name)]
+    cmd += ["--message-format=json-render-diagnostics"]
+    env = dict(os.environ, RUSTFLAGS=" ".join([os.environ.get("RUSTFLAGS", ""), flags]).strip())
+    env.pop("CARGO_TARGET_DIR", None)
+    for line in run(cmd, env=env).splitlines():
+        js = json.loads(line)
+        if js.get("reason") == "compiler-artifact" and js["target"]["name"] == "rind":
+            for path in js["filenames"]:
+                if path.endswith(".rlib"):
+                    return path
+    sys.exit("dit-disasm: no rind rlib for {}".format(name))
+
+
+def functions(tool, rlib):
+    """Each function's instructions: a list of (address, mnemonic, operands,
+    relocation symbol), in order."""
+    out = run([tool, "-d", "-r", "-C", "--no-show-raw-insn", rlib], stderr=subprocess.DEVNULL)
+    funcs, current = {}, None
+    for line in out.splitlines():
+        m = FUNCTION.match(line)
+        if m:
+            current = funcs.setdefault(m[2], [])
+            continue
+        if current is None:
+            continue
+        m = RELOC.match(line)
+        if m and current:
+            addr, mnem, ops, _ = current[-1]
+            current[-1] = (addr, mnem, ops, m[1])
+            continue
+        m = INSN.match(line)
+        if m:
+            current.append((int(m[1], 16), m[2].lower(), m[3], None))
+    return funcs
+
+
+def endings(insns, start):
+    """The ways the paths from the instruction after `insns[start]` end."""
+    at = {insn[0]: i for i, insn in enumerate(insns)}
+    found, seen = set(), set()
+    stack = [(start + 1, False, 0)]
+    while stack:
+        i, after_dsb, steps = stack.pop()
+        if (i, after_dsb) in seen:
+            continue
+        seen.add((i, after_dsb))
+        if i >= len(insns) or steps > STEPS:
+            found.add("ran off after {} steps".format(steps))
+            continue
+        addr, mnem, ops, reloc = insns[i]
+        if i == start:
+            found.add("back to the msr")
+            continue
+        if mnem == "sb" and not after_dsb:
+            found.add(SB)
+            continue
+        if mnem == "isb":
+            found.add(DSB_ISB if after_dsb else "isb alone")
+            continue
+        if mnem == "dsb":
+            if after_dsb or ops.strip() != "nsh":
+                found.add("dsb " + ops.strip())
+                continue
+            stack.append((i + 1, True, steps + 1))
+            continue
+        if mnem == "bl" and reloc and "detect" in reloc:
+            stack.append((i + 1, after_dsb, steps + 1))
+            continue
+        # A call to, or tail call of, the function holding `sb`.
+        if mnem in ("bl", "b") and reloc and "speculation_barrier" in reloc and not after_dsb:
+            found.add(SB_CALL)
+            continue
+        if mnem == "b" and reloc:
+            found.add(NONE if not after_dsb else "dsb nsh then a tail call")
+            continue
+        if STACK_ACCESS.match(mnem) and STACK.search(ops):
+            stack.append((i + 1, after_dsb, steps + 1))
+            continue
+        if not TRANSPARENT.match(mnem):
+            found.add(NONE if not after_dsb else "dsb nsh then " + mnem)
+            continue
+        if BRANCH.match(mnem):
+            targets = TARGET.findall(ops)
+            target = at.get(int(targets[0], 16)) if targets else None
+            if target is None:
+                found.add(NONE if not after_dsb else "dsb nsh then a branch out")
+            else:
+                stack.append((target, after_dsb, steps + 1))
+            if mnem == "b":
+                continue
+        stack.append((i + 1, after_dsb, steps + 1))
+    return found
+
+
+def site_problem(found, expected):
+    """Why one site's endings fail, or None. A site with no ending at all
+    (every path loops back into instructions already explored) fails: the
+    empty set is a subset of every expected set, and another site's endings
+    could otherwise make the aggregate check pass."""
+    if not found:
+        return "no path from it reaches an ending"
+    if not found <= expected:
+        return ", ".join(sorted(found))
+    return None
+
+
+def self_test():
+    """Planted control flow, so a scan that stops recording endings fails
+    here rather than passing every site: a loop with no exit, Apple's two
+    barriers behind a feature test, and a path with no barrier."""
+    msr = (0x0, "msr", "DIT, #0x1", None)
+    planted = [
+        (
+            "a loop with no barrier exit",
+            [msr, (0x4, "ldr", "x8, [x9]", None), (0x8, "cbz", "x8, 0x4 <f+0x4>", None),
+             (0xC, "b", "0x4 <f+0x4>", None)],
+            {SB, DSB_ISB},
+            False,
+        ),
+        (
+            "sb, else dsb nsh; isb",
+            [msr, (0x4, "ldrb", "w8, [x9]", None), (0x8, "tbz", "w8, #0x0, 0x14 <f+0x14>", None),
+             (0xC, "sb", "", None), (0x10, "ret", "", None), (0x14, "dsb", "nsh", None),
+             (0x18, "isb", "", None), (0x1C, "ret", "", None)],
+            {SB, DSB_ISB},
+            True,
+        ),
+        (
+            "no barrier where Apple's is expected",
+            [msr, (0x4, "ldp", "x29, x30, [sp], #0x10", None), (0x8, "ret", "", None)],
+            {SB, DSB_ISB},
+            False,
+        ),
+        (
+            "no barrier where none is expected",
+            [msr, (0x4, "ldp", "x29, x30, [sp], #0x10", None), (0x8, "ret", "", None)],
+            {NONE},
+            True,
+        ),
+    ]
+    bad = []
+    for name, insns, expected, passes in planted:
+        found = endings(insns, 0)
+        if (site_problem(found, expected) is None) != passes:
+            bad.append("{}: endings {}".format(name, sorted(found) or "none"))
+    if bad:
+        sys.exit("dit-disasm: self-test failed:\n  " + "\n  ".join(bad))
+    print("dit-disasm: self-test: {} planted sites classified as expected".format(len(planted)))
+
+
+def check(tool, name, target, flags, expected):
+    rlib = build(name, target, flags)
+    sites, failures, seen_all = 0, [], set()
+    funcs = functions(tool, rlib)
+    holders = [insns for func, insns in funcs.items() if "speculation_barrier" in func]
+    callee_has_sb = bool(holders) and all(any(m == "sb" for _, m, _, _ in i) for i in holders)
+    for func, insns in sorted(funcs.items()):
+        for i, (addr, mnem, ops, _) in enumerate(insns):
+            if mnem != "msr" or ops.replace(" ", "").lower() != "dit,#0x1":
+                continue
+            sites += 1
+            found = endings(insns, i)
+            if SB_CALL in found:
+                found = (found - {SB_CALL}) | {SB if callee_has_sb else "a call to a speculation_barrier without sb"}
+            seen_all |= found
+            problem = site_problem(found, expected)
+            if problem:
+                failures.append("{} +{:#x}: {}".format(func, addr, problem))
+    if not sites:
+        failures.append("no `msr DIT, #1` at all")
+    if expected - seen_all:
+        failures.append("never found: {}".format(", ".join(sorted(expected - seen_all))))
+    status = "FAIL" if failures else "ok"
+    print(
+        "dit-disasm: {} ({} {}): {} sites, every path ends in {}: {}".format(
+            name, target, flags or "default flags", sites, " or ".join(sorted(seen_all)), status
+        )
+    )
+    for failure in failures:
+        print("  " + failure)
+    return not failures
+
+
+def main():
+    self_test()
+    if sys.argv[1:] == ["--self-test"]:
+        return
+    tool = objdump()
+    ok = [check(tool, *b) for b in BUILDS]
+    if not all(ok):
+        sys.exit("dit-disasm: the barrier after `msr DIT, #1` is not what each target expects")
+
+
+if __name__ == "__main__":
+    main()

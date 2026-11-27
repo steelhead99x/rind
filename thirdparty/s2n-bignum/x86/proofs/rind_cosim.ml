@@ -74,6 +74,8 @@ let register_forms = [
   (fun () -> sse [0x0f; 0x3a; 0x0f] 3 (rnd 16) (rnd 16) [imm ()]); (* PALIGNR *)
   (fun () -> vex 3 (rnd 2) (rnd 16) (rnd 2) 0x0f 3 (rnd 16) (rnd 16)
                [imm ()]);                                      (* VPALIGNR *)
+  (fun () -> vex 1 (rnd 2) 0 (rnd 2) 0x70 3 (rnd 16) (rnd 16)
+               [rnd 256]);                                     (* VPSHUFD *)
   (fun () -> sse [0x0f; 0x72] 3 6 (rnd 16) [imm ()]);          (* PSLLD *)
   (fun () -> sse [0x0f; 0x72] 3 2 (rnd 16) [imm ()]);          (* PSRLD *)
   (fun () -> sse [0x0f; 0x73] 3 7 (rnd 16) [imm ()]);          (* PSLLDQ *)
@@ -118,6 +120,8 @@ let memory_forms = [
                (mem (rnd 128)));                         (* VBROADCASTI128 m128 *)
   (fun () -> vex 3 (rnd 2) (rnd 16) (rnd 2) 0x0f 1 (rnd 16) 4
                (mem (rnd 128) @ [imm ()]));                    (* VPALIGNR m *)
+  (fun () -> vex 1 (rnd 2) 0 (rnd 2) 0x70 1 (rnd 16) 4
+               (mem (rnd 128) @ [rnd 256]));                   (* VPSHUFD m *)
   (fun () -> sse [0x0f; 0x3a; 0x0f] 1 (rnd 16) 4
                (mem (aligned ()) @ [imm ()]));                 (* PALIGNR m128 *)
   (fun () -> sse [0x0f; 0xeb] 1 (rnd 16) 4 (mem (aligned ())));   (* POR *)

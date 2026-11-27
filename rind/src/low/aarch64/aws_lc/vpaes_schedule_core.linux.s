@@ -165,15 +165,6 @@
 	bl	{vpaes_schedule_transform}	// output transform
 	st1	{{v0.2d}}, [x2]			// vmovdqu	%xmm0,	(%rdx)		# save last key
 
-	// cleanup
-	eor	v0.16b, v0.16b, v0.16b		// vpxor	%xmm0,	%xmm0,	%xmm0
-	eor	v1.16b, v1.16b, v1.16b		// vpxor	%xmm1,	%xmm1,	%xmm1
-	eor	v2.16b, v2.16b, v2.16b		// vpxor	%xmm2,	%xmm2,	%xmm2
-	eor	v3.16b, v3.16b, v3.16b		// vpxor	%xmm3,	%xmm3,	%xmm3
-	eor	v4.16b, v4.16b, v4.16b		// vpxor	%xmm4,	%xmm4,	%xmm4
-	eor	v5.16b, v5.16b, v5.16b		// vpxor	%xmm5,	%xmm5,	%xmm5
-	eor	v6.16b, v6.16b, v6.16b		// vpxor	%xmm6,	%xmm6,	%xmm6
-	eor	v7.16b, v7.16b, v7.16b		// vpxor	%xmm7,	%xmm7,	%xmm7
 	ldp	x29, x30, [sp],#16
 	
 	ret

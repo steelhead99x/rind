@@ -1,13 +1,16 @@
 #![no_main]
 
-//! Signing against aws-lc: Ed25519 from any seed, ECDSA from any scalar, and
-//! RSA under every scheme and any PSS salt length, each over any message.
+//! Signing against aws-lc and an independent oracle: Ed25519 from any seed,
+//! ECDSA from any scalar, and RSA under every scheme and any PSS salt length,
+//! each over any message.
 //!
-//! Ed25519 and RSA PKCS#1 v1.5 signatures must match aws-lc-rs's byte for
-//! byte. ECDSA and PSS signatures are randomized, so aws-lc verifies them;
-//! PSS through aws-lc-sys, since aws-lc-rs takes a salt length only in a
-//! `'static` algorithm. The RSA keys are the test keys and one rind generates
-//! as the target starts, which aws-lc-rs must load as the same key.
+//! Ed25519 and RSA PKCS#1 v1.5 signatures must match aws-lc-rs's and the
+//! oracle's byte for byte. ECDSA and PSS signatures are randomized, so both
+//! verify them; PSS through aws-lc-sys, since aws-lc-rs takes a salt length
+//! only in a `'static` algorithm. The RSA keys are the test keys and one rind
+//! generates as the target starts, which aws-lc-rs and RustCrypto must load
+//! as the same key. The oracles are this tier's for Ed25519 and the NIST
+//! curves, and RustCrypto's `rsa`.
 
 use std::sync::LazyLock;
 
@@ -15,8 +18,15 @@ use aws_lc_rs::rand::SystemRandom;
 use aws_lc_rs::signature::{self as theirs, KeyPair as _, UnparsedPublicKey};
 use aws_lc_rs::{agreement, digest};
 use libfuzzer_sys::{arbitrary, arbitrary::Arbitrary, fuzz_target};
+use oracle::Nist;
 use rind::rsa::{PssSaltLength, SigningAlgorithm as RsaSigningAlgorithm};
 use rind::{ecdsa, ed25519, rsa as our_rsa};
+use rsa::pkcs1::{DecodeRsaPrivateKey, DecodeRsaPublicKey};
+use rsa::pkcs8::DecodePrivateKey;
+use rsa::pss::Pss;
+
+mod der;
+mod oracle;
 
 #[derive(Arbitrary, Debug)]
 enum Input {
@@ -66,7 +76,13 @@ fuzz_target!(|input: Input| match input {
         let theirs = theirs::Ed25519KeyPair::from_seed_unchecked(&seed).unwrap();
         let ours = ed25519::KeyPair::from_seed(&seed).unwrap();
         assert_eq!(ours.public_key().as_ref(), theirs.public_key().as_ref());
-        assert_eq!(ours.sign(&message).as_ref(), theirs.sign(&message).as_ref());
+        assert_eq!(
+            ours.public_key().as_ref(),
+            oracle::ed25519::public_key(&seed)
+        );
+        let signature = ours.sign(&message);
+        assert_eq!(signature.as_ref(), theirs.sign(&message).as_ref());
+        assert_eq!(signature.as_ref(), oracle::ed25519::sign(&seed, &message));
     }
     Input::Ecdsa {
         case,
@@ -96,6 +112,8 @@ struct EcdsaCase {
     ours: &'static ecdsa::SigningAlgorithm,
     digest: Option<&'static rind::digest::Algorithm>,
     theirs: &'static theirs::EcdsaVerificationAlgorithm,
+    /// Whether `ours` signs in DER, rather than fixed-width.
+    der: bool,
 }
 
 /// aws-lc-rs's agreement algorithm on a curve, which computes a scalar's
@@ -113,6 +131,7 @@ macro_rules! ecdsa {
             ours: &ecdsa::sign::$ours,
             digest: $digest,
             theirs: &theirs::$theirs,
+            der: matches!(stringify!($ours).as_bytes(), [.., b'A', b'S', b'N', b'1']),
         }
     };
 }
@@ -216,7 +235,7 @@ const ECDSA: [EcdsaCase; 20] = {
 };
 
 /// rind signs `message` with the key of `scalar`, whose public key aws-lc
-/// computes, and aws-lc-rs verifies the signature.
+/// computes, and aws-lc-rs and the curve's oracle verify the signature.
 fn ecdsa(case: &EcdsaCase, scalar: &mut [u8; 66], message: &[u8]) {
     let (curve, scalar_len) = case.curve;
     let scalar = &mut scalar[..scalar_len];
@@ -230,6 +249,12 @@ fn ecdsa(case: &EcdsaCase, scalar: &mut [u8; 66], message: &[u8]) {
         return;
     };
     let point = theirs.compute_public_key().unwrap();
+    let (oracle, curve_hash): (Box<dyn Nist>, _) = match scalar_len {
+        32 => (Box::new(oracle::p256()), &digest::SHA256),
+        48 => (Box::new(oracle::p384()), &digest::SHA384),
+        _ => (Box::new(oracle::p521()), &digest::SHA512),
+    };
+    assert_eq!(oracle.public_key(scalar), point.as_ref());
     let ours = ecdsa::KeyPair::from_scalar_and_public_key(case.ours, scalar, point.as_ref())
         .expect("refused a key with aws-lc's public key");
     let signature = match case.digest {
@@ -240,13 +265,35 @@ fn ecdsa(case: &EcdsaCase, scalar: &mut [u8; 66], message: &[u8]) {
     UnparsedPublicKey::new(case.theirs, point.as_ref())
         .verify(message, signature.as_ref())
         .expect("aws-lc-rs refused rind's signature");
+
+    // The oracle takes the digest, under the hash aws-lc-rs verifies with,
+    // and a fixed-width signature.
+    let hash = match case.digest {
+        None => curve_hash,
+        Some(hash) => match hash.output_len() {
+            32 => &digest::SHA256,
+            48 => &digest::SHA384,
+            _ => &digest::SHA512,
+        },
+    };
+    let digest = digest::digest(hash, message);
+    let fixed = der::fixed_width(signature.as_ref(), scalar_len, case.der).unwrap();
+    assert!(
+        oracle.verify(point.as_ref(), digest.as_ref(), &fixed),
+        "the oracle refused rind's signature"
+    );
 }
 
-/// A test key, loaded by both.
+/// A test key, loaded by all three.
 struct RsaKey {
     name: String,
     ours: our_rsa::KeyPair,
     theirs: aws_lc_rs::rsa::KeyPair,
+    /// RustCrypto's public key, which verifies what rind signs. It is
+    /// loaded from the private key where RustCrypto takes it, and from the
+    /// public one for the unbalanced key, whose primes
+    /// `PrivateKey::from_components` refuses as of such unequal size.
+    independent: rsa::PublicKey,
 }
 
 static RSA_KEYS: LazyLock<Vec<RsaKey>> = LazyLock::new(|| {
@@ -254,11 +301,26 @@ static RSA_KEYS: LazyLock<Vec<RsaKey>> = LazyLock::new(|| {
         name: name.into(),
         ours: our_rsa::KeyPair::from_pkcs8(der).unwrap(),
         theirs: aws_lc_rs::rsa::KeyPair::from_pkcs8(der).unwrap(),
+        independent: rsa::PrivateKey::from_pkcs8_der(der)
+            .unwrap()
+            .as_public_key()
+            .clone(),
     };
-    let pkcs1 = |name: &str, der: &[u8]| RsaKey {
-        name: name.into(),
-        ours: our_rsa::KeyPair::from_pkcs1(der).unwrap(),
-        theirs: aws_lc_rs::rsa::KeyPair::from_der(der).unwrap(),
+    let pkcs1 = |name: &str, der: &[u8]| {
+        let ours = our_rsa::KeyPair::from_pkcs1(der).unwrap();
+        let independent = match rsa::PrivateKey::from_pkcs1_der(der) {
+            Ok(key) => key.as_public_key().clone(),
+            Err(_) => {
+                assert_eq!(name, "rsa2086-unbalanced.der");
+                rsa::PublicKey::from_pkcs1_der(ours.public_key().as_ref()).unwrap()
+            }
+        };
+        RsaKey {
+            name: name.into(),
+            ours,
+            theirs: aws_lc_rs::rsa::KeyPair::from_der(der).unwrap(),
+            independent,
+        }
     };
     macro_rules! key {
         ($load:ident, $file:literal) => {
@@ -274,12 +336,18 @@ static RSA_KEYS: LazyLock<Vec<RsaKey>> = LazyLock::new(|| {
     let name = format!("generated: {}", hex(der.as_ref()));
     let theirs = aws_lc_rs::rsa::KeyPair::from_pkcs8(der.as_ref())
         .unwrap_or_else(|e| panic!("aws-lc-rs refused the key rind {name}: {e:?}"));
+    let independent = rsa::PrivateKey::from_pkcs8_der(der.as_ref())
+        .unwrap_or_else(|e| panic!("RustCrypto refused the key rind {name}: {e:?}"));
+    independent
+        .validate()
+        .unwrap_or_else(|e| panic!("RustCrypto found the key rind {name} invalid: {e:?}"));
 
     let keys = vec![
         RsaKey {
             name,
             ours: generated,
             theirs,
+            independent: independent.as_public_key().clone(),
         },
         key!(pkcs8, "rsa2048.pkcs8.der"),
         key!(pkcs8, "rsa2048-e33.pkcs8.der"),
@@ -328,6 +396,21 @@ fn rsa(key: &RsaKey, scheme: &RsaScheme, message: &[u8]) {
                 .sign(theirs, &SystemRandom::new(), message, &mut wanted)
                 .unwrap();
             assert_eq!(signature.as_ref(), wanted, "{name}");
+            // PKCS#1 v1.5 has one signature per message, so RustCrypto
+            // verifying it, a public operation, is its signing the same
+            // bytes, without a private one.
+            let public = &key.independent;
+            let signature = signature.as_ref();
+            let independent = match hash {
+                Hash::Sha256 => public.pkcs1v15_verify::<sha2::Sha256>(message, signature),
+                Hash::Sha384 => public.pkcs1v15_verify::<sha2::Sha384>(message, signature),
+                Hash::Sha512 => public.pkcs1v15_verify::<sha2::Sha512>(message, signature),
+            };
+            assert_eq!(
+                independent,
+                Ok(()),
+                "{name}: RustCrypto refused rind's signature"
+            );
             return;
         }
         RsaScheme::Pss(hash, ref salt) => (hash, salt),
@@ -384,6 +467,29 @@ fn rsa(key: &RsaKey, scheme: &RsaScheme, message: &[u8]) {
             let digest = digest::digest(theirs_hash, message);
             let digest = digest.as_ref();
             let signature = signature.as_ref();
+            let public = &key.independent;
+            let independent = match hash {
+                Hash::Sha256 => public.verify(
+                    Pss::<sha2::Sha256>::new_with_salt(salt_len),
+                    digest,
+                    signature,
+                ),
+                Hash::Sha384 => public.verify(
+                    Pss::<sha2::Sha384>::new_with_salt(salt_len),
+                    digest,
+                    signature,
+                ),
+                Hash::Sha512 => public.verify(
+                    Pss::<sha2::Sha512>::new_with_salt(salt_len),
+                    digest,
+                    signature,
+                ),
+            };
+            assert_eq!(
+                independent,
+                Ok(()),
+                "{name}: RustCrypto refused rind's signature"
+            );
             // SAFETY: each pointer is valid for its length, and `rsa` is live.
             Some(unsafe {
                 aws_lc_sys::RSA_verify_pss_mgf1(

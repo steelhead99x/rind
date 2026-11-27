@@ -3,17 +3,17 @@ description: Run an `admin/prove` check that the prove workflow caches, and on m
 
 inputs:
   check:
-    description: The check's `admin/prove` arguments, `hol-light <arch>` or `cosim`, which `admin/prove key` takes too.
+    description: The check's `admin/prove` arguments, `hol-light <arch>`, `cosim`, or `lean`, which `admin/prove key` takes too.
     required: true
   key:
-    description: The key the workflow's `keys` job computed for the check, empty where it computed none.
+    description: The key the workflow computed for the check, empty where it computed none.
     required: true
 
 runs:
   using: composite
   steps:
-    # On a push to main, the job waited for any other run checking this key,
-    # which may have saved it since `keys` looked.
+    # On a push to main, another run may have saved a HOL Light job's key
+    # since `keys` looked; `lean` looks its key up only here.
     - name: Look up
       id: cache
       if: github.event_name == 'push' && inputs.key != ''
@@ -24,7 +24,7 @@ runs:
         lookup-only: true
 
     # A key that differs from the one `keys` looked up would save an entry no
-    # lookup finds, so every pull request would miss without turning red.
+    # lookup finds, so every push to main would check it again without turning red.
     - name: Check
       if: steps.cache.outputs.cache-hit != 'true'
       shell: bash
@@ -32,7 +32,9 @@ runs:
         CHECK: ${{ inputs.check }}
         LOOKED_UP: ${{ inputs.key }}
       run: |
-        nix develop .#hol-light --command admin/prove $CHECK
+        shell=hol-light
+        [[ $CHECK != lean ]] || shell=prove
+        nix develop ".#$shell" --command admin/prove $CHECK
         key=$(<".tmp/prove/keys/${CHECK// /-}")
         echo "checked $key"
         if [[ -n $LOOKED_UP && $key != "$LOOKED_UP" ]]; then
@@ -44,7 +46,7 @@ runs:
     # names the inputs that passed.
     - name: Passed
       id: passed
-      if: steps.cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+      if: steps.cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
       shell: bash
       env:
         CHECK: ${{ inputs.check }}

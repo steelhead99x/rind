@@ -18,7 +18,3 @@ Follow-up from the 2026-11-18 /quest-plan on independence and Lean, which settle
 - Maintainer: the retained trace check for each wrapper whose SDE or QEMU harness retires. No `ct_binsec_...` region decodes AVX-512 or SVE2, so `ct_sde_mlkem768` (rind's `keygen_internal`, `encaps_internal`, `decaps`, which are rind's Rust around VG's routines), `ct_sde_p256_ifma_ecdh`, and `ct_qemu_chacha20poly1305` would leave their wrappers without a trace check. Either BINSEC gains those decoders, or a region stubs the VG routine by its contract on the portable parts, or the maintainer accepts ctgrind alone for the part of each wrapper valgrind runs. Clear it by choosing one.
 
 Checked for the Plan's first bullet, at VG `0aa40d6c`: each declared leak is public in rind's caller. ML-KEM-768's `leakRho` is `ρ`, which is in the encapsulation key; P-256 ECDH's `leak` is the peer's public key bytes; ChaCha20-Poly1305 open's `openLeak` is whether it returns 1, which rind returns. So no harness stays for that reason.
-
-## Related
-
-- [aarch64 SHA-256 on the SHA-2 instructions is proven in Lean, constant time included](/quest/m2/lean-assembly-trial.md) - the same retirement rule, for rind's own Lean proofs

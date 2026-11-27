@@ -1530,21 +1530,21 @@ theorem vg_verify_spec (h : Runs) (vg : low.x86_64.p256_vg.P256) (point : mid.p2
   step with as_bytes_uncompressed_spec h point hx hy as ⟨b, hb4, hbc⟩
   step with u64x4_to_be_spec e as ⟨c, hc⟩
   step with vg_p256_verify_spec as ⟨bb, hbb⟩
-  have hcb : some (vgP256.coords b.val) = Q := by
+  have hcb : some (vgNist.coords vgP256.C b.val) = Q := by
     rw [← hQe]; exact congrArg some hbc
-  have hdec := vgP256.decode_bv b.val b.property hb4
-  rw [vgBytes, vgBytes, vgBytes, vgP256.hashToInt_32 c.val c.property, hc, hsgv] at hbb
+  have hdec := vgNist.decode_bv vgP256.curve_matches b.val b.property hb4
+  rw [vgBytes, vgBytes, vgBytes, vgNist.hashToInt_len vgP256.curve_matches c.val c.property, hc, hsgv] at hbb
   unfold VG.Spec.Ecdsa.verify at hbb
   rcases hd : VG.Spec.EcKey.decodePublicKey vgP256.C (b.val.map (·.bv)) with _ | Q'
   · rw [hd] at hdec; exact absurd (hcb ▸ hQ) hdec
   rw [hd] at hdec hbb
   obtain ⟨hon, hQ'⟩ := hdec
   have hr : VG.Spec.Weierstrass.ofBytes ((List.map (·.bv) (a.val ++ a1.val)).take vgP256.C.len) = scNat r := by
-    rw [List.map_append, List.take_left' (by simp; rfl), vgP256.ofBytes_bv, a_post]
+    rw [List.map_append, List.take_left' (by simp; rfl), vgNist.ofBytes_bv, a_post]
   have hs : VG.Spec.Weierstrass.ofBytes ((List.map (·.bv) (a.val ++ a1.val)).drop vgP256.C.len) = scNat s := by
-    rw [List.map_append, List.drop_left' (by simp; rfl), vgP256.ofBytes_bv, a1_post]
+    rw [List.map_append, List.drop_left' (by simp; rfl), vgNist.ofBytes_bv, a1_post]
   simp only [hr, hs] at hbb
-  have hiff := vgP256.verifyWith_iff Q' (hQ' ▸ hon) (scNat e) (scNat r) (scNat s)
+  have hiff := vgNist.verifyWith_iff vgP256.curve_matches (by simp [n256]) Q' (hQ' ▸ hon) (scNat e) (scNat r) (scNat s)
   rw [hQ', hcb] at hiff
   subst hbb
   by_cases hv : ecdsaP256Verifies Q (scNat e) (scNat r) (scNat s)

@@ -10,6 +10,8 @@ use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::quic::{self, Connection, DirectionalKeys, KeyChange, PacketKey, Version};
 use rustls::{CipherSuite, ClientConfig, RootCertStore, ServerConfig, Side, SupportedCipherSuite};
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+use wasm_bindgen_test::wasm_bindgen_test as test;
 
 /// The providers rind runs against.
 #[cfg(not(target_family = "wasm"))]
@@ -132,6 +134,10 @@ fn handshake(
         seal_open(&*client_next.local, &*server_next.remote);
         seal_open(&*server_next.local, &*client_next.remote);
     }
+
+    // Multipath nonces (draft-ietf-quic-multipath-11), which noq uses for every packet.
+    seal_open_for_path(&*client_1rtt.local.packet, &*server_1rtt.remote.packet);
+    seal_open_for_path(&*server_1rtt.local.packet, &*client_1rtt.remote.packet);
 }
 
 /// Drives `send` until it changes keys or runs dry, and feeds its output to `recv`.
@@ -209,19 +215,39 @@ fn seal_open(send: &dyn PacketKey, recv: &dyn PacketKey) {
     assert_eq!(plain, b"after a key update");
 }
 
+fn seal_open_for_path(send: &dyn PacketKey, recv: &dyn PacketKey) {
+    for path_id in [0, 1, 7] {
+        let mut packet = b"on a path".to_vec();
+        let tag = send
+            .encrypt_in_place_for_path(path_id, 9, b"header", &mut packet)
+            .unwrap();
+        packet.extend_from_slice(tag.as_ref());
+
+        // Path id 0 is the single-path nonce. A nonzero id is not.
+        let mut single = b"on a path".to_vec();
+        let single_tag = send.encrypt_in_place(9, b"header", &mut single).unwrap();
+        single.extend_from_slice(single_tag.as_ref());
+        assert_eq!(packet == single, path_id == 0);
+
+        let mut wrong = packet.clone();
+        assert!(
+            recv.decrypt_in_place_for_path(path_id + 1, 9, b"header", &mut wrong)
+                .is_err()
+        );
+        let plain = recv
+            .decrypt_in_place_for_path(path_id, 9, b"header", &mut packet)
+            .unwrap();
+        assert_eq!(plain, b"on a path");
+    }
+}
+
 fn server_config(provider: Arc<CryptoProvider>) -> Arc<ServerConfig> {
-    let cert_chain = CertificateDer::pem_file_iter(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/keys/ecdsa-p256/end.fullchain"
-    ))
-    .unwrap()
-    .collect::<Result<Vec<_>, _>>()
-    .unwrap();
-    let key = PrivateKeyDer::from_pem_file(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/keys/ecdsa-p256/end.key"
-    ))
-    .unwrap();
+    // Compiled in, since the browser's target has no file system.
+    let cert_chain =
+        CertificateDer::pem_slice_iter(include_bytes!("keys/ecdsa-p256/end.fullchain"))
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+    let key = PrivateKeyDer::from_pem_slice(include_bytes!("keys/ecdsa-p256/end.key")).unwrap();
     ServerConfig::builder_with_provider(provider)
         .with_protocol_versions(&[&rustls::version::TLS13])
         .unwrap()
@@ -234,13 +260,7 @@ fn server_config(provider: Arc<CryptoProvider>) -> Arc<ServerConfig> {
 fn client_config(provider: Arc<CryptoProvider>) -> Arc<ClientConfig> {
     let mut roots = RootCertStore::empty();
     roots
-        .add(
-            CertificateDer::from_pem_file(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/tests/keys/ecdsa-p256/ca.cert"
-            ))
-            .unwrap(),
-        )
+        .add(CertificateDer::from_pem_slice(include_bytes!("keys/ecdsa-p256/ca.cert")).unwrap())
         .unwrap();
     ClientConfig::builder_with_provider(provider)
         .with_protocol_versions(&[&rustls::version::TLS13])

@@ -235,6 +235,27 @@ mod tests {
             >(&[&msg], &[&dst])
             .unwrap();
             assert_eq!(ours.as_bytes()[..], theirs.to_bytes()[..]);
+
+            // armv7 and the portable backend run fiat-crypto's field
+            // arithmetic, as aws-lc does there. RustCrypto's does not, and
+            // the textbook reference checks it too.
+            #[cfg(all(
+                any(rind_backend = "arm", rind_backend = "portable"),
+                not(any(miri, target_family = "wasm"))
+            ))]
+            {
+                let reference = crate::test::reference::p256();
+                let point = hash_to_curve(&msg, &dst).unwrap();
+                assert_eq!(
+                    point.point.as_bytes_uncompressed()[..],
+                    reference.hash_to_curve(&msg, &dst).unwrap()[..]
+                );
+                let scalar = hash_to_scalar(&[&msg], &dst).unwrap();
+                assert_eq!(
+                    scalar.as_bytes()[..],
+                    reference.hash_to_scalar(&msg, &dst).unwrap()[..]
+                );
+            }
         }
     }
 

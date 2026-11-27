@@ -4,7 +4,7 @@ use core::fmt;
 
 use crate::Error;
 use crate::cipher::Algorithm;
-use crate::low::{self, AesKey, Entry};
+use crate::low::{self, AesDecKey, AesKey, Entry};
 
 /// An AES key that encrypts single blocks.
 ///
@@ -181,12 +181,48 @@ pub(crate) fn check_gcm_iv(iv: &[u8]) -> Result<(), Error> {
 
 /// Expands `key`, which the caller has checked is 16, 24, or 32 bytes.
 pub(super) fn expand_key(key: &[u8]) -> AesKey {
+    match key.len() {
+        16 => expand_copy::<16>(key),
+        24 => expand_copy::<24>(key),
+        _ => expand_copy::<32>(key),
+    }
+}
+
+/// Expands a copy of `key`, which is `N` bytes.
+///
+/// `N` is a constant so the copy is a few fixed-size moves. A variable-length
+/// one calls `memcpy`, which stores 24 bytes as two overlapping 16-byte
+/// halves, and the AES-192 expansion's first 16-byte load then reads across
+/// both, which store forwarding cannot serve: about 10 ns of a 100 ns key.
+#[inline(always)]
+fn expand_copy<const N: usize>(key: &[u8]) -> AesKey {
     // Mark a copy: the caller's buffer may be shared, or a promoted constant.
     let mut copy = [0u8; 32];
-    let copy_key = &mut copy[..key.len()];
+    let copy_key = &mut copy[..N];
     copy_key.copy_from_slice(key);
     low::ct::secret_slice(copy_key);
     AesKey::new(copy_key)
+}
+
+/// Expands `key` for decryption, which the caller has checked is 16, 24, or
+/// 32 bytes.
+pub(super) fn expand_dec_key(key: &[u8]) -> AesDecKey {
+    match key.len() {
+        16 => expand_dec_copy::<16>(key),
+        24 => expand_dec_copy::<24>(key),
+        _ => expand_dec_copy::<32>(key),
+    }
+}
+
+/// Expands a copy of `key` for decryption, as [`expand_copy`] does for
+/// encryption.
+#[inline(always)]
+fn expand_dec_copy<const N: usize>(key: &[u8]) -> AesDecKey {
+    let mut copy = [0u8; 32];
+    let copy_key = &mut copy[..N];
+    copy_key.copy_from_slice(key);
+    low::ct::secret_slice(copy_key);
+    AesDecKey::new(copy_key)
 }
 
 #[cfg(test)]
@@ -194,7 +230,6 @@ pub(super) fn expand_key(key: &[u8]) -> AesKey {
 mod tests {
     use super::*;
     use crate::cipher::{AES_128, AES_192, AES_256};
-    use crate::low::AesDecKey;
     use crate::test::*;
 
     fn algorithm(key: &[u8]) -> &'static Algorithm {

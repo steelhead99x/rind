@@ -1,6 +1,6 @@
 [package]
 name = "rind-dart"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 repository = "https://github.com/kixel-ai/rind"
 license = "Apache-2.0 OR ISC OR MIT-0"
@@ -15,7 +15,8 @@ exclude = ["integration", "cryptography"]
 
 [lib]
 name = "rind_dart"
-crate-type = ["cdylib"]
+# The rlib is for `fuzz/fuzzer/dart.rs`, which calls the C ABI in process.
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 rind = { version = "0.3.2", path = "../rind" }

@@ -1,0 +1,260 @@
+#!/usr/bin/env python3
+"""Turns coverage measurements into a gate.
+
+    admin/coverage-gate export REPORT.json TIER.json
+        Reduces `cargo llvm-cov report --json` to the published code, with
+        names demangled, as `admin/coverage` writes each tier's.
+    admin/coverage-gate list TIER.json...
+        Prints what none of these tiers ran: published functions, those
+        admin/coverage.allow allows, and copies of functions that ran.
+    admin/coverage-gate check [--baseline-out FILE] TIER.json...
+        The nightly gate, given every tier coverage.yml measures: lists as
+        `list` does, then fails when a published function no tier ran is not
+        in admin/coverage.allow, an entry there allows no unrun function, or
+        a file's uncovered regions, branches, or copies rise past
+        admin/coverage.baseline, which leaves out the regions and branches
+        of rind's backends (`rind/src/low/`). FILE gets this run's counts in the
+        baseline's format.
+
+Published code is each crate's `src/`, but for its test modules. A function
+runs when any tier runs any copy of it: each architecture compiles its own,
+and a generic or a closure has one copy per instantiation. A copy no tier ran
+of a function some tier ran, such as a generic instantiated for a type no
+test uses, is a monomorphization gap. A region or a branch's side is found
+by its source span, so it is covered when any tier covers it in any copy.
+"""
+
+import collections
+import json
+import os
+import re
+import subprocess
+import sys
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ALLOW = os.path.join(ROOT, "admin", "coverage.allow")
+BASELINE = os.path.join(ROOT, "admin", "coverage.baseline")
+
+# rustc records a generic function no crate instantiated as a copy whose
+# parameters are all `_`, which is no instantiation a test could run.
+UNINSTANTIATED = re.compile(r"(?<=[<\[(, ;])_(?=[>\]), ;])")
+
+
+def published(path):
+    parts = path.split("/")
+    return not path.startswith("/") and len(parts) > 2 and parts[1] == "src"
+
+
+def defining(name):
+    """The segments of the path that defines a demangled function, without
+    its generic arguments, its trait, or the closures inside it: so
+    `<a::Foo<b::tests::T> as Drop>::drop::{closure#0}` is `a`, `Foo`, `drop`.
+    A test's types and closures, as generic arguments, are left out."""
+    out, depth = [], 0
+    for i, c in enumerate(name):
+        if depth:
+            if c == "<":
+                depth += 1
+            elif c == ">" and name[i - 1] != "-":
+                depth -= 1
+        elif c == "<" and out and (out[-1].isalnum() or out[-1] in "_:"):
+            # A generic argument list, after a name or as a turbofish.
+            depth = 1
+            if out[-2:] == [":", ":"]:
+                del out[-2:]
+        else:
+            out.append(c)
+    path = "".join(out)
+    # What remains of angle brackets are qualified paths: `<T as Trait>`
+    # and `<T>` each define in `T`.
+    while True:
+        path, n = re.subn(r"<([^<>]*?)(?: as [^<>]*)?>", r"\1", path)
+        if not n:
+            break
+    return [s for s in path.split("::") if not s.startswith("{")]
+
+
+def demangle(names):
+    # cargo-llvm-cov's own demangler, the one its text report uses, reads
+    # one symbol a line.
+    if not names:
+        return []
+    env = dict(os.environ, __CARGO_LLVM_COV_DEMANGLER="1")
+    out = subprocess.run(
+        ["cargo-llvm-cov"], input="\n".join(names) + "\n", env=env,
+        capture_output=True, text=True, check=True,
+    ).stdout.splitlines()
+    if len(out) != len(names):
+        sys.exit(f"error: the demangler returned {len(out)} names for {len(names)}")
+    return out
+
+
+def export(report, output):
+    prefix = ROOT + "/"
+    records = []
+    for function in json.load(open(report))["data"][0]["functions"]:
+        files = [f.removeprefix(prefix) for f in function["filenames"]]
+        # pyo3's `__pymethod_` trampolines are left out: the release wheel
+        # counts them as unrun even when the method each calls, measured on
+        # its own, ran.
+        if any(map(published, files)) and "__pymethod_" not in function["name"]:
+            records.append((files, function))
+    functions = []
+    regions = collections.Counter()
+    branches = collections.Counter()
+    for (files, function), name in zip(records, demangle([f["name"] for _, f in records])):
+        # A test module's own functions, not the published ones a test
+        # instantiates with its types or closures.
+        if "tests" in defining(name):
+            continue
+        if published(files[0]):
+            functions.append([files[0], function["regions"][0][0], name, function["count"]])
+        for ls, cs, le, ce, count, file, _, kind in function["regions"]:
+            # Kind 0 is a code region; the others are expansions, skipped
+            # code, gaps, and branches.
+            if kind == 0 and published(files[file]):
+                regions[files[file], ls, cs, le, ce] += count
+        for ls, cs, le, ce, taken, not_taken, file, *_ in function["branches"]:
+            if published(files[file]):
+                branches[files[file], ls, cs, le, ce, True] += taken
+                branches[files[file], ls, cs, le, ce, False] += not_taken
+    with open(output, "w") as f:
+        json.dump({
+            "functions": functions,
+            "regions": [[*k, v] for k, v in regions.items()],
+            "branches": [[*k, v] for k, v in branches.items()],
+        }, f)
+
+
+def load(tiers):
+    copies = collections.Counter()
+    regions = collections.Counter()
+    branches = collections.Counter()
+    for tier in tiers:
+        data = json.load(open(tier))
+        for path, line, name, count in data["functions"]:
+            copies[path, line, name] += count
+        for *k, v in data["regions"]:
+            regions[tuple(k)] += v
+        for *k, v in data["branches"]:
+            branches[tuple(k)] += v
+    return copies, regions, branches
+
+
+def allowlist():
+    """Each entry: a path, or a directory ending in `/`, and the name of a
+    function it allows there, or none to allow every function in it. A line
+    naming several functions is an entry for each, so each must stay in use."""
+    entries = []
+    for line in open(ALLOW):
+        words = line.split("#", 1)[0].split()
+        if words:
+            entries.extend((words[0], (fn,) if fn else ()) for fn in words[1:] or [None])
+    return entries
+
+
+def within(path, where):
+    return path == where or (where.endswith("/") and path.startswith(where))
+
+
+def allows(entry, path, names):
+    where, fns = entry
+    # A name, such as `sign` or `Key::sign`, matches the end of the path that
+    # defines a function, so it also allows the closures inside it but no
+    # other function of the same module or name.
+    return within(path, where) and (
+        not fns or any(
+            defining(n)[-len(fn.split("::")):] == fn.split("::") for fn in fns for n in names
+        )
+    )
+
+
+def main():
+    args = sys.argv[1:]
+    command, args = (args[0], args[1:]) if args else ("", [])
+    if command == "export" and len(args) == 2:
+        return export(*args)
+    baseline_out = None
+    if command == "check" and args[:1] == ["--baseline-out"]:
+        baseline_out, args = args[1], args[2:]
+    if command not in ("list", "check") or not args:
+        sys.exit(__doc__)
+
+    copies, regions, branches = load(args)
+    entries = allowlist()
+
+    # A function is identified by where its code starts: the copies of one
+    # definition, such as a blanket impl's `<u8 as T>::f` and `<u16 as T>::f`,
+    # demangle to different paths, so no name tells them from two functions.
+    functions = collections.defaultdict(lambda: [[], 0])
+    for (path, line, name), count in copies.items():
+        functions[path, line][0].append(name)
+        functions[path, line][1] += count
+    listed, allowed, used = [], [], set()
+    for (path, line), (names, count) in sorted(functions.items()):
+        if count:
+            continue
+        matches = [e for e in entries if allows(e, path, names)]
+        used.update(matches)
+        (allowed if matches else listed).append(f"  {path}:{line} {min(names)}")
+    gaps = sorted(
+        (path, line, name) for (path, line, name), count in copies.items()
+        if not count and functions[path, line][1] and not UNINSTANTIATED.search(name)
+    )
+
+    print("Functions no test ran:", *listed, sep="\n")
+    print("Functions no test ran that admin/coverage.allow allows:", *allowed, sep="\n")
+    print("Copies no test ran of functions that ran:", *(f"  {p}:{l} {n}" for p, l, n in gaps), sep="\n")
+    if command == "list":
+        return
+
+    failed = bool(listed)
+    for entry in entries:
+        if entry not in used:
+            print(f"error: admin/coverage.allow's `{' '.join([entry[0], *entry[1]])}` allows no unrun function")
+            failed = True
+
+    # Per file: uncovered regions, uncovered branch sides, and copies no
+    # test ran. Whole files and directories the allowlist allows stay out.
+    # So do rind's backends' regions and branches, which vary from run to run
+    # with the CPU a hosted runner draws, Intel or AMD, with AVX-512 IFMA or
+    # without, and with which thread wins a race; the functions and copies
+    # each tier runs there are the same from run to run, so they still count.
+    measured = collections.defaultdict(lambda: [0, 0, 0])
+    for (path, *_), count in regions.items():
+        measured[path][0] += not count and not path.startswith("rind/src/low/")
+    for (path, *_), count in branches.items():
+        measured[path][1] += not count and not path.startswith("rind/src/low/")
+    for path, *_ in gaps:
+        measured[path][2] += 1
+    measured = {
+        path: c for path, c in sorted(measured.items())
+        if any(c) and not any(within(path, where) for where, fns in entries if not fns)
+    }
+    header, baseline = [], {}
+    for line in open(BASELINE):
+        if line.startswith("#") or not line.strip():
+            header.append(line)
+        else:
+            *counts, path = line.split()
+            baseline[path] = [int(c) for c in counts]
+    lower = False
+    for path in sorted(measured.keys() | baseline.keys()):
+        now, base = measured.get(path, [0, 0, 0]), baseline.get(path, [0, 0, 0])
+        if any(n > b for n, b in zip(now, base)):
+            print(f"error: {path} has {now[0]} uncovered regions, {now[1]} uncovered branches, and {now[2]} unrun copies, past the baseline's {base[0]}, {base[1]}, and {base[2]}")
+            failed = True
+        elif now != base:
+            lower = True
+    if lower:
+        print("Some files fell below the baseline: lower it to this run's coverage.baseline artifact.")
+    if baseline_out:
+        with open(baseline_out, "w") as f:
+            f.writelines(header)
+            f.writelines(f"{r} {b} {c} {path}\n" for path, (r, b, c) in measured.items())
+    if failed:
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

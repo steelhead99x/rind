@@ -10,8 +10,8 @@ Leave jsonwebtoken's `aws_lc_rs` and `rust_crypto` features off, and add this cr
 
 ```toml
 [dependencies]
-jsonwebtoken = "11"
-rind-jsonwebtoken = "11"
+jsonwebtoken = "12"
+rind-jsonwebtoken = "12"
 ```
 
 Use it like:

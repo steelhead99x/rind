@@ -210,4 +210,24 @@ mod tests {
             }
         }
     }
+
+    // The digests match whichever routine runs, so only this sees the pick:
+    // AVX2 wherever rind's AVX2 kernels run, the SHA512 instructions' CPUs
+    // included, then AVX on Intel's, then the scalar routine.
+    #[test]
+    fn picks_the_fastest_routine() {
+        let got = match path() {
+            Path::Avx2(_) => "avx2",
+            Path::Avx(_) => "avx",
+            Path::Nohw => "nohw",
+        };
+        let want = if HaveAvx2::check().is_some() {
+            "avx2"
+        } else if HaveAvx::check().is_some() && is_intel() {
+            "avx"
+        } else {
+            "nohw"
+        };
+        assert_eq!(got, want);
+    }
 }

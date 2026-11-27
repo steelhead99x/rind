@@ -134,6 +134,13 @@ theorem aes_cbc_encrypting_key_new_spec (h : RunsAesHw) (alg : Algorithm) (algor
       simp only [bne_iff_ne, ne_eq]; intro he; apply hk; rw [← hlen, ← he]; simp
     simp only [hne, ite_true, ite_eq_right hk, WP.spec_ok]
 
+/-- `expand_dec_key` of a key of `alg`'s length holds the inverse cipher's round keys of its bytes. -/
+theorem expand_dec_key_spec (h : RunsAesHw) (alg : Algorithm) (key : Slice U8)
+    (hk : key.length = 4 * nk alg) :
+    mid.aes.expand_dec_key key ⦃ k => ModeDecKeyIs alg (bvs key.val) k ⦄ := by
+  rw [expand_dec_key_eq key (by cases alg <;> simp only [nk] at hk <;> omega)]
+  exact dec_key_new_mode_spec h alg key hk
+
 /-- A CBC decryption key is refused unless it is the algorithm's length, and
 otherwise holds the inverse cipher's round keys of its bytes. -/
 theorem aes_cbc_decrypting_key_new_spec (h : RunsAesHw) (alg : Algorithm) (algorithm : cipher.Algorithm)
@@ -148,12 +155,9 @@ theorem aes_cbc_decrypting_key_new_spec (h : RunsAesHw) (alg : Algorithm) (algor
   · have hne : ¬ (Slice.len key != algorithm.key_len) = true := by
       simp only [bne_iff_ne, ne_eq, not_not]; scalar_tac
     simp only [hne, ite_eq_left hk]
-    have hnk : nk alg ≤ 8 := by cases alg <;> decide
-    step*
-    · simp only [copy_key1_post, low.ct.secret_slice, bind_ok]
-      apply WP.spec_bind (dec_key_new_mode_spec h alg key hk)
-      intro adk hadk
-      exact (WP.spec_ok _).2 ⟨_, rfl, hadk⟩
+    apply WP.spec_bind (expand_dec_key_spec h alg key hk)
+    intro adk hadk
+    exact (WP.spec_ok _).2 ⟨_, rfl, hadk⟩
   · have hne : (Slice.len key != algorithm.key_len) = true := by
       simp only [bne_iff_ne, ne_eq]; intro he; apply hk; rw [← hlen, ← he]; simp
     simp only [hne, ite_true, ite_eq_right hk, WP.spec_ok]

@@ -79,7 +79,7 @@ fn new_signer(algorithm: &Algorithm, key: &EncodingKey) -> Result<Box<dyn JwtSig
         Ok(signer(algorithm, key))
     };
     let rsa = |padding: &'static RsaSigningAlgorithm| -> Result<Box<dyn JwtSigner>> {
-        let key = RsaKeyPair::from_pkcs1(der).map_err(invalid_rsa)?;
+        let key = rsa_private_key(der)?;
         Ok(signer(algorithm, (key, padding)))
     };
 
@@ -252,15 +252,25 @@ fn invalid_rsa(error: impl std::fmt::Display) -> Error {
     ErrorKind::InvalidRsaKey(error.to_string()).into()
 }
 
-fn rsa_pub_components_from_private_key(der: &[u8]) -> Result<(Vec<u8>, Vec<u8>)> {
+/// Loads a PKCS#1 private key, refusing a modulus under 2048 bits as aws-lc
+/// does, though rind loads one of 2047.
+fn rsa_private_key(der: &[u8]) -> Result<RsaKeyPair> {
     let key = RsaKeyPair::from_pkcs1(der).map_err(invalid_rsa)?;
+    if key.public_key().modulus_bits() < 2048 {
+        return Err(invalid_rsa("TooSmall"));
+    }
+    Ok(key)
+}
+
+fn rsa_pub_components_from_private_key(der: &[u8]) -> Result<(Vec<u8>, Vec<u8>)> {
+    let key = rsa_private_key(der)?;
     rsa_pub_components_from_public_key(key.public_key().as_ref())
 }
 
 fn rsa_pub_components_from_public_key(der: &[u8]) -> Result<(Vec<u8>, Vec<u8>)> {
     // Refuses the keys rind cannot parse.
     rsa::PublicKey::new(der).map_err(invalid_rsa)?;
-    let key = pkcs1::RsaPublicKey::from_der(der).map_err(invalid_rsa)?;
+    let key = pkcs1::RsaPublicKeyRef::from_der(der).map_err(invalid_rsa)?;
     Ok((
         key.modulus.as_bytes().to_vec(),
         key.public_exponent.as_bytes().to_vec(),
