@@ -137,9 +137,12 @@ qemu. iOS devices' code is only built.
 - Thumb-only M-profile targets (`thumbv6m-none-eabi`, `thumbv7em-none-eabihf`)
   and `riscv32imc-unknown-none-elf` build the portable backend; M-profile has
   no A32 and no NEON for the arm assembly. Where the target has no
-  compare-and-swap (`thumbv6m`, `riscv32imc`), ECDSA caches public verification
-  tables with atomic word loads and stores. ML-DSA rebuilds its expansion
-  on each use. Neither path needs a critical section.
+  compare-and-swap (`thumbv6m`, `riscv32imc`), the reuse cache keeps nothing,
+  so each use builds its value again. With the `no-cas-ecdsa-cache` feature,
+  ECDSA caches each public key's verification table with atomic word loads
+  and stores instead, for about 1.2 KiB more in every ECDSA public key and
+  more stack; ML-DSA still rebuilds its expansion on each use. Neither path
+  needs a critical section.
 
 - Builds with `-Z cf-protection=branch` or `-Z branch-protection=bti`, both
   unstable, are unsupported: rind calls aws-lc's x86_64 and aarch64 routines

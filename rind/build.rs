@@ -77,11 +77,14 @@ fn main() {
     println!("cargo::rustc-check-cfg=cfg(rind_reg_asm)");
     println!("cargo::rustc-check-cfg=cfg(rind_no_cas_cache)");
     println!("cargo::rerun-if-env-changed=RUST_TARGET_PATH");
-    // These targets support atomic word loads and stores without supporting CAS.
+    // These targets support atomic word loads and stores without supporting
+    // CAS. The cache costs every ECDSA public key's memory whether or not the
+    // key is reused, so the program opts in with `no-cas-ecdsa-cache`.
     if matches!(
         env::var("TARGET").as_deref(),
         Ok("thumbv6m-none-eabi" | "riscv32imc-unknown-none-elf")
     ) && target_json_text().is_none()
+        && env::var_os("CARGO_FEATURE_NO_CAS_ECDSA_CACHE").is_some()
     {
         println!("cargo::rustc-cfg=rind_no_cas_cache");
     }

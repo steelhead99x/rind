@@ -26,6 +26,14 @@ cargo clippy "${packages[@]}" --locked --target "$target" --all-targets -- --den
 export CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS=true
 export CARGO_PROFILE_RELEASE_OVERFLOW_CHECKS=true
 SLOW_TESTS=1 cargo test "${packages[@]}" --locked --release --target "$target"
+# The ECDSA verification that `no-cas-ecdsa-cache` caches on
+# `thumbv6m-none-eabi` and `riscv32imc-unknown-none-elf`, which CI only lints:
+# their cfg forced here, so its verify path runs Wycheproof and the curves'
+# tests. Its own target directory, as below.
+CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-target}/rind-no-cas-cache" \
+    CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="$CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS --cfg rind_no_cas_cache" \
+    sh -c 'cargo test -p rind --lib --locked --release --target "$1" -- p256 p384 p521 ecdsa verification_table &&
+        cargo test -p rind --test wycheproof --locked --release --target "$1" -- ecdsa' sh "$target"
 # wasm runs on 32-bit limbs and generates only RSA-2048 keys, so every size's
 # key generation is wipe-checked here on those limbs, with the checks above.
 # Its own target directory keeps this cfg from rebuilding the tree above, at

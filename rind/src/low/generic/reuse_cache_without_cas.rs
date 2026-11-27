@@ -2,8 +2,9 @@
 
 //! The reuse cache on targets without compare-and-swap, such as ARMv6-M's
 //! `thumbv6m-none-eabi` (the RP2040) and `riscv32imc-unknown-none-elf`: it
-//! keeps nothing. ECDSA uses a separate table on the targets where word
-//! loads and stores are supported without compare-and-swap.
+//! keeps nothing. With `no-cas-ecdsa-cache`, ECDSA keeps its verification
+//! tables in `verification_table.rs` instead, through atomic word loads and
+//! stores.
 //!
 //! `reuse_cache.rs` lets exactly one use write the value by winning a
 //! compare-and-swap. Without one, two uses, on two cores or in a core and an
