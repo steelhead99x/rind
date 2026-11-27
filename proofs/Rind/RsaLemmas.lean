@@ -144,6 +144,19 @@ theorem wordsNat_lt' (w : List U64) : rind.spec.wordsNat w < 2 ^ (64 * w.length)
       exact y.hBounds)
   simpa [pow_mul] using this
 
+/-- Words of one length are equal where their values are. -/
+theorem wordsNat_inj : ∀ (a b : List U64), a.length = b.length →
+    rind.spec.wordsNat a = rind.spec.wordsNat b → a = b
+  | [], [], _, _ => rfl
+  | x :: xs, y :: ys, hl, h => by
+    simp only [rind.spec.wordsNat, List.map_cons, Nat.ofDigits_cons] at h
+    have hx := x.hBounds
+    have hy := y.hBounds
+    simp only [UScalarTy.numBits] at hx hy
+    have e : x.val = y.val := by omega
+    have e' : rind.spec.wordsNat xs = rind.spec.wordsNat ys := by simp only [rind.spec.wordsNat]; omega
+    rw [UScalar.eq_of_val_eq e, wordsNat_inj xs ys (by simpa using hl) e']
+
 theorem wordsNat_append (a b : List U64) :
     rind.spec.wordsNat (a ++ b) = rind.spec.wordsNat a + 2 ^ (64 * a.length) * rind.spec.wordsNat b := by
   simp only [rind.spec.wordsNat, List.map_append, Nat.ofDigits_append, List.length_map, pow_mul]

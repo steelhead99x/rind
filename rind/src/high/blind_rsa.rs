@@ -132,19 +132,19 @@ impl KeyPair {
     /// more for 8192 bits, with no upper bound. Its timing reveals only which
     /// candidate primes it discards.
     pub fn generate(algorithm: &'static Algorithm, size: RsaKeySize) -> Result<Self, Error> {
-        Ok(Self::new(algorithm, rsa::SigningKey::generate(size)?))
+        Self::new(algorithm, rsa::SigningKey::generate(size)?)
     }
 
     /// Loads a PKCS#8 v1 RSA private key for `algorithm`, named
     /// `rsaEncryption`, `id-RSAES-OAEP`, or `id-ea-rsa`.
     pub fn from_pkcs8(algorithm: &'static Algorithm, der: &[u8]) -> Result<Self, Error> {
-        Ok(Self::new(algorithm, rsa::SigningKey::from_pkcs8_der(der)?))
+        Self::new(algorithm, rsa::SigningKey::from_pkcs8_der(der)?)
     }
 
-    fn new(algorithm: &'static Algorithm, key: rsa::SigningKey) -> Self {
-        // A private key's modulus is at least 2048 bits.
-        let public = PublicKey::new_unchecked(algorithm, key.public_key());
-        Self { key, public }
+    fn new(algorithm: &'static Algorithm, key: rsa::SigningKey) -> Result<Self, Error> {
+        // A private key's modulus may be 2047 bits, which the public key refuses.
+        let public = PublicKey::checked(algorithm, key.public_key())?;
+        Ok(Self { key, public })
     }
 
     /// Returns the public key, which clients blind messages to.
@@ -362,6 +362,17 @@ impl Blinding {
     }
 }
 
+impl Drop for Blinding {
+    fn drop(&mut self) {
+        // The unblinder holds the blind's inverse, as good as the blind,
+        // which links the signature to the message the server signed.
+        low::zeroise_value(self);
+    }
+}
+
+// A public key, words, and bytes, all valid at zero.
+impl low::Zeroable for Blinding {}
+
 impl fmt::Debug for Blinding {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Blinding")
@@ -474,7 +485,8 @@ mod tests {
                     &hex(&vector["p"]),
                     &hex(&vector["q"]),
                 ),
-            );
+            )
+            .unwrap();
             let public_key = PublicKey::from_components(
                 algorithm,
                 &PublicKeyComponents {
@@ -779,6 +791,15 @@ mod tests {
         let small = PublicKey::new_unchecked(&RSABSSA_SHA384_PSS_RANDOMIZED, small).to_spki();
         assert_eq!(
             PublicKey::from_spki(&RSABSSA_SHA384_PSS_RANDOMIZED, small.as_ref()).err(),
+            Some(KeyFormatError::RsaModulus.into())
+        );
+        // As is the 2047-bit private key `rsa::KeyPair` loads.
+        assert_eq!(
+            KeyPair::from_pkcs8(
+                &RSABSSA_SHA384_PSS_RANDOMIZED,
+                include_bytes!("rsa/rsa2047.pkcs8.der")
+            )
+            .err(),
             Some(KeyFormatError::RsaModulus.into())
         );
     }

@@ -182,9 +182,12 @@ impl<L: KeyType> fmt::Debug for Okm<'_, L> {
 }
 
 // Each conversion expands into a stack buffer for its key to copy. Every key
-// length fits the buffer and the 255-block limit.
+// length fits the buffer and the 255-block limit. One `Entry` covers both the
+// expand and the keying, so on Apple's targets the conversion sets DIT once,
+// not once for each, and the expanded bytes never sit outside it.
 impl From<Okm<'_, &'static aead::Algorithm>> for aead::Key {
     fn from(okm: Okm<'_, &'static aead::Algorithm>) -> Self {
+        let _entry = Entry::new_secret();
         let algorithm = okm.len;
         let mut buf = [0u8; MAX_OUTPUT_LEN];
         let bytes = &mut buf[..algorithm.key_len()];
@@ -195,6 +198,7 @@ impl From<Okm<'_, &'static aead::Algorithm>> for aead::Key {
 
 impl From<Okm<'_, &'static aead::quic::Algorithm>> for aead::quic::HeaderProtectionKey {
     fn from(okm: Okm<'_, &'static aead::quic::Algorithm>) -> Self {
+        let _entry = Entry::new_secret();
         let algorithm = okm.len;
         let mut buf = [0u8; MAX_OUTPUT_LEN];
         let bytes = &mut buf[..algorithm.key_len()];
@@ -205,6 +209,7 @@ impl From<Okm<'_, &'static aead::quic::Algorithm>> for aead::quic::HeaderProtect
 
 impl From<Okm<'_, &'static hmac::Algorithm>> for hmac::Key {
     fn from(okm: Okm<'_, &'static hmac::Algorithm>) -> Self {
+        let _entry = Entry::new_secret();
         let algorithm = okm.len;
         let mut buf = [0u8; MAX_OUTPUT_LEN];
         let bytes = &mut buf[..algorithm.tag_len()];
@@ -215,6 +220,7 @@ impl From<Okm<'_, &'static hmac::Algorithm>> for hmac::Key {
 
 impl From<Okm<'_, &'static Algorithm>> for Prk {
     fn from(okm: Okm<'_, &'static Algorithm>) -> Self {
+        let _entry = Entry::new_secret();
         let algorithm = okm.len;
         let mut buf = [0u8; MAX_OUTPUT_LEN];
         let bytes = &mut buf[..algorithm.0.tag_len()];

@@ -12,22 +12,29 @@
  *   18     SP's offset into the scratch buffer
  *   19     PC's offset from the instruction, 0 on input
  *   20-83  the scratch buffer's 64 words
+ *   84-147 Q0-Q15, four words each, the lowest first
  *
  * and the reply's are the same after the instruction runs. SP points into the
- * 256-byte scratch buffer, so an instruction under test reaches memory only
- * through SP; the other registers take any value. A malformed request gets
- * ERROR, and a fault kills the executor, which the client reports. */
+ * 256-byte scratch buffer. The greeting's metadata, `slot=` and `scratch=`,
+ * give the instruction's and the buffer's addresses in decimal, so that a
+ * request can branch to a landing slot through a register or a loaded word,
+ * and the client can tell what a PC-relative operand or a literal load reads.
+ * A malformed request gets ERROR, and a fault kills the executor, which the
+ * client reports. */
 
 typedef unsigned int u32;
 
-#define STATE_WORDS 84
+#define STATE_WORDS 148
 #define SCRATCH_WORDS 64
+#define QREG_WORDS 64
 
 extern u32 cosim_state[17];
+extern u32 cosim_qregs[QREG_WORDS];
 extern u32 cosim_slot[1];
+extern u32 cosim_scratch[SCRATCH_WORDS];
 extern void cosim_enter(void);
 
-static u32 scratch[SCRATCH_WORDS] __attribute__((aligned(256)));
+#define scratch cosim_scratch
 
 static long syscall3(long number, long a, long b, long c) {
     register long r7 __asm__("r7") = number;
@@ -132,6 +139,7 @@ static int run(u32 instruction, u32 *state) {
     cosim_state[14] = state[14] << 31 | state[15] << 30 | state[16] << 29 | state[17] << 28;
     cosim_state[15] = (u32)(unsigned long)scratch + state[18];
     for (int i = 0; i < SCRATCH_WORDS; i++) scratch[i] = state[20 + i];
+    for (int i = 0; i < QREG_WORDS; i++) cosim_qregs[i] = state[84 + i];
     cosim_slot[0] = instruction;
     syscall3(SYS_CACHEFLUSH, (long)cosim_slot, (long)(cosim_slot + 1), 0);
     cosim_enter();
@@ -140,13 +148,18 @@ static int run(u32 instruction, u32 *state) {
     state[18] = cosim_state[15] - (u32)(unsigned long)scratch;
     state[19] = cosim_state[16];
     for (int i = 0; i < SCRATCH_WORDS; i++) state[20 + i] = scratch[i];
+    for (int i = 0; i < QREG_WORDS; i++) state[84 + i] = cosim_qregs[i];
     return 1;
 }
 
 int cosim_main(void) {
     static char line[2048];
     static u32 state[STATE_WORDS];
-    put("READY 1 aarch32 84\n");
+    put("READY 1 aarch32 148 slot=");
+    put_u32((u32)(unsigned long)cosim_slot);
+    put(" scratch=");
+    put_u32((u32)(unsigned long)cosim_scratch);
+    put("\n");
     flush();
     for (;;) {
         long length = read_line(line, sizeof line);

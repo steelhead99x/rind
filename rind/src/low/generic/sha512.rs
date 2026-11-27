@@ -13,12 +13,12 @@
 //!
 //! Every operation is an add, rotate, shift, or bitwise op, and every index
 //! is a round number, so nothing branches on or indexes by the state or the
-//! block. It is not formally verified: its correctness rests on its use in
-//! OpenSSL, BoringSSL, and aws-lc, and on rind's tests of it against
-//! FIPS 180-4, Wycheproof, and aws-lc-rs.
+//! block. `proofs/Rind/Portable/Sha512Compress.lean` proves it computes
+//! FIPS 180-4's compression of each block in turn, written as `sha256` is
+//! for Aeneas to translate.
 
-/// One round on the schedule word `$w`, the working variables named in
-/// their current order.
+/// One round on the schedule word `w` and constant `k`: the new `d` and `h`
+/// of the working variables in their current order.
 #[cfg(any(
     not(all(
         not(target_pointer_width = "64"),
@@ -26,20 +26,54 @@
     )),
     test
 ))]
-macro_rules! round {
-    ($w:expr, $k:expr, $a:ident, $b:ident, $c:ident, $d:ident, $e:ident, $f:ident, $g:ident, $h:ident) => {{
-        let s1 = $e.rotate_right(14) ^ $e.rotate_right(18) ^ $e.rotate_right(41);
-        let ch = (($f ^ $g) & $e) ^ $g;
-        let t1 = $w
-            .wrapping_add($h)
-            .wrapping_add(s1)
-            .wrapping_add(ch)
-            .wrapping_add($k);
-        let s0 = $a.rotate_right(28) ^ $a.rotate_right(34) ^ $a.rotate_right(39);
-        let maj = (($a ^ $b) & ($b ^ $c)) ^ $b;
-        $d = $d.wrapping_add(t1);
-        $h = s0.wrapping_add(maj).wrapping_add(t1);
-    }};
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+fn round(
+    w: u64,
+    k: u64,
+    a: u64,
+    b: u64,
+    c: u64,
+    d: u64,
+    e: u64,
+    f: u64,
+    g: u64,
+    h: u64,
+) -> (u64, u64) {
+    let s1 = e.rotate_right(14) ^ e.rotate_right(18) ^ e.rotate_right(41);
+    let ch = ((f ^ g) & e) ^ g;
+    let t1 = w
+        .wrapping_add(h)
+        .wrapping_add(s1)
+        .wrapping_add(ch)
+        .wrapping_add(k);
+    let s0 = a.rotate_right(28) ^ a.rotate_right(34) ^ a.rotate_right(39);
+    let maj = ((a ^ b) & (b ^ c)) ^ b;
+    (d.wrapping_add(t1), s0.wrapping_add(maj).wrapping_add(t1))
+}
+
+/// The next schedule word into slot `j` of the window `x`, which it returns:
+/// W[t] = σ1(W[t-2]) + W[t-7] + σ0(W[t-15]) + W[t-16], FIPS 180-4 §6.4.2,
+/// with each index taken mod 16 in the window.
+#[cfg(any(
+    not(all(
+        not(target_pointer_width = "64"),
+        any(target_os = "espidf", target_os = "none")
+    )),
+    test
+))]
+#[inline(always)]
+fn schedule(x: &mut [u64; 16], j: usize) -> u64 {
+    let w1 = x[(j + 1) % 16];
+    let w14 = x[(j + 14) % 16];
+    let s0 = w1.rotate_right(1) ^ w1.rotate_right(8) ^ (w1 >> 7);
+    let s1 = w14.rotate_right(19) ^ w14.rotate_right(61) ^ (w14 >> 6);
+    let w = x[j]
+        .wrapping_add(s0)
+        .wrapping_add(s1)
+        .wrapping_add(x[(j + 9) % 16]);
+    x[j] = w;
+    w
 }
 
 /// Compresses whole 128-byte `blocks` into `state`.
@@ -52,15 +86,34 @@ macro_rules! round {
 ))]
 pub(crate) fn sha512_compress_blocks(state: &mut [u64; 8], blocks: &[u8]) {
     assert!(blocks.len().is_multiple_of(128));
-    let (blocks, _) = blocks.as_chunks::<128>();
-    for block in blocks {
-        let (words, _) = block.as_chunks::<8>();
-        let mut x: [u64; 16] = core::array::from_fn(|j| u64::from_be_bytes(words[j]));
-        let [mut a, mut b, mut c, mut d, mut e, mut f, mut g, mut h] = *state;
+    let mut off = 0;
+    while off < blocks.len() {
+        let block = &blocks[off..off + 128];
+        let mut x = [0u64; 16];
+        for j in 0..16 {
+            x[j] = u64::from_be_bytes([
+                block[8 * j],
+                block[8 * j + 1],
+                block[8 * j + 2],
+                block[8 * j + 3],
+                block[8 * j + 4],
+                block[8 * j + 5],
+                block[8 * j + 6],
+                block[8 * j + 7],
+            ]);
+        }
+        let mut a = state[0];
+        let mut b = state[1];
+        let mut c = state[2];
+        let mut d = state[3];
+        let mut e = state[4];
+        let mut f = state[5];
+        let mut g = state[6];
+        let mut h = state[7];
 
         macro_rules! first {
-            ($j:literal, $($v:ident),*) => {
-                round!(x[$j], K[$j], $($v),*)
+            ($j:literal, $a:ident, $b:ident, $c:ident, $d:ident, $e:ident, $f:ident, $g:ident, $h:ident) => {
+                ($d, $h) = round(x[$j], K[$j], $a, $b, $c, $d, $e, $f, $g, $h)
             };
         }
         sixteen!(first, a, b, c, d, e, f, g, h);
@@ -69,33 +122,53 @@ pub(crate) fn sha512_compress_blocks(state: &mut [u64; 8], blocks: &[u8]) {
         // loop's time on x86_64.
         let mut i = 16;
         while i < 80 {
-            // W[t] = σ1(W[t-2]) + W[t-7] + σ0(W[t-15]) + W[t-16], FIPS 180-4
-            // §6.4.2, with each index taken mod 16 in the window.
             macro_rules! rest {
-                ($j:literal, $($v:ident),*) => {{
-                    let w1 = x[($j + 1) & 15];
-                    let w14 = x[($j + 14) & 15];
-                    let s0 = w1.rotate_right(1) ^ w1.rotate_right(8) ^ (w1 >> 7);
-                    let s1 = w14.rotate_right(19) ^ w14.rotate_right(61) ^ (w14 >> 6);
-                    let w = x[$j]
-                        .wrapping_add(s0)
-                        .wrapping_add(s1)
-                        .wrapping_add(x[($j + 9) & 15]);
-                    x[$j] = w;
-                    round!(w, K[i + $j], $($v),*)
-                }};
+                ($j:literal, $a:ident, $b:ident, $c:ident, $d:ident, $e:ident, $f:ident, $g:ident, $h:ident) => {
+                    ($d, $h) = round(
+                        schedule(&mut x, $j),
+                        K[i + $j],
+                        $a,
+                        $b,
+                        $c,
+                        $d,
+                        $e,
+                        $f,
+                        $g,
+                        $h,
+                    )
+                };
             }
             sixteen!(rest, a, b, c, d, e, f, g, h);
             i += 16;
         }
 
-        for (s, v) in state.iter_mut().zip([a, b, c, d, e, f, g, h]) {
-            *s = s.wrapping_add(v);
-        }
+        state[0] = state[0].wrapping_add(a);
+        state[1] = state[1].wrapping_add(b);
+        state[2] = state[2].wrapping_add(c);
+        state[3] = state[3].wrapping_add(d);
+        state[4] = state[4].wrapping_add(e);
+        state[5] = state[5].wrapping_add(f);
+        state[6] = state[6].wrapping_add(g);
+        state[7] = state[7].wrapping_add(h);
+        off += 128;
     }
 }
 
-// FIPS 180-4 §4.2.3.
+// FIPS 180-4 §4.2.3. With `esp32s3-sha512-unrolled` on ESP-IDF, in internal
+// DRAM rather than flash `.rodata`, for `sha512_esp32s3`'s IRAM body: `.iram1`
+// code is expected not to touch flash while the cache is off.
+//
+// SAFETY: the attribute only selects the output section. The bytes are these
+// constants, and ESP-IDF maps `.dram1` into internal DRAM.
+#[cfg_attr(
+    all(
+        target_arch = "xtensa",
+        target_os = "espidf",
+        rind_esp32s3,
+        feature = "esp32s3-sha512-unrolled",
+    ),
+    unsafe(link_section = ".dram1.rodata")
+)]
 pub(super) static K: [u64; 80] = [
     0x428a2f98d728ae22,
     0x7137449123ef65cd,

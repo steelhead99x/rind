@@ -104,6 +104,37 @@ fn build(manifest: &Path, out: &Path, target: &str) -> PathBuf {
     // match inlined frames.
     let ctgrind = env::var_os("CARGO_FEATURE___CTGRIND").is_some();
     let debug = if ctgrind { "line-tables-only" } else { "false" };
+    // A sanitizer the caller runs, as `sanitizers.yml` does, checks inside
+    // the module too. Under cargo fuzz, which sets `--cfg fuzzing`, the module
+    // also takes the fuzzer's coverage and checks flags, so
+    // `fuzz/fuzzer/fips.rs` sees inside it as it does inside rind.
+    let caller = env::var("CARGO_ENCODED_RUSTFLAGS").unwrap_or_default();
+    let caller: Vec<&str> = caller.split('\x1f').collect();
+    let fuzzing = caller.windows(2).any(|pair| pair == ["--cfg", "fuzzing"]);
+    let forwarded: &[&str] = if fuzzing {
+        &[
+            "-Zsanitizer",
+            "-Cpasses=sancov",
+            "-Cllvm-args=-sanitizer-coverage",
+            "-Cdebug-assertions",
+            "-Coverflow",
+        ]
+    } else {
+        &["-Zsanitizer"]
+    };
+    // The integrity test reads the module's whole loaded image, globals'
+    // redzones included, and AddressSanitizer would register a fuzzer's
+    // coverage counters as globals with relocations a shared library cannot
+    // take, so it leaves the module's globals unchecked; their heap and stack
+    // it still checks.
+    if caller.contains(&"-Zsanitizer=address") {
+        flags.push("-Cllvm-args=-asan-globals=0");
+    }
+    flags.extend(
+        caller
+            .iter()
+            .filter(|flag| forwarded.iter().any(|prefix| flag.starts_with(prefix))),
+    );
     let mut features = Vec::new();
     if ctgrind {
         features.push("rind/__ctgrind");

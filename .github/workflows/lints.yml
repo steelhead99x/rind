@@ -1,23 +1,14 @@
 name: quality lints
 
-# aarch64 clippy over every target, which needs an arm64 runner, with the
-# flake's pinned tools so a new stable release can't fail it. `just ci`
+# aarch64 clippy over every target, which needs an arm64 runner, and clippy
+# over every combination of Cargo features, with the flake's pinned tools so a
+# new stable release can't fail them. `just ci`
 # already runs x86_64 clippy, both rustfmt checks, `admin/structure`, and the
 # MSRV check on every merge.
 on:
   schedule:
     - cron: "0 18 * * *"
   workflow_dispatch:
-  pull_request:
-    branches: [main]
-    paths:
-      - rind*/**
-      - fuzz/**
-      - Cargo.toml
-      - Cargo.lock
-      - flake.nix
-      - flake.lock
-      - .github/workflows/lints.yml
 
 permissions:
   contents: read
@@ -41,3 +32,18 @@ jobs:
 
       - name: clippy
         run: nix develop --command cargo clippy --workspace --all-targets --locked -- --deny warnings
+
+  # Every combination of each published crate's Cargo features, linted
+  # (`just powerset`).
+  powerset:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/just
+      - uses: ./.github/actions/nix
+
+      - name: clippy
+        run: just powerset

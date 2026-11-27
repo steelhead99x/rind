@@ -9,18 +9,6 @@ on:
   schedule:
     - cron: "23 4 * * 0"
   workflow_dispatch:
-  # A pull request checks only that the shell and the build still work.
-  pull_request:
-    # A draft skips every job until it is marked ready, and turning a PR back
-    # into a draft cancels its ready run: see CONTRIBUTING.md.
-    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
-    branches: [main]
-    paths:
-      - rind-timing/**
-      - admin/timing
-      - flake.nix
-      - flake.lock
-      - .github/workflows/timing.yml
 
 concurrency:
   group: timing-${{ github.ref }}
@@ -33,22 +21,8 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  smoke:
-    if: github.event_name == 'pull_request' && !github.event.pull_request.draft
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - uses: ./.github/actions/nix
-
-      - name: Build
-        run: nix develop .#timing --command cargo build --release --locked -p rind-timing
-
   marvin:
     name: marvin (${{ matrix.os }}, RSA-${{ matrix.bits }})
-    if: github.event_name != 'pull_request'
     strategy:
       fail-fast: false
       matrix:

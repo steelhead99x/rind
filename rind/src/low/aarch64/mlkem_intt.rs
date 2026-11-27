@@ -37,9 +37,6 @@ use crate::low::macros::*;
 /// repo (mlkem/native/aarch64/src/aarch64_zetas.c) or our "tests/test.c".
 #[inline(never)]
 pub(crate) fn mlkem_intt(a: &mut [i16; 256], z_01234: &[i16; 80], z_56: &[i16; 384]) {
-    assert!((a.as_mut_ptr() as usize).is_multiple_of(32));
-    assert!((z_01234.as_ptr() as usize).is_multiple_of(32));
-    assert!((z_56.as_ptr() as usize).is_multiple_of(32));
     // SAFETY: inline assembly. see [crate::low::inline_assembly_safety] for safety info.
     unsafe {
         core::arch::asm!(

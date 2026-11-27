@@ -401,6 +401,70 @@ fn store(bytes: &mut [u8], block: uint8x16_t) {
     }
 }
 
+fn stitched<const ENC: bool>(
+    key: &HwKey,
+    table: &PmullTable,
+    tag: &mut [u8; 16],
+    counter: &mut [u8; 16],
+    blocks: &mut [[u8; 16]],
+) {
+    if blocks.is_empty() {
+        return;
+    }
+    let htable = &table.htable;
+    let [htable4 @ .., _, _, _, _, _, _] = htable;
+    let (inout, len) = (blocks.as_mut_ptr(), blocks.len());
+    // SAFETY: only a `HaveCryptoExt` token builds a `HwKey`, proving the
+    // `aes` cpu feature, `eight_way` proves `sha3`, and `inout` is valid
+    // for reads and writes of `len` blocks. s2n-bignum's kernels' theorems
+    // (`AES*_GCM_*_NOIBT_SUBROUTINE_{CORRECT,SAFE}`) take the input and
+    // output either equal, as here, or disjoint, and every other buffer
+    // is a separate borrow. aws-lc runs its AES-192 routines in place too.
+    // The `_alt` kernels' proofs also assume `inout` plus its length is
+    // below 2^63 (`KernelBuffersLow` in the Lean proofs), which holds for
+    // untagged user-space addresses and is not checked here: the kernels
+    // compare their pointers as signed integers, so two pointers with the
+    // same tag still compare in order, but a tag that sets bit 63 leaves the
+    // proof's cover.
+    unsafe {
+        match (key, ENC, table.eight_way) {
+            (HwKey::Aes128(k), true, None) => {
+                aes128_gcm_enc(inout, len, tag, counter, k.round_keys(), htable4)
+            }
+            (HwKey::Aes128(k), false, None) => {
+                aes128_gcm_dec(inout, len, tag, counter, k.round_keys(), htable4)
+            }
+            (HwKey::Aes128(k), true, Some(_)) => {
+                aes128_gcm_enc_alt(inout, len, tag, counter, k.round_keys(), htable)
+            }
+            (HwKey::Aes128(k), false, Some(_)) => {
+                aes128_gcm_dec_alt(inout, len, tag, counter, k.round_keys(), htable)
+            }
+            (HwKey::Aes256(k), true, None) => {
+                aes256_gcm_enc(inout, len, tag, counter, k.round_keys(), htable4)
+            }
+            (HwKey::Aes256(k), false, None) => {
+                aes256_gcm_dec(inout, len, tag, counter, k.round_keys(), htable4)
+            }
+            (HwKey::Aes256(k), true, Some(_)) => {
+                aes256_gcm_enc_alt(inout, len, tag, counter, k.round_keys(), htable)
+            }
+            (HwKey::Aes256(k), false, Some(_)) => {
+                aes256_gcm_dec_alt(inout, len, tag, counter, k.round_keys(), htable)
+            }
+            (HwKey::Aes192(k), true, Some(_)) => {
+                let (key, ivec, xi) = (k.round_keys(), counter, tag);
+                asm_call!(unsafe extern "C" aesv8_gcm_8x_enc_192(inout, len * 128, inout, xi, ivec, key, htable));
+            }
+            (HwKey::Aes192(k), false, Some(_)) => {
+                let (key, ivec, xi) = (k.round_keys(), counter, tag);
+                asm_call!(unsafe extern "C" aesv8_gcm_8x_dec_192(inout, len * 128, inout, xi, ivec, key, htable));
+            }
+            (HwKey::Aes192(_), _, None) => unreachable!("composed above"),
+        }
+    }
+}
+
 ```
 -/
 
@@ -724,5 +788,88 @@ def low.aarch64.aes_gcm.short (ENC : Bool) {ROUND_KEYS : Std.Usize}
     if h2 : out.length ≤ Usize.max then ok (Std.Array.make 16#usize tag (by simpa using h1), Slice.from out h2)
     else fail .panic
   else fail .panic
+
+
+/-! ## The stitched kernels
+
+`stitched` passes the blocks to each kernel as a pointer and a count, which
+Aeneas cannot follow, so the model passes the slice. Each kernel's Rust
+wrapper is opaque: it returns the blocks, the tag, and the counter block it
+writes back, and `Rind.Aarch64.S2nBignum` states s2n-bignum's theorem about
+each of the eight it proves. aws-lc's AES-192 kernels, which no theorem
+covers, are opaque too. -/
+
+/-- The kernels' blocks written in place, tag, and counter block. -/
+abbrev low.aarch64.aes_gcm.KernelOut := Slice (Std.Array U8 16#usize) × Std.Array U8 16#usize × Std.Array U8 16#usize
+
+/-- `aes128_gcm_enc`'s wrapper. -/
+opaque low.aarch64.aes128_gcm_enc.aes128_gcm_enc : Slice (Std.Array U8 16#usize) → Std.Array U8 16#usize →
+  Std.Array U8 16#usize → Std.Array core.core_arch.arm_shared.neon.uint8x16_t 11#usize → Std.Array V 6#usize →
+  Result low.aarch64.aes_gcm.KernelOut
+/-- `aes128_gcm_dec`'s wrapper. -/
+opaque low.aarch64.aes128_gcm_dec.aes128_gcm_dec : Slice (Std.Array U8 16#usize) → Std.Array U8 16#usize →
+  Std.Array U8 16#usize → Std.Array core.core_arch.arm_shared.neon.uint8x16_t 11#usize → Std.Array V 6#usize →
+  Result low.aarch64.aes_gcm.KernelOut
+/-- `aes128_gcm_enc_alt`'s wrapper. -/
+opaque low.aarch64.aes128_gcm_enc_alt.aes128_gcm_enc_alt : Slice (Std.Array U8 16#usize) → Std.Array U8 16#usize →
+  Std.Array U8 16#usize → Std.Array core.core_arch.arm_shared.neon.uint8x16_t 11#usize → Std.Array V 12#usize →
+  Result low.aarch64.aes_gcm.KernelOut
+/-- `aes128_gcm_dec_alt`'s wrapper. -/
+opaque low.aarch64.aes128_gcm_dec_alt.aes128_gcm_dec_alt : Slice (Std.Array U8 16#usize) → Std.Array U8 16#usize →
+  Std.Array U8 16#usize → Std.Array core.core_arch.arm_shared.neon.uint8x16_t 11#usize → Std.Array V 12#usize →
+  Result low.aarch64.aes_gcm.KernelOut
+/-- `aes256_gcm_enc`'s wrapper. -/
+opaque low.aarch64.aes256_gcm_enc.aes256_gcm_enc : Slice (Std.Array U8 16#usize) → Std.Array U8 16#usize →
+  Std.Array U8 16#usize → Std.Array core.core_arch.arm_shared.neon.uint8x16_t 15#usize → Std.Array V 6#usize →
+  Result low.aarch64.aes_gcm.KernelOut
+/-- `aes256_gcm_dec`'s wrapper. -/
+opaque low.aarch64.aes256_gcm_dec.aes256_gcm_dec : Slice (Std.Array U8 16#usize) → Std.Array U8 16#usize →
+  Std.Array U8 16#usize → Std.Array core.core_arch.arm_shared.neon.uint8x16_t 15#usize → Std.Array V 6#usize →
+  Result low.aarch64.aes_gcm.KernelOut
+/-- `aes256_gcm_enc_alt`'s wrapper. -/
+opaque low.aarch64.aes256_gcm_enc_alt.aes256_gcm_enc_alt : Slice (Std.Array U8 16#usize) → Std.Array U8 16#usize →
+  Std.Array U8 16#usize → Std.Array core.core_arch.arm_shared.neon.uint8x16_t 15#usize → Std.Array V 12#usize →
+  Result low.aarch64.aes_gcm.KernelOut
+/-- `aes256_gcm_dec_alt`'s wrapper. -/
+opaque low.aarch64.aes256_gcm_dec_alt.aes256_gcm_dec_alt : Slice (Std.Array U8 16#usize) → Std.Array U8 16#usize →
+  Std.Array U8 16#usize → Std.Array core.core_arch.arm_shared.neon.uint8x16_t 15#usize → Std.Array V 12#usize →
+  Result low.aarch64.aes_gcm.KernelOut
+/-- aws-lc's `aesv8_gcm_8x_enc_192`, through `asm_call!`. -/
+opaque low.aarch64.aes_gcm.aesv8_gcm_8x_enc_192 : Slice (Std.Array U8 16#usize) → Std.Array U8 16#usize →
+  Std.Array U8 16#usize → Std.Array core.core_arch.arm_shared.neon.uint8x16_t 13#usize → Std.Array V 12#usize →
+  Result low.aarch64.aes_gcm.KernelOut
+/-- aws-lc's `aesv8_gcm_8x_dec_192`, through `asm_call!`. -/
+opaque low.aarch64.aes_gcm.aesv8_gcm_8x_dec_192 : Slice (Std.Array U8 16#usize) → Std.Array U8 16#usize →
+  Std.Array U8 16#usize → Std.Array core.core_arch.arm_shared.neon.uint8x16_t 13#usize → Std.Array V 12#usize →
+  Result low.aarch64.aes_gcm.KernelOut
+
+/-- `stitched`: nothing for no blocks, else the kernel for the key's size,
+`ENC`, and whether the table holds eight powers, on the first six entries of
+the table for the four-way kernels, and the panic of `unreachable!` for an
+AES-192 key without them. It returns the tag, the counter block, and the
+blocks, in the order Aeneas returns `&mut` arguments. -/
+def low.aarch64.aes_gcm.stitched (ENC : Bool) (key : low.aarch64.aes.HwKey) (table : low.aarch64.ghash.PmullTable)
+    (tag counter : Std.Array U8 16#usize) (blocks : Slice (Std.Array U8 16#usize)) :
+    Result (Std.Array U8 16#usize × Std.Array U8 16#usize × Slice (Std.Array U8 16#usize)) := do
+  if blocks.length = 0 then ok (tag, counter, blocks)
+  else
+    let htable4 : Std.Array V 6#usize := Std.Array.make 6#usize (table.htable.val.take 6) (by simp)
+    let r ← match key, ENC, table.eight_way with
+      | .Aes128 k, true, none => low.aarch64.aes128_gcm_enc.aes128_gcm_enc blocks tag counter k.round_keys htable4
+      | .Aes128 k, false, none => low.aarch64.aes128_gcm_dec.aes128_gcm_dec blocks tag counter k.round_keys htable4
+      | .Aes128 k, true, some _ =>
+        low.aarch64.aes128_gcm_enc_alt.aes128_gcm_enc_alt blocks tag counter k.round_keys table.htable
+      | .Aes128 k, false, some _ =>
+        low.aarch64.aes128_gcm_dec_alt.aes128_gcm_dec_alt blocks tag counter k.round_keys table.htable
+      | .Aes256 k, true, none => low.aarch64.aes256_gcm_enc.aes256_gcm_enc blocks tag counter k.round_keys htable4
+      | .Aes256 k, false, none => low.aarch64.aes256_gcm_dec.aes256_gcm_dec blocks tag counter k.round_keys htable4
+      | .Aes256 k, true, some _ =>
+        low.aarch64.aes256_gcm_enc_alt.aes256_gcm_enc_alt blocks tag counter k.round_keys table.htable
+      | .Aes256 k, false, some _ =>
+        low.aarch64.aes256_gcm_dec_alt.aes256_gcm_dec_alt blocks tag counter k.round_keys table.htable
+      | .Aes192 k, true, some _ => low.aarch64.aes_gcm.aesv8_gcm_8x_enc_192 blocks tag counter k.round_keys table.htable
+      | .Aes192 k, false, some _ => low.aarch64.aes_gcm.aesv8_gcm_8x_dec_192 blocks tag counter k.round_keys table.htable
+      | .Aes192 _, _, none => fail .panic
+    ok (r.2.1, r.2.2, r.1)
 
 end rind.aarch64

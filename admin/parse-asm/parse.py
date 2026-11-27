@@ -168,6 +168,19 @@ def parse_file(f, visit):
     cpp.function(
         "CFI_STACKLOAD2", lambda lo, hi, offset: f"ldp {lo}, {hi}, [sp, #({offset}+0)]"
     )
+    # One callee-saved register, stored beside xzr so the slot is 16 bytes.
+    # The header's `.cfi` notes are unwind metadata, which an `asm!` block
+    # does not carry; the instruction is the one the proofs' bodies run.
+    cpp.function("CFI_PUSH1Z", lambda reg: f"stp {reg}, xzr, [sp, #-16]!")
+    cpp.function("CFI_POP1Z", lambda reg: f"ldp {reg}, xzr, [sp], #16")
+    cpp.function(
+        "CFI_STACKSAVE1Z",
+        lambda reg, offset: f"stp {reg}, xzr, [sp, #({offset}+0)]",
+    )
+    cpp.function(
+        "CFI_STACKLOAD1Z",
+        lambda reg, offset: f"ldp {reg}, xzr, [sp, #({offset}+0)]",
+    )
 
     lines = f.readlines()
     lines = tidy_linewise(lines)

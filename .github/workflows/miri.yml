@@ -20,13 +20,14 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # The portable backend's tests under Miri: forced on x86_64, and on s390x,
-  # which runs it big-endian. See `sh/miri.sh`.
+  # The portable backend's tests under Miri: forced on x86_64, on s390x,
+  # which runs it big-endian, and on i686, which runs 32-bit limbs and
+  # pointers. See `sh/miri.sh`.
   miri:
     strategy:
       fail-fast: false
       matrix:
-        target: [x86_64-unknown-linux-gnu, s390x-unknown-linux-gnu]
+        target: [x86_64-unknown-linux-gnu, s390x-unknown-linux-gnu, i686-unknown-linux-gnu]
 
     runs-on: ubuntu-latest
     steps:

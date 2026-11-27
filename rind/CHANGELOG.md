@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Other
+
+- *(aarch64)* run s2n-bignum's narrow-multiplier schedules for the elliptic curves and for RSA's 16- and 32-word Montgomery products (RSA-2048's CRT primes and modulus, RSA-4096's CRT primes) on Cortex-A72, Cortex-A76, and Neoverse N1. Other aarch64 cores, including ones this crate does not recognise, keep the `_alt` schedules and `bn_mul_mont`. Each narrow routine has s2n-bignum's HOL Light correctness proof, whose bytes `admin/prove-bytes` checks against rind's release build, and not yet the Lean composition
+
 ## [0.3.2](https://github.com/kixel-ai/rind/compare/rind-v0.3.1...rind-v0.3.2) - 2026-11-08
 
 ### Other

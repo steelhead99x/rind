@@ -230,6 +230,7 @@ pub(crate) fn cctv_value<'a>(record: &'a [(String, Vec<u8>)], name: &str) -> &'a
 /// hundreds of times slower than it runs natively: hours for its tests. Its
 /// tests then check only the 128f sets, which take every code path the
 /// others do, and whose secrets the others handle alike.
+#[cfg(feature = "slh-dsa")]
 pub(crate) const CTGRIND_DEBUG: bool = cfg!(all(feature = "__ctgrind", debug_assertions));
 
 pub(crate) mod bignum;

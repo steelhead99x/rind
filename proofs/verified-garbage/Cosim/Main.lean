@@ -1,6 +1,7 @@
 import Cosim.X86_64
 import Cosim.AArch64
 import Cosim.Rind
+import Cosim.RindX86_64
 import Std.Data.HashMap
 
 /-!
@@ -16,9 +17,9 @@ whose CPU features are all among `cpu-features` (comma-separated Rust
 under, it writes each other instruction to `emulator-out`, and fails if the
 emulator lacks a feature it needs too, since then nothing would check it.
 It fails if a group is not an instruction of the model, or the model faults
-in every state tried. With `--rind` for `groups`, on aarch64, it writes the
-cases of the functions rind proves in its own model instead
-(`Cosim/Rind.lean`).
+in every state tried. With `--rind` for `groups`, it writes the cases of the
+functions rind proves in its own model of `arch` instead (`Cosim/Rind.lean`,
+`Cosim/RindX86_64.lean`).
 -/
 
 open Cosim
@@ -51,9 +52,7 @@ def main (args : List String) : IO UInt32 := do
   let mut missing : Std.HashMap String Nat := {}
   let mut rng : UInt64 := seed.toUInt64
   let gens ← if groups == "--rind" then
-      if arch != "aarch64" then
-        IO.eprintln "vg-cosim: rind's model is of aarch64 only"; return 2
-      pure [Rind.blocks n]
+      pure [if arch == "aarch64" then Rind.blocks n else RindX86_64.blocks n]
     else
       (← IO.FS.lines groups).toList.mapM fun line => do
         let [kind, text, hex] := line.splitOn "\t" | return pure (.error s!"bad line: {line}")

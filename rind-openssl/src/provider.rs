@@ -8,14 +8,14 @@ use std::sync::Arc;
 
 use crate::ffi::{
     Algorithm, CORE_NEW_ERROR, CORE_VSET_ERROR, Callback, CoreHandle, CoreNewError, CoreVsetError,
-    Dispatch, INTEGER, Item, OP_KEYEXCH, OP_KEYMGMT, OP_SIGNATURE, PROVIDER_GET_CAPABILITIES,
-    PROVIDER_GET_PARAMS, PROVIDER_GET_REASON_STRINGS, PROVIDER_GETTABLE_PARAMS,
-    PROVIDER_QUERY_OPERATION, PROVIDER_TEARDOWN, Param, ProviderGetCapabilities, ProviderGetParams,
-    ProviderGetReasonStrings, ProviderGettableParams, ProviderQueryOperation, ProviderTeardown,
-    UTF8_PTR, entry,
+    Dispatch, INTEGER, Item, OP_KEM, OP_KEYEXCH, OP_KEYMGMT, OP_SIGNATURE,
+    PROVIDER_GET_CAPABILITIES, PROVIDER_GET_PARAMS, PROVIDER_GET_REASON_STRINGS,
+    PROVIDER_GETTABLE_PARAMS, PROVIDER_QUERY_OPERATION, PROVIDER_TEARDOWN, Param,
+    ProviderGetCapabilities, ProviderGetParams, ProviderGetReasonStrings, ProviderGettableParams,
+    ProviderQueryOperation, ProviderTeardown, UTF8_PTR, entry,
 };
 use crate::params::ParamsMut;
-use crate::{ed25519, x25519};
+use crate::{ed25519, ml_dsa, ml_kem, x25519};
 
 /// One activation of the provider, in one OpenSSL library context: the
 /// core's handle and the functions that raise errors through it.
@@ -288,9 +288,15 @@ unsafe extern "C" fn get_params(_provctx: *mut c_void, params: *mut Param) -> c_
     1
 }
 
-static KEYMGMT: [Algorithm; 3] = [
+static KEYMGMT: [Algorithm; 9] = [
     Algorithm::new(c"X25519:1.3.101.110", &x25519::KEYMGMT),
     Algorithm::new(c"ED25519:1.3.101.112", &ed25519::KEYMGMT),
+    Algorithm::new(ML_KEM_512, &ml_kem::KEYMGMT_512),
+    Algorithm::new(ML_KEM_768, &ml_kem::KEYMGMT_768),
+    Algorithm::new(ML_KEM_1024, &ml_kem::KEYMGMT_1024),
+    Algorithm::new(ML_DSA_44, &ml_dsa::KEYMGMT_44),
+    Algorithm::new(ML_DSA_65, &ml_dsa::KEYMGMT_65),
+    Algorithm::new(ML_DSA_87, &ml_dsa::KEYMGMT_87),
     Algorithm::END,
 ];
 
@@ -299,10 +305,28 @@ static KEYEXCH: [Algorithm; 2] = [
     Algorithm::END,
 ];
 
-static SIGNATURE: [Algorithm; 2] = [
+static SIGNATURE: [Algorithm; 5] = [
     Algorithm::new(c"ED25519:1.3.101.112", &ed25519::SIGNATURE),
+    Algorithm::new(ML_DSA_44, &ml_dsa::SIGNATURE_44),
+    Algorithm::new(ML_DSA_65, &ml_dsa::SIGNATURE_65),
+    Algorithm::new(ML_DSA_87, &ml_dsa::SIGNATURE_87),
     Algorithm::END,
 ];
+
+static KEM: [Algorithm; 4] = [
+    Algorithm::new(ML_KEM_512, &ml_kem::KEM_512),
+    Algorithm::new(ML_KEM_768, &ml_kem::KEM_768),
+    Algorithm::new(ML_KEM_1024, &ml_kem::KEM_1024),
+    Algorithm::END,
+];
+
+// The names OpenSSL 3.5's default provider gives each parameter set.
+const ML_KEM_512: &CStr = c"ML-KEM-512:MLKEM512:id-alg-ml-kem-512:2.16.840.1.101.3.4.4.1";
+const ML_KEM_768: &CStr = c"ML-KEM-768:MLKEM768:id-alg-ml-kem-768:2.16.840.1.101.3.4.4.2";
+const ML_KEM_1024: &CStr = c"ML-KEM-1024:MLKEM1024:id-alg-ml-kem-1024:2.16.840.1.101.3.4.4.3";
+const ML_DSA_44: &CStr = c"ML-DSA-44:MLDSA44:2.16.840.1.101.3.4.3.17:id-ml-dsa-44";
+const ML_DSA_65: &CStr = c"ML-DSA-65:MLDSA65:2.16.840.1.101.3.4.3.18:id-ml-dsa-65";
+const ML_DSA_87: &CStr = c"ML-DSA-87:MLDSA87:2.16.840.1.101.3.4.3.19:id-ml-dsa-87";
 
 unsafe extern "C" fn query_operation(
     _provctx: *mut c_void,
@@ -318,6 +342,7 @@ unsafe extern "C" fn query_operation(
         OP_KEYMGMT => KEYMGMT.as_ptr(),
         OP_KEYEXCH => KEYEXCH.as_ptr(),
         OP_SIGNATURE => SIGNATURE.as_ptr(),
+        OP_KEM => KEM.as_ptr(),
         _ => core::ptr::null(),
     }
 }
@@ -355,6 +380,11 @@ unsafe extern "C" fn get_capabilities(
     callback: Callback,
     arg: *mut c_void,
 ) -> c_int {
+    // SAFETY: OpenSSL passes a C string.
+    if unsafe { CStr::from_ptr(capability) } == c"TLS-SIGALG" {
+        // SAFETY: as below.
+        return unsafe { ml_dsa::tls_sigalgs(callback, arg) };
+    }
     // SAFETY: OpenSSL passes a C string.
     if unsafe { CStr::from_ptr(capability) } != c"TLS-GROUP" {
         // Nothing to give for any other, which is how a provider without

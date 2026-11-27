@@ -25,12 +25,12 @@ final class HkdfAlgorithm {
 const hkdfSha1 = HkdfAlgorithm._(hmacSha1);
 
 /// An HKDF salt, which extracts a [HkdfPrk] from a secret.
-final class HkdfSalt extends _Handle {
+final class HkdfSalt extends Handle {
   /// Makes a salt for [algorithm] from [value], which may be empty.
   HkdfSalt(HkdfAlgorithm algorithm, Uint8List value)
     : _hashLength = algorithm._hmac.tagLength,
       super(
-        _newHandle(
+        newHandle(
           (out) => _hkdfSaltNew(
             algorithm._hmac._id,
             value.address,
@@ -46,14 +46,14 @@ final class HkdfSalt extends _Handle {
   /// Extracts a pseudorandom key from [secret] (HKDF-Extract).
   HkdfPrk extract(Uint8List secret) => HkdfPrk._(
     _hashLength,
-    _newHandle(
-      (out) => _hkdfExtract(_pointer, secret.address, secret.length, out),
+    newHandle(
+      (out) => _hkdfExtract(pointer, secret.address, secret.length, out),
     ),
   );
 }
 
 /// A pseudorandom key, which expands into any number of keys.
-final class HkdfPrk extends _Handle {
+final class HkdfPrk extends Handle {
   HkdfPrk._(this._hashLength, Pointer<Void> pointer)
     : super(pointer, _hkdfPrkFinalizer);
 
@@ -70,10 +70,10 @@ final class HkdfPrk extends _Handle {
     final joined = BytesBuilder(copy: false);
     info.forEach(joined.add);
     final infoBytes = joined.takeBytes();
-    return _output(
+    return output(
       length,
       (out) => _hkdfExpand(
-        _pointer,
+        pointer,
         infoBytes.address,
         infoBytes.length,
         out.address,

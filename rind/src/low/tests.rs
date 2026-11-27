@@ -16,6 +16,26 @@ fn bignum_mux() {
     bignum_mux_equiv(u64::MAX, &[1; 1], &[0; 1]);
 }
 
+// A CPU check folds to true only for features the target enables, and never
+// in a build that can deny one.
+#[cfg(not(any(rind_backend = "portable", rind_backend = "arm")))]
+#[test]
+fn cpu_checks_fold_only_for_enabled_features() {
+    use super::cpu_enabled;
+    for (deniable, enabled, wanted, folds) in [
+        (false, 0b011, 0b000, true),
+        (false, 0b011, 0b001, true),
+        (false, 0b011, 0b011, true),
+        (false, 0b011, 0b101, false),
+        (false, 0b001, 0b011, false),
+        (false, 0b011, !0b011, false),
+        (true, 0b011, 0b001, false),
+        (true, 0b011, 0b101, false),
+    ] {
+        assert_eq!(cpu_enabled(deniable, enabled, wanted), folds);
+    }
+}
+
 // ld64 splits a Mach-O object into atoms at each CFI frame, and can
 // dead-strip one that is reached only by branches with no relocation, such as
 // a routine joined into another's naked function.
@@ -118,10 +138,13 @@ fn no_debug_assert_beside_unsafe() {
 /// debug assertion would not fire.
 #[test]
 fn wrappers_refuse_mismatched_slices() {
+    // x86_64's ML-KEM routines alone need 32-byte alignment.
+    #[cfg(rind_backend = "x86_64")]
     #[repr(align(32))]
     struct Aligned<const N: usize>([i16; N]);
 
     // 2 bytes past a 32-byte boundary.
+    #[cfg(rind_backend = "x86_64")]
     fn misaligned<const N: usize>(buf: &mut Aligned<1024>) -> &mut [i16; N] {
         (&mut buf.0[1..1 + N]).try_into().unwrap()
     }
@@ -335,17 +358,6 @@ fn wrappers_refuse_mismatched_slices() {
             }),
             ("coprime", || {
                 bignum_coprime::bignum_coprime(&[1; 4], &[1; 4], &mut [0; 7]);
-            }),
-            ("ntt", || {
-                let (z, z56) = (Aligned([0; 80]), Aligned([0; 384]));
-                mlkem_ntt::mlkem_ntt(misaligned(&mut Aligned([0; 1024])), &z.0, &z56.0)
-            }),
-            ("intt", || {
-                let (z, z56) = (Aligned([0; 80]), Aligned([0; 384]));
-                mlkem_intt::mlkem_intt(misaligned(&mut Aligned([0; 1024])), &z.0, &z56.0)
-            }),
-            ("tobytes", || {
-                mlkem_tobytes::mlkem_tobytes(&mut [0; 384], misaligned(&mut Aligned([0; 1024])))
             }),
         ]);
     }

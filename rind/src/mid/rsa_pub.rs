@@ -46,7 +46,7 @@ impl RsaPublicKey {
 
     /// `R^2 mod n`, `R = 2^(64w)` for `n`'s `w` words: by
     /// pyca/verified-garbage's routine where it is faster, and otherwise by
-    /// `PosInt::pub_montifier`, for an odd `n` of 1024 to 8192 bits.
+    /// `PosInt::pub_montifier`, for an odd `n` of 1017 to 8192 bits.
     fn montifier_of(n: &RsaPosInt) -> Result<RsaPosInt, Error> {
         let Some(vg) = low::rsa_vg::Precompute::check(n.as_words()) else {
             return Ok(n.pub_montifier());
@@ -185,8 +185,11 @@ pub(crate) const MAX_PUBLIC_MODULUS_BYTES: usize = MAX_PUBLIC_MODULUS_BITS / 8;
 
 const MAX_PUBLIC_EXPONENT_BITS: u32 = 33;
 
-// Legacy verification's floor; anything smaller is refused outright.
-const MIN_PUBLIC_MODULUS_BITS: usize = 1024;
+// Legacy verification's floor counted in whole bytes, as ring counts it:
+// the fewest bits that fill 1024 bits' 128 bytes. Each algorithm then holds
+// its own floor in `VerificationAlgorithm`; anything smaller is refused
+// outright.
+const MIN_PUBLIC_MODULUS_BITS: usize = 1017;
 
 type RsaPosInt = low::PosInt<MAX_PUBLIC_MODULUS_WORDS>;
 

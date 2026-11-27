@@ -1,0 +1,40 @@
+name: RindBenchAll
+options:
+  bundleIdPrefix: io.github.steelhead99x.rindbench
+  projectFormat: xcode15_3
+targets:
+  RindBenchAll:
+    type: application
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - main.m
+      - path: Resources
+        excludes: [keys]
+      - path: Resources/keys
+        type: folder
+    info:
+      path: Info.plist
+      properties:
+        CFBundleDisplayName: RindBench All
+        CFBundleShortVersionString: "14.1"
+        CFBundleVersion: "15"
+        UILaunchScreen: {}
+        UIUserInterfaceStyle: Dark
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
+        CFBundleIcons~ipad:
+          CFBundlePrimaryIcon:
+            CFBundleIconFiles: [AppIcon20x20, AppIcon29x29, AppIcon40x40, AppIcon76x76, AppIcon83.5x83.5]
+        BenchHost: ${BENCH_HOST}
+        BenchPort: ${BENCH_PORT}
+        NSLocalNetworkUsageDescription: Sends benchmark results to the computer that installed this app.
+        UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.steelhead99x.rindbench.all
+        CODE_SIGN_STYLE: Automatic
+        TARGETED_DEVICE_FAMILY: "1,2"
+        OTHER_LDFLAGS: ["$(RIND_DEVBENCH_LIB)", "-framework", "Security", "-lc++"]
+        ENABLE_BITCODE: NO
+        DEAD_CODE_STRIPPING: YES

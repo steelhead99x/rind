@@ -1076,13 +1076,13 @@ theorem precompute_check_spec (hcpu : ∃ t, low.x86_64.cpu.HaveBmi2Adx.check = 
       core.option.Option.Insts.CoreOpsTry_traitFromResidualOptionNever.from_residual]
 
 /-- `montifier_of` returns `2^(128k) mod n` for an odd `k`-word modulus `n`
-of 1024 to 8192 bits whose top word is nonzero: by pyca/verified-garbage's
+of 1017 to 8192 bits whose top word is nonzero: by pyca/verified-garbage's
 routine where `Precompute::check` gives a token, and otherwise by
 `pub_montifier`. -/
 theorem montifier_of_spec (hcpu : ∃ t, low.x86_64.cpu.HaveBmi2Adx.check = ok t) (n : RsaInt)
     (hk : n.used.val ≤ 128)
     (hodd : wordsNat (lowWords n n.used) % 2 = 1)
-    (hsz : 1024 ≤ (wordsNat (lowWords n n.used)).size)
+    (hsz : 1017 ≤ (wordsNat (lowWords n n.used)).size)
     (htop : 2 ^ (64 * (n.used.val - 1)) ≤ wordsNat (lowWords n n.used)) :
     mid.rsa_pub.RsaPublicKey.montifier_of n ⦃ r => ∃ m, r = .Ok m ∧ m.used = n.used ∧
       wordsNat (lowWords m n.used) = 2 ^ (128 * n.used.val) % wordsNat (lowWords n n.used) ⦄ := by
@@ -1194,11 +1194,11 @@ theorem montifier_of_spec (hcpu : ∃ t, low.x86_64.cpu.HaveBmi2Adx.check = ok t
   rw [List.take_zero, List.nil_append, zero_add, hs6l] at this
   rw [lowWords, s_post2, s1_post, this, hs6N]
 
-/-- What `RsaPublicKey::new` accepts: an odd modulus of 1024 to 8192 bits
+/-- What `RsaPublicKey::new` accepts: an odd modulus of 1017 to 8192 bits
 and an odd exponent above one and below `2^33`. -/
 def PubKeyOk (n : RsaInt) (e : U64) : Prop :=
   let N := wordsNat (lowWords n n.used)
-  N % 2 = 1 ∧ 1024 ≤ N.size ∧ N.size ≤ 8192 ∧ e.val % 2 = 1 ∧ e.val ≠ 1 ∧ e.val < 2 ^ 33
+  N % 2 = 1 ∧ 1017 ≤ N.size ∧ N.size ≤ 8192 ∧ e.val % 2 = 1 ∧ e.val ≠ 1 ∧ e.val < 2 ^ 33
 
 /-- `RsaPublicKey::new` returns a key meeting `PubKeyInv` for the modulus
 and exponent it was given, or refuses them when `PubKeyOk` fails. -/
@@ -1246,10 +1246,10 @@ theorem rsa_public_key_new_spec (hrun : Runs) (h : low.entry.Entry.assert_held =
     simp only [core.ops.range.RangeInclusive.contains, liftFun2, bind_ok, hri, hre, hrx,
       core.cmp.impls.PartialOrdUsize.le, core.cmp.impls.PartialOrdUsize.lt, mid.rsa_pub.MIN_PUBLIC_MODULUS_BITS,
       mid.rsa_pub.MAX_PUBLIC_MODULUS_BITS]
-    have e1024 : (1024#usize).val = 1024 := rfl
+    have e1017 : (1017#usize).val = 1017 := rfl
     have e8192 : (8192#usize).val = 8192 := rfl
-    simp only [hi, e1024, e8192, Bool.false_eq_true, ↓reduceIte]
-    by_cases hsz : 1024 ≤ N.size ∧ N.size ≤ 8192
+    simp only [hi, e1017, e8192, Bool.false_eq_true, ↓reduceIte]
+    by_cases hsz : 1017 ≤ N.size ∧ N.size ≤ 8192
     · simp only [hsz.1, hsz.2, decide_true, ↓reduceIte, bind_ok, core.num.U64.is_multiple_of,
         UScalar.is_multiple_of]
       have e2 : (2#u64).val = 2 := rfl
@@ -1278,7 +1278,7 @@ theorem rsa_public_key_new_spec (hrun : Runs) (h : low.entry.Entry.assert_held =
         simp only [bne_iff_ne, ne_eq] at hne
         exact hne (by rw [UScalar.eq_equiv]; exact this)
       rename_i hne
-      -- The modulus fills its words: at least 1024 bits needs at least 16.
+      -- The modulus fills its words: at least 1017 bits needs at least 16.
       have hNlt : N < 2 ^ (64 * n.used.val) := by
         have := wordsNat_lt' (lowWords n n.used)
         rwa [lowWords_length n hk, hN] at this
@@ -1305,8 +1305,8 @@ theorem rsa_public_key_new_spec (hrun : Runs) (h : low.entry.Entry.assert_held =
       dsimp only
       rw [hN]
       exact ⟨by omega, hk, hodd', hn0, hm, by omega, by omega, hsz.1, hsz.2, htop⟩
-    · have : (if decide (1024 ≤ N.size) = true then ok (decide (N.size ≤ 8192)) else ok false) = ok false := by
-        by_cases h1 : 1024 ≤ N.size
+    · have : (if decide (1017 ≤ N.size) = true then ok (decide (N.size ≤ 8192)) else ok false) = ok false := by
+        by_cases h1 : 1017 ≤ N.size
         · simp only [h1, decide_true, ↓reduceIte]; simp only [ok.injEq, decide_eq_false_iff_not]; omega
         · simp [h1]
       rw [this]
@@ -1383,10 +1383,10 @@ theorem public_exponent_spec (e : Slice U8) :
       (by simp) (by simp) (by simp [beNat, leNat]) as ⟨v, hv⟩
     exact ⟨fun _ => ⟨v, rfl, hv⟩, fun h => by scalar_tac⟩
 
-/-- What RSA key loading accepts, as numbers: an odd modulus of 1024 to
+/-- What RSA key loading accepts, as numbers: an odd modulus of 1017 to
 8192 bits and an odd exponent above one and below `2^33`. -/
 def KeyOk (N E : Nat) : Prop :=
-  N % 2 = 1 ∧ 1024 ≤ N.size ∧ N.size ≤ 8192 ∧ E % 2 = 1 ∧ E ≠ 1 ∧ E < 2 ^ 33
+  N % 2 = 1 ∧ 1017 ≤ N.size ∧ N.size ≤ 8192 ∧ E % 2 = 1 ∧ E ≠ 1 ∧ E < 2 ^ 33
 
 /-- `key` is the RSA public key `(N, E)`: it meets `PubKeyInv`, and its
 modulus fills its `k = ⌈N.size / 64⌉` words. -/

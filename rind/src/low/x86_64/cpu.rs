@@ -476,9 +476,14 @@ const AES_GCM_BASE: u32 = AES | PCLMULQDQ | SSSE3 | SSE41 | AVX | AVX2 | MOVBE;
 const DETECTED: u32 = 1 << 31;
 
 /// Whether the CPU has every feature in `wanted`.
+///
+/// True at compile time for features the target enables (`cpu_enabled`): a
+/// build for a CPU with BMI2 and ADX carries no `_alt` routine. A build that
+/// can deny a feature still asks.
 #[inline]
 fn has(wanted: u32) -> bool {
-    features() & wanted == wanted
+    use super::super::{CPU_DENIABLE, cpu_enabled};
+    cpu_enabled(CPU_DENIABLE, ENABLED, wanted) || features() & wanted == wanted
 }
 
 static FEATURES: AtomicU32 = AtomicU32::new(0);

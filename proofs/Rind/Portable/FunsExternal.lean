@@ -14,16 +14,6 @@ what each theorem takes as a hypothesis.
 
 namespace rind.portable
 
-/-! The SHA-256 and SHA-512 block functions, whose contracts
-`Rind.Portable.ShaBlocks` and `Rind.Portable.Sha512Entry` state as
-hypotheses. -/
-
-opaque low.generic.sha256.sha256_compress_blocks
-  : Array Std.U32 8#usize → Slice Std.U8 → Result (Array Std.U32 8#usize)
-
-opaque low.generic.sha512.sha512_compress_blocks
-  : Array Std.U64 8#usize → Slice Std.U8 → Result (Array Std.U64 8#usize)
-
 /-! SHA-1's block function, whose contract `Rind.Portable.ShaBlocks` states as
 a hypothesis. -/
 

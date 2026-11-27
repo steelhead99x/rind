@@ -23,10 +23,10 @@ enum AgreementAlgorithm {
 }
 
 /// A private key for key agreement.
-final class AgreementPrivateKey extends _Handle {
+final class AgreementPrivateKey extends Handle {
   AgreementPrivateKey._(this.algorithm, int source, Uint8List bytes)
     : super(
-        _newHandle(
+        newHandle(
           (out) => _agreementPrivateKeyNew(
             algorithm._id,
             source,
@@ -58,23 +58,24 @@ final class AgreementPrivateKey extends _Handle {
   /// The algorithm the key is for.
   final AgreementAlgorithm algorithm;
 
-  Uint8List _export(int what) => _output(
-    _exportLength,
-    (out) =>
-        _agreementPrivateKeyExport(_pointer, what, out.address, out.length),
+  Uint8List _export(int what) => output(
+    what == 0 ? maxEcPointLength : exportLength,
+    (out) => _agreementPrivateKeyExport(pointer, what, out.address, out.length),
   );
 
   /// The public key to send to the peer.
-  AgreementPublicKey get publicKey =>
-      AgreementPublicKey._(algorithm, _export(0));
+  late final AgreementPublicKey publicKey = AgreementPublicKey._(
+    algorithm,
+    _export(0),
+  );
 
   /// Agrees on a shared secret with [peer], the peer's public key bytes as
   /// [AgreementPublicKey.new] parses them, throwing [RindError.keyRejected]
   /// for a key it refuses.
-  Uint8List agree(Uint8List peer) => _output(
+  Uint8List agree(Uint8List peer) => output(
     algorithm._secretLength,
     (out) => _agreementAgree(
-      _pointer,
+      pointer,
       peer.address,
       peer.length,
       out.address,
@@ -91,7 +92,7 @@ final class AgreementPrivateKey extends _Handle {
 
 /// A public key for key agreement.
 final class AgreementPublicKey {
-  AgreementPublicKey._(this.algorithm, this.bytes);
+  AgreementPublicKey._(this.algorithm, this._bytes);
 
   /// Parses a peer's public key for [algorithm]: X25519's 32 bytes, any
   /// value, or a NIST curve's X9.62 point, uncompressed or compressed,
@@ -110,18 +111,24 @@ final class AgreementPublicKey {
 
   /// The key as [AgreementPrivateKey.agree] takes it: X25519's 32 bytes, or
   /// a NIST curve's uncompressed point.
-  final Uint8List bytes;
+  ///
+  /// Each read is a new list. The key keeps its own copy, so changing the
+  /// list a caller holds leaves the key, and [toSpki], as they were.
+  Uint8List get bytes => Uint8List.fromList(_bytes);
+
+  final Uint8List _bytes;
 
   /// Encodes the key as a `SubjectPublicKeyInfo`.
-  Uint8List toSpki() => _parse(algorithm, 0, bytes, 1);
+  Uint8List toSpki() => _parse(algorithm, 0, _bytes, 1);
 
   static Uint8List _parse(
     AgreementAlgorithm algorithm,
     int spki,
     Uint8List bytes,
     int export,
-  ) => _output(
-    _exportLength,
+  ) => output(
+    // X25519's 32 bytes and 44-byte SPKI fit the NIST curves' bounds.
+    export == 0 ? maxEcPointLength : maxEcSpkiLength,
     (out) => _agreementPublicKey(
       algorithm._id,
       spki,

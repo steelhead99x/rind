@@ -163,6 +163,25 @@ fn rsa() {
     assert_eq!(format!("{ciphertext:?}"), format!("Ciphertext({bytes})"));
     let plaintext = key.decrypt(ciphertext.as_ref(), b"").unwrap();
     assert_eq!(show(&plaintext), "Plaintext(..)");
+
+    use rind::rsa::{KeyPairComponents, PublicKeyComponents};
+    let private = [0xffu8];
+    let components = KeyPairComponents {
+        public_key: PublicKeyComponents {
+            n: &[1u8][..],
+            e: &[3],
+        },
+        d: &private,
+        p: &private,
+        q: &private,
+        dp: &private,
+        dq: &private,
+        qi: &private,
+    };
+    assert_eq!(
+        show(&components),
+        "KeyPairComponents { public_key: PublicKeyComponents { n: [1], e: [3] }, .. }"
+    );
 }
 
 #[test]

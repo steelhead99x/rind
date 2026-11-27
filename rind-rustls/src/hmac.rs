@@ -1,3 +1,5 @@
+use alloc::boxed::Box;
+
 use rind::hmac;
 use rustls::crypto;
 
