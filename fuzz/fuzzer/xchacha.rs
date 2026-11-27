@@ -1,9 +1,11 @@
 #![no_main]
 
 //! XChaCha20-Poly1305 opening what aws-lc seals, tampered with, against
-//! aws-lc opening it. aws-lc-rs has no XChaCha20-Poly1305, so this calls
-//! aws-lc directly.
+//! aws-lc and RustCrypto opening it. aws-lc-rs has no XChaCha20-Poly1305, so
+//! this calls aws-lc directly.
 
+use chacha20poly1305::XChaCha20Poly1305;
+use chacha20poly1305::aead::{AeadInOut, KeyInit};
 use libfuzzer_sys::{arbitrary, arbitrary::Arbitrary, fuzz_target};
 use rind::aead::{RandomNonce, RandomizedNonceKey};
 
@@ -27,9 +29,14 @@ fuzz_target!(|input: Input| {
         edit,
     } = input;
     let mut sealed = aws_lc(Op::Seal, &key, &nonce, &aad, &plain).unwrap();
+    assert_eq!(
+        sealed,
+        rustcrypto(Op::Seal, &key, &nonce, &aad, &plain).unwrap()
+    );
     let changed = edit.apply(&mut sealed);
 
     let theirs = aws_lc(Op::Open, &key, &nonce, &aad, &sealed);
+    assert_eq!(theirs, rustcrypto(Op::Open, &key, &nonce, &aad, &sealed));
     let ours = RandomizedNonceKey::new(&key)
         .open_in_place(RandomNonce::from(nonce), &aad, &mut sealed)
         .map(|plain| plain.to_vec());
@@ -43,6 +50,39 @@ fuzz_target!(|input: Input| {
 enum Op {
     Seal,
     Open,
+}
+
+/// RustCrypto's XChaCha20-Poly1305 output for `input`, or `None` if it
+/// refuses it.
+fn rustcrypto(
+    op: Op,
+    key: &[u8; 32],
+    nonce: &[u8; 24],
+    aad: &[u8],
+    input: &[u8],
+) -> Option<Vec<u8>> {
+    let cipher = XChaCha20Poly1305::new(key.into());
+    let mut out = input.to_vec();
+    match op {
+        Op::Seal => {
+            let tag = cipher
+                .encrypt_inout_detached(nonce.into(), aad, out.as_mut_slice().into())
+                .ok()?;
+            out.extend_from_slice(&tag);
+        }
+        Op::Open => {
+            let tag = out.split_off(out.len().checked_sub(16)?);
+            cipher
+                .decrypt_inout_detached(
+                    nonce.into(),
+                    aad,
+                    out.as_mut_slice().into(),
+                    tag.as_slice().try_into().unwrap(),
+                )
+                .ok()?;
+        }
+    }
+    Some(out)
 }
 
 /// aws-lc's XChaCha20-Poly1305 output for `input`, or `None` if it refuses it.

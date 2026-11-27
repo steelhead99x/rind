@@ -24,6 +24,9 @@ declare -A skipped=(
     # release has yet to publish; dart-release.yml runs it after. build.yml's
     # dart jobs test rind-dart from source.
     [dart-libraries]="builds against the crates the release publishes"
+    # Scorecard publishes only from the default branch, and scores the
+    # repository rather than the release.
+    [scorecard]="scores main and the repository's settings, not the release"
 )
 
 # The workflow files, by file name, at REV, or in the working tree when REV is

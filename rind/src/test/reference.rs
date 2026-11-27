@@ -6,13 +6,12 @@
 //! shares no code with rind or with any crate covering these curves, so the
 //! differential tests take it as the independent oracle where every such
 //! crate runs what rind runs: fiat-crypto's NIST field arithmetic and
-//! curve25519-dalek on armv7 and the portable backend, and HACL*'s SHA-512
-//! under Ed25519 on the portable backend. It hashes with RustCrypto's
-//! `sha2`. It is slow, not constant time, and refuses nothing but what the
+//! curve25519-dalek on armv7 and the portable backend. It hashes with
+//! RustCrypto's `sha2`. It is slow, not constant time, and refuses nothing but what the
 //! standards refuse.
 //!
-//! Both `rind`'s unit tests and `tests/crosschecks.rs` include this file, so
-//! it names nothing in either crate.
+//! `rind`'s unit tests, `tests/crosschecks_curves.rs`, and the fuzz targets
+//! include this file, so it names nothing in any of them.
 
 #![allow(dead_code, reason = "each crate that includes it uses part of it")]
 
@@ -643,63 +642,6 @@ impl Edwards {
             x = f.neg(&x);
         }
         Some((x, y))
-    }
-
-    fn hash_to_scalar(&self, parts: &[&[u8]]) -> BigUint {
-        BigUint::from_bytes_le(&sha512(&parts.concat())) % &self.l
-    }
-
-    /// RFC 8032's secret scalar and prefix of a 32-byte seed.
-    fn expand(&self, seed: &[u8; 32]) -> (BigUint, Vec<u8>) {
-        let h = sha512(seed);
-        let mut a = <[u8; 32]>::try_from(&h[..32]).unwrap();
-        a[0] &= 248;
-        a[31] &= 127;
-        a[31] |= 64;
-        (BigUint::from_bytes_le(&a), h[32..].to_vec())
-    }
-
-    /// Ed25519's public key for a seed.
-    pub(crate) fn ed25519_public_key(&self, seed: &[u8; 32]) -> [u8; 32] {
-        self.encode(&self.mul(&self.expand(seed).0, &self.base()))
-    }
-
-    /// Ed25519's signature of `message` under a seed.
-    pub(crate) fn ed25519_sign(&self, seed: &[u8; 32], message: &[u8]) -> [u8; 64] {
-        let (a, prefix) = self.expand(seed);
-        let public = self.encode(&self.mul(&a, &self.base()));
-        let r = self.hash_to_scalar(&[&prefix, message]);
-        let big_r = self.encode(&self.mul(&r, &self.base()));
-        let k = self.hash_to_scalar(&[&big_r, &public, message]);
-        let s = (r + k * a) % &self.l;
-        let mut signature = [0u8; 64];
-        signature[..32].copy_from_slice(&big_r);
-        let s = s.to_bytes_le();
-        signature[32..32 + s.len()].copy_from_slice(&s);
-        signature
-    }
-
-    /// Whether `signature` is Ed25519's over `message` under `public_key`,
-    /// by the cofactorless check `[S]B = R + [k]A`.
-    pub(crate) fn ed25519_verify(
-        &self,
-        public_key: &[u8; 32],
-        message: &[u8],
-        signature: &[u8],
-    ) -> bool {
-        let Ok(signature) = <&[u8; 64]>::try_from(signature) else {
-            return false;
-        };
-        let big_r_bytes = <[u8; 32]>::try_from(&signature[..32]).unwrap();
-        let (Some(a), Some(big_r)) = (self.decode(public_key), self.decode(&big_r_bytes)) else {
-            return false;
-        };
-        let s = BigUint::from_bytes_le(&signature[32..]);
-        if s >= self.l {
-            return false;
-        }
-        let k = self.hash_to_scalar(&[&big_r_bytes, public_key, message]);
-        self.mul(&s, &self.base()) == self.add(&big_r, &self.mul(&k, &a))
     }
 
     fn is_negative(x: &BigUint) -> bool {

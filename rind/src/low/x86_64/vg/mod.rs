@@ -20,9 +20,21 @@ pub(crate) mod vg_chacha20_block;
 #[rustfmt::skip]
 pub(crate) mod vg_chacha20_init;
 #[rustfmt::skip]
+pub(crate) mod vg_chacha20_poly1305_open_body_avx512vl;
+#[rustfmt::skip]
+pub(crate) mod vg_chacha20_poly1305_open_body_ifma;
+#[rustfmt::skip]
+pub(crate) mod vg_chacha20_poly1305_open_ifma;
+#[rustfmt::skip]
+pub(crate) mod vg_chacha20_poly1305_seal_body_ifma;
+#[rustfmt::skip]
+pub(crate) mod vg_chacha20_poly1305_seal_ifma;
+#[rustfmt::skip]
 pub(crate) mod vg_chacha20_xor;
 #[rustfmt::skip]
 pub(crate) mod vg_chacha20_xor_avx2;
+#[rustfmt::skip]
+pub(crate) mod vg_chacha20_xor_avx512;
 #[rustfmt::skip]
 pub(crate) mod vg_chacha20_xor_avx512vl;
 #[rustfmt::skip]
@@ -79,6 +91,8 @@ pub(crate) mod vg_keccak_f1600;
 pub(crate) mod vg_keccak_pad_scratch;
 #[rustfmt::skip]
 pub(crate) mod vg_keccak_squeeze_scratch;
+#[rustfmt::skip]
+pub(crate) mod vg_mcdt_enter;
 #[rustfmt::skip]
 pub(crate) mod vg_mlkem16_cbd2_avx2;
 #[rustfmt::skip]
@@ -153,6 +167,7 @@ pub(crate) mod vg_mlkem_sample_tbl;
 pub(crate) mod vg_mlkem_yconsts;
 #[rustfmt::skip]
 pub(crate) mod vg_p256_check_point_adx;
+#[cfg(test)]
 #[rustfmt::skip]
 pub(crate) mod vg_p256_comb;
 #[rustfmt::skip]
@@ -190,11 +205,23 @@ pub(crate) mod vg_p384_mul_mod_p;
 #[rustfmt::skip]
 pub(crate) mod vg_p384_mul_mod_p_adx;
 #[rustfmt::skip]
+pub(crate) mod vg_poly1305_blocks;
+#[rustfmt::skip]
+pub(crate) mod vg_poly1305_blocks_avx2;
+#[rustfmt::skip]
+pub(crate) mod vg_poly1305_blocks_ifma;
+#[rustfmt::skip]
+pub(crate) mod vg_poly1305_finalize_scratch;
+#[rustfmt::skip]
+pub(crate) mod vg_poly1305_init_core;
+#[rustfmt::skip]
 pub(crate) mod vg_rsa_mont_mul_adx;
 #[rustfmt::skip]
 pub(crate) mod vg_rsa_private_crt_precomputed_ifma;
 #[rustfmt::skip]
 pub(crate) mod vg_rsa_private_crt_precomputed_ifma512;
+#[rustfmt::skip]
+pub(crate) mod vg_rsa_public_precompute_adx;
 #[rustfmt::skip]
 pub(crate) mod vg_rsa_public_precomputed_checked_ifma;
 #[rustfmt::skip]

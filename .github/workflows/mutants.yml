@@ -10,7 +10,9 @@ name: mutants
 # runs a whole campaign, which `admin/mutants` refuses off GitHub-hosted
 # runners: every architecture's over the workspace, or one crate's, one
 # architecture's, or the changes since `base`, as in
-# `gh workflow run mutants.yml --ref <branch> -f package=rind-rustls`.
+# `gh workflow run mutants.yml --ref <branch> -f package=rind-rustls`. The
+# whole workspace's three campaigns exceed a matrix's 256 jobs together, so
+# dispatch those one `campaign` at a time.
 # Like fuzzing, it never runs on pull requests: a large diff's mutants take
 # hours of every architecture's runners.
 #
@@ -95,9 +97,17 @@ jobs:
           path: ${{ runner.temp }}/changes.diff
           retention-days: 14
 
-      # Seconds a mutant takes on each runner: the higher of two diffs' means
-      # in the shards' `outcomes.json`, measured in November 2026, since a
-      # diff's mean varies by twice that, by which tests its code has.
+      # Seconds a mutant takes on each runner, build and test, measured over the
+      # 8257 mutants of 2026-11-21's run, as if `admin/mutants`' skips and a 2x
+      # timeout had applied. A mutant a test kills stops at its first failure,
+      # about a minute; one none kills runs every test, 6 to 13 minutes, so a
+      # diff's mean follows its survivors more than its size. That run's 24 for
+      # aarch64 was far low: 126 of its mutants were Ed25519 verification, which
+      # only x86_64 compiles and no test killed elsewhere, and hung tests ran at
+      # 5x the baseline, up to an hour each. Replaying that run's mutants into
+      # these shard counts, the slowest shard takes 3.1 h on x86_64, 3.8 h on
+      # aarch64, and 3.5 h on portable, so x86_64's 120 is above its 94 mean:
+      # its survivors cluster.
       - name: Count
         id: count
         run: |
@@ -130,13 +140,15 @@ jobs:
               '. + [range($shards) | {name: $name, os: $os, args: $args, shard: ., shards: $shards}]' <<<"$matrix")
           }
           # `--target` lets this x86_64 runner list another's campaign.
-          add x86_64 ubuntu-latest 68 --target x86_64-unknown-linux-gnu "${crate[@]}"
-          add aarch64 ubuntu-24.04-arm 24 --target aarch64-unknown-linux-gnu "${crate[@]}"
+          add x86_64 ubuntu-latest 120 --target x86_64-unknown-linux-gnu "${crate[@]}"
+          add aarch64 ubuntu-24.04-arm 60 --target aarch64-unknown-linux-gnu "${crate[@]}"
           # What only the portable backend compiles, and what armv7's assembly
           # replaces. Its adapters' code is the same as on x86_64.
-          add portable ubuntu-latest 66 --portable -p rind
+          add portable ubuntu-latest 75 --portable -p rind
           jobs=$(jq length <<<"$matrix")
-          [ "$jobs" -le 256 ] || { echo "::error::$jobs jobs, more than a matrix's 256"; exit 1; }
+          # A whole workspace at these sizes is over 256 shards across the three
+          # campaigns, but each fits alone.
+          [ "$jobs" -le 256 ] || { echo "::error::$jobs jobs, more than a matrix's 256; dispatch one campaign at a time with -f campaign=x86_64, aarch64, or portable"; exit 1; }
           echo "mutants=$matrix" >> "$GITHUB_OUTPUT"
         env:
           CAMPAIGN: ${{ inputs.campaign || 'all' }}

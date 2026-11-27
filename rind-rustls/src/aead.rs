@@ -1,3 +1,5 @@
+use alloc::boxed::Box;
+
 use rind::aead;
 use rustls::crypto::cipher::{
     AeadKey, InboundOpaqueMessage, InboundPlainMessage, Iv, MessageDecrypter, MessageEncrypter,
@@ -377,6 +379,8 @@ const AESGCM_OVERHEAD: usize = AESGCM_EXPLICIT_NONCE_LEN + TAG_LEN;
 #[cfg(test)]
 mod tests {
     use rustls::Error;
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    use wasm_bindgen_test::wasm_bindgen_test as test;
 
     use super::*;
 
@@ -534,7 +538,7 @@ mod tests {
                 .into_iter()
                 .enumerate()
             {
-                let plain = vec![0x42; len];
+                let plain = std::vec![0x42; len];
                 let sealed = encrypter
                     .encrypt(
                         OutboundPlainMessage {

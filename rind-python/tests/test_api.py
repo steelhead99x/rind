@@ -23,22 +23,61 @@ if PYCA:
     from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 import pyrind
-from pyrind import aead, agreement, cipher, cpu, digest, hkdf, hmac, kem, key_wrap, pbkdf2, rsa, signature
-from pyrind.signature import sign, verify
+from pyrind import aead, agreement, cipher, cpu, digest, ecdsa, ed25519 as rind_ed25519, hkdf, hmac, kem, key_wrap, pbkdf2, rsa
+
+
+def der(tag, contents):
+    """One DER element."""
+    if len(contents) < 0x80:
+        return bytes([tag, len(contents)]) + contents
+    length = len(contents).to_bytes((len(contents).bit_length() + 7) // 8, "big")
+    return bytes([tag, 0x80 | len(length)]) + length + contents
+
+
+def der_integer(value):
+    """A non-negative DER INTEGER."""
+    return der(0x02, value.to_bytes(value.bit_length() // 8 + 1, "big"))
 
 
 class Package(unittest.TestCase):
     def test_submodules_import(self):
         import pyrind.digest.legacy
-        import pyrind.signature.verify.legacy
+        import pyrind.ecdsa.sign
+        import pyrind.ecdsa.verify
+        import pyrind.rsa.sign
+        import pyrind.rsa.verify.legacy
 
-        self.assertIs(pyrind.signature.verify.legacy, verify.legacy)
+        self.assertIs(pyrind.rsa.verify.legacy, rsa.verify.legacy)
+        self.assertIs(pyrind.ecdsa.sign, ecdsa.sign)
+        self.assertIs(pyrind.rsa.sign, rsa.sign)
+        self.assertFalse(hasattr(pyrind, "signature"))
         self.assertIs(pyrind.digest.legacy.SHA1, digest.legacy.SHA1)
 
     def test_constants_name_themselves(self):
         self.assertEqual(repr(aead.AES_128_GCM), "pyrind.aead.AES_128_GCM")
-        self.assertEqual(repr(verify.legacy.RSA_PKCS1_SHA1), "pyrind.signature.verify.legacy.RSA_PKCS1_SHA1")
+        self.assertEqual(repr(rsa.verify.legacy.PKCS1_SHA1), "pyrind.rsa.verify.legacy.PKCS1_SHA1")
+        self.assertEqual(repr(ecdsa.sign.P256_SHA256_ASN1), "pyrind.ecdsa.sign.P256_SHA256_ASN1")
+        self.assertEqual(repr(key_wrap.Mode.KWP), "Mode.KWP")
+        # Enum constants hash, so they key a dict or fill a set.
+        self.assertEqual(len({key_wrap.Mode.KW, key_wrap.Mode.KWP, key_wrap.Mode.KW}), 2)
+        self.assertEqual(len({rsa.KeySize.RSA_2048, rsa.KeySize.RSA_2048}), 1)
+        # They equal no int, as an int that equalled one would hash apart
+        # from it, but still convert to the int of their position.
+        for constant, value in ((key_wrap.Mode.KW, 0), (key_wrap.Mode.KWP, 1), (rsa.KeySize.RSA_2048, 0)):
+            self.assertNotEqual(constant, value)
+            self.assertNotIn(constant, {value})
+            self.assertEqual(int(constant), value)
         self.assertEqual(aead.Key.__module__, "pyrind.aead")
+        for cls, module in (
+            (ecdsa.KeyPair, "pyrind.ecdsa"),
+            (ecdsa.PublicKey, "pyrind.ecdsa"),
+            (rind_ed25519.KeyPair, "pyrind.ed25519"),
+            (rind_ed25519.PublicKey, "pyrind.ed25519"),
+            (rsa.KeyPair, "pyrind.rsa"),
+            (rsa.PublicKey, "pyrind.rsa"),
+            (key_wrap.Mode, "pyrind.key_wrap"),
+        ):
+            self.assertEqual(cls.__module__, module)
 
     def test_errors_share_a_base(self):
         for error in (
@@ -59,8 +98,17 @@ class Package(unittest.TestCase):
     def test_another_modules_algorithm_is_a_type_error(self):
         with self.assertRaises(TypeError):
             aead.Key(digest.SHA256, bytes(16))
-        with self.assertRaises(TypeError):
-            signature.EcdsaKeyPair.generate(verify.ECDSA_P256_SHA256_ASN1)
+        rsa_key = rsa.KeyPair.generate(rsa.KeySize.RSA_2048)
+        for call in (
+            lambda: ecdsa.KeyPair.generate(ecdsa.verify.P256_SHA256_ASN1),
+            lambda: ecdsa.PublicKey(ecdsa.sign.P256_SHA256_ASN1, bytes(65)),
+            lambda: rsa_key.sign(rsa.verify.PKCS1_SHA256, b"m"),
+            lambda: rsa_key.public_key().verify(ecdsa.verify.P256_SHA256_ASN1, b"", b""),
+            lambda: rsa_key.public_key().verify(rsa.sign.PKCS1_SHA256, b"", b""),
+            lambda: key_wrap.AesKek(key_wrap.AES_128, bytes(16)).wrap_key(rsa.KeySize.RSA_2048, bytes(16)),
+        ):
+            with self.assertRaises(TypeError):
+                call()
 
     def test_keys_do_not_pickle(self):
         import pickle
@@ -91,6 +139,27 @@ class BytesLike(unittest.TestCase):
         for data in (memoryview(b"abc").cast("b"), array.array("H", [1, 2]), strided):
             self.assertEqual(digest.digest(digest.SHA256, data), hashlib.sha256(bytes(data)).digest())
         self.assertEqual(digest.digest(digest.SHA256, bytearray()), hashlib.sha256(b"").digest())
+
+    def test_secrets_from_any_buffer(self):
+        # A secret in a buffer other than `bytes` loads through a copy that
+        # pyrind wipes; it works as the `bytes` would, and the caller's buffer
+        # is left for the caller to wipe.
+        seed = bytes(range(32))
+        derived = pbkdf2.Secret(pbkdf2.PBKDF2_HMAC_SHA256, seed).derive(1, b"salt", 32)
+        loads = (
+            lambda s: aead.Key(aead.AES_256_GCM, s).seal(bytes(12), b"m", aad=b""),
+            lambda s: hmac.sign(hmac.Key(hmac.HMAC_SHA256, s), b"m"),
+            lambda s: hkdf.Salt(hkdf.HKDF_SHA256, b"").extract(s).expand(b"", 32),
+            lambda s: pbkdf2.Secret(pbkdf2.PBKDF2_HMAC_SHA256, s).verify(1, b"salt", derived),
+            lambda s: key_wrap.AesKek(key_wrap.AES_256, bytes(32)).wrap_key(key_wrap.Mode.KW, s),
+            lambda s: bytes(agreement.PrivateKey.from_scalar(agreement.X25519, s).public_key()),
+            lambda s: rind_ed25519.KeyPair.from_seed(s).sign(b"m"),
+        )
+        for load in loads:
+            expected = load(seed)
+            for buffer in (bytearray(seed), memoryview(bytearray(seed)), array.array("B", seed)):
+                self.assertEqual(load(buffer), expected)
+                self.assertEqual(bytes(buffer), seed)
 
 
 class Digest(unittest.TestCase):
@@ -302,28 +371,35 @@ class KeyWrap(unittest.TestCase):
             for length in (16, 24, 40):
                 key = os.urandom(length)
                 wrapped = keywrap.aes_key_wrap(kek_bytes, key)
-                self.assertEqual(kek.wrap(key), wrapped)
-                self.assertEqual(kek.unwrap(wrapped), key)
+                self.assertEqual(kek.wrap_key(key_wrap.Mode.KW, key), wrapped)
+                self.assertEqual(kek.unwrap_key(key_wrap.Mode.KW, wrapped), key)
             for length in (1, 8, 9, 20):
                 key = os.urandom(length)
                 wrapped = keywrap.aes_key_wrap_with_padding(kek_bytes, key)
-                self.assertEqual(kek.wrap_padded(key), wrapped)
-                self.assertEqual(kek.unwrap_padded(wrapped), key)
+                self.assertEqual(kek.wrap_key(key_wrap.Mode.KWP, key), wrapped)
+                self.assertEqual(kek.unwrap_key(key_wrap.Mode.KWP, wrapped), key)
 
     def test_refuses_what_it_did_not_wrap(self):
         kek = key_wrap.AesKek(key_wrap.AES_128, bytes(16))
         other = key_wrap.AesKek(key_wrap.AES_128, bytes(15) + b"\x01")
-        for wrapped in (other.wrap(bytes(16)), bytes(23), bytes(25), b""):
+        kw, kwp = key_wrap.Mode.KW, key_wrap.Mode.KWP
+        for wrapped in (other.wrap_key(kw, bytes(16)), bytes(23), bytes(25), bytes(8), bytes(7), b""):
             with self.assertRaises(pyrind.DecryptFailed):
-                kek.unwrap(wrapped)
-        for wrapped in (other.wrap_padded(bytes(5)), bytes(15), bytes(17), b""):
+                kek.unwrap_key(kw, wrapped)
+        for wrapped in (other.wrap_key(kwp, bytes(5)), bytes(15), bytes(17), bytes(8), bytes(7), b""):
             with self.assertRaises(pyrind.DecryptFailed):
-                kek.unwrap_padded(wrapped)
+                kek.unwrap_key(kwp, wrapped)
+        # Each mode refuses what the other wrapped.
+        with self.assertRaises(pyrind.DecryptFailed):
+            kek.unwrap_key(kwp, kek.wrap_key(kw, bytes(16)))
+        with self.assertRaises(pyrind.DecryptFailed):
+            kek.unwrap_key(kw, kek.wrap_key(kwp, bytes(16)))
         for key in (bytes(8), bytes(17)):
             with self.assertRaises(pyrind.WrongLength):
-                kek.wrap(key)
+                kek.wrap_key(kw, key)
         with self.assertRaises(pyrind.WrongLength):
-            kek.wrap_padded(b"")
+            kek.wrap_key(kwp, b"")
+        self.assertEqual(len(kek.wrap_key(kwp, bytes(9))), 24)
 
 
 class Aead(unittest.TestCase):
@@ -451,7 +527,7 @@ class Agreement(unittest.TestCase):
 
 class Signature(unittest.TestCase):
     def test_ed25519_rfc8032_test_1(self):
-        key = signature.Ed25519KeyPair.from_seed(
+        key = rind_ed25519.KeyPair.from_seed(
             bytes.fromhex("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60")
         )
         self.assertEqual(
@@ -467,56 +543,90 @@ class Signature(unittest.TestCase):
         key.public_key().verify(b"", signed)
         with self.assertRaises(pyrind.BadSignature):
             key.public_key().verify(b"x", signed)
+        public = rind_ed25519.PublicKey(bytes(key.public_key()))
+        public.verify(b"", signed)
+        self.assertEqual(bytes(rind_ed25519.PublicKey.from_spki(public.to_spki())), bytes(public))
+        with self.assertRaises(pyrind.KeyRejected):
+            rind_ed25519.PublicKey(public.to_spki())
 
     @requires_pyca
     def test_ed25519_matches_pyca(self):
-        ours = signature.Ed25519KeyPair.generate()
+        ours = rind_ed25519.KeyPair.generate()
         theirs = ed25519.Ed25519PrivateKey.from_private_bytes(ours.to_seed())
         self.assertEqual(ours.sign(b"message"), theirs.sign(b"message"))
         loaded = serialization.load_der_private_key(ours.to_pkcs8v1(), None)
         self.assertEqual(loaded.sign(b"m"), ours.sign(b"m"))
-        self.assertEqual(signature.Ed25519KeyPair.from_pkcs8(ours.to_pkcs8()).to_seed(), ours.to_seed())
+        self.assertEqual(rind_ed25519.KeyPair.from_pkcs8(ours.to_pkcs8()).to_seed(), ours.to_seed())
+        their_spki = theirs.public_key().public_bytes(
+            serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
+        )
+        self.assertEqual(ours.public_key().to_spki(), their_spki)
 
     @requires_pyca
     def test_ecdsa_against_pyca(self):
         for algorithm, check, curve, hash_ in (
-            (sign.ECDSA_P256_SHA256_ASN1, verify.ECDSA_P256_SHA256_ASN1, ec.SECP256R1(), hashes.SHA256()),
-            (sign.ECDSA_P384_SHA384_ASN1, verify.ECDSA_P384_SHA384_ASN1, ec.SECP384R1(), hashes.SHA384()),
-            (sign.ECDSA_P521_SHA512_ASN1, verify.ECDSA_P521_SHA512_ASN1, ec.SECP521R1(), hashes.SHA512()),
+            (ecdsa.sign.P256_SHA256_ASN1, ecdsa.verify.P256_SHA256_ASN1, ec.SECP256R1(), hashes.SHA256()),
+            (ecdsa.sign.P384_SHA384_ASN1, ecdsa.verify.P384_SHA384_ASN1, ec.SECP384R1(), hashes.SHA384()),
+            (ecdsa.sign.P521_SHA512_ASN1, ecdsa.verify.P521_SHA512_ASN1, ec.SECP521R1(), hashes.SHA512()),
         ):
-            ours = signature.EcdsaKeyPair.generate(algorithm)
-            their_view = serialization.load_der_public_key(ours.to_spki())
+            ours = ecdsa.KeyPair.generate(algorithm)
+            their_view = serialization.load_der_public_key(ours.public_key().to_spki())
             their_view.verify(ours.sign(b"message"), b"message", ec.ECDSA(hash_))
 
             theirs = ec.generate_private_key(curve)
             der = theirs.private_bytes(
                 serialization.Encoding.DER, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()
             )
-            loaded = signature.EcdsaKeyPair.from_pkcs8(algorithm, der)
+            loaded = ecdsa.KeyPair.from_pkcs8(algorithm, der)
             spki = theirs.public_key().public_bytes(
                 serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
             )
-            public = signature.PublicKey.from_spki(check, spki)
+            public = ecdsa.PublicKey.from_spki(check, spki)
             public.verify(b"message", theirs.sign(b"message", ec.ECDSA(hash_)))
             public.verify(b"message", loaded.sign(b"message"))
+            self.assertEqual(loaded.public_key().to_spki(), spki)
             with self.assertRaises(pyrind.BadSignature):
                 public.verify(b"massage", loaded.sign(b"message"))
 
     def test_ecdsa_fixed_and_encodings(self):
-        key = signature.EcdsaKeyPair.generate(sign.ECDSA_P256_SHA256_FIXED)
+        key = ecdsa.KeyPair.generate(ecdsa.sign.P256_SHA256_FIXED)
         signed = key.sign(b"m")
         self.assertEqual(len(signed), 64)
-        public = signature.PublicKey(verify.ECDSA_P256_SHA256_FIXED, bytes(key.public_key()))
+        public = ecdsa.PublicKey(ecdsa.verify.P256_SHA256_FIXED, bytes(key.public_key()))
         public.verify(b"m", signed)
+        key.public_key().verify(b"m", signed)
         for loaded in (
-            signature.EcdsaKeyPair.from_sec1(sign.ECDSA_P256_SHA256_FIXED, key.to_sec1()),
-            signature.EcdsaKeyPair.from_scalar_and_public_key(
-                sign.ECDSA_P256_SHA256_FIXED, key.to_scalar(), bytes(key.public_key())
+            ecdsa.KeyPair.from_sec1(ecdsa.sign.P256_SHA256_FIXED, key.to_sec1()),
+            ecdsa.KeyPair.from_scalar_and_public_key(
+                ecdsa.sign.P256_SHA256_FIXED, key.to_scalar(), bytes(key.public_key())
             ),
         ):
             public.verify(b"m", loaded.sign(b"m"))
         with self.assertRaises(pyrind.KeyRejected):
-            signature.EcdsaKeyPair.from_pkcs8(sign.ECDSA_P384_SHA384_ASN1, key.to_pkcs8())
+            ecdsa.KeyPair.from_pkcs8(ecdsa.sign.P384_SHA384_ASN1, key.to_pkcs8())
+        # The constructor takes a bare point, and only `from_spki` takes SPKI.
+        spki = public.to_spki()
+        self.assertEqual(bytes(ecdsa.PublicKey.from_spki(ecdsa.verify.P256_SHA256_FIXED, spki)), bytes(public))
+        with self.assertRaises(pyrind.KeyRejected):
+            ecdsa.PublicKey(ecdsa.verify.P256_SHA256_FIXED, spki)
+        with self.assertRaises(pyrind.KeyRejected):
+            ecdsa.PublicKey.from_spki(ecdsa.verify.P384_SHA384_ASN1, spki)
+
+    def test_public_key_is_one_object(self):
+        for key in (
+            ecdsa.KeyPair.generate(ecdsa.sign.P256_SHA256_ASN1),
+            rind_ed25519.KeyPair.generate(),
+            rsa.KeyPair.generate(rsa.KeySize.RSA_2048),
+            rsa.DecryptingKey.generate(rsa.OAEP_SHA256, rsa.KeySize.RSA_2048),
+            agreement.PrivateKey.generate(agreement.X25519),
+            agreement.PrivateKey.generate(agreement.ECDH_P256),
+            kem.DecapsulationKey.generate(kem.ML_KEM_768),
+        ):
+            self.assertIs(key.public_key(), key.public_key())
+        self.assertFalse(hasattr(ecdsa.KeyPair, "to_spki"))
+        self.assertFalse(hasattr(rind_ed25519.KeyPair, "to_spki"))
+        self.assertFalse(hasattr(rsa.KeyPair, "to_spki"))
+        self.assertFalse(hasattr(rsa.DecryptingKey, "to_spki"))
 
     @requires_pyca
     def test_rsa_against_pyca(self):
@@ -524,57 +634,165 @@ class Signature(unittest.TestCase):
         der = theirs.private_bytes(
             serialization.Encoding.DER, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()
         )
-        ours = signature.RsaKeyPair.from_pkcs8(der)
+        ours = rsa.KeyPair.from_pkcs8(der)
         their_public = theirs.public_key()
+        their_spki = their_public.public_bytes(
+            serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
+        )
+        their_pkcs1 = their_public.public_bytes(serialization.Encoding.DER, serialization.PublicFormat.PKCS1)
+        public = rsa.PublicKey.from_spki(their_spki)
+        self.assertEqual(bytes(public), their_pkcs1)
+        self.assertEqual(bytes(rsa.PublicKey(their_pkcs1)), their_pkcs1)
+        self.assertEqual(ours.public_key().to_spki(), their_spki)
+        self.assertEqual(public.modulus_len(), 256)
         for algorithm, check, pad in (
-            (sign.RSA_PKCS1_SHA256, verify.RSA_PKCS1_SHA256, padding.PKCS1v15()),
-            (sign.RSA_PSS_SHA256, verify.RSA_PSS_SHA256, padding.PSS(padding.MGF1(hashes.SHA256()), 32)),
+            (rsa.sign.PKCS1_SHA256, rsa.verify.PKCS1_SHA256, padding.PKCS1v15()),
+            (rsa.sign.PSS_SHA256, rsa.verify.PSS_SHA256, padding.PSS(padding.MGF1(hashes.SHA256()), 32)),
         ):
             their_public.verify(ours.sign(algorithm, b"message"), b"message", pad, hashes.SHA256())
-            public = signature.PublicKey.from_spki(check, ours.to_spki())
-            public.verify(b"message", theirs.sign(b"message", pad, hashes.SHA256()))
-            self.assertEqual(bytes(ours.public_key(algorithm)), bytes(public))
+            # One key verifies with every algorithm whose floor it meets.
+            public.verify(check, b"message", theirs.sign(b"message", pad, hashes.SHA256()))
+            ours.public_key().verify(check, b"message", ours.sign(algorithm, b"message"))
+        public.verify(
+            rsa.verify.PSS_SHA256_ANY_SALT,
+            b"message",
+            theirs.sign(b"message", padding.PSS(padding.MGF1(hashes.SHA256()), 0), hashes.SHA256()),
+        )
+        with self.assertRaises(pyrind.BadSignature):
+            public.verify(rsa.verify.PSS_SHA256, b"message", ours.sign(rsa.sign.PKCS1_SHA256, b"message"))
         numbers = their_public.public_numbers()
         n = numbers.n.to_bytes((numbers.n.bit_length() + 7) // 8, "big")
         e = numbers.e.to_bytes(3, "big")
-        public = signature.PublicKey.from_components(verify.RSA_PKCS1_SHA256, n, e)
-        public.verify(b"m", ours.sign(sign.RSA_PKCS1_SHA256, b"m"))
-        with self.assertRaises(TypeError):
-            signature.PublicKey.from_components(verify.ED25519, n, e)
+        components = rsa.PublicKey.from_components(n, e)
+        self.assertEqual(bytes(components), their_pkcs1)
+        components.verify(rsa.verify.PKCS1_SHA256, b"m", ours.sign(rsa.sign.PKCS1_SHA256, b"m"))
 
     def test_rsa_generate(self):
-        key = signature.RsaKeyPair.generate(rsa.KeySize.RSA_2048)
-        public = signature.PublicKey.from_spki(verify.RSA_PSS_SHA256, key.to_spki())
-        public.verify(b"m", key.sign(sign.RSA_PSS_SHA256, b"m"))
-        # The constructor takes SPKI as well as PKCS#1.
-        spki = signature.PublicKey(verify.RSA_PSS_SHA256, key.to_spki())
-        self.assertEqual(bytes(spki), bytes(public))
-        # Each constructor refuses a modulus below the algorithm's floor as
-        # it loads, before any signature arrives.
-        floor = verify.legacy.RSA_PKCS1_3072_SHA384
-        for call in (
-            lambda: signature.PublicKey(floor, bytes(public)),
-            lambda: signature.PublicKey(floor, key.to_spki()),
-            lambda: signature.PublicKey.from_spki(floor, key.to_spki()),
-        ):
+        key = rsa.KeyPair.generate(rsa.KeySize.RSA_2048)
+        public = key.public_key()
+        spki = public.to_spki()
+        self.assertEqual(bytes(rsa.PublicKey.from_spki(spki)), bytes(public))
+        rsa.PublicKey(bytes(public)).verify(rsa.verify.PSS_SHA256, b"m", key.sign(rsa.sign.PSS_SHA256, b"m"))
+        # The constructor takes PKCS#1 only, and `from_spki` SPKI only.
+        with self.assertRaises(pyrind.KeyRejected):
+            rsa.PublicKey(spki)
+        with self.assertRaises(pyrind.KeyRejected):
+            rsa.PublicKey.from_spki(bytes(public))
+        # A key loads whatever its size, and `verify` refuses a modulus below
+        # the algorithm's floor before it reads the signature.
+        floor = rsa.verify.legacy.PKCS1_3072_SHA384
+        for signature in (b"", key.sign(rsa.sign.PKCS1_SHA384, b"m")):
             with self.assertRaises(pyrind.KeyRejected):
-                call()
+                public.verify(floor, b"m", signature)
+        self.assertEqual(public.modulus_len(), 256)
         if PYCA:
             loaded = serialization.load_der_private_key(key.to_pkcs8(), None)
             self.assertEqual(loaded.key_size, 2048)
             numbers = loaded.public_key().public_numbers()
             n = numbers.n.to_bytes(256, "big")
             e = numbers.e.to_bytes(3, "big")
-            signature.PublicKey.from_components(verify.RSA_PSS_SHA256, n, e)
+            components = rsa.PublicKey.from_components(n, e)
+            components.verify(rsa.verify.PSS_SHA256, b"m", key.sign(rsa.sign.PSS_SHA256, b"m"))
             with self.assertRaises(pyrind.KeyRejected):
-                signature.PublicKey.from_components(floor, n, e)
+                components.verify(floor, b"m", b"")
+
+    @requires_pyca
+    def test_rsa_1024_verifies_only_with_legacy(self):
+        theirs = pyca_rsa.generate_private_key(65537, 1024)
+        spki = theirs.public_key().public_bytes(
+            serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
+        )
+        public = rsa.PublicKey.from_spki(spki)
+        signed = theirs.sign(b"m", padding.PKCS1v15(), hashes.SHA256())
+        public.verify(rsa.verify.legacy.PKCS1_1024_SHA256, b"m", signed)
+        with self.assertRaises(pyrind.KeyRejected):
+            public.verify(rsa.verify.PKCS1_SHA256, b"m", signed)
+
+    def test_rsa_public_key_edges(self):
+        # Public moduli need no factors, so these are made to measure: odd,
+        # with the top bit of their size set.
+        def modulus(bits):
+            return (1 << bits - 1) | 1
+
+        def unsigned(value):
+            return value.to_bytes((value.bit_length() + 7) // 8, "big")
+
+        def pkcs1(n, e=65537):
+            return der(0x30, der_integer(n) + der_integer(e))
+
+        e = unsigned(65537)
+        for bits in (1024, 1025, 2047, 8192):
+            n = modulus(bits)
+            key = rsa.PublicKey.from_components(unsigned(n), e)
+            self.assertEqual(key.modulus_len(), (bits + 7) // 8)
+            # Each way in reads the same key, and each way out round trips.
+            self.assertEqual(bytes(key), pkcs1(n))
+            self.assertEqual(bytes(rsa.PublicKey(pkcs1(n))), pkcs1(n))
+            self.assertEqual(bytes(rsa.PublicKey.from_spki(key.to_spki())), pkcs1(n))
+        for n, e_bytes in (
+            (modulus(1023), e),  # below 1024 bits
+            (modulus(8193), e),  # above 8192 bits
+            (modulus(2048) + 1, e),  # even
+            (modulus(2048), unsigned(1)),
+            (modulus(2048), unsigned(65536)),  # even
+            (modulus(2048), unsigned(1 << 33 | 1)),  # past 33 bits
+        ):
+            with self.assertRaises(pyrind.KeyRejected):
+                rsa.PublicKey.from_components(unsigned(n), e_bytes)
+            with self.assertRaises(pyrind.KeyRejected):
+                rsa.PublicKey(pkcs1(n, int.from_bytes(e_bytes, "big")))
+        rsa.PublicKey.from_components(unsigned(modulus(2048)), unsigned((1 << 33) - 1))
+        for n_bytes, e_bytes in ((b"\x00" + unsigned(modulus(2048)), e), (unsigned(modulus(2048)), b"\x00" + e), (b"", e)):
+            with self.assertRaises(pyrind.KeyRejected):
+                rsa.PublicKey.from_components(n_bytes, e_bytes)
+        good = pkcs1(modulus(2048))
+        for bad in (good + b"\x00", good[:-1], b"\x30" + good[1:2] + der_integer(modulus(2048))):
+            with self.assertRaises(pyrind.KeyRejected):
+                rsa.PublicKey(bad)
+
+        # A modulus at an algorithm's floor reads the signature, so one too
+        # short fails as a bad signature; a bit below, `verify` refuses the
+        # key whatever the signature.
+        floors = (
+            (1024, rsa.verify.legacy.PKCS1_1024_SHA256),
+            (2048, rsa.verify.PKCS1_SHA256),
+            (2048, rsa.verify.PSS_SHA256),
+            (2048, rsa.verify.PSS_SHA256_ANY_SALT),
+            (3072, rsa.verify.legacy.PKCS1_3072_SHA384),
+        )
+        for floor, algorithm in floors:
+            at = rsa.PublicKey.from_components(unsigned(modulus(floor)), e)
+            for signature in (b"", bytes(at.modulus_len()), bytes(at.modulus_len() + 1)):
+                with self.assertRaises(pyrind.BadSignature):
+                    at.verify(algorithm, b"m", signature)
+            if floor > 1024:
+                below = rsa.PublicKey.from_components(unsigned(modulus(floor - 1)), e)
+                for signature in (b"", bytes(below.modulus_len())):
+                    with self.assertRaises(pyrind.KeyRejected):
+                        below.verify(algorithm, b"m", signature)
+
+        # RSA-OAEP's floor is 2048 bits, refused as the key loads.
+        oaep = rsa.OAEP_SHA256
+        at = pkcs1(modulus(2048))
+        self.assertEqual(rsa.EncryptingKey(oaep, at).to_spki(), rsa.PublicKey(at).to_spki())
+        rsa.EncryptingKey.from_components(oaep, unsigned(modulus(2048)), e)
+        below = pkcs1(modulus(2047))
+        for call in (
+            lambda: rsa.EncryptingKey(oaep, below),
+            lambda: rsa.EncryptingKey.from_spki(oaep, rsa.PublicKey(below).to_spki()),
+            lambda: rsa.EncryptingKey.from_components(oaep, unsigned(modulus(2047)), e),
+        ):
+            with self.assertRaises(pyrind.KeyRejected):
+                call()
 
     def test_garbage_keys_are_rejected(self):
         for call in (
-            lambda: signature.Ed25519KeyPair.from_pkcs8(b"\x30\x00"),
-            lambda: signature.RsaKeyPair.from_pkcs1(os.urandom(100)),
-            lambda: signature.PublicKey(verify.ECDSA_P256_SHA256_ASN1, os.urandom(65)),
-            lambda: signature.PublicKey.from_spki(verify.ED25519, b""),
+            lambda: rind_ed25519.KeyPair.from_pkcs8(b"\x30\x00"),
+            lambda: rsa.KeyPair.from_pkcs1(os.urandom(100)),
+            lambda: ecdsa.PublicKey(ecdsa.verify.P256_SHA256_ASN1, os.urandom(65)),
+            lambda: rind_ed25519.PublicKey.from_spki(b""),
+            lambda: rsa.PublicKey(b""),
+            lambda: rsa.PublicKey.from_spki(os.urandom(100)),
         ):
             with self.assertRaises(pyrind.KeyRejected):
                 call()
@@ -590,7 +808,15 @@ class Rsa(unittest.TestCase):
         ours = rsa.DecryptingKey.from_pkcs8(rsa.OAEP_SHA256, der)
         pad = padding.OAEP(padding.MGF1(hashes.SHA256()), hashes.SHA256(), b"label")
         self.assertEqual(ours.decrypt(theirs.public_key().encrypt(b"secret", pad), label=b"label"), b"secret")
-        encrypting = rsa.EncryptingKey(rsa.OAEP_SHA256, ours.to_spki())
+        spki = ours.public_key().to_spki()
+        encrypting = rsa.EncryptingKey.from_spki(rsa.OAEP_SHA256, spki)
+        pkcs1 = theirs.public_key().public_bytes(serialization.Encoding.DER, serialization.PublicFormat.PKCS1)
+        self.assertEqual(rsa.EncryptingKey(rsa.OAEP_SHA256, pkcs1).to_spki(), spki)
+        # The constructor takes PKCS#1 only, and `from_spki` SPKI only.
+        with self.assertRaises(pyrind.KeyRejected):
+            rsa.EncryptingKey(rsa.OAEP_SHA256, spki)
+        with self.assertRaises(pyrind.KeyRejected):
+            rsa.EncryptingKey.from_spki(rsa.OAEP_SHA256, pkcs1)
         self.assertEqual(theirs.decrypt(encrypting.encrypt(b"secret", label=b"label"), pad), b"secret")
         self.assertEqual(encrypting.max_message_len, 256 - 2 * 32 - 2)
         with self.assertRaises(pyrind.WrongLength):

@@ -42,8 +42,9 @@
 # `brotli` does `std`; a feature the adapter declares implies only what its
 # own table says.
 #
-# rind-object-store is excluded: object_store defines a provider trait and
-# ships no provider module whose shape the adapter could copy.
+# rind-object-store and rind-rand-core are excluded: object_store defines a
+# provider trait, and rand_core RNG traits, and neither ships a provider whose
+# shape the adapter could copy.
 #
 # The rustdoc JSON format is unstable, so this runs on the flake's pinned
 # stable toolchain, with RUSTC_BOOTSTRAP to unlock the flag.

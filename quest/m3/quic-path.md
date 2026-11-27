@@ -13,7 +13,7 @@ Since 0.1.13 ([kixel-ai/rind#329](https://github.com/kixel-ai/rind/pull/329)), t
 Decided with the maintainer on 2026-11-05, from #387's findings (✅ chosen):
 - Route AES-GCM opens under 256 B to Vale on VAES and AVX-512 CPUs: approve ✅ / drop. Done in [kixel-ai/rind#391](https://github.com/kixel-ai/rind/pull/391).
 - Call the hardware AES block directly for header protection: approve ✅ / drop. Done in [kixel-ai/rind#392](https://github.com/kixel-ai/rind/pull/392).
-- DIT on aarch64: keep toggling it per call, once per batch where an API processes one ✅ / never set it, as aws-lc-rs / leave it set once a thread enters rind. Narrowed with the maintainer on 2026-11-08 to Apple's platforms, since Arm says DIT changes nothing on its current cores.
+- DIT on aarch64: keep toggling it per call, once per batch where an API processes one ✅ / never set it, as aws-lc-rs / leave it set once a thread enters rind. Narrowed with the maintainer on 2026-11-08 to Apple's platforms, then widened on 2026-11-21 back to every core with FEAT_DIT, since Arm's [KA005181](https://developer.arm.com/documentation/ka005181/1-0/) names cores, such as Neoverse V1, that may need it and strongly recommends setting it.
 - One-pass short-message AES-GCM on aarch64, with DIT kept per call: approve ✅ / drop. Done in [kixel-ai/rind#393](https://github.com/kixel-ai/rind/pull/393).
 - Ask zshenker for a Zen 2 rerun on 0.1.13: ask ✅ / skip.
 - New public QUIC API (a key that seals and applies header protection in one call, or a GSO batch seal): none ✅ / add. Neither measured an end-to-end win: header protection and dispatch are 3.6% of moq's CPU in `echo_quic`, rustls exposes no QUIC secrets for a fused key, and batching 1200 B packets amortizes only a few ns of about 100-270 ns per call.

@@ -675,21 +675,21 @@ theorem vg_diffie_hellman_spec (h : Runs) (vg : low.x86_64.p256_vg.P256) (k : mi
   obtain ⟨hx, hy, hPe⟩ := hrep
   step with u64x4_to_be_spec k.scalar as ⟨a, ha⟩
   step with as_bytes_uncompressed_spec h peer.point hx hy as ⟨b, hb4, hbc⟩
-  have hcb : some (vgP256.coords b.val) = P := by
+  have hcb : some (vgNist.coords vgP256.C b.val) = P := by
     rw [← hPe]; exact congrArg some hbc
   step with vg_p256_ecdh_spec vg a b as ⟨o, ho⟩
-  simp only [vgBytes, vgP256.ofBytes_bv, ha] at ho
+  simp only [vgBytes, vgNist.ofBytes_bv, ha] at ho
   rw [vgP256.exchange_eq _ hk b.val b.property hb4 (hcb ▸ hP), hcb] at ho
   rcases hq : p256Pow P (wordsNat k.scalar.val) with _ | ⟨x, y⟩ <;> rw [hq] at ho <;> simp only at ho
   · subst ho; simp
   · obtain ⟨out, rfl, hout⟩ := ho
     simp only [WP.spec_ok]
     refine ⟨out, rfl, ?_⟩
-    have hon := vgP256.pow_onCurve P hP (wordsNat k.scalar.val)
+    have hon : p256OnCurve (p256Pow P (wordsNat k.scalar.val)) := vgNist.pow_onCurve vgP256.curve_matches P hP _
     rw [hq] at hon
     show beNat out.val = x
-    rw [← vgP256.ofBytes_bv, hout,
-      vgP256.ofBytes_toBytes_lt _ _ (lt_trans hon.1 (by simp [p256]))]
+    rw [← vgNist.ofBytes_bv, hout,
+      vgNist.ofBytes_toBytes_lt _ _ (lt_trans hon.1 (by simp [p256]))]
 
 theorem not_onCurve_zero : ¬ p256OnCurve (some (0, 0)) := by
   simp [p256OnCurve, nist.OnCurve, p256, b256]
@@ -712,7 +712,7 @@ theorem diffie_hellman_spec (h : Runs) (hvg : RunsP256) (k : mid.p256.PrivateKey
     intro r hr
     rcases hq : p256Pow P (wordsNat k.scalar.val) with _ | ⟨x, y⟩ <;> simp only [hq] at hr ⊢
     · exact hr
-    · have hon := vgP256.pow_onCurve P hP (wordsNat k.scalar.val)
+    · have hon : p256OnCurve (p256Pow P (wordsNat k.scalar.val)) := vgNist.pow_onCurve vgP256.curve_matches P hP _
       rw [hq] at hon
       simp only [hon, ↓reduceIte]
       exact hr

@@ -12,8 +12,8 @@ RFC 8032's PureEd25519 over HOL Light's `edwards25519_group`, defined in
 https://github.com/jrh13/hol-light/blob/217dd32e798d98926d3ab81ed3dfcdf435831e1f/EC/edwards25519.ml,
 with s2n-bignum's encoding of its points, the definitions s2n-bignum's
 theorems state their routines' results in. The group's multiplication and
-power stay opaque: nothing is assumed of them beyond the routine contracts in
-`Rind.<Arch>.S2nBignum`.
+power transliterate HOL Light's `edwards_add` and `group_pow`, and
+`Rind.Ed25519Group` proves their group laws.
 -/
 
 namespace rind.spec
@@ -51,17 +51,27 @@ def edB : EdPoint :=
   (0x216936d3cd6e53fec0a4e231fdd6dc5c692cc7609525a7b2c9562d608f25d51a,
     0x6666666666666666666666666666666666666666666666666666666666666658)
 
-/-- `group_pow edwards25519_group P n`, the point `P` multiplied by `n`.
+/-- `edwards_add (integer_mod_ring p_25519, &e_25519, &d_25519)`, which
+`EDWARDS25519_GROUP` shows is `group_mul edwards25519_group`: the sum of two
+points by the twisted Edwards addition law, in `integer_mod_ring`'s arithmetic
+mod p, whose `ring_div` by 0 is 0, as `ZMod`'s is,
+https://github.com/jrh13/hol-light/blob/217dd32e798d98926d3ab81ed3dfcdf435831e1f/EC/edwards.ml#L33 -/
+def edMul (P Q : EdPoint) : EdPoint :=
+  let x1 : ZMod p25519 := P.1
+  let y1 : ZMod p25519 := P.2
+  let x2 : ZMod p25519 := Q.1
+  let y2 : ZMod p25519 := Q.2
+  let t := (d25519 : ZMod p25519) * (x1 * (y1 * (x2 * y2)))
+  ((((x1 * y2 + y1 * x2) * (1 + t)⁻¹ : ZMod p25519).val : Int),
+    (((y1 * y2 - (e25519 : ZMod p25519) * (x1 * x2)) * (1 - t)⁻¹ : ZMod p25519).val : Int))
 
-It is opaque here: nothing is assumed of it beyond the routine contracts in
-`Rind.<Arch>.S2nBignum`, which restate s2n-bignum's theorems about it. -/
-opaque edPow : EdPoint → Nat → EdPoint
-
-/-- `group_mul edwards25519_group P Q`, the sum of two points.
-
-It is opaque here: nothing is assumed of it beyond the routine contracts in
-`Rind.<Arch>.S2nBignum`, which restate s2n-bignum's theorems about it. -/
-opaque edMul : EdPoint → EdPoint → EdPoint
+/-- `group_pow edwards25519_group P n`, the point `P` multiplied by `n`:
+`group_id edwards25519_group`, which `EDWARDS25519_GROUP` shows is
+`edwards_0`, the point (0, 1), multiplied by `P` `n` times,
+https://github.com/jrh13/hol-light/blob/217dd32e798d98926d3ab81ed3dfcdf435831e1f/Library/grouptheory.ml#L376 -/
+def edPow (P : EdPoint) : Nat → EdPoint
+  | 0 => (0, 1)
+  | n + 1 => edMul P (edPow P n)
 
 /-- `edwards_neg (integer_mod_ring p_25519, &e_25519, &d_25519) P`, which
 `EDWARDS25519_GROUP` shows is `group_inv edwards25519_group P`: x negated mod

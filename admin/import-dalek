@@ -1,0 +1,118 @@
+#!/usr/bin/env python3
+"""Copies the specs of Beneficial AI Foundation's curve25519-dalek proofs into proofs/curve25519-dalek.
+
+Usage: admin/import-dalek [--check] <curve25519-dalek-fork clone holding REV>
+
+Beneficial AI Foundation (BAIF) proves curve25519-dalek's serial backends in
+Lean, through Aeneas, in its fork of the crate
+(`curve25519-dalek/lean/`). rind runs that backend on armv7, and
+`proofs/Rind/Armv7/Dalek.lean` restates BAIF's theorems about the functions
+rind calls as axioms, stated in BAIF's specs. This copies the spec modules
+those statements name, `ROOTS` and every module of BAIF's they import, byte
+for byte as REV holds them, whatever the clone's working tree holds, with the
+fork's license beside them, and deletes any other file under
+`proofs/curve25519-dalek`. `--check` changes nothing and fails unless the
+copy is already that.
+
+BAIF's proofs are about the fork's source at REV, translated by the Aeneas
+release its `AENEAS_VERSION.txt` names; `admin/prove dalek` checks that the
+crates.io release rind builds translates to the same code in every
+definition the axioms reach. `admin/upstream curve25519-dalek` checks out the
+fork at REV.
+"""
+
+import os
+import re
+import subprocess
+import sys
+
+REV = "f6351dfe59cdd894f94260bc66de33d6bff8e6f6"
+
+ADMIN = os.path.dirname(os.path.abspath(__file__))
+DEST = os.path.join(ADMIN, "..", "proofs", "curve25519-dalek")
+LEAN = "curve25519-dalek/lean"
+
+# RFC 7748's X25519 as BAIF states it, and the conversion of Aeneas's byte
+# arrays to the vectors it takes.
+ROOTS = [
+    "ForHumans.Specs.X25519",
+    "ForHumans.Specs.Representation.Array",
+]
+
+# BAIF's own modules: the rest are Mathlib's, Aeneas's, and BAIF's
+# EllipticCurve library's, which `proofs/lakefile.toml` requires.
+OWN = ("ForHumans.", "Proofs.")
+IMPORT = re.compile(r"^(?:public )?(?:meta )?import (?:all )?([A-Za-z0-9_.]+)\b", re.M)
+
+
+def path_of(module):
+    return os.path.join(*module.split(".")) + ".lean"
+
+
+def show(clone, path):
+    return subprocess.run(
+        ["git", "-C", clone, "show", f"{REV}:{LEAN}/{path}"],
+        check=True,
+        capture_output=True,
+    ).stdout
+
+
+def main():
+    args = sys.argv[1:]
+    check = args[:1] == ["--check"]
+    if check:
+        args = args[1:]
+    if len(args) != 1:
+        sys.exit(__doc__.split("\n\n")[1])
+    clone = args[0]
+
+    files, todo = {}, list(ROOTS)
+    while todo:
+        module = todo.pop()
+        path = path_of(module)
+        if path in files:
+            continue
+        files[path] = show(clone, path)
+        for dep in IMPORT.findall(files[path].decode()):
+            if dep.startswith(OWN):
+                todo.append(dep)
+
+    # The fork's license, which covers BAIF's proofs, beside them.
+    files["LICENSE"] = subprocess.run(
+        ["git", "-C", clone, "show", f"{REV}:curve25519-dalek/LICENSE"],
+        check=True,
+        capture_output=True,
+    ).stdout
+
+    stale = []
+    for root, _, names in os.walk(DEST):
+        for name in names:
+            path = os.path.relpath(os.path.join(root, name), DEST)
+            if path not in files:
+                stale.append(path)
+    changed = []
+    for path, data in sorted(files.items()):
+        dest = os.path.join(DEST, path)
+        try:
+            with open(dest, "rb") as f:
+                same = f.read() == data
+        except FileNotFoundError:
+            same = False
+        if not same:
+            changed.append(path)
+            if not check:
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                with open(dest, "wb") as f:
+                    f.write(data)
+    if not check:
+        for path in stale:
+            os.remove(os.path.join(DEST, path))
+    if check and (changed or stale):
+        for path in changed:
+            print(f"admin/import-dalek: {path} differs from BAIF's at {REV}", file=sys.stderr)
+        for path in stale:
+            print(f"admin/import-dalek: {path} is not one of BAIF's files", file=sys.stderr)
+        sys.exit(1)
+
+
+main()

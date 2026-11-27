@@ -4,6 +4,7 @@
 //! secret seed it slices out but never branches on.
 
 use crate::error::{self, KeyRejected};
+use crate::io;
 
 const INTEGER: u8 = 0x02;
 const SEQUENCE: u8 = 0x30;
@@ -14,40 +15,9 @@ fn read<'a>(
     input: &mut untrusted::Reader<'a>,
     tag: u8,
 ) -> Result<untrusted::Input<'a>, error::Unspecified> {
-    if input.read_byte()? != tag {
-        return Err(error::Unspecified);
-    }
-    let len = match input.read_byte()? {
-        len @ 0..=0x7f => usize::from(len),
-        0x81 => match input.read_byte()? {
-            len @ 0x80..=0xff => usize::from(len),
-            _ => return Err(error::Unspecified),
-        },
-        0x82 => {
-            let high = input.read_byte()?;
-            let low = input.read_byte()?;
-            match u16::from_be_bytes([high, low]) {
-                len @ 0x100..=0xffff => usize::from(len),
-                _ => return Err(error::Unspecified),
-            }
-        }
-        _ => return Err(error::Unspecified),
-    };
-    Ok(input.read_bytes(len)?)
-}
-
-/// Reads a positive INTEGER and returns its magnitude, without the zero byte DER
-/// adds when its top bit is set.
-#[cfg(feature = "alloc")]
-fn positive_integer<'a>(input: &mut untrusted::Reader<'a>) -> Result<&'a [u8], error::Unspecified> {
-    let value = read(input, INTEGER)?.as_slice_less_safe();
-    match value {
-        [] | [0x80..=0xff, ..] => Err(error::Unspecified),
-        [0, rest @ ..] => match rest {
-            [0x80..=0xff, ..] => Ok(rest),
-            _ => Err(error::Unspecified),
-        },
-        _ => Ok(value),
+    match io::der::read_tag_and_get_value(input)? {
+        (actual, value) if actual == tag => Ok(value),
+        _ => Err(error::Unspecified),
     }
 }
 
@@ -56,7 +26,12 @@ fn positive_integer<'a>(input: &mut untrusted::Reader<'a>) -> Result<&'a [u8], e
 pub(crate) fn rsa_public_key(der: &[u8]) -> Result<(&[u8], &[u8]), error::Unspecified> {
     untrusted::Input::from(der).read_all(error::Unspecified, |input| {
         read(input, SEQUENCE)?.read_all(error::Unspecified, |input| {
-            Ok((positive_integer(input)?, positive_integer(input)?))
+            let n = io::der::positive_integer(input)?;
+            let e = io::der::positive_integer(input)?;
+            Ok((
+                n.big_endian_without_leading_zero(),
+                e.big_endian_without_leading_zero(),
+            ))
         })
     })
 }

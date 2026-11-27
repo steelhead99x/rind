@@ -3,7 +3,7 @@
 //! The portable backend: pure Rust, for every architecture without one of
 //! rind's assembly backends, and the base armv7 builds on. Most is libcrux's
 //! and HACL*'s, where whole operations are swapped in `mid`, and rind's own
-//! portable arithmetic in `generic`: the NIST curves, RSA, and ML-KEM. Each
+//! portable code in `generic`: the NIST curves, RSA, ML-KEM, and SHA-2. Each
 //! file names its source.
 //!
 //! It needs no CPU features, and each operation's time depends on no secret,

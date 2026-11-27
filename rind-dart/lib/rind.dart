@@ -3,20 +3,44 @@
 /// rind's cryptography for Dart and Flutter, through FFI to the pure-Rust
 /// rind library.
 ///
-/// Algorithms only legacy protocols should use are in
-/// `package:rind/legacy.dart`.
+/// Signatures are in `package:rind/ecdsa.dart`, `package:rind/ed25519.dart`,
+/// and `package:rind/rsa.dart`, with RSA-OAEP, each imported under its
+/// name. Algorithms only legacy protocols should use are in
+/// `package:rind/legacy.dart` and `package:rind/rsa_legacy.dart`.
 library;
 
 export 'src/bindings.dart'
-    hide
-        digestMd5,
-        digestSha1,
-        hkdfSha1,
-        hmacSha1,
-        oaepSha1,
-        pbkdf2HmacSha1,
-        rsaPkcs1Min1024Sha1,
-        rsaPkcs1Min1024Sha256,
-        rsaPkcs1Min1024Sha512,
-        rsaPkcs1Min3072Sha384,
-        rsaPkcs1Sha1;
+    show
+        AeadAlgorithm,
+        AeadKey,
+        AesCbcDecryptingKey,
+        AesCbcEncryptingKey,
+        AesCtr,
+        AgreementAlgorithm,
+        AgreementPrivateKey,
+        AgreementPublicKey,
+        CbcIv,
+        ChaCha20,
+        CipherAlgorithm,
+        DecapsulationKey,
+        DigestAlgorithm,
+        DigestContext,
+        EncapsulationKey,
+        GcmIv,
+        GcmKey,
+        HkdfAlgorithm,
+        HkdfPrk,
+        HkdfSalt,
+        HmacAlgorithm,
+        HmacContext,
+        HmacKey,
+        KemAlgorithm,
+        Nonce,
+        Pbkdf2Algorithm,
+        Pbkdf2Secret,
+        RandomizedNonceKey,
+        constantTimeVerify,
+        digest,
+        fillRandom,
+        hasAesHardware;
+export 'src/error.dart';

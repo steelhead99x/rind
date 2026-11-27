@@ -21,10 +21,14 @@ open VG VG.AArch64 Cosim.AArch64 Rind.AArch64
 def parts : VG.Code Rind.AArch64.Instr VG.AArch64.Cond →
     List Rind.AArch64.Instr × List VG.AArch64.Cond
   | .block is => (is, [])
-  | .seq a b | .ite _ a b | .icall _ _ a b =>
+  | .seq a b | .icall _ _ a b =>
     let (i, c) := parts a
     let (j, d) := parts b
     (i ++ j, c ++ d)
+  | .ite c a b =>
+    let (i, d) := parts a
+    let (j, e) := parts b
+    (i ++ j, c :: d ++ e)
   | .loop b c => let (i, d) := parts b; (i, c :: d)
   | .call _ b => parts b
   | .frame i b j => let (is, c) := parts b; (i :: is ++ [j], c)
