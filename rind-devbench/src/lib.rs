@@ -28,7 +28,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ffi::{CStr, CString, c_char};
 use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Mutex, Once, OnceLock};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 pub const SCHEMA: &str = "rind-devbench/1";
@@ -53,7 +53,11 @@ fn stop_flag() -> bool {
 /// list, dots dropped and each once, which the report publishes.
 pub const CPU_DENIED: &str = env!("DEVBENCH_DENY_IDS");
 
+/// Set only once every variable is written, so [`denies_missing`] never sees
+/// a half-applied build as applied.
 static DENIES_APPLIED: AtomicBool = AtomicBool::new(false);
+/// Runs [`apply_build_denies`]'s writes once; a second caller waits for them.
+static DENIES_ONCE: Once = Once::new();
 
 /// Sets `RIND_CPU_DISABLE_<id>` for each id in [`CPU_DENIED`], before rind's
 /// first call: rind reads the CPU's features once and keeps them. Takes effect
@@ -70,13 +74,14 @@ static DENIES_APPLIED: AtomicBool = AtomicBool::new(false);
 /// calls it from a worker thread: [`catalog`] and [`start`] refuse a build that
 /// denies features when it was not called.
 pub unsafe fn apply_build_denies() {
-    if DENIES_APPLIED.swap(true, Ordering::SeqCst) {
-        return;
-    }
-    for id in CPU_DENIED.split(',').filter(|id| !id.is_empty()) {
-        // SAFETY: the caller's contract above: no other thread exists or reads the environment.
-        unsafe { std::env::set_var(format!("RIND_CPU_DISABLE_{id}"), "1") };
-    }
+    DENIES_ONCE.call_once(|| {
+        for id in CPU_DENIED.split(',').filter(|id| !id.is_empty()) {
+            // SAFETY: the caller's contract above: no other thread exists or reads the environment.
+            unsafe { std::env::set_var(format!("RIND_CPU_DISABLE_{id}"), "1") };
+        }
+        // After the writes: a reader that sees the flag sees every variable.
+        DENIES_APPLIED.store(true, Ordering::SeqCst);
+    });
 }
 
 /// Whether this build denies features whose variables were never set, so a

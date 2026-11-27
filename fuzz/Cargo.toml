@@ -37,7 +37,7 @@ rind-rcgen = { path = "../rind-rcgen" }
 rind-rustls = { path = "../rind-rustls" }
 rind-str0m = { path = "../rind-str0m" }
 rcgen = { version = "0.14", default-features = false }
-rustls = { version = "0.23.20", default-features = false, features = ["aws-lc-rs", "std", "tls12"] }
+rustls = { version = "0.23.33", default-features = false, features = ["aws-lc-rs", "std", "tls12"] }
 str0m = { version = "0.25", default-features = false }
 str0m-aws-lc-rs = "0.7"
 # SLH-DSA, which aws-lc-rs lacks, and the traits that encode its keys.
@@ -73,7 +73,8 @@ p521 = { version = "0.14", default-features = false, features = ["ecdh", "ecdsa"
 # and the portable backend where every crate covering a curve runs rind's.
 num-bigint = "0.5"
 hpke-rs = { version = "0.8", default-features = false, features = ["hazmat", "rustcrypto", "std"] }
-blind-rsa-signatures = { version = "0.18", default-features = false }
+# rind's fork: UPSTREAM.md's "blind-rsa-signatures 0.18 does not build on rsa 0.10.0".
+blind-rsa-signatures = { path = "../thirdparty/blind-rsa-signatures", default-features = false }
 akd_core = { version = "0.13", default-features = false, features = ["vrf"] }
 vrf-rfc9381 = { version = "0.0.7", default-features = false, features = ["p256"] }
 voprf = { version = "0.5", default-features = false, features = ["alloc", "ristretto255-ciphersuite"] }

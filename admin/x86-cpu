@@ -32,11 +32,12 @@ TESTS = "target/x86-cpu-tests.tsv"
 # hash and took 21 to 28 minutes per SHA model under SDE. They check the
 # length counter, which no CPU path changes, and run natively in build.yml.
 SKIP = ["--skip", "large_digest"]
-# And the crosschecks of SLH-DSA's small-signature sets, which took 1186 of
-# crosschecks' 1413 seconds under Diamond Rapids on a Zen 3 host, mostly
-# RustCrypto and fips205 signing as oracles. The fast sets run the same hash
-# kernels, `mid::slhdsa`'s ACVP tests check every set's signatures byte for
-# byte on each model, and these run natively in every merge queue build.
+# And the differential tests of SLH-DSA's small-signature sets, which took
+# 1186 of the differential tests' 1413 seconds under Diamond Rapids on a Zen 3
+# host, mostly RustCrypto and fips205 signing as oracles. The fast sets run
+# the same hash kernels, `mid::slhdsa`'s ACVP tests check every set's
+# signatures byte for byte on each model, and these run natively in every
+# merge queue build.
 for _hash in ["sha2", "shake"]:
     for _bits in [128, 192, 256]:
         SKIP += ["--skip", f"slh_dsa_{_hash}_{_bits}s::sign_verify"]
@@ -365,8 +366,8 @@ elif mode == "all":
     # busy until the last one ends rather than idling behind the slowest
     # model. The largest binaries come first, and within one the newest
     # models, which run slowest under SDE: on a Zen 3 host, Granite Rapids
-    # took six times Prescott's CPU time, and crosschecks took half the
-    # total. A binary uses about one and a half CPUs under SDE, so half as
+    # took six times Prescott's CPU time, and the differential tests took half
+    # the total. A binary uses about one and a half CPUs under SDE, so half as
     # many runs as CPUs keep the host busy beside the queue's other checks.
     jobs = []
     for exe, package in sorted(tests, key=lambda t: -os.path.getsize(t[0])):

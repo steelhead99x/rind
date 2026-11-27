@@ -126,7 +126,12 @@ fn rsa_key_from_pem(pem: &[u8]) -> Result<RsaKeyPair> {
         Ok(_) => return Err(generic("no RSA private key in PEM".into())),
         Err(err) => return Err(generic(format!("invalid PEM: {err}"))),
     };
-    key.map_err(|err| generic(format!("invalid RSA private key: {err}")))
+    let key = key.map_err(|err| generic(format!("invalid RSA private key: {err}")))?;
+    // rind loads a 2047-bit modulus, which aws-lc, as object_store uses, refuses.
+    if key.public_key().modulus_bits() < 2048 {
+        return Err(generic("invalid RSA private key: TooSmall".into()));
+    }
+    Ok(key)
 }
 
 fn generic(message: String) -> Error {

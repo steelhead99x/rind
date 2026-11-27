@@ -96,9 +96,11 @@ ROOTS = {
         "vg_chacha20_init",
         "vg_chacha20_apply_neon",
         "vg_chacha20_apply_sve2",
-        # ChaCha20-Poly1305 with SVE2.
+        # ChaCha20-Poly1305 with SVE2, and with NEON from a length.
         "vg_chacha20_poly1305_seal_sve2",
         "vg_chacha20_poly1305_open_sve2",
+        "vg_chacha20_poly1305_seal_neon",
+        "vg_chacha20_poly1305_open_neon",
         # ML-KEM-768's encapsulation key check, and encapsulation with the
         # SHA-3 instructions: Apple's cores take VG's variant that also runs
         # Keccak on them, as VG's dispatcher picks.
@@ -117,6 +119,8 @@ ROOTS = {
         "vg_pbkdf2_hmac_sha256_sha2",
         "vg_pbkdf2_hmac_sha384_sha512",
         "vg_pbkdf2_hmac_sha512_sha512",
+        # SHA-384 and SHA-512's block function with the SHA-512 instructions.
+        "vg_sha512_compress_sha512",
         # P-384's k·G, for ECDSA's keys and nonces, and its ECDSA
         # verification.
         "vg_ec_p384_public_key",

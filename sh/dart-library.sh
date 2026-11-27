@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Build the prebuilt libraries a release of rind-dart's Dart package pins,
-# from the package sh/dart-package.sh staged, as its build hook builds from
+# from the package sh/dart-package.sh staged (or, nightly, the checkout's
+# rind-dart), as its build hook builds from
 # source but for the oldest systems each target supports: Android API 21,
 # glibc 2.17 through cargo-zigbuild (as pyrind's manylinux2014 wheels), and
 # Rust's default Apple deployment targets. Each lands in OUT_DIR as
@@ -33,6 +34,10 @@ for target in "$@"; do
             cargo=(cargo-zigbuild)
             triple=$target.2.17
             ;;
+        # MSVC's linker stamps the link time unless told /Brepro, and a
+        # release's libraries must be reproducible. Spelled with `-`, since
+        # Git Bash rewrites an argument starting `/` into a Windows path.
+        *-windows-msvc) link=(-- -Clink-arg=-Brepro) ;;
     esac
     case "$target" in
         *-apple-*) file=librind_dart.dylib ext=dylib ;;

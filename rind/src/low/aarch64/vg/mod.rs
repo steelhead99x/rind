@@ -54,7 +54,11 @@ pub(crate) mod vg_chacha20_block;
 #[rustfmt::skip]
 pub(crate) mod vg_chacha20_init;
 #[rustfmt::skip]
+pub(crate) mod vg_chacha20_poly1305_open_neon;
+#[rustfmt::skip]
 pub(crate) mod vg_chacha20_poly1305_open_sve2;
+#[rustfmt::skip]
+pub(crate) mod vg_chacha20_poly1305_seal_neon;
 #[rustfmt::skip]
 pub(crate) mod vg_chacha20_poly1305_seal_sve2;
 #[rustfmt::skip]

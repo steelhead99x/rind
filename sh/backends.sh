@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The rind backends a diff can break: x86_64, aarch64, arm (armv7), and
-# portable. `just check`'s cross, msrv, and vartime modules check only the
+# portable. `just ci`'s cross, msrv, and vartime modules check only the
 # reached backends' builds.
 #
 # Usage: sh/backends.sh CHANGED_FILE

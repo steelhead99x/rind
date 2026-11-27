@@ -555,7 +555,7 @@ pub(crate) struct Components<'a> {
 /// An RSA signing private key.
 ///
 /// Keys supported by this library have public moduli between
-/// 2048- and 8192-bits.  Only two-prime RSA keys are supported.
+/// 2047- and 8192-bits.  Only two-prime RSA keys are supported.
 pub(crate) struct SigningKey(rsa_priv::RsaPrivateKey);
 
 impl SigningKey {
@@ -762,6 +762,12 @@ impl SigningKey {
     pub(crate) fn modulus_len_bytes(&self) -> usize {
         let _entry = Entry::new_public();
         self.0.public_key().modulus_len_bytes()
+    }
+
+    /// The bit lengths of the primes `p` and `q`.
+    pub(crate) fn prime_bits(&self) -> [usize; 2] {
+        let _entry = Entry::new_public();
+        self.0.prime_bits()
     }
 
     /// Signs `message`, using RSASSA-PKCS1-v1_5 with SHA-256.
@@ -1791,6 +1797,27 @@ mod tests {
         check_all_algs(&mut [0u8; 261], &private_key, &private_key.public_key());
     }
 
+    /// Each prime's length is as the key's encoding gives it, and a modulus
+    /// below 2047 bits is refused, the one bit below its floor.
+    #[test]
+    fn reports_prime_lengths() {
+        for (der, bits) in [
+            (&include_bytes!("rsa/rsa2047.der")[..], [1024, 1024]),
+            (include_bytes!("rsa/rsa2048.der"), [1024, 1024]),
+            (include_bytes!("rsa/rsa2048-q-above-p.der"), [1024, 1024]),
+            (include_bytes!("rsa/rsa2086-unbalanced.der"), [1028, 1058]),
+            (include_bytes!("rsa/rsa4096.der"), [2048, 2048]),
+            (include_bytes!("rsa/rsa8192.der"), [4096, 4096]),
+        ] {
+            let key = SigningKey::from_pkcs1_der(der).unwrap();
+            assert_eq!(key.prime_bits(), bits);
+        }
+        assert_eq!(
+            SigningKey::from_pkcs1_der(include_bytes!("rsa/rsa2046.der")).err(),
+            Some(KeyFormatError::RsaModulus.into())
+        );
+    }
+
     /// A private integer read as negative is refused, as aws-lc-rs does,
     /// though without its sign byte the bytes alone are the right magnitude.
     #[test]
@@ -1851,6 +1878,7 @@ mod tests {
 
         for pkcs1 in [
             &include_bytes!("rsa/rsa2048.der")[..],
+            include_bytes!("rsa/rsa2047.der"),
             include_bytes!("rsa/rsa2048-q-above-p.der"),
             include_bytes!("rsa/rsa2086-unbalanced.der"),
             include_bytes!("rsa/rsa4096.der"),

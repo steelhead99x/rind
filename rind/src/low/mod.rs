@@ -145,18 +145,58 @@ mod generic {
     // AVX2.
     #[cfg(not(rind_backend = "aarch64"))]
     pub(crate) mod mlkem_poly;
+    // The barrier Poly1305's 32-bit limbs and their 16-bit halves pass values
+    // through, so the compiler cannot branch on a mask or fuse the halves.
+    #[cfg(any(
+        all(
+            rind_backend = "portable",
+            any(target_pointer_width = "32", rind_limb = "32")
+        ),
+        test
+    ))]
+    pub(crate) mod hide;
+    // Poly1305's 32x32->64-bit products from 16-bit halves where that
+    // multiply ends early, is missing, or is a library call (see build.rs).
+    // Only Poly1305 calls it.
+    #[cfg(any(
+        all(
+            any(rind_mul16, rind_mul16_top, rind_mul16_soft),
+            rind_backend = "portable",
+            any(target_pointer_width = "32", rind_limb = "32")
+        ),
+        test
+    ))]
+    pub(crate) mod mul16;
+    // One SplitMix64 for the tests that need a reproducible stream.
+    #[cfg(test)]
+    pub(crate) mod splitmix;
     // The portable backend's group orders, picked from by modulus.
     #[cfg(any(rind_backend = "arm", rind_backend = "portable"))]
     pub(crate) mod order;
     // x86_64's separate-pass Poly1305 and the 64-bit portable backend's.
     // aarch64 runs Poly1305 only in aws-lc's one-pass ChaCha20-Poly1305,
-    // whose tests check it against this.
+    // whose tests check it against this, and every backend's tests check
+    // `poly1305_32` against it.
     #[cfg(any(
         rind_backend = "x86_64",
-        all(rind_backend = "portable", target_pointer_width = "64"),
-        all(rind_backend = "aarch64", test)
+        all(
+            rind_backend = "portable",
+            target_pointer_width = "64",
+            not(rind_limb = "32")
+        ),
+        test
     ))]
     pub(crate) mod poly1305;
+    // The portable backend's Poly1305 on 32-bit targets, in 26-bit limbs,
+    // and on 64-bit ones forced to 32-bit limbs, so CI checks it on x86_64.
+    #[cfg(any(
+        all(
+            rind_backend = "portable",
+            any(target_pointer_width = "32", rind_limb = "32")
+        ),
+        test
+    ))]
+    pub(crate) mod poly1305_32;
     #[cfg(target_has_atomic = "8")]
     pub(super) mod reuse_cache;
     // Where there is no compare-and-swap, and in tests to test it.
@@ -179,17 +219,23 @@ mod generic {
     ))]
     pub(super) mod sha256;
     // FIPS 180-4 §4.2.2, one copy. The ESP-IDF Xtensa compressor and the
-    // portable one above both read it. aarch64 tests compile neither reader,
-    // so the table stays out: clippy denies an unused static.
+    // portable one above both read it, as do aarch64's interleaved SLH-DSA
+    // lanes. Other aarch64 builds compile no reader, so the table stays out
+    // there: clippy denies an unused static.
     #[cfg(any(
         rind_backend = "portable",
+        all(feature = "slh-dsa", rind_backend = "aarch64"),
         all(test, any(rind_backend = "arm", rind_backend = "x86_64"))
     ))]
     pub(super) mod sha256_k;
     // SLH-DSA's SHA-256 lanes one at a time, which x86_64 runs with the SHA
-    // extensions or without AVX2.
+    // extensions or without AVX2, and aarch64 without the SHA-256
+    // instructions or for a group of one or two lanes.
     #[cfg(feature = "slh-dsa")]
     pub(super) mod sha256x8;
+    // Eight Keccak-f states four at a time, which every backend but x86_64
+    // with AVX-512 runs.
+    pub(crate) mod keccak8;
     // The portable backend's SHA-512, and its round constants. Tests compile
     // it everywhere, to check the assembly and the rolled loop against.
     #[cfg(any(rind_backend = "portable", test))]
@@ -400,6 +446,8 @@ cfg_if::cfg_if! {
         pub(crate) use x86_64::aes_gcm;
         #[cfg(test)]
         pub(crate) use x86_64::ct_sde;
+        #[cfg(all(test, feature = "ml-dsa"))]
+        pub(crate) use x86_64::cpu::HaveAvx512Vl;
         pub(crate) use x86_64::bignum_add::bignum_add;
         pub(crate) use x86_64::bignum_add_p25519::bignum_add_p25519;
         pub(crate) use x86_64::bignum_add_p256::bignum_add_p256;
@@ -523,6 +571,7 @@ cfg_if::cfg_if! {
         pub(crate) use x86_64::sha3_keccak_f1600::sha3_keccak_f1600;
         pub(crate) use x86_64::sha3_keccak4_f1600_shim::sha3_keccak4_f1600;
         pub(crate) use x86_64::sha3_keccak_nof4_f1600::sha3_keccak_nof4_f1600;
+        pub(crate) use x86_64::sha3_keccak8_f1600::sha3_keccak_nof8_f1600;
 
     } else if #[cfg(rind_backend = "aarch64")] {
         pub(in crate::low) use aarch64::cpu::{enter_cpu_state, zero_bytes, ct_compare_bytes, ct_compare_16, leave_cpu_state};
@@ -639,15 +688,17 @@ cfg_if::cfg_if! {
         pub(crate) use aarch64::sha1::{sha1_compress_blocks, sha1_compress_padded};
         pub(crate) use aarch64::sha256::{sha256_compress_blocks, sha256_finish};
         #[cfg(feature = "slh-dsa")]
-        pub(crate) use generic::sha256x8::sha256_finish_x8;
+        pub(crate) use aarch64::sha256x8::sha256_finish_x8;
         pub(crate) use aarch64::sha3_keccak_f1600_mux::sha3_keccak_f1600;
         pub(crate) use aarch64::sha3_keccak4_f1600_mux::sha3_keccak4_f1600;
         pub(crate) use aarch64::sha3_keccak_nof4_f1600::sha3_keccak_nof4_f1600;
+        pub(crate) use generic::keccak8::sha3_keccak_nof8_f1600;
         pub(crate) use aarch64::sha512::sha512_compress_blocks;
 
         pub(crate) use aarch64::chacha20;
         pub(crate) use aarch64::chacha20poly1305;
-        pub(crate) use generic::mlkem::{mlkem_compress_d4, mlkem_compress_d5, mlkem_compress_d10, mlkem_compress_d11, mlkem_frombytes, mlkem_unpack};
+        pub(crate) use aarch64::mlkem::{mlkem_compress_d4, mlkem_compress_d5, mlkem_compress_d10, mlkem_compress_d11};
+        pub(crate) use generic::mlkem::{mlkem_frombytes, mlkem_unpack};
     } else if #[cfg(rind_backend = "arm")] {
         pub(in crate::low) use arm::cpu::{enter_cpu_state, zero_bytes, ct_compare_bytes, ct_compare_16, leave_cpu_state};
         pub(crate) use arm::aes::{AesDecKey, AesKey};
@@ -669,6 +720,7 @@ cfg_if::cfg_if! {
         pub(crate) use arm::keccak1600_armv4::{
             sha3_keccak4_f1600, sha3_keccak_f1600, sha3_keccak_nof4_f1600,
         };
+        pub(crate) use generic::keccak8::sha3_keccak_nof8_f1600;
         pub(crate) use arm::sha_armv4::{
             sha1_compress_blocks, sha1_compress_padded, sha256_compress_blocks, sha256_finish,
             sha512_compress_blocks,
@@ -691,6 +743,7 @@ cfg_if::cfg_if! {
         pub(crate) use portable::keccak::{
             sha3_keccak4_f1600, sha3_keccak_f1600, sha3_keccak_nof4_f1600,
         };
+        pub(crate) use generic::keccak8::sha3_keccak_nof8_f1600;
         pub(crate) use portable::sha::{
             sha1_compress_blocks, sha1_compress_padded, sha256_compress_blocks, sha256_finish,
             sha512_compress_blocks,

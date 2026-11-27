@@ -2,14 +2,16 @@
 
 This directory is rind's fork of
 [blind-rsa-signatures](https://github.com/jedisct1/rust-blind-rsa-signatures),
-the RFC 9474 implementation `rind/tests/crosschecks.rs` checks rind's blind RSA
-against. The workspace's `[patch.crates-io]` builds it in place of crates.io's
+the RFC 9474 implementation `rind/tests/crosschecks_rsa.rs` checks rind's
+blind RSA against. The workspace's `[patch.crates-io]` builds it in place of crates.io's
 0.18.0, which does not build on `rsa` 0.10.0.
 
 Base: `45d0abfa829c3623389daae30bc35e9b2f3b550c`
 
-Every file here is upstream's at that commit, its tag `0.18.0`, unchanged, except this one and
-those listed under "Changed files", so each change can be offered upstream.
+Every file here is upstream's at that commit, its tag `0.18.0`, unchanged, except this one,
+`.rustfmt.toml`, and those listed under "Changed files", so each change can be
+offered upstream. `.rustfmt.toml` keeps `cargo fmt --all`, which formats the
+members' path dependencies too, from restyling upstream's code.
 
 ## Moving the base
 

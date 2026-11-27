@@ -1,5 +1,5 @@
 import Rind.Portable.Blockwise
-import Rind.Sha2Lemmas
+import Rind.Portable.Sha512Compress
 open Aeneas Aeneas.Std Result rind.spec
 
 /-!
@@ -14,15 +14,12 @@ that, do not see these entry-guard lemmas.
 
 namespace rind.portable
 
-/-- rind's SHA-512 has no CPU dispatch here, so this assumes that its entry
-guard and the debug build's check that one is held pass, and the contract of
-its block function, `low::generic::sha512`, aws-lc's C in Rust, which no
-proof covers yet: FIPS 180-4's over every whole block. None reads an input. -/
+/-- rind's SHA-512 has no CPU dispatch here, so this assumes only that its
+entry guard and the debug build's check that one is held pass. Neither reads an
+input. Its block function, `low::generic::sha512`, aws-lc's C in Rust, is
+proven in `Rind.Portable.Sha512Compress`. -/
 def RunsSha512 : Prop :=
-  (∃ e, low.entry.Entry.new_secret = ok e) ∧ low.entry.Entry.assert_held = ok () ∧
-    ∀ (state : Std.Array U64 8#usize) (blocks : Slice U8), blocks.length % 128 = 0 →
-      low.generic.sha512.sha512_compress_blocks state blocks ⦃ r =>
-        r.val = compress state.val blocks.val ⦄
+  (∃ e, low.entry.Entry.new_secret = ok e) ∧ low.entry.Entry.assert_held = ok ()
 
 @[step]
 theorem sha512_new_secret_spec (h : RunsSha512) : low.entry.Entry.new_secret ⦃ _ => True ⦄ := by
@@ -31,21 +28,21 @@ theorem sha512_new_secret_spec (h : RunsSha512) : low.entry.Entry.new_secret ⦃
 
 @[step]
 theorem assert_held_spec (h : RunsSha512) : low.entry.Entry.assert_held ⦃ _ => True ⦄ := by
-  obtain ⟨-, he, -⟩ := h
+  obtain ⟨-, he⟩ := h
   simp [he]
 
 /-- The entry guard is held, as `ct_equal` checks, which every target's
 `RunsSha512` states. -/
-theorem RunsSha512.held (h : RunsSha512) : low.entry.Entry.assert_held = ok () := h.2.1
+theorem RunsSha512.held (h : RunsSha512) : low.entry.Entry.assert_held = ok () := h.2
 
 /-- SHA-512's block function as the backend exports it, which calls
 `low::generic::sha512`'s, over a whole number of blocks. -/
 @[step]
-theorem sha512_compress_blocks_spec (h : RunsSha512) (state : Std.Array U64 8#usize)
+theorem sha512_compress_blocks_spec (_ : RunsSha512) (state : Std.Array U64 8#usize)
     (blocks : Slice U8) (hm : blocks.length % 128 = 0) :
     low.portable.sha.sha512_compress_blocks state blocks ⦃ r =>
       r.val = compress state.val blocks.val ⦄ := by
   unfold low.portable.sha.sha512_compress_blocks
-  exact h.2.2 state blocks hm
+  exact generic_sha512_compress_blocks_spec state blocks hm
 
 end rind.portable

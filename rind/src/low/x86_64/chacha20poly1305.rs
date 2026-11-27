@@ -14,10 +14,13 @@
 //! branches and memory addresses whatever the key, nonce, and data, but for
 //! whether open authenticated, which its contract lets it reveal. Those
 //! proofs are over its models of the instructions, which `admin/prove vg`
-//! cosimulates. The aws-lc assembly is not formally verified: its
-//! correctness rests on its use and testing in BoringSSL and aws-lc. rind
-//! tests both against RFC 8439, Wycheproof, aws-lc-rs, and separate
-//! ChaCha20 and Poly1305 passes.
+//! cosimulates. `proofs/Rind/X86_64/VgChaCha20Poly1305.lean` takes those
+//! theorems as axioms about `seal_ifma` and `open_ifma`, and
+//! `proofs/Rind/X86_64/ChaCha20Poly1305.lean` proves `seal` and `open`, and
+//! the AEAD API above them, from them on IFMA CPUs. The aws-lc assembly is
+//! not formally verified: its correctness rests on its use and testing in
+//! BoringSSL and aws-lc. rind tests both against RFC 8439, Wycheproof,
+//! aws-lc-rs, and separate ChaCha20 and Poly1305 passes.
 //!
 //! VG's routines zero their stack scratch before returning, which AGENTS.md
 //! allows an imported proven routine: VG defines each routine with that

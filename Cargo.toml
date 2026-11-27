@@ -25,11 +25,26 @@ members = [
   "admin/spec-tests",
   "admin/wasm-fixture"
 ]
-# Vendored upstream forks, built only through `[patch.crates-io]`.
+# Vendored upstream forks, which members take as path dependencies.
 exclude = ["thirdparty/blind-rsa-signatures"]
 
 [workspace.package]
 rust-version = "1.90"
+
+[profile.dev]
+# Line tables keep panic and backtrace `file:line` and valgrind's frames at a
+# fraction of full debuginfo's link time and bytes; `profile.test` inherits it.
+debug = "line-tables-only"
+
+# The profile `just check` and CI test under (`cargo nextest run
+# --cargo-profile test-fast`). Dev and test stay at `opt-level = 0` for what
+# needs unoptimized code, such as `admin/ctgrind`'s debug build, whose
+# valgrind rows catch a secret-dependent branch an optimizer would hide.
+# The slowest tests run minutes unoptimized. Assertions and overflow checks
+# stay on, so a test still trips on what dev's would.
+[profile.test-fast]
+inherits = "test"
+opt-level = 1
 
 [profile.dev.build-override]
 # Left unset, cargo gives a build dependency debuginfo only when the same
@@ -62,8 +77,3 @@ opt-level = 3
 
 [profile.dev.package.subtle]
 debug-assertions = false
-
-# rind's fork, ported to rsa 0.10.0: UPSTREAM.md's "blind-rsa-signatures 0.18
-# does not build on rsa 0.10.0".
-[patch.crates-io]
-blind-rsa-signatures = { path = "thirdparty/blind-rsa-signatures" }

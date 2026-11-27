@@ -19,7 +19,7 @@ pub fn any_supported_type(der: &PrivateKeyDer<'_>) -> Result<Arc<dyn SigningKey>
     match der {
         PrivateKeyDer::Pkcs8(pkcs8) => match load_pkcs8(der, pkcs8)? {
             rind::KeyPair::Ed25519(key) => Ok(Arc::new(Ed25519(Arc::new(key)))),
-            rind::KeyPair::Rsa(key) => Ok(Arc::new(RsaSigningKey(Arc::new(key)))),
+            rind::KeyPair::Rsa(key) => Ok(Arc::new(RsaSigningKey::checked(der, key)?)),
             key => ecdsa_key(der, key, "which rind-rustls does not sign with"),
         },
         PrivateKeyDer::Pkcs1(_) => Ok(Arc::new(RsaSigningKey::new(der)?)),
@@ -147,9 +147,18 @@ impl RsaSigningKey {
             _ => return Err(unsupported(der, "not an RSA key encoding")),
         };
         match key {
-            Ok(key) => Ok(Self(Arc::new(key))),
+            Ok(key) => Self::checked(der, key),
             Err(err) => Err(unsupported(der, &format!("as RSA: {err}"))),
         }
+    }
+
+    // rind loads a 2047-bit modulus, which aws-lc, whose provider this
+    // mirrors, refuses.
+    fn checked(der: &PrivateKeyDer<'_>, key: RsaKeyPair) -> Result<Self, rustls::Error> {
+        if key.public_key().modulus_bits() < 2048 {
+            return Err(unsupported(der, "as RSA: TooSmall"));
+        }
+        Ok(Self(Arc::new(key)))
     }
 }
 

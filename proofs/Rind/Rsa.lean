@@ -4,10 +4,11 @@ public import Mathlib.Data.Nat.Size
 @[expose] public section
 
 /-!
-# RSA signature verification
+# RSA signatures
 
 RFC 8017's RSASSA-PKCS1-v1_5 and RSASSA-PSS verification over any hash,
-transliterated from its sections 4, 5.2.2, 8, 9, and B.2.1. A hash is a
+transliterated from its sections 4, 5.2.2, 8, 9, and B.2.1, and its signature
+primitive by the CRT, from section 5.2.1. A hash is a
 function of the message's octets, as `Rind.HashSpec` defines SHA-1 and
 SHA-256, and the other proofs SHA-384 and SHA-512. The RFC bounds each
 hash's input, which the theorems that use these state.
@@ -30,6 +31,16 @@ def i2osp (x xLen : Nat) : Option (List Byte) :=
 representative out of range") unless `s < n`. -/
 def rsavp1 (n e s : Nat) : Option Nat :=
   if s < n then some (s ^ e % n) else none
+
+/-- RSASP1, section 5.2.1, by the private key's second form, without the
+multi-prime part: `s = s₂ + q·h` for `s₁ = m^dP mod p`, `s₂ = m^dQ mod q`,
+and `h = (s₁ - s₂)·qInv mod p`. Step 1's range check, `m < n`, is the
+caller's. -/
+def rsasp1Crt (p q dP dQ qInv m : Nat) : Nat :=
+  let s₁ := m ^ dP % p
+  let s₂ := m ^ dQ % q
+  let h := (((s₁ : Int) - s₂) * qInv % (p : Int)).toNat
+  s₂ + q * h
 
 /-- `k`, the modulus's length in octets. -/
 def octetLen (n : Nat) : Nat :=

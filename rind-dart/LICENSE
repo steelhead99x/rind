@@ -214,7 +214,10 @@ mlkem-native <https://github.com/pq-code-package/mlkem-native>
   rind/src/low/x86_64/aws_lc/mlkem_*, which admin/import-aws-lc takes from
   mlkem-native's x86_64 AVX2 assembly as aws-lc vendors it at that commit,
   with the tables of its compress_consts.c in
-  rind/src/low/x86_64/mlkem_compress.rs.
+  rind/src/low/x86_64/mlkem_compress.rs; and
+  rind/src/low/aarch64/mlkem_native, which admin/import-mlkem-native takes
+  from mlkem-native's aarch64 compression assembly and its table at commit
+  58721ebde4b682bb3384ef7d11333e4f0ddb0164.
   Copyright (c) The mlkem-native project authors
   License: Apache-2.0 OR ISC OR MIT.
 

@@ -16,7 +16,7 @@ use crate::high::signature::ml_dsa::ParameterSet;
 use crate::kem::Algorithm;
 use crate::low::Entry;
 use crate::mid::mldsa::{self, KeyPair};
-use crate::mid::mlkem::{Array, Ciphertext, DecapKey, EncapKey, Message};
+use crate::mid::mlkem::{Ciphertext, DecapKey, EncapKey, FixedArray, Message};
 use crate::mid::sha3::Sha3_256Context;
 use crate::mid::util::Array as _;
 

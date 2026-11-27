@@ -106,11 +106,15 @@ impl KeyPair {
     ) -> Result<Self, Error> {
         let der = pkcs8.secret_pkcs8_der();
         let key = match signer(alg)? {
-            Signer::Ecdsa(signing) => EcdsaKeyPair::from_pkcs8(signing, der).map(Key::Ecdsa),
-            Signer::Ed25519 => Ed25519KeyPair::from_pkcs8(der).map(Key::Ed25519),
-            Signer::Rsa(padding) => RsaKeyPair::from_pkcs8(der).map(|key| Key::Rsa(key, padding)),
+            Signer::Ecdsa(signing) => EcdsaKeyPair::from_pkcs8(signing, der)
+                .map(Key::Ecdsa)
+                .map_err(rejected),
+            Signer::Ed25519 => Ed25519KeyPair::from_pkcs8(der)
+                .map(Key::Ed25519)
+                .map_err(rejected),
+            Signer::Rsa(padding) => rsa_key(RsaKeyPair::from_pkcs8(der), padding),
         };
-        Ok(Self::new(key.map_err(rejected)?, alg, der.to_vec()))
+        Ok(Self::new(key?, alg, der.to_vec()))
     }
 
     /// Loads a private key that signs with `alg`: PKCS#8, or SEC1 for ECDSA
@@ -125,15 +129,20 @@ impl KeyPair {
             // label, and PKCS#1 for RSA unless it is labeled PKCS#8.
             Signer::Ecdsa(signing) => EcdsaKeyPair::from_pkcs8(signing, der)
                 .or_else(|_| EcdsaKeyPair::from_sec1(signing, der))
-                .map(Key::Ecdsa),
-            Signer::Ed25519 => Ed25519KeyPair::from_pkcs8(der).map(Key::Ed25519),
-            Signer::Rsa(padding) => match key {
-                PrivateKeyDer::Pkcs8(_) => RsaKeyPair::from_pkcs8(der),
-                _ => RsaKeyPair::from_pkcs1(der),
-            }
-            .map(|key| Key::Rsa(key, padding)),
+                .map(Key::Ecdsa)
+                .map_err(rejected),
+            Signer::Ed25519 => Ed25519KeyPair::from_pkcs8(der)
+                .map(Key::Ed25519)
+                .map_err(rejected),
+            Signer::Rsa(padding) => rsa_key(
+                match key {
+                    PrivateKeyDer::Pkcs8(_) => RsaKeyPair::from_pkcs8(der),
+                    _ => RsaKeyPair::from_pkcs1(der),
+                },
+                padding,
+            ),
         };
-        Ok(Self::new(loaded.map_err(rejected)?, alg, der.to_vec()))
+        Ok(Self::new(loaded?, alg, der.to_vec()))
     }
 
     /// Parses a PEM private key, PKCS#8, SEC1, or PKCS#1, finding its algorithm.
@@ -286,6 +295,24 @@ fn signer(algorithm: &SignatureAlgorithm) -> Result<Signer, Error> {
     })
 }
 
+/// Whether aws-lc, which rcgen's `aws_lc_rs` feature uses, takes the key: rind
+/// also loads a modulus of 2047 bits.
+fn rsa_floor(key: &RsaKeyPair) -> bool {
+    key.public_key().modulus_bits() >= 2048
+}
+
+/// Wraps a loaded RSA key, refusing a modulus under 2048 bits as aws-lc does.
+fn rsa_key(
+    key: Result<RsaKeyPair, rind::Error>,
+    padding: &'static RsaSigningAlgorithm,
+) -> Result<Key, Error> {
+    let key = key.map_err(rejected)?;
+    if !rsa_floor(&key) {
+        return Err(Error::RingKeyRejected("TooSmall".into()));
+    }
+    Ok(Key::Rsa(key, padding))
+}
+
 /// Keeps rind's reason for refusing a key, as rcgen does for its backends.
 fn rejected(err: rind::Error) -> Error {
     match err {
@@ -366,7 +393,7 @@ impl TryFrom<&PrivateKeyDer<'_>> for KeyPair {
             Ok(rind::KeyPair::Ed25519(key)) => (Key::Ed25519(key), &PKCS_ED25519),
             Ok(rind::KeyPair::EcdsaP256(key)) => (Key::Ecdsa(key), &PKCS_ECDSA_P256_SHA256),
             Ok(rind::KeyPair::EcdsaP384(key)) => (Key::Ecdsa(key), &PKCS_ECDSA_P384_SHA384),
-            Ok(rind::KeyPair::Rsa(key)) if pkcs8 => {
+            Ok(rind::KeyPair::Rsa(key)) if pkcs8 && rsa_floor(&key) => {
                 (Key::Rsa(key, &rsa::sign::PKCS1_SHA256), &PKCS_RSA_SHA256)
             }
             // rcgen names P-521 only with its `aws_lc_rs` feature.
@@ -377,7 +404,9 @@ impl TryFrom<&PrivateKeyDer<'_>> for KeyPair {
                     (key, &PKCS_ECDSA_P256_SHA256)
                 } else if let Ok(key) = sec1(&ecdsa::sign::P384_SHA384_ASN1) {
                     (key, &PKCS_ECDSA_P384_SHA384)
-                } else if let (false, Ok(key)) = (pkcs8, RsaKeyPair::from_pkcs1(der)) {
+                } else if let (false, Some(key)) =
+                    (pkcs8, RsaKeyPair::from_pkcs1(der).ok().filter(rsa_floor))
+                {
                     (Key::Rsa(key, &rsa::sign::PKCS1_SHA256), &PKCS_RSA_SHA256)
                 } else {
                     return Err(Error::CouldNotParseKeyPair);

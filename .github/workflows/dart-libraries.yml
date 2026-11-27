@@ -1,9 +1,10 @@
 name: dart-libraries
 
 # Builds the prebuilt libraries rind-dart's Dart package downloads, one per
-# target rind supports, from the package as pub.dev receives it. Nightly, on
-# demand, and from dart-release.yml, which releases and pins what this
-# uploads. Read-only: releasing is dart-release.yml's.
+# target rind supports. From dart-release.yml, which releases and pins what
+# this uploads, it builds the package as pub.dev receives it; nightly and on
+# demand, the checkout's rind-dart, so a break shows before the release.
+# Read-only: releasing is dart-release.yml's.
 
 on:
   schedule:
@@ -29,8 +30,10 @@ env:
 
 jobs:
   # One staged package, so every library and the published package share its
-  # lockfile.
+  # lockfile. Only a release stages it: before rind's version is on crates.io,
+  # as on a release branch, `cargo package` cannot resolve it.
   package:
+    if: inputs.ref
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -54,6 +57,8 @@ jobs:
   library:
     name: library (${{ matrix.name }})
     needs: package
+    # A release needs the staged package; the nightly skips it.
+    if: ${{ !cancelled() && (needs.package.result == 'success' || (!inputs.ref && needs.package.result == 'skipped')) }}
     strategy:
       fail-fast: false
       matrix:
@@ -84,7 +89,12 @@ jobs:
           ref: ${{ inputs.ref }}
           persist-credentials: false
 
+      # A release builds the staged package, against rind from crates.io as
+      # pub.dev's users get it. The nightly builds the checkout's rind-dart
+      # against the workspace's rind instead: between releases main's
+      # rind-dart uses rind's unreleased API, which crates.io lacks.
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: inputs.ref
         with:
           name: rind-dart-package
           path: ${{ runner.temp }}/rind-dart
@@ -108,9 +118,24 @@ jobs:
         shell: bash
         env:
           TARGETS: ${{ matrix.targets }}
+          PACKAGE: ${{ inputs.ref && format('{0}/rind-dart', runner.temp) || 'rind-dart' }}
         run: |
           IFS=, read -ra targets <<<"$TARGETS"
-          sh/dart-library.sh "$RUNNER_TEMP/rind-dart" "$RUNNER_TEMP/libraries" "${targets[@]}"
+          sh/dart-library.sh "$PACKAGE" "$RUNNER_TEMP/libraries" "${targets[@]}"
+
+      # A release's libraries must be reproducible: built again from a clean
+      # target directory at the same paths, which the Apple libraries' install
+      # names and the Windows ones' PDB paths record, each matches bit for bit.
+      - name: Rebuild and compare
+        shell: bash
+        env:
+          TARGETS: ${{ matrix.targets }}
+          PACKAGE: ${{ inputs.ref && format('{0}/rind-dart', runner.temp) || 'rind-dart' }}
+        run: |
+          IFS=, read -ra targets <<<"$TARGETS"
+          rm -rf "$PACKAGE/target"
+          sh/dart-library.sh "$PACKAGE" "$RUNNER_TEMP/rebuilt" "${targets[@]}"
+          diff -r "$RUNNER_TEMP/libraries" "$RUNNER_TEMP/rebuilt"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

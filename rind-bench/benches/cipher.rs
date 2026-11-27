@@ -301,6 +301,37 @@ fn bench_header_protection(c: &mut Criterion) {
     }
 }
 
+// Expanding a CBC decryption key, as each message under a fresh key pays. It
+// drops each key in the loop, so the wiping is timed too.
+#[cfg(not(target_arch = "xtensa"))]
+fn bench_aes_cbc_key(c: &mut Criterion) {
+    use std::hint::black_box;
+
+    for (name, key_len) in [("aes128-cbc", 16), ("aes192-cbc", 24), ("aes256-cbc", 32)] {
+        let key = &[0u8; 32][..key_len];
+        let mut group = c.benchmark_group(format!("{name}-key"));
+        group.bench_function(BenchmarkId::new("aws-lc-rs", "decrypt"), |b| {
+            use aws_lc_rs::cipher::{
+                AES_128, AES_192, AES_256, PaddedBlockDecryptingKey, UnboundCipherKey,
+            };
+            let algorithm = match key_len {
+                16 => &AES_128,
+                24 => &AES_192,
+                _ => &AES_256,
+            };
+            b.iter(|| {
+                let key = UnboundCipherKey::new(algorithm, black_box(key)).unwrap();
+                PaddedBlockDecryptingKey::cbc_pkcs7(key).unwrap()
+            });
+        });
+        group.bench_function(BenchmarkId::new("rind", "decrypt"), |b| {
+            let _dit = criterion::rind_dit();
+            let algorithm = rind_aes(key_len);
+            b.iter(|| rind::cipher::AesCbcDecryptingKey::new(algorithm, black_box(key)).unwrap());
+        });
+    }
+}
+
 #[cfg(not(target_arch = "xtensa"))]
 fn rind_aes(key_len: usize) -> &'static rind::cipher::Algorithm {
     match key_len {
@@ -315,6 +346,7 @@ criterion_group!(
     benches,
     bench_aes_ctr,
     bench_aes_cbc,
+    bench_aes_cbc_key,
     bench_chacha20,
     bench_header_protection
 );

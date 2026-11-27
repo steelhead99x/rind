@@ -165,3 +165,17 @@ impl From<Unspecified> for KeyRejected {
 pub(crate) fn unspecified<E>(_: E) -> Unspecified {
     Unspecified
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // rind's wrong-length refusal is aws-lc-rs's `InvalidEncoding`.
+    #[test]
+    fn wrong_length_is_invalid_encoding() {
+        assert_eq!(
+            KeyRejected::rind(rind::Error::WrongLength).description_(),
+            "InvalidEncoding"
+        );
+    }
+}

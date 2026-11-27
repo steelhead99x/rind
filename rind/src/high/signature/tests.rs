@@ -127,8 +127,8 @@ fn ecdsa_verifies_only_under_its_algorithm() {
 
 // Signing as a verify-only constant, such as a cross-hash pair, needs crate
 // access, so this differential test lives here rather than in
-// `tests/crosschecks.rs`. Wycheproof has no P-256 with SHA-384 vectors, nor
-// P-521 with SHA-256 or SHA-384.
+// `tests/crosschecks_curves.rs`. Wycheproof has no P-256 with SHA-384
+// vectors, nor P-521 with SHA-256 or SHA-384.
 #[test]
 #[cfg(not(any(miri, target_family = "wasm")))]
 fn ecdsa_verification_matches_aws_lc_rs() {
@@ -1133,4 +1133,24 @@ fn signatures_debug_as_bytes() {
         format!("{signature:?}"),
         format!("Signature({:?})", signature.as_ref())
     );
+}
+
+/// A modulus a bit under an algorithm's floor verifies only once the floor is
+/// counted in whole bytes, as ring counts it.
+#[test]
+fn byte_floor_takes_a_modulus_a_bit_short() {
+    let key = rsa::KeyPair::from_pkcs1(include_bytes!("../rsa/rsa2047.der")).unwrap();
+    assert_eq!(key.public_key().modulus_bits(), 2047);
+    let signature = key.sign(&rsa::sign::PKCS1_SHA256, b"message").unwrap();
+    let public = key.public_key();
+
+    let bits = rsa::verify::PKCS1_SHA256.floor_in_bytes();
+    assert!(
+        public
+            .verify(&rsa::verify::PKCS1_SHA256, b"message", signature.as_ref())
+            .is_err()
+    );
+    public
+        .verify(&bits, b"message", signature.as_ref())
+        .unwrap();
 }

@@ -154,12 +154,16 @@ pub const LIBRARIES: &[(&str, &str)] = &[
 ];
 
 /// Library -> (arch, CPU features it needs, as rind-cpuid names them).
+/// build.rs reads it through this file; the library does not.
+#[allow(dead_code)]
 pub const REQUIRED: &[(&str, &str, &[&str])] = &[
     ("graviola", "x86_64", &["aes", "pclmulqdq", "bmi1", "adx", "avx", "avx2"]),
     ("graviola", "aarch64", &["neon", "aes", "pmull", "sha2"]),
 ];
 
-/// Library -> crates whose versions a result records.
+/// Library -> crates whose versions a result records. build.rs reads it
+/// through this file; the library does not.
+#[allow(dead_code)]
 pub const CRATES: &[(&str, &[&str])] = &[
     ("rind", &["rind", "rind-rustls"]),
     ("aws-lc-rs", &["aws-lc-rs", "aws-lc-sys"]),
