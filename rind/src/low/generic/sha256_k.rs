@@ -5,8 +5,8 @@
 
 //! SHA-256's sixty-four round constants.
 //!
-//! One table, shared by `sha256`'s test compressor and by the ESP-IDF
-//! Xtensa body in `portable::sha`. On that target the table is
+//! One table, shared by `sha256`'s test compressor, aarch64's interleaved
+//! SLH-DSA lanes, and the ESP-IDF Xtensa body in `portable::sha`. On that target the table is
 //! `.dram1.rind_sha256_k`: an IRAM instruction address is not a data
 //! address, so the constants cannot live in the block's literal pool.
 //! Every other build leaves the section attribute off. The layout check

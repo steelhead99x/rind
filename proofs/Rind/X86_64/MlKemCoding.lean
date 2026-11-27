@@ -688,6 +688,448 @@ theorem to_message_bits_spec (self : mid.mlkem.Coeffs (Array I16 256#usize) mid.
         rw [this] at hin
         exact final _ hin
 
+/-! CBD sampling. `sample_cbd2` and `sample_cbd3` sum each run of `η` bits of
+a word at once, with masked adds whose fields are wide enough that none
+carries into the next; `cbd2_field` and `cbd3_field` show it by arithmetic. -/
+
+/-- A number whose only bit, if any, is bit 0, is that bit. -/
+theorem eq_toNat_of_testBit (y : ℕ) (b : Bool) (h : ∀ i, y.testBit i = (decide (i = 0) && b)) :
+    y = b.toNat := by
+  apply Nat.eq_of_testBit_eq
+  intro i
+  rw [h i]
+  cases b <;> rcases i with _ | i <;> simp [Nat.testBit_succ]
+
+/-- The `w`-bit field from bit `s` of `t` masked by `M`, where `M` keeps only
+the field's low bit, is that bit of `t`. -/
+theorem masked_field (t M s w : ℕ) (hw : 0 < w) (hM : ∀ i < w, M.testBit (s + i) = decide (i = 0)) :
+    (t &&& M) / 2 ^ s % 2 ^ w = (t.testBit s).toNat := by
+  apply eq_toNat_of_testBit
+  intro i
+  rw [Nat.testBit_mod_two_pow, Nat.testBit_div_two_pow, Nat.testBit_and]
+  by_cases hi : i < w
+  · rw [Nat.add_comm i s, hM i hi]
+    rcases i with _ | i <;> simp [hi]
+  · have : ¬ (i = 0) := by omega
+    simp [hi, this]
+
+/-- The bits of `t` masked by `M` below bit `s` are at most `M`'s. -/
+theorem masked_low (t M s : ℕ) : (t &&& M) % 2 ^ s ≤ M % 2 ^ s := by
+  rw [← Nat.and_two_pow_sub_one_eq_mod, ← Nat.and_two_pow_sub_one_eq_mod, Nat.and_assoc]
+  exact Nat.and_le_right
+
+/-- Three numbers whose parts below `P` sum below `P`, and whose digits at
+`P` in base `b` sum below `b`, add digit by digit there: nothing carries. -/
+theorem add3_digit (A B C P b : ℕ) (hP : 0 < P) (hlo : A % P + B % P + C % P < P)
+    (hd : A / P % b + B / P % b + C / P % b < b) :
+    (A + B + C) / P % b = A / P % b + B / P % b + C / P % b := by
+  have hab : (A + B) / P = A / P + B / P := by
+    rw [Nat.add_div hP]; simp [show ¬ P ≤ A % P + B % P by omega]
+  have hab' : (A + B) % P = A % P + B % P := by
+    rw [Nat.add_mod]; exact Nat.mod_eq_of_lt (by omega)
+  rw [Nat.add_div hP]
+  simp only [show ¬ P ≤ (A + B) % P + C % P by omega, ite_false, Nat.add_zero]
+  rw [hab, Nat.add_mod, Nat.add_mod (A / P), Nat.mod_eq_of_lt (a := A / P % b + B / P % b) (by omega),
+    Nat.mod_eq_of_lt hd]
+
+/-- `sample_cbd2`'s mask, `0x55555555`, keeps only bit 0 of each two-bit field. -/
+theorem M2_bit : ∀ k < 16, ∀ i < 2, (1431655765 : ℕ).testBit (2 * k + i) = decide (i = 0) := by decide
+
+/-- Below any field, twice `sample_cbd2`'s mask is still below the field. -/
+theorem M2_low : ∀ k < 16, 2 * ((1431655765 : ℕ) % 2 ^ (2 * k)) < 2 ^ (2 * k) := by decide
+
+/-- `sample_cbd3`'s mask, `0x249249`, keeps only bit 0 of each three-bit field. -/
+theorem M3_bit : ∀ k < 8, ∀ i < 3, (2396745 : ℕ).testBit (3 * k + i) = decide (i = 0) := by decide
+
+/-- Below any field, three times `sample_cbd3`'s mask is still below the field. -/
+theorem M3_low : ∀ k < 8, 3 * ((2396745 : ℕ) % 2 ^ (3 * k)) < 2 ^ (3 * k) := by decide
+
+/-- `sample_cbd2`'s masked add puts the sum of bits `2k` and `2k + 1` of `t`
+in its two-bit field `k`. -/
+theorem cbd2_field (t k : ℕ) (hk : k < 16) :
+    ((t &&& 1431655765) + ((t >>> 1) &&& 1431655765)) / 2 ^ (2 * k) % 2 ^ 2 =
+      (t.testBit (2 * k)).toNat + (t.testBit (2 * k + 1)).toNat := by
+  have hA := masked_field t _ (2 * k) 2 (by norm_num) (M2_bit k hk)
+  have hB := masked_field (t >>> 1) _ (2 * k) 2 (by norm_num) (M2_bit k hk)
+  rw [Nat.testBit_shiftRight, Nat.add_comm 1] at hB
+  have h := add3_digit (t &&& 1431655765) ((t >>> 1) &&& 1431655765) 0 (2 ^ (2 * k)) (2 ^ 2) (by positivity)
+    (by
+      have := masked_low t 1431655765 (2 * k)
+      have := masked_low (t >>> 1) 1431655765 (2 * k)
+      have := M2_low k hk
+      simp only [Nat.zero_mod, Nat.add_zero]; omega)
+    (by rw [hA, hB]; simp only [Nat.zero_div, Nat.zero_mod, Nat.add_zero]
+        cases t.testBit (2 * k) <;> cases t.testBit (2 * k + 1) <;> decide)
+  simp only [Nat.add_zero, Nat.zero_div, Nat.zero_mod] at h
+  rw [h, hA, hB]
+
+/-- `sample_cbd3`'s masked adds put the sum of bits `3k`, `3k + 1`, and
+`3k + 2` of `t` in its three-bit field `k`. -/
+theorem cbd3_field (t k : ℕ) (hk : k < 8) :
+    ((t &&& 2396745) + ((t >>> 1) &&& 2396745) + ((t >>> 2) &&& 2396745)) / 2 ^ (3 * k) % 2 ^ 3 =
+      (t.testBit (3 * k)).toNat + (t.testBit (3 * k + 1)).toNat + (t.testBit (3 * k + 2)).toNat := by
+  have hA := masked_field t _ (3 * k) 3 (by norm_num) (M3_bit k hk)
+  have hB := masked_field (t >>> 1) _ (3 * k) 3 (by norm_num) (M3_bit k hk)
+  have hC := masked_field (t >>> 2) _ (3 * k) 3 (by norm_num) (M3_bit k hk)
+  rw [Nat.testBit_shiftRight, Nat.add_comm 1] at hB
+  rw [Nat.testBit_shiftRight, Nat.add_comm 2] at hC
+  rw [add3_digit _ _ _ _ _ (by positivity)
+    (by
+      have := masked_low t 2396745 (3 * k)
+      have := masked_low (t >>> 1) 2396745 (3 * k)
+      have := masked_low (t >>> 2) 2396745 (3 * k)
+      have := M3_low k hk
+      omega)
+    (by rw [hA, hB, hC]
+        cases t.testBit (3 * k) <;> cases t.testBit (3 * k + 1) <;> cases t.testBit (3 * k + 2) <;> decide),
+    hA, hB, hC]
+
+/-- `u32::from_le_bytes` reads its bytes as a little-endian number. -/
+theorem val_of_fromLEBytes32 (a : List U8) (i : U32) {h}
+    (hi : i.bv = (BitVec.fromLEBytes (a.map U8.bv)).cast h) : i.val = leNat a := by
+  show i.bv.toNat = _
+  rw [hi, BitVec.toNat_cast, toNat_fromLEBytes]
+  simp [leNat, List.map_map, Function.comp_def]
+
+/-- Bit `m` of the word read from `n` bytes of `l` at byte `base` is bit
+`8 * base + m` of `l`. -/
+theorem word_bit (l w : List U8) (base n m : ℕ) (hw : ∀ k < n, w[k]! = l[base + k]!) (hm : m < 8 * n) :
+    (leNat w).testBit m = (l[(8 * base + m) / 8]!).val.testBit ((8 * base + m) % 8) := by
+  rw [leNat_testBit, hw (m / 8) (by omega), show (8 * base + m) / 8 = base + m / 8 by omega,
+    show (8 * base + m) % 8 = m % 8 by omega]
+
+/-- Bit `k` of `l`, in FIPS 203's `BytesToBits` order, as a number. -/
+def byteBit (l : List U8) (k : ℕ) : ℕ := ((l[k / 8]!).val.testBit (k % 8)).toNat
+
+/-- Coefficient `p` of FIPS 203's `SamplePolyCBD_η` of the bytes `l`. -/
+def cbdVal (η : ℕ) (l : List U8) (p : ℕ) : ℤ :=
+  ((∑ j : Fin η, byteBit l (2 * p * η + j) : ℕ) : ℤ) - ((∑ j : Fin η, byteBit l (2 * p * η + η + j) : ℕ) : ℤ)
+
+/-- A sum of `η` bits is at most `η`. -/
+theorem sum_byteBit_le (η : ℕ) (l : List U8) (s : ℕ) : (∑ j : Fin η, byteBit l (s + j)) ≤ η := by
+  calc (∑ j : Fin η, byteBit l (s + j)) ≤ ∑ _j : Fin η, 1 :=
+        Finset.sum_le_sum fun j _ => Bool.toNat_le _
+    _ = η := by simp
+
+/-- Coefficients equal to `cbdVal` are `SamplePolyCBD_η`'s, each in `[-η, η]`. -/
+theorem cbd_holds {η : Η} {n : ℕ} (hn : η.val = n) (buf : List U8) (hlen : buf.length = 64 * η.val)
+    (a : List I16) (h : ∀ p < 256, (a[p]!).val = cbdVal n buf p) :
+    Holds (-(n : ℤ)) n 256 a (SamplePolyCBD (toVec (64 * η.val) buf hlen)) := by
+  subst hn
+  intro p hp
+  have h1 := sum_byteBit_le η.val buf (2 * p * η.val)
+  have h2 := sum_byteBit_le η.val buf (2 * p * η.val + η.val)
+  rw [h p hp, cbdVal]
+  refine ⟨by omega, by omega, ?_⟩
+  rw [SamplePolyCBD_get _ _ hp]
+  simp only [bit_toVec, byteBit]
+  push_cast
+  rfl
+
+theorem sample_cbd2_inner_spec (i : Usize) (d : U32) (hi : i.val < 32)
+    (iter : core.ops.range.Range Usize) (out : Array I16 256#usize)
+    (he : iter.end.val = 8) (hs : iter.start.val = 0) :
+    mid.mlkem.sample_cbd2_loop0_loop0 iter out i d ⦃ r =>
+      (∀ p, 8 * i.val ≤ p → p < 8 * i.val + 8 →
+        (r.val[p]!).val = ((d.val / 2 ^ (2 * (2 * (p - 8 * i.val))) % 2 ^ 2 : ℕ) : ℤ) -
+          ((d.val / 2 ^ (2 * (2 * (p - 8 * i.val) + 1)) % 2 ^ 2 : ℕ) : ℤ)) ∧
+      ∀ p, ¬ (8 * i.val ≤ p ∧ p < 8 * i.val + 8) → r.val[p]! = out.val[p]! ⦄ := by
+  unfold mid.mlkem.sample_cbd2_loop0_loop0
+  apply range_loop 8 (fun j (o : Array I16 256#usize) =>
+    (∀ p, 8 * i.val ≤ p → p < 8 * i.val + j →
+      (o.val[p]!).val = ((d.val / 2 ^ (2 * (2 * (p - 8 * i.val))) % 2 ^ 2 : ℕ) : ℤ) -
+        ((d.val / 2 ^ (2 * (2 * (p - 8 * i.val) + 1)) % 2 ^ 2 : ℕ) : ℤ)) ∧
+    ∀ p, ¬ (8 * i.val ≤ p ∧ p < 8 * i.val + j) → o.val[p]! = out.val[p]!) _ _ iter out he (by omega)
+  · rw [hs]
+    exact ⟨fun p h1 h2 => by omega, fun p _ => rfl⟩
+  · intro it o he hs hinv
+    simp only
+    unfold mid.mlkem.sample_cbd2_loop0_loop0.body
+    step as ⟨o', it1, ho, he1⟩
+    split_ifs at ho with hlt
+    · obtain ⟨rfl, hst⟩ := ho
+      simp only
+      step as ⟨i1, hi1⟩
+      step as ⟨i2, hi2, _⟩
+      step as ⟨i3, hi3⟩
+      step as ⟨a, ha⟩
+      step as ⟨i4, hi4⟩
+      step as ⟨i5, hi5, _⟩
+      step as ⟨i6, hi6⟩
+      step as ⟨b, hb⟩
+      step as ⟨i7, hi7⟩
+      step as ⟨i8, hi8⟩
+      step as ⟨i9, hi9⟩
+      step as ⟨a1, ha1⟩
+      have hm3 : (3#u32).val = 2 ^ 2 - 1 := by decide
+      have hi1v : i1.val = 2 * (2 * it.start.val) := by scalar_tac
+      have hi4v : i4.val = 2 * (2 * it.start.val + 1) := by scalar_tac
+      have hi3v : i3.val = d.val / 2 ^ (2 * (2 * it.start.val)) % 2 ^ 2 := by
+        rw [hi3, UScalar.val_and, hi2, hi1v, Nat.shiftRight_eq_div_pow, hm3, Nat.and_two_pow_sub_one_eq_mod]
+      have hi6v : i6.val = d.val / 2 ^ (2 * (2 * it.start.val + 1)) % 2 ^ 2 := by
+        rw [hi6, UScalar.val_and, hi5, hi4v, Nat.shiftRight_eq_div_pow, hm3, Nat.and_two_pow_sub_one_eq_mod]
+      have hi3lt : i3.val < 4 := by rw [hi3v]; exact Nat.mod_lt _ (by norm_num)
+      have hi6lt : i6.val < 4 := by rw [hi6v]; exact Nat.mod_lt _ (by norm_num)
+      have hav : a.val = i3.val := by
+        rw [ha, UScalar.hcast_val_eq]; exact Int.bmod_eq_of_le (by simp) (by simp; omega)
+      have hbv : b.val = i6.val := by
+        rw [hb, UScalar.hcast_val_eq]; exact Int.bmod_eq_of_le (by simp) (by simp; omega)
+      have hi7v : i7.val = (i3.val : ℤ) - i6.val := by
+        rw [hi7, core.num.I16.wrapping_sub_val_eq, hav, hbv]
+        exact Int.bmod_eq_of_le (by simp; omega) (by simp; omega)
+      obtain ⟨hin, hout⟩ := hinv
+      have hidx : i9.val = 8 * i.val + it.start.val := by rw [hi9, hi8]
+      have hlen : 8 * i.val + it.start.val < o.val.length := by simp; omega
+      refine ⟨by rw [he1]; exact he, hst, by omega, fun p h1 h2 => ?_, fun p hp => ?_⟩
+      · rw [ha1, Array.set_val_eq, hidx]
+        by_cases hp : p = 8 * i.val + it.start.val
+        · subst hp
+          rw [getElem!_set_self _ _ _ hlen, hi7v, hi3v, hi6v,
+            show 8 * i.val + it.start.val - 8 * i.val = it.start.val by omega]
+        · rw [getElem!_set_ne _ _ _ _ (Ne.symm hp)]
+          exact hin p h1 (by omega)
+      · rw [ha1, Array.set_val_eq, hidx, getElem!_set_ne _ _ _ _ (by omega)]
+        exact hout p (by omega)
+    · obtain ⟨rfl, hst⟩ := ho
+      simp only [WP.spec_ok]
+      have : it.start.val = 8 := by omega
+      rw [this] at hinv
+      exact hinv
+
+theorem sample_cbd2_loop_spec (buf : Array U8 128#usize)
+    (iter : core.ops.range.Range Usize) (out : Array I16 256#usize)
+    (he : iter.end.val = 32) (hs : iter.start.val = 0) :
+    mid.mlkem.sample_cbd2_loop0 iter buf out ⦃ r => ∀ p < 256, (r.val[p]!).val = cbdVal 2 buf.val p ⦄ := by
+  unfold mid.mlkem.sample_cbd2_loop0
+  apply WP.spec_mono (range_loop 32 (fun j (o : Array I16 256#usize) =>
+    ∀ p < 8 * j, (o.val[p]!).val = cbdVal 2 buf.val p) _ _ iter out he (by omega) (by rw [hs]; intro p hp; omega))
+  · intro r hr
+    exact hr
+  · intro it o he hs hinv
+    simp only
+    unfold mid.mlkem.sample_cbd2_loop0.body
+    step as ⟨o', it1, ho, he1⟩
+    split_ifs at ho with hlt
+    · obtain ⟨rfl, hst⟩ := ho
+      simp only
+      step as ⟨i1, hi1⟩
+      step as ⟨i2, hi2⟩
+      step as ⟨i3, hi3⟩
+      step as ⟨i4, hi4⟩
+      step as ⟨i5, hi5⟩
+      step as ⟨i6, hi6⟩
+      step as ⟨i7, hi7⟩
+      step as ⟨i8, hi8⟩
+      step as ⟨t, ht⟩
+      step as ⟨i9, hi9⟩
+      step as ⟨i10, hi10, _⟩
+      step as ⟨i11, hi11⟩
+      step as ⟨d, hd⟩
+      step with sample_cbd2_inner_spec it.start d (by omega) { start := 0#usize, «end» := 8#usize } o rfl rfl
+        as ⟨out1, hin1, hout1⟩
+      have htv : t.val = leNat [i2, i4, i6, i8] := val_of_fromLEBytes32 [i2, i4, i6, i8] t ht
+      have hw : ∀ k < 4, [i2, i4, i6, i8][k]! = buf.val[4 * it.start.val + k]! := by
+        intro k hk
+        have hb : 4 * it.start.val + k < buf.val.length := by simp; omega
+        rw [List.getElem!_eq_getElem?_getD (l := buf.val), List.getElem?_eq_getElem hb, Option.getD_some]
+        interval_cases k <;> simp [hi2, hi4, hi6, hi8, hi1, hi3, hi5, hi7]
+      have hbit : ∀ m < 32, t.val.testBit m =
+          (buf.val[(8 * (4 * it.start.val) + m) / 8]!).val.testBit ((8 * (4 * it.start.val) + m) % 8) := by
+        intro m hm
+        rw [htv]
+        exact word_bit _ _ _ 4 m hw (by omega)
+      have hM : (1431655765#u32).val = 1431655765 := rfl
+      have hi9v : i9.val = t.val &&& 1431655765 := by rw [hi9, UScalar.val_and, hM]
+      have hi11v : i11.val = (t.val >>> 1) &&& 1431655765 := by rw [hi11, UScalar.val_and, hi10, hM]
+      have hdv : d.val = (t.val &&& 1431655765) + ((t.val >>> 1) &&& 1431655765) := by
+        have h1 : t.val &&& 1431655765 ≤ 1431655765 := Nat.and_le_right
+        have h2 : (t.val >>> 1) &&& 1431655765 ≤ 1431655765 := Nat.and_le_right
+        rw [hd, core.num.U32.wrapping_add_val_eq, hi9v, hi11v]
+        exact Nat.mod_eq_of_lt (by simp [U32.size, U32.numBits]; omega)
+      refine ⟨by rw [he1]; exact he, hst, by omega, fun p hp => ?_⟩
+      rw [hst] at hp
+      by_cases hlo : 8 * it.start.val ≤ p
+      · rw [hin1 p hlo (by omega), hdv, cbd2_field _ _ (by omega), cbd2_field _ _ (by omega), cbdVal]
+        simp only [Fin.sum_univ_two, Fin.val_zero, Fin.val_one, byteBit]
+        rw [hbit _ (by omega), hbit _ (by omega), hbit _ (by omega), hbit _ (by omega),
+          show 8 * (4 * it.start.val) + 2 * (2 * (p - 8 * it.start.val)) = 2 * p * 2 + 0 by omega,
+          show 8 * (4 * it.start.val) + (2 * (2 * (p - 8 * it.start.val)) + 1) = 2 * p * 2 + 1 by omega,
+          show 8 * (4 * it.start.val) + 2 * (2 * (p - 8 * it.start.val) + 1) = 2 * p * 2 + 2 + 0 by omega,
+          show 8 * (4 * it.start.val) + (2 * (2 * (p - 8 * it.start.val) + 1) + 1) = 2 * p * 2 + 2 + 1 by omega]
+      · rw [hout1 p (by omega)]
+        exact hinv p (by omega)
+    · obtain ⟨rfl, hst⟩ := ho
+      simp only [WP.spec_ok]
+      have : it.start.val = 32 := by omega
+      rw [this] at hinv
+      exact hinv
+
+/-- `sample_cbd2` is FIPS 203's `SamplePolyCBD_2`, each coefficient in `[-2, 2]`. -/
+theorem sample_cbd2_spec {η : Η} (hη : η.val = 2) (buf : Array U8 128#usize) (out : Array I16 256#usize) :
+    mid.mlkem.sample_cbd2 buf out ⦃ r =>
+      Holds (-2) 2 256 r.val (SamplePolyCBD (toVec (64 * η.val) buf.val (by rw [hη]; exact buf.property))) ⦄ := by
+  unfold mid.mlkem.sample_cbd2
+  step as ⟨i, hi⟩
+  have h32 : i.val = 32 := by rw [hi]; simp [mid.mlkem.N]
+  apply WP.spec_mono (sample_cbd2_loop_spec buf _ out h32 rfl)
+  intro r hr
+  exact cbd_holds hη buf.val _ r.val hr
+
+theorem sample_cbd3_inner_spec (i : Usize) (d : U32) (hi : i.val < 64)
+    (iter : core.ops.range.Range Usize) (out : Array I16 256#usize)
+    (he : iter.end.val = 4) (hs : iter.start.val = 0) :
+    mid.mlkem.sample_cbd3_loop0_loop0 iter out i d ⦃ r =>
+      (∀ p, 4 * i.val ≤ p → p < 4 * i.val + 4 →
+        (r.val[p]!).val = ((d.val / 2 ^ (3 * (2 * (p - 4 * i.val))) % 2 ^ 3 : ℕ) : ℤ) -
+          ((d.val / 2 ^ (3 * (2 * (p - 4 * i.val) + 1)) % 2 ^ 3 : ℕ) : ℤ)) ∧
+      ∀ p, ¬ (4 * i.val ≤ p ∧ p < 4 * i.val + 4) → r.val[p]! = out.val[p]! ⦄ := by
+  unfold mid.mlkem.sample_cbd3_loop0_loop0
+  apply range_loop 4 (fun j (o : Array I16 256#usize) =>
+    (∀ p, 4 * i.val ≤ p → p < 4 * i.val + j →
+      (o.val[p]!).val = ((d.val / 2 ^ (3 * (2 * (p - 4 * i.val))) % 2 ^ 3 : ℕ) : ℤ) -
+        ((d.val / 2 ^ (3 * (2 * (p - 4 * i.val) + 1)) % 2 ^ 3 : ℕ) : ℤ)) ∧
+    ∀ p, ¬ (4 * i.val ≤ p ∧ p < 4 * i.val + j) → o.val[p]! = out.val[p]!) _ _ iter out he (by omega)
+  · rw [hs]
+    exact ⟨fun p h1 h2 => by omega, fun p _ => rfl⟩
+  · intro it o he hs hinv
+    simp only
+    unfold mid.mlkem.sample_cbd3_loop0_loop0.body
+    step as ⟨o', it1, ho, he1⟩
+    split_ifs at ho with hlt
+    · obtain ⟨rfl, hst⟩ := ho
+      simp only
+      step as ⟨i1, hi1⟩
+      step as ⟨i2, hi2, _⟩
+      step as ⟨i3, hi3⟩
+      step as ⟨a, ha⟩
+      step as ⟨i4, hi4⟩
+      step as ⟨i5, hi5, _⟩
+      step as ⟨i6, hi6⟩
+      step as ⟨b, hb⟩
+      step as ⟨i7, hi7⟩
+      step as ⟨i8, hi8⟩
+      step as ⟨i9, hi9⟩
+      step as ⟨a1, ha1⟩
+      have hm7 : (7#u32).val = 2 ^ 3 - 1 := by decide
+      have hi1v : i1.val = 3 * (2 * it.start.val) := by scalar_tac
+      have hi4v : i4.val = 3 * (2 * it.start.val + 1) := by scalar_tac
+      have hi3v : i3.val = d.val / 2 ^ (3 * (2 * it.start.val)) % 2 ^ 3 := by
+        rw [hi3, UScalar.val_and, hi2, hi1v, Nat.shiftRight_eq_div_pow, hm7, Nat.and_two_pow_sub_one_eq_mod]
+      have hi6v : i6.val = d.val / 2 ^ (3 * (2 * it.start.val + 1)) % 2 ^ 3 := by
+        rw [hi6, UScalar.val_and, hi5, hi4v, Nat.shiftRight_eq_div_pow, hm7, Nat.and_two_pow_sub_one_eq_mod]
+      have hi3lt : i3.val < 8 := by rw [hi3v]; exact Nat.mod_lt _ (by norm_num)
+      have hi6lt : i6.val < 8 := by rw [hi6v]; exact Nat.mod_lt _ (by norm_num)
+      have hav : a.val = i3.val := by
+        rw [ha, UScalar.hcast_val_eq]; exact Int.bmod_eq_of_le (by simp) (by simp; omega)
+      have hbv : b.val = i6.val := by
+        rw [hb, UScalar.hcast_val_eq]; exact Int.bmod_eq_of_le (by simp) (by simp; omega)
+      have hi7v : i7.val = (i3.val : ℤ) - i6.val := by
+        rw [hi7, core.num.I16.wrapping_sub_val_eq, hav, hbv]
+        exact Int.bmod_eq_of_le (by simp; omega) (by simp; omega)
+      obtain ⟨hin, hout⟩ := hinv
+      have hidx : i9.val = 4 * i.val + it.start.val := by rw [hi9, hi8]
+      have hlen : 4 * i.val + it.start.val < o.val.length := by simp; omega
+      refine ⟨by rw [he1]; exact he, hst, by omega, fun p h1 h2 => ?_, fun p hp => ?_⟩
+      · rw [ha1, Array.set_val_eq, hidx]
+        by_cases hp : p = 4 * i.val + it.start.val
+        · subst hp
+          rw [getElem!_set_self _ _ _ hlen, hi7v, hi3v, hi6v,
+            show 4 * i.val + it.start.val - 4 * i.val = it.start.val by omega]
+        · rw [getElem!_set_ne _ _ _ _ (Ne.symm hp)]
+          exact hin p h1 (by omega)
+      · rw [ha1, Array.set_val_eq, hidx, getElem!_set_ne _ _ _ _ (by omega)]
+        exact hout p (by omega)
+    · obtain ⟨rfl, hst⟩ := ho
+      simp only [WP.spec_ok]
+      have : it.start.val = 4 := by omega
+      rw [this] at hinv
+      exact hinv
+
+theorem sample_cbd3_loop_spec (buf : Array U8 192#usize)
+    (iter : core.ops.range.Range Usize) (out : Array I16 256#usize)
+    (he : iter.end.val = 64) (hs : iter.start.val = 0) :
+    mid.mlkem.sample_cbd3_loop0 iter buf out ⦃ r => ∀ p < 256, (r.val[p]!).val = cbdVal 3 buf.val p ⦄ := by
+  unfold mid.mlkem.sample_cbd3_loop0
+  apply WP.spec_mono (range_loop 64 (fun j (o : Array I16 256#usize) =>
+    ∀ p < 4 * j, (o.val[p]!).val = cbdVal 3 buf.val p) _ _ iter out he (by omega) (by rw [hs]; intro p hp; omega))
+  · intro r hr
+    exact hr
+  · intro it o he hs hinv
+    simp only
+    unfold mid.mlkem.sample_cbd3_loop0.body
+    step as ⟨o', it1, ho, he1⟩
+    split_ifs at ho with hlt
+    · obtain ⟨rfl, hst⟩ := ho
+      simp only
+      step as ⟨i1, hi1⟩
+      step as ⟨i2, hi2⟩
+      step as ⟨i3, hi3⟩
+      step as ⟨i4, hi4⟩
+      step as ⟨i5, hi5⟩
+      step as ⟨i6, hi6⟩
+      step as ⟨t, ht⟩
+      step as ⟨i7, hi7⟩
+      step as ⟨i8, hi8, _⟩
+      step as ⟨i9, hi9⟩
+      step as ⟨i10, hi10⟩
+      step as ⟨i11, hi11, _⟩
+      step as ⟨i12, hi12⟩
+      step as ⟨d, hd⟩
+      step with sample_cbd3_inner_spec it.start d (by omega) { start := 0#usize, «end» := 4#usize } o rfl rfl
+        as ⟨out1, hin1, hout1⟩
+      have htv : t.val = leNat [i2, i4, i6, 0#u8] := val_of_fromLEBytes32 [i2, i4, i6, 0#u8] t ht
+      have hw : ∀ k < 3, [i2, i4, i6, 0#u8][k]! = buf.val[3 * it.start.val + k]! := by
+        intro k hk
+        have hb : 3 * it.start.val + k < buf.val.length := by simp; omega
+        rw [List.getElem!_eq_getElem?_getD (l := buf.val), List.getElem?_eq_getElem hb, Option.getD_some]
+        interval_cases k <;> simp [hi2, hi4, hi6, hi1, hi3, hi5]
+      have hbit : ∀ m < 24, t.val.testBit m =
+          (buf.val[(8 * (3 * it.start.val) + m) / 8]!).val.testBit ((8 * (3 * it.start.val) + m) % 8) := by
+        intro m hm
+        rw [htv]
+        exact word_bit _ _ _ 3 m hw (by omega)
+      have hM : (2396745#u32).val = 2396745 := rfl
+      have h1 : t.val &&& 2396745 ≤ 2396745 := Nat.and_le_right
+      have h2 : (t.val >>> 1) &&& 2396745 ≤ 2396745 := Nat.and_le_right
+      have h3 : (t.val >>> 2) &&& 2396745 ≤ 2396745 := Nat.and_le_right
+      have hi10v : i10.val = (t.val &&& 2396745) + ((t.val >>> 1) &&& 2396745) := by
+        rw [hi10, core.num.U32.wrapping_add_val_eq, hi7, UScalar.val_and, hM, hi9, UScalar.val_and, hi8, hM]
+        exact Nat.mod_eq_of_lt (by simp [U32.size, U32.numBits]; omega)
+      have hdv : d.val = (t.val &&& 2396745) + ((t.val >>> 1) &&& 2396745) + ((t.val >>> 2) &&& 2396745) := by
+        rw [hd, core.num.U32.wrapping_add_val_eq, hi10v, hi12, UScalar.val_and, hi11, hM]
+        exact Nat.mod_eq_of_lt (by simp [U32.size, U32.numBits]; omega)
+      refine ⟨by rw [he1]; exact he, hst, by omega, fun p hp => ?_⟩
+      rw [hst] at hp
+      by_cases hlo : 4 * it.start.val ≤ p
+      · rw [hin1 p hlo (by omega), hdv, cbd3_field _ _ (by omega), cbd3_field _ _ (by omega), cbdVal]
+        simp only [Fin.sum_univ_three, Fin.val_zero, Fin.val_one, Fin.val_two, byteBit]
+        rw [hbit _ (by omega), hbit _ (by omega), hbit _ (by omega), hbit _ (by omega), hbit _ (by omega),
+          hbit _ (by omega),
+          show 8 * (3 * it.start.val) + 3 * (2 * (p - 4 * it.start.val)) = 2 * p * 3 + 0 by omega,
+          show 8 * (3 * it.start.val) + (3 * (2 * (p - 4 * it.start.val)) + 1) = 2 * p * 3 + 1 by omega,
+          show 8 * (3 * it.start.val) + (3 * (2 * (p - 4 * it.start.val)) + 2) = 2 * p * 3 + 2 by omega,
+          show 8 * (3 * it.start.val) + 3 * (2 * (p - 4 * it.start.val) + 1) = 2 * p * 3 + 3 + 0 by omega,
+          show 8 * (3 * it.start.val) + (3 * (2 * (p - 4 * it.start.val) + 1) + 1) = 2 * p * 3 + 3 + 1 by omega,
+          show 8 * (3 * it.start.val) + (3 * (2 * (p - 4 * it.start.val) + 1) + 2) = 2 * p * 3 + 3 + 2 by omega]
+      · rw [hout1 p (by omega)]
+        exact hinv p (by omega)
+    · obtain ⟨rfl, hst⟩ := ho
+      simp only [WP.spec_ok]
+      have : it.start.val = 64 := by omega
+      rw [this] at hinv
+      exact hinv
+
+/-- `sample_cbd3` is FIPS 203's `SamplePolyCBD_3`, each coefficient in `[-3, 3]`. -/
+theorem sample_cbd3_spec {η : Η} (hη : η.val = 3) (buf : Array U8 192#usize) (out : Array I16 256#usize) :
+    mid.mlkem.sample_cbd3 buf out ⦃ r =>
+      Holds (-3) 3 256 r.val (SamplePolyCBD (toVec (64 * η.val) buf.val (by rw [hη]; exact buf.property))) ⦄ := by
+  unfold mid.mlkem.sample_cbd3
+  step as ⟨i, hi⟩
+  have h64 : i.val = 64 := by rw [hi]; simp [mid.mlkem.N]
+  apply WP.spec_mono (sample_cbd3_loop_spec buf _ out h64 rfl)
+  intro r hr
+  exact cbd_holds hη buf.val _ r.val hr
+
 end MlKemCoding
 
 end rind.x86_64

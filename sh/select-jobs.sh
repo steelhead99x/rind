@@ -7,7 +7,10 @@
 #
 # Each ENTRY is a job ID, which runs the job whole, or `job:value,...`, which
 # runs only the rows of its matrix that take each named value on that value's
-# axis, as `armv7:no-neon,debug` runs armv7's one debug no-NEON row. Entries
+# axis, as `armv7:no-neon,debug` runs armv7's one debug no-NEON row. A job
+# whose `exclude` falls back to rows of its own, as ctgrind's `portable` does,
+# skips those when named whole, as the schedule does, and runs them only when
+# its entry names their values. Entries
 # are separated by single spaces and follow the workflow's job order, and a
 # job's values its matrix's order, so one selection has one spelling, and one
 # concurrency group. Anything else, such as a typo, fails, so a dispatch never

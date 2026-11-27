@@ -6,8 +6,9 @@ use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 use rind::cipher::{self, CbcIv};
 use rind::key_wrap::{AesKek, Mode};
+use zeroize::Zeroizing;
 
-use crate::{Bytes, WrongLength, algorithm, bytes, bytes_with, constants, error};
+use crate::{Bytes, Secret, WrongLength, algorithm, bytes, bytes_with, constants, error};
 
 algorithm!(
     /// An AES key size.
@@ -27,7 +28,7 @@ struct AesCbcEncryptingKey(Box<cipher::AesCbcEncryptingKey>);
 impl AesCbcEncryptingKey {
     /// Expands `key` for `algorithm`; raises `WrongLength` unless it is that size.
     #[new]
-    fn new(algorithm: &Bound<'_, Algorithm>, key: Bytes<'_>) -> PyResult<Self> {
+    fn new(algorithm: &Bound<'_, Algorithm>, key: Secret<'_>) -> PyResult<Self> {
         cipher::AesCbcEncryptingKey::new(algorithm.get().inner, &key)
             .map(Box::new)
             .map(Self)
@@ -59,7 +60,7 @@ struct AesCbcDecryptingKey(Box<cipher::AesCbcDecryptingKey>);
 impl AesCbcDecryptingKey {
     /// Expands `key` for `algorithm`; raises `WrongLength` unless it is that size.
     #[new]
-    fn new(algorithm: &Bound<'_, Algorithm>, key: Bytes<'_>) -> PyResult<Self> {
+    fn new(algorithm: &Bound<'_, Algorithm>, key: Secret<'_>) -> PyResult<Self> {
         cipher::AesCbcDecryptingKey::new(algorithm.get().inner, &key)
             .map(Box::new)
             .map(Self)
@@ -81,6 +82,34 @@ impl AesCbcDecryptingKey {
     }
 }
 
+/// A key-wrap mode: AES-KW (RFC 3394), for keys a multiple of 8 bytes from
+/// 16, or AES-KWP (RFC 5649), for keys of any length from 1 byte; equal
+/// only to itself, never to an int, so its hash agrees with its equality.
+#[pyclass(
+    frozen,
+    eq,
+    hash,
+    from_py_object,
+    module = "pyrind.key_wrap",
+    name = "Mode"
+)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum KeyWrapMode {
+    #[pyo3(name = "KW")]
+    Kw,
+    #[pyo3(name = "KWP")]
+    Kwp,
+}
+
+impl From<KeyWrapMode> for Mode {
+    fn from(mode: KeyWrapMode) -> Self {
+        match mode {
+            KeyWrapMode::Kw => Self::Kw,
+            KeyWrapMode::Kwp => Self::Kwp,
+        }
+    }
+}
+
 /// An AES key-encryption key, which wraps keys with AES-KW (RFC 3394) and
 /// AES-KWP (RFC 5649).
 #[pyclass(frozen, module = "pyrind.key_wrap", name = "AesKek")]
@@ -90,56 +119,43 @@ struct Kek(Box<AesKek>);
 impl Kek {
     /// Expands `key` for `algorithm`; raises `WrongLength` unless it is that size.
     #[new]
-    fn new(algorithm: &Bound<'_, Algorithm>, key: Bytes<'_>) -> PyResult<Self> {
+    fn new(algorithm: &Bound<'_, Algorithm>, key: Secret<'_>) -> PyResult<Self> {
         AesKek::new(algorithm.get().inner, &key)
             .map(Box::new)
             .map(Self)
             .map_err(error)
     }
 
-    /// Wraps `key`, a multiple of 8 bytes from 16, with AES-KW; raises
-    /// `WrongLength` for any other length.
-    fn wrap<'py>(&self, py: Python<'py>, key: Bytes<'_>) -> PyResult<Bound<'py, PyBytes>> {
-        bytes_with(py, &[], key.len() + 8, |out| {
-            self.0.wrap_key(Mode::Kw, &key, out).map_err(error)
-        })
-    }
-
-    /// Unwraps an AES-KW `wrapped`; raises `DecryptFailed` unless this key
-    /// wrapped it.
-    fn unwrap<'py>(&self, py: Python<'py>, wrapped: Bytes<'_>) -> PyResult<Bound<'py, PyBytes>> {
-        if wrapped.len() < 24 || !wrapped.len().is_multiple_of(8) {
-            return Err(error(rind::Error::DecryptFailed));
-        }
-        bytes_with(py, &[], wrapped.len() - 8, |out| {
-            self.0
-                .unwrap_key(Mode::Kw, &wrapped, out)
-                .map(|_| ())
-                .map_err(error)
-        })
-    }
-
-    /// Wraps `key`, of any length from 1 byte, with AES-KWP.
-    fn wrap_padded<'py>(&self, py: Python<'py>, key: Bytes<'_>) -> PyResult<Bound<'py, PyBytes>> {
-        bytes_with(py, &[], key.len().next_multiple_of(8) + 8, |out| {
-            self.0.wrap_key(Mode::Kwp, &key, out).map_err(error)
-        })
-    }
-
-    /// Unwraps an AES-KWP `wrapped`; raises `DecryptFailed` unless this key
-    /// wrapped it.
-    fn unwrap_padded<'py>(
+    /// Wraps `key` with `mode`; raises `WrongLength` for a length the mode
+    /// does not take.
+    fn wrap_key<'py>(
         &self,
         py: Python<'py>,
+        mode: KeyWrapMode,
+        key: Secret<'_>,
+    ) -> PyResult<Bound<'py, PyBytes>> {
+        // Both modes' wrapped length, as KW takes only a multiple of 8.
+        let len = key.len().next_multiple_of(8) + 8;
+        bytes_with(py, &[], len, |out| {
+            self.0.wrap_key(mode.into(), &key, out).map_err(error)
+        })
+    }
+
+    /// Unwraps `wrapped` with `mode`; raises `DecryptFailed` unless this key
+    /// wrapped it in that mode.
+    fn unwrap_key<'py>(
+        &self,
+        py: Python<'py>,
+        mode: KeyWrapMode,
         wrapped: Bytes<'_>,
     ) -> PyResult<Bound<'py, PyBytes>> {
-        if wrapped.len() < 16 || !wrapped.len().is_multiple_of(8) {
-            return Err(error(rind::Error::DecryptFailed));
-        }
-        let mut key = vec![0; wrapped.len() - 8];
+        // rind refuses a `wrapped` too short for `mode` before it reads the
+        // buffer, and KWP's key may be shorter than it, so it is copied out,
+        // to scratch that is wiped before it is freed.
+        let mut key = Zeroizing::new(vec![0; wrapped.len().saturating_sub(8)]);
         let len = self
             .0
-            .unwrap_key(Mode::Kwp, &wrapped, &mut key)
+            .unwrap_key(mode.into(), &wrapped, &mut key)
             .map_err(error)?
             .len();
         Ok(bytes(py, &key[..len]))
@@ -159,6 +175,7 @@ pub(crate) fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
 }
 
 pub(crate) fn register_key_wrap(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_class::<KeyWrapMode>()?;
     m.add_class::<Kek>()?;
     constants!(m, Algorithm, "pyrind.key_wrap", {
         AES_128 => &cipher::AES_128,

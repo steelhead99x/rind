@@ -24,20 +24,27 @@ def SigningKeyOf384 (key : P384SigningKey) (d : Nat) : Prop :=
 
 namespace P384
 
-theorem static_public_key_uncompressed_spec (h : Runs) (hvg : NoVgP384) (k : mid.p384.StaticPrivateKey)
+theorem static_public_key_uncompressed_spec (h : Runs) (hvg : RunsP384) (k : mid.p384.StaticPrivateKey)
     (hk0 : 0 < scNat k.scalar) (hk : scNat k.scalar < n384) :
     mid.p384.StaticPrivateKey.public_key_uncompressed k ⦃ b => p384PublicKey (scNat k.scalar) b.val ⦄ := by
   obtain ⟨x, y, hq, hc⟩ := p384_g_mult _ hk0 hk
   unfold mid.p384.StaticPrivateKey.public_key_uncompressed
   step with new_secret_spec h
-  simp only [hvg.eq, bind_ok]
+  obtain ⟨⟨t, ht⟩, -⟩ := hvg
+  simp only [ht, bind_ok]
+  rcases t with _ | vg
+  swap
+  · apply WP.spec_mono (vg_public_key_spec h vg k hk x y hq hc)
+    rintro b ⟨hb4, hbc⟩
+    exact ⟨b.property, hb4, by rw [hq, hbc]⟩
+  simp only
   step with public_point_spec h k x y hk hq hc as ⟨pt, hx, hy, hpx, hpy⟩
   step with as_bytes_uncompressed_spec h pt hx hy as ⟨b, hb4, hbc⟩
   exact ⟨b.property, hb4, by rw [hq, hbc, hpx, hpy]⟩
 
 /-- The build of a signing key's cached public key: X9.62's uncompressed
 encoding of its scalar times G, in the first 97 bytes. -/
-theorem point_build_spec (h : Runs) (hvg : NoVgP384) (key : P384SigningKey) (d : Nat) (hs : SigningKeyOf384 key d) :
+theorem point_build_spec (h : Runs) (hvg : RunsP384) (key : P384SigningKey) (d : Nat) (hs : SigningKeyOf384 key d) :
     high.ecdsa.SigningKey.public_key_uncompressed.closure.Insts.CoreOpsFunctionFnOnceTupleEncodedPoint.call_once
       P384C key () ⦃ ep => ep.len.val = 97 ∧ p384PublicKey d (ep.bytes.val.take 97) ⦄ := by
   obtain ⟨hsd, hd0, hd⟩ := hs
@@ -79,7 +86,7 @@ theorem signing_new_spec (hc : P384.Cached) (k : mid.p384.StaticPrivateKey)
 
 /-- A signing key's public key: X9.62's uncompressed encoding of its scalar
 times G, in the first 97 bytes, built on the first read and kept. -/
-theorem public_key_bytes_spec (h : Runs) (hvg : NoVgP384) (hc : P384.Cached) (key : P384SigningKey) (d : Nat)
+theorem public_key_bytes_spec (h : Runs) (hvg : RunsP384) (hc : P384.Cached) (key : P384SigningKey) (d : Nat)
     (hs : SigningKeyOf384 key d) :
     high.ecdsa.SigningKey.public_key_uncompressed P384C key ⦃ ep =>
       ep.len.val = 97 ∧ p384PublicKey d (ep.bytes.val.take 97) ⦄ := by
@@ -184,7 +191,7 @@ theorem sec1_is_public_key_spec (s enc : Slice U8) (xy : List U8) (hs : s.val = 
         · exact hn3 (h.trans (UScalar.eq_of_val_eq rfl))
       simp [hnc]
 
-theorem is_public_key_spec (h : Runs) (hvg : NoVgP384) (hc : P384.Cached) (key : P384SigningKey) (d : Nat)
+theorem is_public_key_spec (h : Runs) (hvg : RunsP384) (hc : P384.Cached) (key : P384SigningKey) (d : Nat)
     (hs : SigningKeyOf384 key d) (enc : Slice U8) :
     high.ecdsa.SigningKey.is_public_key P384C key enc ⦃ b =>
       ∃ B, p384PublicKey d B ∧ (b ↔ enc.val = B ∨ enc.val = x962Compress384 B) ⦄ := by
@@ -220,7 +227,7 @@ theorem is_public_key_spec (h : Runs) (hvg : NoVgP384) (hc : P384.Cached) (key :
   intro b hb
   exact ⟨_, hxy ▸ hpk, hb⟩
 
-theorem from_scalar_spec (h : Runs) (hvg : NoVgP384) (hc : P384.Cached) (sk pk : Slice U8) :
+theorem from_scalar_spec (h : Runs) (hvg : RunsP384) (hc : P384.Cached) (sk pk : Slice U8) :
     high.ecdsa.SigningKey.from_private_key_and_public_key P384C sk pk ⦃ r =>
       if sk.length ≠ 48 then r = .Err (.KeyRejected .WrongLength)
       else if 0 < beNat sk.val ∧ beNat sk.val < n384 then
@@ -333,7 +340,7 @@ theorem verdict_of_outcome {Q : nist.Point} {dg sig : List U8} {r : core.result.
 /-- What `load::<P384, Sha384, Fixed>` makes of a signing key whose scalar
 is `d`: a key pair holding it, and its public key, which parses as its own
 point. -/
-theorem load_tail_spec (h : Runs) (hvg : NoVgP384) (hheld : Held) (hc : P384.Cached) (signing : P384SigningKey) (d : Nat)
+theorem load_tail_spec (h : Runs) (hvg : RunsP384) (hheld : Held) (hc : P384.Cached) (signing : P384SigningKey) (d : Nat)
     (hs : SigningKeyOf384 signing d) :
     (do
       let point ← high.ecdsa.SigningKey.public_key_uncompressed P384C signing
@@ -369,7 +376,7 @@ end P384
 system random source, and it holds its public key; generation is refused only
 if a draw fails or none of its 64 draws is in [1, n). The draws themselves
 are outside the functional spec. -/
-theorem p384_ecdsa_generate (h : Runs) (hvg : NoVgP384) (hheld : Held) (hc : P384.Cached) (hfill : Fills) :
+theorem p384_ecdsa_generate (h : Runs) (hvg : RunsP384) (hheld : Held) (hc : P384.Cached) (hfill : Fills) :
     high.signature.ecdsa.KeyPair.generate high.signature.ecdsa.sign.P384_SHA384_FIXED ⦃ r =>
       (∀ kp, r = .Ok kp → ∃ d, EcdsaKeyPairOf384 kp d) ∧ ∀ e, r = .Err e → e = .RngFailed ⦄ := by
   unfold high.signature.ecdsa.KeyPair.generate high.signature.ecdsa.sign.P384_SHA384_FIXED
@@ -390,7 +397,7 @@ open Classical in
 claims: refused unless the scalar is 48 bytes, in [1, n), and the public key
 is its uncompressed or compressed encoding, and otherwise its private scalar
 is the scalar. -/
-theorem p384_ecdsa_from_scalar_and_public_key (h : Runs) (hvg : NoVgP384) (hheld : Held) (hc : P384.Cached)
+theorem p384_ecdsa_from_scalar_and_public_key (h : Runs) (hvg : RunsP384) (hheld : Held) (hc : P384.Cached)
     (sk pk : Slice U8) :
     high.signature.ecdsa.KeyPair.from_scalar_and_public_key high.signature.ecdsa.sign.P384_SHA384_FIXED
       sk pk ⦃ r =>
@@ -427,7 +434,7 @@ nonce in [1, n), neither zero. Signing is refused only if the nonce's random
 input cannot be drawn, a nonce draw fails, or none of a nonce's 64 draws is
 in [1, n). The nonces, RFC 6979's hedged with that input, are
 outside the functional spec. -/
-theorem p384_ecdsa_sign (h : Runs) (hvg : NoVgP384) (hdrbg : Drbg) (hfill : Fills)
+theorem p384_ecdsa_sign (h : Runs) (hvg : RunsP384) (hdrbg : Drbg) (hfill : Fills)
     (hsha : RunsSha512) (kp : high.signature.ecdsa.KeyPair) (d : Nat) (hkp : EcdsaKeyPairOf384 kp d)
     (msg : Slice U8) (hm : msg.length ≤ maxInput) :
     high.signature.ecdsa.KeyPair.sign kp msg ⦃ r =>
@@ -491,7 +498,7 @@ theorem p384_ecdsa_key_pair_public_key (kp : high.signature.ecdsa.KeyPair) (d : 
 
 /-- Verification with a P-384 key pair's public key: ECDSA's verification
 of `msg`'s SHA-384 under its scalar times the generator. -/
-theorem p384_ecdsa_key_pair_verify (h : Runs) (hvg : NoVgP384Verify) (hc : P384.Cached)
+theorem p384_ecdsa_key_pair_verify (h : Runs) (hvg : RunsP384) (hc : P384.Cached)
     (hsha : RunsSha512) (kp : high.signature.ecdsa.KeyPair) (d : Nat) (hkp : EcdsaKeyPairOf384 kp d)
     (msg sig : Slice U8) (hm : msg.length ≤ maxInput) :
     (do
@@ -511,7 +518,7 @@ theorem p384_ecdsa_key_pair_verify (h : Runs) (hvg : NoVgP384Verify) (hc : P384.
 /-- A P-384 public key parsed from its encoding: refused unless it is an
 X9.62 uncompressed point on the curve, and otherwise its verification is
 ECDSA's of a message's SHA-384 under that point. -/
-theorem p384_ecdsa_public_key_new (h : Runs) (hvg : NoVgP384Verify) (hheld : Held) (hc : P384.Cached)
+theorem p384_ecdsa_public_key_new (h : Runs) (hvg : RunsP384) (hheld : Held) (hc : P384.Cached)
     (hsha : RunsSha512) (bytes : Slice U8) :
     high.signature.ecdsa.PublicKey.new high.signature.ecdsa.verify.P384_SHA384_FIXED bytes ⦃ r =>
       P384.x962Outcome bytes.val (fun pk => ∀ (msg sig : Slice U8), msg.length ≤ maxInput →

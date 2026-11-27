@@ -1,5 +1,10 @@
 #![no_main]
 
+//! AES-CBC with PKCS#7 padding against aws-lc-rs and RustCrypto, encrypting
+//! and decrypting the ciphertext tampered with.
+
+use ::aes::cipher::block_padding::Pkcs7;
+use ::aes::cipher::{BlockModeDecrypt, BlockModeEncrypt, KeyIvInit};
 use aws_lc_rs::cipher::{
     DecryptionContext, EncryptionContext, PaddedBlockDecryptingKey, PaddedBlockEncryptingKey,
     UnboundCipherKey,
@@ -8,6 +13,9 @@ use libfuzzer_sys::{arbitrary, arbitrary::Arbitrary, fuzz_target};
 use rind::cipher::{AES_128, AES_192, AES_256, AesCbcDecryptingKey, AesCbcEncryptingKey, CbcIv};
 
 mod edit;
+mod rustcrypto;
+
+use rustcrypto::rustcrypto_aes;
 
 fuzz_target!(|input: (Operation, [u8; 16], Vec<u8>, edit::Edit)| {
     let (op, iv, msg, edit) = input;
@@ -30,6 +38,10 @@ fuzz_target!(|input: (Operation, [u8; 16], Vec<u8>, edit::Edit)| {
         .less_safe_encrypt(&mut right, EncryptionContext::Iv128(iv.into()))
         .unwrap();
     assert_eq!(ct, right);
+    let independent = rustcrypto_aes!(key, Aes => cbc::Encryptor::<Aes>::new_from_slices(key, &iv)
+        .unwrap()
+        .encrypt_padded_vec::<Pkcs7>(&msg));
+    assert_eq!(ct, independent);
 
     // Both decrypt the ciphertext tampered with alike, or refuse it.
     edit.apply(&mut ct);
@@ -43,8 +55,12 @@ fuzz_target!(|input: (Operation, [u8; 16], Vec<u8>, edit::Edit)| {
         .unwrap()
         .decrypt(&mut theirs_out, DecryptionContext::Iv128(iv.into()))
         .map(|pt| pt.to_vec());
+    let independent = rustcrypto_aes!(key, Aes => cbc::Decryptor::<Aes>::new_from_slices(key, &iv)
+        .unwrap()
+        .decrypt_padded_vec::<Pkcs7>(&ct));
     assert_eq!(ours_result.as_ref().ok(), theirs_result.as_ref().ok());
     assert_eq!(ours_result.is_err(), theirs_result.is_err());
+    assert_eq!(ours_result.ok(), independent.ok());
 });
 
 #[derive(Arbitrary, Debug)]

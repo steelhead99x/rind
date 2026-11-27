@@ -193,8 +193,8 @@ impl<C: Curve> SigningKey<C> {
     }
 
     /// [`Self::sign()`] with `random` in place of the system's, so the FIPS
-    /// module's self-test knows its answer.
-    #[cfg(any(test, rind_fips))]
+    /// module's self-test knows its answer. Compiled as `crate::fips` is.
+    #[cfg(all(any(test, rind_fips), feature = "ml-dsa", feature = "slh-dsa"))]
     pub(crate) fn sign_with_random<'a, H: SignatureHash>(
         &self,
         message: &[u8],

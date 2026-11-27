@@ -134,7 +134,7 @@ fn cpu_paths(runner: bool) -> Vec<Vec<&'static str>> {
                 "avx512vbmi",
                 "avx512vbmi2",
             ],
-            &["vaes", "vpclmulqdq", "sha", "sha512", "intel"],
+            &["vaes", "vpclmulqdq", "sha", "intel"],
         ],
         |feature| match feature {
             "avx512f" => std::arch::is_x86_feature_detected!("avx512f"),
@@ -147,7 +147,6 @@ fn cpu_paths(runner: bool) -> Vec<Vec<&'static str>> {
             "vaes" => std::arch::is_x86_feature_detected!("vaes"),
             "vpclmulqdq" => std::arch::is_x86_feature_detected!("vpclmulqdq"),
             "sha" => std::arch::is_x86_feature_detected!("sha"),
-            "sha512" => std::arch::is_x86_feature_detected!("sha512"),
             // The vendor picks some paths, as an AMD CPU takes the other.
             "intel" => {
                 // SAFETY: every x86_64 CPU has `cpuid`.

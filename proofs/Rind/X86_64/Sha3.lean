@@ -1440,6 +1440,17 @@ theorem sbl_states (a r : Std.Array (Std.Array U64 25#usize) 4#usize) (N : Nat)
     Option.some.injEq] at this
   rw [getElem!_pos r.val j (by simp; omega), getElem!_pos a.val j (by simp; omega), this]
 
+theorem sbl_states8 (a r : Std.Array (Std.Array U64 25#usize) 8#usize) (N : Nat)
+    (h : (states8 r).take N = ((states8 a).take N).map (keccak 24)) (j : Nat) (hj : j < N)
+    (hj8 : j < 8) : sbl (r.val[j]!).val = keccakF (sbl (a.val[j]!).val) := by
+  apply keccakF_sbl
+  have := congrArg (·[j]?) h
+  simp only [List.getElem?_take, List.getElem?_map, ite_eq_left hj, states8,
+    List.getElem?_eq_getElem (show j < r.val.length by simp; omega),
+    List.getElem?_eq_getElem (show j < a.val.length by simp; omega), Option.map_some,
+    Option.some.injEq] at this
+  rw [getElem!_pos r.val j (by simp; omega), getElem!_pos a.val j (by simp; omega), this]
+
 /-! ### `SqueezingSponge4xShake128` -/
 
 /-- ML-KEM's SHAKE128 inputs: messages `M j` of 34 bytes, padded. -/
@@ -2110,42 +2121,42 @@ theorem shake_read_spec (h : RunsSha3) {R : Usize} (hR : 8 ≤ R.val ∧ R.val <
         rw [hwhole, hi4, Nat.mul_comm] at hwe
         rw [Nat.mul_add]; omega
 
-/-! ### `Shake4x` -/
+/-! ### `Shake8x` -/
 
 /-- The state of SHAKE at rate `R` on `M` once absorbed. -/
 abbrev shakeAbsorbed (R : Nat) (M : List Byte) : List Byte :=
   absorb R zeros (keccakPad R shakePad M)
 
-/-- Up to four SHAKE instances at rate `R`, lane `j` on `M j`, that have
+/-- Up to eight SHAKE instances at rate `R`, lane `j` on `M j`, that have
 squeezed `k` blocks: the Keccak-f each lane owes yields block `k`. -/
-def Squeezing4 {R : Usize} (x : mid.sha3.Shake4x R) (M : Nat → List Byte) (k : Nat) : Prop :=
-  1 ≤ x.lanes.val ∧ x.lanes.val ≤ 4 ∧
+def Squeezing8 {R : Usize} (x : mid.sha3.Shake8x R) (M : Nat → List Byte) (k : Nat) : Prop :=
+  1 ≤ x.lanes.val ∧ x.lanes.val ≤ 8 ∧
     ∀ j < x.lanes.val, keccakF (sbl (x.states.val[j]!).val) = keccakF^[k] (shakeAbsorbed R.val (M j))
 
-theorem shake4x_new_loop_spec (R : Usize) (hR : 8 ≤ R.val ∧ R.val < 200 ∧ R.val % 8 = 0)
-    {LEN : Usize} (hLEN : LEN.val < R.val) (inputs : Slice (Std.Array U8 LEN)) (hn4 : inputs.length ≤ 4)
-    (iter : core.ops.range.Range Usize) (a : Std.Array (Std.Array U64 25#usize) 4#usize)
+theorem shake8x_new_loop_spec (R : Usize) (hR : 8 ≤ R.val ∧ R.val < 200 ∧ R.val % 8 = 0)
+    {LEN : Usize} (hLEN : LEN.val < R.val) (inputs : Slice (Std.Array U8 LEN)) (hn8 : inputs.length ≤ 8)
+    (iter : core.ops.range.Range Usize) (a : Std.Array (Std.Array U64 25#usize) 8#usize)
     (hs : iter.start.val ≤ inputs.length) (he : iter.end.val = inputs.length)
-    (hz : ∀ j, iter.start.val ≤ j → j < 4 → sbl (a.val[j]!).val = zeros)
+    (hz : ∀ j, iter.start.val ≤ j → j < 8 → sbl (a.val[j]!).val = zeros)
     (ha : ∀ j < iter.start.val,
       keccakF (sbl (a.val[j]!).val) = shakeAbsorbed R.val (bv (inputs.val[j]!).val)) :
-    mid.sha3.Shake4x.new_loop R iter inputs a ⦃ r =>
+    mid.sha3.Shake8x.new_loop R iter inputs a ⦃ r =>
       ∀ j < inputs.length,
         keccakF (sbl (r.val[j]!).val) = shakeAbsorbed R.val (bv (inputs.val[j]!).val) ⦄ := by
-  unfold mid.sha3.Shake4x.new_loop
+  unfold mid.sha3.Shake8x.new_loop
   apply loop.spec_decr_nat (fun x => inputs.length - x.1.start.val)
     (fun x => x.1.start.val ≤ inputs.length ∧ x.1.end.val = inputs.length ∧
-      (∀ j, x.1.start.val ≤ j → j < 4 → sbl (x.2.val[j]!).val = zeros) ∧
+      (∀ j, x.1.start.val ≤ j → j < 8 → sbl (x.2.val[j]!).val = zeros) ∧
       ∀ j < x.1.start.val,
         keccakF (sbl (x.2.val[j]!).val) = shakeAbsorbed R.val (bv (inputs.val[j]!).val))
   · rintro ⟨it, st⟩ ⟨hs, he, hz, hst⟩
     simp only at hs he hz hst ⊢
-    unfold mid.sha3.Shake4x.new_loop.body
+    unfold mid.sha3.Shake8x.new_loop.body
     by_cases hlt : it.start.val < it.end.val
     · step with core.iter.range.IteratorRange.next_Usize_some_spec as ⟨o, it', ho, hst', hen⟩
       subst ho
       have hen' : it'.end.val = it.end.val := by rw [hen]
-      have hj4 : it.start.val < 4 := by omega
+      have hj8 : it.start.val < 8 := by omega
       step as ⟨a0, back, ha0, hback⟩
       step as ⟨a1, ha1⟩
       step as ⟨sl, hsl⟩
@@ -2161,7 +2172,7 @@ theorem shake4x_new_loop_spec (R : Usize) (hR : 8 ≤ R.val ∧ R.val < 200 ∧ 
             omega)]
         · rw [ha3, ← getElem!_pos (back a2).val it.start.val (by simp; omega), hback,
             array_set_getElem! _ _ _ _ (by simp; omega), ite_eq_left rfl, ha2, ha0,
-            ← getElem!_pos st.val it.start.val (by simp; omega), hz _ (le_refl _) hj4]
+            ← getElem!_pos st.val it.start.val (by simp; omega), hz _ (le_refl _) hj8]
           simp [absorb, blocks_nil]
       step with sponge_pad_spec R 31#u8 hR a3 LEN _ hm as ⟨a4, ha4⟩
       refine ⟨by omega, by omega, ?_, ?_, by omega⟩
@@ -2182,19 +2193,19 @@ theorem shake4x_new_loop_spec (R : Usize) (hR : 8 ≤ R.val ∧ R.val < 200 ∧ 
       exact hst j (by omega)
   · exact ⟨hs, he, hz, ha⟩
 
-/-- `Shake4x::new` absorbs each input into its own lane. -/
-theorem shake4x_new_spec (R : Usize) (hR : 8 ≤ R.val ∧ R.val < 200 ∧ R.val % 8 = 0)
+/-- `Shake8x::new` absorbs each input into its own lane. -/
+theorem shake8x_new_spec (R : Usize) (hR : 8 ≤ R.val ∧ R.val < 200 ∧ R.val % 8 = 0)
     {LEN : Usize} (hLEN : LEN.val < R.val) (inputs : Slice (Std.Array U8 LEN))
-    (hn : 1 ≤ inputs.length ∧ inputs.length ≤ 4) :
-    mid.sha3.Shake4x.new R inputs ⦃ x =>
-      x.lanes.val = inputs.length ∧ Squeezing4 x (fun j => bv (inputs.val[j]!).val) 0 ⦄ := by
-  unfold mid.sha3.Shake4x.new
+    (hn : 1 ≤ inputs.length ∧ inputs.length ≤ 8) :
+    mid.sha3.Shake8x.new R inputs ⦃ x =>
+      x.lanes.val = inputs.length ∧ Squeezing8 x (fun j => bv (inputs.val[j]!).val) 0 ⦄ := by
+  unfold mid.sha3.Shake8x.new
   have hlen : inputs.len.val = inputs.length := by simp [Slice.length]
   step*
-  step with shake4x_new_loop_spec R hR hLEN inputs hn.2 { start := 0#usize, «end» := inputs.len } _
+  step with shake8x_new_loop_spec R hR hLEN inputs hn.2 { start := 0#usize, «end» := inputs.len } _
     (by simp) hlen (fun j _ hj => by
-      have : (Std.Array.repeat 4#usize (Std.Array.repeat 25#usize 0#u64)).val =
-        List.replicate 4 (Std.Array.repeat 25#usize 0#u64) := rfl
+      have : (Std.Array.repeat 8#usize (Std.Array.repeat 25#usize 0#u64)).val =
+        List.replicate 8 (Std.Array.repeat 25#usize 0#u64) := rfl
       rw [this, getElem!_pos _ j (by simp; omega), List.getElem_replicate, sbl_zero])
     (fun j hj => absurd hj (by simp)) as ⟨st, hst⟩
   refine ⟨hlen, by simp only; omega, by simp only; omega, fun j hj => ?_⟩
@@ -2215,34 +2226,34 @@ theorem sponge_block (R k b : Nat) (hR : 0 < R ∧ R ≤ 200) (d : Byte) (M : Li
     squeeze_block R R _ (le_refl _) (by rw [length_iterate_keccakF _ _ hS]; omega)]
 
 /-- Each lane's output in use holds its first `n j` bytes of SHAKE from block `k`. -/
-def ShakeOut4 {N : Usize} (out : Std.Array (Std.Array U8 N) 4#usize) (R : Nat)
+def ShakeOut8 {N : Usize} (out : Std.Array (Std.Array U8 N) 8#usize) (R : Nat)
     (M : Nat → List Byte) (lanes k : Nat) (n : Nat → Nat) : Prop :=
   ∀ j < lanes,
     (bv (out.val[j]!).val).take (n j) = (sponge R shakePad (M j) (R * k + n j)).drop (R * k)
 
-theorem shake4x_squeeze_inner_spec {R N : Usize} (hR : 8 ≤ R.val ∧ R.val < 200 ∧ R.val % 8 = 0)
-    (a : Std.Array (Std.Array U64 25#usize) 4#usize) (M : Nat → List Byte) (lanes k : Nat)
-    (hl : lanes ≤ 4) (b : Usize) (hb : R.val * b.val + R.val ≤ N.val)
+theorem shake8x_squeeze_inner_spec {R N : Usize} (hR : 8 ≤ R.val ∧ R.val < 200 ∧ R.val % 8 = 0)
+    (a : Std.Array (Std.Array U64 25#usize) 8#usize) (M : Nat → List Byte) (lanes k : Nat)
+    (hl : lanes ≤ 8) (b : Usize) (hb : R.val * b.val + R.val ≤ N.val)
     (ha : ∀ j < lanes, sbl (a.val[j]!).val = keccakF^[k + b.val] (shakeAbsorbed R.val (M j)))
-    (iter : core.ops.range.Range Usize) (out : Std.Array (Std.Array U8 N) 4#usize)
+    (iter : core.ops.range.Range Usize) (out : Std.Array (Std.Array U8 N) 8#usize)
     (hs : iter.start.val ≤ lanes) (he : iter.end.val = lanes)
-    (ho : ShakeOut4 out R.val M lanes k fun j =>
+    (ho : ShakeOut8 out R.val M lanes k fun j =>
       R.val * b.val + if j < iter.start.val then R.val else 0) :
-    mid.sha3.Shake4x.squeeze_loop0_loop0 R iter a out b ⦃ r =>
-      ShakeOut4 r R.val M lanes k fun _ => R.val * b.val + R.val ⦄ := by
-  unfold mid.sha3.Shake4x.squeeze_loop0_loop0
+    mid.sha3.Shake8x.squeeze_loop0_loop0 R iter a out b ⦃ r =>
+      ShakeOut8 r R.val M lanes k fun _ => R.val * b.val + R.val ⦄ := by
+  unfold mid.sha3.Shake8x.squeeze_loop0_loop0
   apply loop.spec_decr_nat (fun y => lanes - y.1.start.val)
     (fun y => y.1.start.val ≤ lanes ∧ y.1.end.val = lanes ∧
-      ShakeOut4 y.2 R.val M lanes k fun j =>
+      ShakeOut8 y.2 R.val M lanes k fun j =>
         R.val * b.val + if j < y.1.start.val then R.val else 0)
   · rintro ⟨it, o⟩ ⟨hs, he, hst⟩
     simp only at hs he hst ⊢
-    unfold mid.sha3.Shake4x.squeeze_loop0_loop0.body
+    unfold mid.sha3.Shake8x.squeeze_loop0_loop0.body
     by_cases hlt : it.start.val < it.end.val
     · step with core.iter.range.IteratorRange.next_Usize_some_spec as ⟨oj, it', ho, hst', hen⟩
       subst ho
       have hen' : it'.end.val = it.end.val := by rw [hen]
-      have hj4 : it.start.val < 4 := by omega
+      have hj8 : it.start.val < 8 := by omega
       step as ⟨a1, ha1⟩
       step as ⟨a2, back, ha2, hback⟩
       have hNmax : N.val ≤ Usize.max := by scalar_tac
@@ -2294,24 +2305,24 @@ theorem shake4x_squeeze_inner_spec {R N : Usize} (hR : 8 ≤ R.val ∧ R.val < 2
       exact this
   · exact ⟨hs, he, ho⟩
 
-theorem shake4x_squeeze_loop_spec (h : RunsSha3) {R N : Usize}
+theorem shake8x_squeeze_loop_spec (h : RunsSha3) {R N : Usize}
     (hR : 8 ≤ R.val ∧ R.val < 200 ∧ R.val % 8 = 0) (M : Nat → List Byte) (lanes k : Nat)
-    (iter : core.ops.range.Range Usize) (x : mid.sha3.Shake4x R)
-    (out : Std.Array (Std.Array U8 N) 4#usize) (he : iter.end.val = N.val / R.val)
+    (iter : core.ops.range.Range Usize) (x : mid.sha3.Shake8x R)
+    (out : Std.Array (Std.Array U8 N) 8#usize) (he : iter.end.val = N.val / R.val)
     (hs : iter.start.val ≤ N.val / R.val) (hl : x.lanes.val = lanes)
-    (hx : Squeezing4 x M (k + iter.start.val))
-    (ho : ShakeOut4 out R.val M lanes k fun _ => R.val * iter.start.val) :
-    mid.sha3.Shake4x.squeeze_loop0 iter x out ⦃ r =>
-      r.1.lanes.val = lanes ∧ Squeezing4 r.1 M (k + N.val / R.val) ∧
-        ShakeOut4 r.2 R.val M lanes k fun _ => R.val * (N.val / R.val) ⦄ := by
-  unfold mid.sha3.Shake4x.squeeze_loop0
+    (hx : Squeezing8 x M (k + iter.start.val))
+    (ho : ShakeOut8 out R.val M lanes k fun _ => R.val * iter.start.val) :
+    mid.sha3.Shake8x.squeeze_loop0 iter x out ⦃ r =>
+      r.1.lanes.val = lanes ∧ Squeezing8 r.1 M (k + N.val / R.val) ∧
+        ShakeOut8 r.2 R.val M lanes k fun _ => R.val * (N.val / R.val) ⦄ := by
+  unfold mid.sha3.Shake8x.squeeze_loop0
   apply loop.spec_decr_nat (fun y => N.val / R.val - y.1.start.val)
     (fun y => y.1.start.val ≤ N.val / R.val ∧ y.1.end.val = N.val / R.val ∧
-      y.2.1.lanes.val = lanes ∧ Squeezing4 y.2.1 M (k + y.1.start.val) ∧
-      ShakeOut4 y.2.2 R.val M lanes k fun _ => R.val * y.1.start.val)
+      y.2.1.lanes.val = lanes ∧ Squeezing8 y.2.1 M (k + y.1.start.val) ∧
+      ShakeOut8 y.2.2 R.val M lanes k fun _ => R.val * y.1.start.val)
   · rintro ⟨it, st, o⟩ ⟨hs, he, hl, hst, hout⟩
     simp only at hs he hl hst hout ⊢
-    unfold mid.sha3.Shake4x.squeeze_loop0.body
+    unfold mid.sha3.Shake8x.squeeze_loop0.body
     obtain ⟨hl1, hl4, hsq⟩ := hst
     by_cases hlt : it.start.val < it.end.val
     · step with core.iter.range.IteratorRange.next_Usize_some_spec as ⟨ob, it', ho, hst', hen⟩
@@ -2325,24 +2336,11 @@ theorem shake4x_squeeze_loop_spec (h : RunsSha3) {R N : Usize}
         rw [Nat.mul_add, Nat.mul_one] at this; omega
       apply WP.spec_bind (Pₘ := fun a => ∀ j < lanes,
         sbl (a.val[j]!).val = keccakF^[k + it.start.val] (shakeAbsorbed R.val (M j)))
-      · have hn4 : st.lanes.val = 4 ∨ st.lanes.val = 3 ∨ st.lanes.val = 2 ∨ st.lanes.val = 1 := by
-          omega
-        rcases hn4 with e | e | e | e <;> simp only [e]
-        · step with keccak4_f1600_spec h st.states as ⟨r, hr⟩
-          rename_i j hj
-          rw [sbl_states st.states r 4 (by rw [hr, List.map_take]) j (by omega) (by omega),
-            hsq j (by omega)]
-        · step with keccak_nof4_f1600_spec h 3#usize (by decide) st.states as ⟨r, hr⟩
-          rename_i j hj
-          rw [sbl_states st.states r 3 hr j (by omega) (by omega), hsq j (by omega)]
-        · step with keccak_nof4_f1600_spec h 2#usize (by decide) st.states as ⟨r, hr⟩
-          rename_i j hj
-          rw [sbl_states st.states r 2 hr j (by omega) (by omega), hsq j (by omega)]
-        · step with keccak_nof4_f1600_spec h 1#usize (by decide) st.states as ⟨r, hr⟩
-          rename_i j hj
-          rw [sbl_states st.states r 1 hr j (by omega) (by omega), hsq j (by omega)]
+      · step with keccak_nof8_f1600_spec h st.lanes ⟨hl1, hl4⟩ st.states as ⟨r, hr⟩
+        rename_i j hj
+        rw [sbl_states8 st.states r st.lanes.val hr j (by omega) (by omega), hsq j (by omega)]
       · intro a ha
-        step with shake4x_squeeze_inner_spec hR a M lanes k (by omega) it.start hbN ha
+        step with shake8x_squeeze_inner_spec hR a M lanes k (by omega) it.start hbN ha
           { start := 0#usize, «end» := st.lanes } o (by simp) hl (by
             intro j hj; simpa using hout j hj) as ⟨o2, ho2⟩
         refine ⟨by omega, by omega, hl, ⟨hl1, hl4, ?_⟩, ?_, by omega⟩
@@ -2359,22 +2357,22 @@ theorem shake4x_squeeze_loop_spec (h : RunsSha3) {R N : Usize}
       exact ⟨hl, ⟨hl1, hl4, hsq⟩, hout⟩
   · exact ⟨hs, he, hl, hx, ho⟩
 
-/-- `Shake4x::squeeze` writes each lane's next `N` bytes of SHAKE, a whole
+/-- `Shake8x::squeeze` writes each lane's next `N` bytes of SHAKE, a whole
 number of blocks, into its output. -/
-theorem shake4x_squeeze_spec (h : RunsSha3) {R N : Usize}
+theorem shake8x_squeeze_spec (h : RunsSha3) {R N : Usize}
     (hR : 8 ≤ R.val ∧ R.val < 200 ∧ R.val % 8 = 0) (hN : N.val % R.val = 0)
-    (x : mid.sha3.Shake4x R) (M : Nat → List Byte) (k : Nat) (hx : Squeezing4 x M k)
-    (outputs : Std.Array (Std.Array U8 N) 4#usize) :
-    mid.sha3.Shake4x.squeeze x outputs ⦃ r =>
-      r.1.lanes = x.lanes ∧ Squeezing4 r.1 M (k + N.val / R.val) ∧
+    (x : mid.sha3.Shake8x R) (M : Nat → List Byte) (k : Nat) (hx : Squeezing8 x M k)
+    (outputs : Std.Array (Std.Array U8 N) 8#usize) :
+    mid.sha3.Shake8x.squeeze x outputs ⦃ r =>
+      r.1.lanes = x.lanes ∧ Squeezing8 r.1 M (k + N.val / R.val) ∧
         ∀ j < x.lanes.val,
           bv (r.2.val[j]!).val = (sponge R.val shakePad (M j) (R.val * k + N.val)).drop (R.val * k) ⦄ := by
-  unfold mid.sha3.Shake4x.squeeze
+  unfold mid.sha3.Shake8x.squeeze
   step as ⟨b, hb⟩
   step with massert_spec (b = true) (by rw [hb]; simpa using hN)
   step with sha3_assert_held_spec h
   step as ⟨n, hn⟩
-  step with shake4x_squeeze_loop_spec h hR M x.lanes.val k { start := 0#usize, «end» := n } x
+  step with shake8x_squeeze_loop_spec h hR M x.lanes.val k { start := 0#usize, «end» := n } x
     outputs (by simp [hn]) (by simp) rfl (by simpa using hx) (by
       intro j hj; simp [sponge, length_squeeze]) as ⟨x', hl', hx', ho'⟩
   refine ⟨UScalar.eq_of_val_eq hl', hx', fun j hj => ?_⟩

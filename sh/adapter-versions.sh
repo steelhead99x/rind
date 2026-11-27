@@ -42,3 +42,24 @@ if [[ -n "$errors" ]]; then
     echo "$errors" >&2
     exit 1
 fi
+
+# rind-rustls calls `Nonce::for_path` and the QUIC multipath `PacketKey`
+# methods, which rustls 0.23.33 added. A lower caret compiles against an
+# older rustls and fails. The requirement is the first number in the req.
+rustls_req=$(cargo metadata --no-deps --format-version 1 | jq -r '
+  .packages[]
+  | select(.name == "rind-rustls")
+  | .dependencies[]
+  | select(.name == "rustls" and .kind == null)
+  | .req
+')
+rustls_min=${rustls_req#^}
+if [[ "$rustls_min" != 0.23.* ]]; then
+    echo "rind-rustls: rustls requirement ${rustls_req} is not 0.23" >&2
+    exit 1
+fi
+patch=${rustls_min#0.23.}
+if [[ ! "$patch" =~ ^[0-9]+$ ]] || (( patch < 33 )); then
+    echo "rind-rustls: rustls requirement ${rustls_req} is below 0.23.33 (Nonce::for_path)" >&2
+    exit 1
+fi

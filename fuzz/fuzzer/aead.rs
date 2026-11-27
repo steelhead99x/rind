@@ -1,81 +1,96 @@
 #![no_main]
 
-//! Each AEAD sealing and opening, tampered with, against aws-lc-rs's, and
-//! AES-GCM with any IV and tag length against aws-lc's, which aws-lc-rs does
-//! not expose.
+//! Each AEAD sealing and opening, tampered with, against aws-lc-rs's and
+//! RustCrypto's, and AES-GCM with any IV and tag length against aws-lc's,
+//! which aws-lc-rs does not expose, and SP 800-38D's construction over
+//! RustCrypto's AES, GHASH, and CTR, since RustCrypto's AES-GCM fixes both
+//! lengths in its type and takes no tag shorter than 12 bytes.
 
+use ::aes::cipher::{BlockCipherEncrypt, KeyIvInit, StreamCipher};
+use aes_gcm::aead::consts::U12;
+use aes_gcm::aead::{AeadInOut, KeyInit};
+use ghash::GHash;
+use ghash::universal_hash::UniversalHash;
 use libfuzzer_sys::{arbitrary, arbitrary::Arbitrary, fuzz_target};
 use rind::aead::{Key, Nonce, gcm};
 
 mod edit;
+mod rustcrypto;
+
+use rustcrypto::rustcrypto_aes;
 
 fuzz_target!(|input: (Operation, edit::Edit)| {
     let (op, edit) = input;
-    let (ours, theirs, key, nonce, aad, plain) = match &op {
-        Operation::Gcm {
-            key,
-            key_len,
-            iv,
-            tag_len,
-            aad,
-            plain,
-        } => {
-            let tag_len = TAG_LENGTHS[usize::from(*tag_len) % TAG_LENGTHS.len()];
-            return gcm_any(&key[..key_len.bytes()], iv, tag_len, aad, plain, &edit);
-        }
-        Operation::ChaCha20Poly1305 {
-            key,
-            nonce,
-            aad,
-            plain,
-        } => (
-            &rind::aead::CHACHA20_POLY1305,
-            &aws_lc_rs::aead::CHACHA20_POLY1305,
-            &key[..],
-            nonce,
-            aad,
-            plain,
-        ),
-        Operation::Aes128Gcm {
-            key,
-            nonce,
-            aad,
-            plain,
-        } => (
-            &rind::aead::AES_128_GCM,
-            &aws_lc_rs::aead::AES_128_GCM,
-            &key[..],
-            nonce,
-            aad,
-            plain,
-        ),
-        Operation::Aes192Gcm {
-            key,
-            nonce,
-            aad,
-            plain,
-        } => (
-            &rind::aead::AES_192_GCM,
-            &aws_lc_rs::aead::AES_192_GCM,
-            &key[..],
-            nonce,
-            aad,
-            plain,
-        ),
-        Operation::Aes256Gcm {
-            key,
-            nonce,
-            aad,
-            plain,
-        } => (
-            &rind::aead::AES_256_GCM,
-            &aws_lc_rs::aead::AES_256_GCM,
-            &key[..],
-            nonce,
-            aad,
-            plain,
-        ),
-    };
+    let (ours, theirs, independent, key, nonce, aad, plain): (_, _, Independent, _, _, _, _) =
+        match &op {
+            Operation::Gcm {
+                key,
+                key_len,
+                iv,
+                tag_len,
+                aad,
+                plain,
+            } => {
+                let tag_len = TAG_LENGTHS[usize::from(*tag_len) % TAG_LENGTHS.len()];
+                return gcm_any(&key[..key_len.bytes()], iv, tag_len, aad, plain, &edit);
+            }
+            Operation::ChaCha20Poly1305 {
+                key,
+                nonce,
+                aad,
+                plain,
+            } => (
+                &rind::aead::CHACHA20_POLY1305,
+                &aws_lc_rs::aead::CHACHA20_POLY1305,
+                rustcrypto::<chacha20poly1305::ChaCha20Poly1305>,
+                &key[..],
+                nonce,
+                aad,
+                plain,
+            ),
+            Operation::Aes128Gcm {
+                key,
+                nonce,
+                aad,
+                plain,
+            } => (
+                &rind::aead::AES_128_GCM,
+                &aws_lc_rs::aead::AES_128_GCM,
+                rustcrypto::<aes_gcm::AesGcm<::aes::Aes128, U12>>,
+                &key[..],
+                nonce,
+                aad,
+                plain,
+            ),
+            Operation::Aes192Gcm {
+                key,
+                nonce,
+                aad,
+                plain,
+            } => (
+                &rind::aead::AES_192_GCM,
+                &aws_lc_rs::aead::AES_192_GCM,
+                rustcrypto::<aes_gcm::AesGcm<::aes::Aes192, U12>>,
+                &key[..],
+                nonce,
+                aad,
+                plain,
+            ),
+            Operation::Aes256Gcm {
+                key,
+                nonce,
+                aad,
+                plain,
+            } => (
+                &rind::aead::AES_256_GCM,
+                &aws_lc_rs::aead::AES_256_GCM,
+                rustcrypto::<aes_gcm::AesGcm<::aes::Aes256, U12>>,
+                &key[..],
+                nonce,
+                aad,
+                plain,
+            ),
+        };
 
     let right = baseline_encrypt(theirs, key, nonce, aad, plain);
     let k = Key::new(ours, key).unwrap();
@@ -98,6 +113,11 @@ fuzz_target!(|input: (Operation, edit::Edit)| {
     };
 
     assert_eq!(left, right);
+    let sealed = [&left.0[..], &left.1].concat();
+    assert_eq!(
+        Some(&sealed),
+        independent(Op::Seal, key, nonce, aad, plain).as_ref()
+    );
 
     // Both open the sealed message tampered with alike, and refuse it if
     // it changed.
@@ -108,10 +128,117 @@ fuzz_target!(|input: (Operation, edit::Edit)| {
     let ours_result = k
         .open_in_place(Nonce::assume_unique_for_key(*nonce), aad, &mut ours_sealed)
         .map(|plain| plain.to_vec());
+    let independent_result = independent(Op::Open, key, nonce, aad, &sealed);
     let theirs_result = baseline_decrypt(theirs, key, nonce, aad, sealed);
     assert_eq!(ours_result.as_ref().ok(), theirs_result.as_ref());
     assert_eq!(ours_result.is_err(), changed);
+    assert_eq!(theirs_result, independent_result);
 });
+
+/// RustCrypto's sealing or opening of `input`, or `None` if it refuses it.
+type Independent = fn(Op, &[u8], &[u8; 12], &[u8], &[u8]) -> Option<Vec<u8>>;
+
+fn rustcrypto<A: AeadInOut + KeyInit>(
+    op: Op,
+    key: &[u8],
+    nonce: &[u8; 12],
+    aad: &[u8],
+    input: &[u8],
+) -> Option<Vec<u8>> {
+    let cipher = A::new_from_slice(key).unwrap();
+    let nonce = nonce.as_slice().try_into().unwrap();
+    let mut out = input.to_vec();
+    match op {
+        Op::Seal => {
+            let tag = cipher
+                .encrypt_inout_detached(nonce, aad, out.as_mut_slice().into())
+                .ok()?;
+            out.extend_from_slice(&tag);
+        }
+        Op::Open => {
+            let tag = out.split_off(out.len().checked_sub(16)?);
+            cipher
+                .decrypt_inout_detached(
+                    nonce,
+                    aad,
+                    out.as_mut_slice().into(),
+                    tag.as_slice().try_into().unwrap(),
+                )
+                .ok()?;
+        }
+    }
+    Some(out)
+}
+
+/// AES-GCM under an IV and tag of any length, built from RustCrypto's AES,
+/// GHASH, and CTR as NIST SP 800-38D sections 7.1 and 7.2 build it: the
+/// sealed input with its tag of `tag_len` bytes, or the opened input, or
+/// `None` if its tag does not authenticate it.
+fn rustcrypto_gcm_any(
+    op: Op,
+    key: &[u8],
+    iv: &[u8],
+    tag_len: usize,
+    aad: &[u8],
+    input: &[u8],
+) -> Option<Vec<u8>> {
+    fn ghash(h: &::aes::Block, parts: [&[u8]; 2]) -> [u8; 16] {
+        let mut ghash = GHash::new(h);
+        for part in parts {
+            ghash.update_padded(part);
+        }
+        let mut lengths = [0u8; 16];
+        lengths[..8].copy_from_slice(&(8 * parts[0].len() as u64).to_be_bytes());
+        lengths[8..].copy_from_slice(&(8 * parts[1].len() as u64).to_be_bytes());
+        ghash.update(&[lengths.into()]);
+        ghash.finalize().into()
+    }
+
+    rustcrypto_aes!(key, Aes => {
+        let aes = Aes::new_from_slice(key).unwrap();
+        let mut h = ::aes::Block::default();
+        aes.encrypt_block(&mut h);
+        let j0 = match iv.len() {
+            12 => {
+                let mut j0 = [0u8; 16];
+                j0[..12].copy_from_slice(iv);
+                j0[15] = 1;
+                j0
+            }
+            _ => ghash(&h, [&[], iv]),
+        };
+        let mut counter = j0;
+        let low = u32::from_be_bytes(j0[12..].try_into().unwrap()).wrapping_add(1);
+        counter[12..].copy_from_slice(&low.to_be_bytes());
+        let mut mask = j0.into();
+        aes.encrypt_block(&mut mask);
+        let tag = |ciphertext: &[u8]| -> Vec<u8> {
+            let s = ghash(&h, [aad, ciphertext]);
+            mask.iter().zip(s).map(|(t, s)| t ^ s).take(tag_len).collect()
+        };
+        let (mut out, expected) = match op {
+            Op::Seal => (input.to_vec(), None),
+            Op::Open => {
+                let (ciphertext, expected) =
+                    input.split_at_checked(input.len().checked_sub(tag_len)?)?;
+                (ciphertext.to_vec(), Some(expected))
+            }
+        };
+        if let Some(expected) = expected {
+            if tag(&out) != expected {
+                return None;
+            }
+        }
+        ctr::Ctr32BE::<Aes>::new_from_slices(key, &counter)
+            .unwrap()
+            .apply_keystream(&mut out);
+        if expected.is_none() {
+            let tag = tag(&out);
+            out.extend(tag);
+        }
+        Some(out)
+    })
+}
 
 fn baseline_encrypt(
     alg: &'static aws_lc_rs::aead::Algorithm,
@@ -183,9 +310,19 @@ fn gcm_any(
         .unwrap();
     let theirs = aws_lc_gcm(Op::Seal, key, ours.tag_len(), iv, aad, plain);
     assert_eq!(Some(&sealed), theirs.as_ref());
+    assert_eq!(
+        Some(&sealed),
+        rustcrypto_gcm_any(Op::Seal, key, iv, ours.tag_len(), aad, plain).as_ref()
+    );
 
+    // The tag fixes whether an edited message opens, so RustCrypto's GCM
+    // must reach aws-lc's verdict.
     let changed = edit.apply(&mut sealed);
     let theirs = aws_lc_gcm(Op::Open, key, ours.tag_len(), iv, aad, &sealed);
+    assert_eq!(
+        rustcrypto_gcm_any(Op::Open, key, iv, ours.tag_len(), aad, &sealed),
+        theirs
+    );
     let ours = ours
         .open_in_place(
             gcm::Iv::assume_unique_for_key(iv).unwrap(),

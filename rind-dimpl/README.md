@@ -27,6 +27,7 @@ let config = dimpl::Config::builder()
 Or install it for the process with `dimpl::crypto::CryptoProvider::install_default`.
 
 It negotiates DTLS 1.2 ECDHE-ECDSA and DTLS 1.3 with AES-128-GCM, AES-256-GCM, and ChaCha20-Poly1305, over X25519, P-256, and P-384, and signs with ECDSA P-256 or P-384 keys in PKCS#8 or SEC1, as DER or PEM.
+A peer's key share is taken in every form dimpl's aws-lc-rs provider takes: X25519's 32 bytes, or a P-256 or P-384 point uncompressed, compressed, or hybrid with its prefix matching `y`, either bare or in a `SubjectPublicKeyInfo` that names the group's curve or spells out its parameters.
 
 ## What rind cannot back
 

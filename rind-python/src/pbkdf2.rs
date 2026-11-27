@@ -47,7 +47,7 @@ fn hash_len(algorithm: &'static pbkdf2::Algorithm) -> usize {
 impl Secret {
     /// Keys `algorithm` with `secret`, a password of any length.
     #[new]
-    fn new(algorithm: &Bound<'_, Algorithm>, secret: Bytes<'_>) -> Self {
+    fn new(algorithm: &Bound<'_, Algorithm>, secret: crate::Secret<'_>) -> Self {
         let algorithm = algorithm.get().inner;
         Self {
             secret: Box::new(pbkdf2::Secret::new(algorithm, &secret)),
@@ -82,7 +82,7 @@ impl Secret {
         py: Python<'_>,
         iterations: u32,
         salt: Bytes<'_>,
-        previously_derived: Bytes<'_>,
+        previously_derived: crate::Secret<'_>,
     ) -> PyResult<()> {
         let iterations = iterations_of(iterations)?;
         py.detach(|| self.secret.verify(iterations, &salt, &previously_derived))

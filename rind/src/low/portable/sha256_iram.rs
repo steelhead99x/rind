@@ -1,14 +1,15 @@
-// The 16-word schedule window follows `low/generic/sha256.rs`, written
-// for Graviola by Joe Birr-Pixton, 2024. The round constants are that
-// file's table, in `generic::sha256_k`. The 16-round body, the rotates,
-// and the block load are rind's, for this target.
+// The 16-word schedule window follows Graviola's portable SHA-256, written
+// by Joe Birr-Pixton, 2024. The round constants are its table, in
+// `generic::sha256_k`. The 16-round body, the rotates, and the block load
+// are rind's, for this target.
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
 //! SHA-256 compression in internal RAM on ESP-IDF Xtensa.
 //!
-//! The portable backend otherwise calls HACL*'s unrolled `sha256_update`
-//! through libcrux-sha2. That body is about 12 KiB, so on an ESP32-S3 it
-//! fills most of the 16 KiB flash instruction cache. This is FIPS 180-4
+//! The portable backend otherwise runs `generic::sha256` from flash. It
+//! was measured here against HACL*'s unrolled `sha256_update`, which the
+//! backend ran then: about 12 KiB, most of an ESP32-S3's 16 KiB flash
+//! instruction cache. This is FIPS 180-4
 //! §4.1.2's functions and §6.2.2's schedule and rounds. The first sixteen
 //! rounds load the block. One sixteen-round schedule body then runs three
 //! times, for rounds 16..64. Returning the working variables in rotated

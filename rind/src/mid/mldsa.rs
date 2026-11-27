@@ -26,8 +26,9 @@ use crate::error::KeyFormatError;
 use crate::low::{self, Entry, MldsaPoly as Poly};
 use crate::mid::rng::{RandomSource, SystemRandom};
 use crate::mid::sha3::{
-    SHAKE_128_R_BYTES, SHAKE_256_R_BYTES, Shake128x4, Shake256, Shake256Sponge, Shake256x4,
+    SHAKE_128_R_BYTES, SHAKE_256_R_BYTES, Shake128x8, Shake256, Shake256Sponge, Shake256x8,
 };
+use crate::mid::util::Array;
 
 const N: usize = 256;
 const Q: i32 = 8380417;
@@ -144,30 +145,6 @@ pub trait Params: fmt::Debug + Send + Sync + Unpin + UnwindSafe + RefUnwindSafe 
 #[derive(Clone, Copy)]
 pub struct Internal(());
 
-/// A byte array of a parameter set's length.
-pub trait Array:
-    Clone
-    + fmt::Debug
-    + AsRef<[u8]>
-    + AsMut<[u8]>
-    + Send
-    + Sync
-    + Unpin
-    + UnwindSafe
-    + RefUnwindSafe
-    + 'static
-{
-    /// Every byte zero.
-    #[doc(hidden)]
-    fn zeroed() -> Self;
-}
-
-impl<const LEN: usize> Array for [u8; LEN] {
-    fn zeroed() -> Self {
-        [0; LEN]
-    }
-}
-
 macro_rules! params {
     ($(
         $set:ident: K = $k:literal, L = $l:literal, ETA = $eta:literal, TAU = $tau:literal,
@@ -269,9 +246,8 @@ pub(crate) struct KeyPair<P: Params> {
     seed: Option<[u8; SEED_LEN]>,
     secret_key: P::SecretKey,
     /// `A`, then `s1`, `s2`, and `t0`, all in the NTT domain. The drop
-    /// frees it before the wipe, and no drop glue runs after: `Polys`'s
-    /// own drop would write `None` over the wiped value, whose other word
-    /// the compiler may fill with the freed pointer.
+    /// frees it before wiping the whole value, and `ManuallyDrop` keeps
+    /// drop glue from running after, so the wipe is the last write.
     expanded: ManuallyDrop<Polys>,
 }
 
@@ -599,8 +575,13 @@ impl Polys {
 }
 
 impl Drop for Polys {
+    /// Wipes in place and lets the `Box`'s drop glue free, which only reads
+    /// `self`: writing `None` back could put a non-zero word over a value
+    /// its owner has already wiped.
     fn drop(&mut self) {
-        self.free();
+        if let Some(polys) = self.0.as_deref_mut() {
+            low::zeroise(polys);
+        }
     }
 }
 
@@ -1104,23 +1085,23 @@ fn unpack_hints<P: Params>(h: &mut Poly, hints: &[u8], i: usize) {
 /// coefficient order.
 fn expand_a<P: Params>(rho: &[u8; SEED_LEN], a: &mut [Poly]) {
     const FIRST: usize = 5 * SHAKE_128_R_BYTES;
-    for (batch, polys) in a.chunks_mut(4).enumerate() {
-        let mut seeds = [[0u8; SEED_LEN + 2]; 4];
+    for (batch, polys) in a.chunks_mut(8).enumerate() {
+        let mut seeds = [[0u8; SEED_LEN + 2]; 8];
         for (n, seed) in seeds.iter_mut().enumerate() {
-            let index = (batch * 4 + n).min(P::K * P::L - 1);
+            let index = (batch * 8 + n).min(P::K * P::L - 1);
             seed[..SEED_LEN].copy_from_slice(rho);
             seed[SEED_LEN] = (index % P::L) as u8;
             seed[SEED_LEN + 1] = (index / P::L) as u8;
         }
-        let mut xof = Shake128x4::new(&seeds[..polys.len()]);
-        let mut buf = [[0u8; FIRST]; 4];
+        let mut xof = Shake128x8::new(&seeds[..polys.len()]);
+        let mut buf = [[0u8; FIRST]; 8];
         xof.squeeze(&mut buf);
-        let mut filled = [0; 4];
+        let mut filled = [0; 8];
         for ((poly, buf), filled) in polys.iter_mut().zip(&buf).zip(&mut filled) {
             *filled = low::mldsa_rej_uniform_vartime(&mut poly.0, 0, buf);
         }
         while filled[..polys.len()].iter().any(|f| *f < N) {
-            let mut block = [[0u8; SHAKE_128_R_BYTES]; 4];
+            let mut block = [[0u8; SHAKE_128_R_BYTES]; 8];
             xof.squeeze(&mut block);
             for ((poly, block), filled) in polys.iter_mut().zip(&block).zip(&mut filled) {
                 *filled = low::mldsa_rej_uniform_vartime(&mut poly.0, *filled, block);
@@ -1145,23 +1126,23 @@ fn expand_s<P: Params>(rho_prime: &[u8; 64], s: &mut [Poly]) {
         _ => low::mldsa_rej_uniform_eta4_vartime(&mut poly.0, offset, buf),
     };
 
-    for (batch, polys) in s.chunks_mut(4).enumerate() {
-        let mut seeds = [[0u8; 66]; 4];
+    for (batch, polys) in s.chunks_mut(8).enumerate() {
+        let mut seeds = [[0u8; 66]; 8];
         for (n, seed) in seeds.iter_mut().enumerate() {
             seed[..64].copy_from_slice(rho_prime);
-            seed[64..].copy_from_slice(&((batch * 4 + n) as u16).to_le_bytes());
+            seed[64..].copy_from_slice(&((batch * 8 + n) as u16).to_le_bytes());
         }
-        let mut xof = Shake256x4::new(&seeds[..polys.len()]);
-        let mut buf = [[0u8; 2 * BLOCK]; 4];
+        let mut xof = Shake256x8::new(&seeds[..polys.len()]);
+        let mut buf = [[0u8; 2 * BLOCK]; 8];
         xof.squeeze(&mut buf);
-        let mut filled = [0; 4];
+        let mut filled = [0; 8];
         for ((poly, buf), filled) in polys.iter_mut().zip(&buf).zip(&mut filled) {
             *filled = sample(poly, 0, &buf[..first]);
         }
         // An eta = 2 polynomial continues from the second block squeezed.
         let mut extra = (P::ETA == 2).then_some(1);
         while filled[..polys.len()].iter().any(|f| *f < N) {
-            let mut block = [[0u8; BLOCK]; 4];
+            let mut block = [[0u8; BLOCK]; 8];
             match extra.take() {
                 Some(_) => {
                     for (block, buf) in block.iter_mut().zip(&buf) {
@@ -1182,15 +1163,15 @@ fn expand_s<P: Params>(rho_prime: &[u8; 64], s: &mut [Poly]) {
 /// ExpandMask: the mask `y` for attempt `kappa`, the first nonce.
 fn expand_mask<P: Params>(rho_prime: &[u8; 64], kappa: u16, y: &mut [Poly]) {
     const BYTES: usize = 5 * SHAKE_256_R_BYTES;
-    for (batch, polys) in y.chunks_mut(4).enumerate() {
-        let mut seeds = [[0u8; 66]; 4];
+    for (batch, polys) in y.chunks_mut(8).enumerate() {
+        let mut seeds = [[0u8; 66]; 8];
         for (n, seed) in seeds.iter_mut().enumerate() {
             seed[..64].copy_from_slice(rho_prime);
-            let nonce = kappa.wrapping_add((batch * 4 + n) as u16);
+            let nonce = kappa.wrapping_add((batch * 8 + n) as u16);
             seed[64..].copy_from_slice(&nonce.to_le_bytes());
         }
-        let mut buf = [[0u8; BYTES]; 4];
-        Shake256x4::new(&seeds[..polys.len()]).squeeze(&mut buf);
+        let mut buf = [[0u8; BYTES]; 8];
+        Shake256x8::new(&seeds[..polys.len()]).squeeze(&mut buf);
         for (poly, buf) in polys.iter_mut().zip(&buf) {
             unpack_z::<P>(poly, &buf[..P::Z_PACKED]);
         }
@@ -1657,6 +1638,24 @@ mod tests {
 
     /// The heap a loaded key holds, as `MlDsaKeyPair` and `PublicKey`
     /// document it, in KiB.
+    // ExpandMask from a secret seed, on the eight-way Keccak-f, for
+    // `admin/ct-sde`: valgrind decodes no AVX-512. ML-DSA-65's five
+    // polynomials leave three lanes unused, ML-DSA-87's seven one.
+    #[cfg(rind_backend = "x86_64")]
+    #[test]
+    #[ignore = "admin/ct-sde runs it under Intel SDE"]
+    fn ct_sde_expand_mask() {
+        use crate::low::ct_sde;
+
+        assert!(low::HaveAvx512Vl::check().is_some(), "AVX-512 F and VL");
+        let _entry = Entry::new_secret();
+        let seed = ct_sde::seed().to_le_bytes();
+        let rho_prime = core::array::from_fn(|i| seed[i % seed.len()] ^ i as u8);
+        let mut y = [Poly::ZERO; 7];
+        ct_sde::traced(|| expand_mask::<MlDsa65>(&rho_prime, 0, &mut y[..5]));
+        ct_sde::traced(|| expand_mask::<MlDsa87>(&rho_prime, 7, &mut y));
+    }
+
     #[test]
     fn expansion_sizes() {
         fn kib<P: Params>() -> [usize; 2] {

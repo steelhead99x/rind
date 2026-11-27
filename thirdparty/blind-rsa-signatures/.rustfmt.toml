@@ -1,0 +1,2 @@
+# rind leaves its vendored fork as upstream formats it.
+disable_all_formatting = true
