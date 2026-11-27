@@ -31,6 +31,56 @@ pub(crate) fn mlkem_rej_uniform_vartime(r: &mut [i16; 256], input: &[u8]) -> u64
     super::mlkem_rej_uniform_vartime::mlkem_rej_uniform_vartime(r, input, &MLKEM_REJ_UNIFORM_TABLE)
 }
 
+/// `ByteEncode_4(Compress_4(a))`, for `a` in `[0, Q)`.
+pub(crate) fn mlkem_compress_d4(r: &mut [u8; 128], a: &[i16; 256]) {
+    // SAFETY: `r` and `a` are the sizes the routine writes and reads, and
+    // rind requires NEON.
+    unsafe { asm_call!(unsafe extern "C" mlkem_poly_compress_d4_aarch64_asm(r, a)) }
+}
+
+/// `ByteEncode_5(Compress_5(a))`, for `a` in `[0, Q)`.
+pub(crate) fn mlkem_compress_d5(r: &mut [u8; 160], a: &[i16; 256]) {
+    // SAFETY: as for `mlkem_compress_d4`, and the table is the routine's.
+    unsafe {
+        asm_call!(unsafe extern "C" mlkem_poly_compress_d5_aarch64_asm(r, a, &COMPRESS_D5_TABLE))
+    }
+}
+
+/// `ByteEncode_10(Compress_10(a))`, for `a` in `[0, Q)`.
+pub(crate) fn mlkem_compress_d10(r: &mut [u8; 320], a: &[i16; 256]) {
+    // SAFETY: as for `mlkem_compress_d4`.
+    unsafe { asm_call!(unsafe extern "C" mlkem_poly_compress_d10_aarch64_asm(r, a)) }
+}
+
+/// `ByteEncode_11(Compress_11(a))`, for `a` in `[0, Q)`.
+pub(crate) fn mlkem_compress_d11(r: &mut [u8; 352], a: &[i16; 256]) {
+    // SAFETY: as for `mlkem_compress_d4`.
+    unsafe { asm_call!(unsafe extern "C" mlkem_poly_compress_d11_aarch64_asm(r, a)) }
+}
+
+/// mlkem-native's constants for `mlkem_poly_compress_d5_aarch64_asm`, from
+/// its `compress_d5_table.c`.
+#[repr(C, align(16))]
+struct Table<const N: usize>([u8; N]);
+
+static COMPRESS_D5_TABLE: Table<32> = Table(include!("mlkem_native/compress_d5_table.rs"));
+
+// mlkem-native's NEON compression, which its HOL Light proofs cover, as
+// `admin/import-mlkem-native` takes it.
+macro_rules! routine {
+    ($name:ident($($arg:ident: $ty:ty),*)) => {
+        #[unsafe(naked)]
+        unsafe extern "C" fn $name($($arg: $ty),*) {
+            core::arch::naked_asm!(include_str!(concat!("mlkem_native/", stringify!($name), ".s")));
+        }
+    };
+}
+
+routine!(mlkem_poly_compress_d4_aarch64_asm(r: *mut [u8; 128], a: *const [i16; 256]));
+routine!(mlkem_poly_compress_d5_aarch64_asm(r: *mut [u8; 160], a: *const [i16; 256], table: *const Table<32>));
+routine!(mlkem_poly_compress_d10_aarch64_asm(r: *mut [u8; 320], a: *const [i16; 256]));
+routine!(mlkem_poly_compress_d11_aarch64_asm(r: *mut [u8; 352], a: *const [i16; 256]));
+
 #[repr(align(32))]
 struct Coeffs<const N: usize>([i16; N]);
 
@@ -393,3 +443,38 @@ pub(super) const MLKEM_REJ_UNIFORM_TABLE: [i8; 4096] = [
     2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, -1, -1, // 254
     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, // 255
 ];
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use crate::low::generic::mlkem as generic;
+
+    // NEON hides the portable compression from every other test, so it is
+    // checked against mlkem-native's here, on every coefficient in `[0, Q)`.
+    #[test]
+    fn compress_matches_portable() {
+        for start in (0..3329 + 7).step_by(256 - 7) {
+            let a: [i16; 256] = core::array::from_fn(|i| ((start + i) % 3329) as i16);
+
+            let (mut want, mut got) = ([0; 128], [0; 128]);
+            generic::mlkem_compress_d4(&mut want, &a);
+            super::mlkem_compress_d4(&mut got, &a);
+            assert_eq!(want, got, "d4, from {start}");
+
+            let (mut want, mut got) = ([0; 160], [0; 160]);
+            generic::mlkem_compress_d5(&mut want, &a);
+            super::mlkem_compress_d5(&mut got, &a);
+            assert_eq!(want, got, "d5, from {start}");
+
+            let (mut want, mut got) = ([0; 320], [0; 320]);
+            generic::mlkem_compress_d10(&mut want, &a);
+            super::mlkem_compress_d10(&mut got, &a);
+            assert_eq!(want, got, "d10, from {start}");
+
+            let (mut want, mut got) = ([0; 352], [0; 352]);
+            generic::mlkem_compress_d11(&mut want, &a);
+            super::mlkem_compress_d11(&mut got, &a);
+            assert_eq!(want, got, "d11, from {start}");
+        }
+    }
+}

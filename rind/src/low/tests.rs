@@ -138,10 +138,13 @@ fn no_debug_assert_beside_unsafe() {
 /// debug assertion would not fire.
 #[test]
 fn wrappers_refuse_mismatched_slices() {
+    // x86_64's ML-KEM routines alone need 32-byte alignment.
+    #[cfg(rind_backend = "x86_64")]
     #[repr(align(32))]
     struct Aligned<const N: usize>([i16; N]);
 
     // 2 bytes past a 32-byte boundary.
+    #[cfg(rind_backend = "x86_64")]
     fn misaligned<const N: usize>(buf: &mut Aligned<1024>) -> &mut [i16; N] {
         (&mut buf.0[1..1 + N]).try_into().unwrap()
     }
@@ -355,17 +358,6 @@ fn wrappers_refuse_mismatched_slices() {
             }),
             ("coprime", || {
                 bignum_coprime::bignum_coprime(&[1; 4], &[1; 4], &mut [0; 7]);
-            }),
-            ("ntt", || {
-                let (z, z56) = (Aligned([0; 80]), Aligned([0; 384]));
-                mlkem_ntt::mlkem_ntt(misaligned(&mut Aligned([0; 1024])), &z.0, &z56.0)
-            }),
-            ("intt", || {
-                let (z, z56) = (Aligned([0; 80]), Aligned([0; 384]));
-                mlkem_intt::mlkem_intt(misaligned(&mut Aligned([0; 1024])), &z.0, &z56.0)
-            }),
-            ("tobytes", || {
-                mlkem_tobytes::mlkem_tobytes(&mut [0; 384], misaligned(&mut Aligned([0; 1024])))
             }),
         ]);
     }

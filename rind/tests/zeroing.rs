@@ -290,6 +290,12 @@ fn mlkem() {
             .unwrap()
             .decapsulate(&ciphertext);
         check_zeroed_on_drop(Box::pin(decapsulated));
+        check_zeroed_on_drop(Box::pin(key.to_seed().unwrap()));
+        let bytes = key.to_bytes();
+        check_zeroed_on_drop(Box::pin(
+            DecapsulationKey::<A>::new(bytes.as_ref()).unwrap(),
+        ));
+        check_zeroed_on_drop(Box::pin(bytes));
         check_zeroed_on_drop(Box::pin(key));
     }
     check::<MlKem512>();

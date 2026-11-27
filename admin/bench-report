@@ -124,9 +124,12 @@ COLLECT_HOSTS = {
     },
     "kixtop": {
         "jobs": 4,
-        "note": "The maintainer's MacBook, in daily use. Its cores have DIT, and every rind row holds "
+        "note": "The maintainer's MacBook Air, in daily use. Its cores have DIT, and every rind row holds "
         "`rind::cpu::Dit::hold()` across calls, as MoQ does, so the rustls rows run rustls' own code with DIT on "
-        "too.",
+        "too. On every logical CPU, rind-rustls's handshakes gain less than aws-lc-rs's from the 6 efficiency "
+        "cores: more of their time is multiplication-heavy assembly, which those cores run at 34-45% of a "
+        "performance core's speed. The Air has no fan, so its performance cores slow within a minute there, "
+        "giving those cores a larger share.",
     },
     "ovh-iad": {
         "jobs": 4,
@@ -754,15 +757,50 @@ def os_name():
     return f"{pretty} (Linux {platform.release()})"
 
 
-def locked_versions():
-    """Each package's versions in Cargo.lock, with the commit of one from git,
-    such as verified-garbage, whose version never changes."""
-    versions = {}
-    with open(os.path.join(ROOT, "Cargo.lock")) as f:
-        pattern = r'\[\[package\]\]\nname = "([^"]+)"\nversion = "([^"]+)"(?:\nsource = "git\+[^"#]*#([0-9a-f]+)")?'
-        for name, version, commit in re.findall(pattern, f.read()):
-            versions.setdefault(name, []).append(f"{version} ({commit[:8]})" if commit else version)
-    return versions
+def bench_versions(lock):
+    """Each package's version that rind-bench builds, from a Cargo.lock's
+    text, with the commit of one from git, such as verified-garbage, whose
+    version never changes, and the directory of a fork rind vendors, such as
+    blind-rsa-signatures, whose crates.io release differs: the one rind-bench
+    names, or every one it reaches. A workspace crate's entry also lists its
+    dev-dependencies, so the walk passes through none but rind-bench."""
+    forks = {}
+    for path in tomllib.loads(open(os.path.join(ROOT, "Cargo.toml")).read())["workspace"].get("exclude", []):
+        with open(os.path.join(ROOT, path, "Cargo.toml"), "rb") as f:
+            forks[tomllib.load(f)["package"]["name"]] = path
+    packages = tomllib.loads(lock)["package"]
+    by_name = {}
+    for p in packages:
+        by_name.setdefault(p["name"], []).append(p)
+
+    def resolve(dep):
+        name, _, version = dep.partition(" ")
+        found = [p for p in by_name[name] if not version or p["version"] == version]
+        if len(found) != 1:
+            fail(f"Cargo.lock's {dep} names {len(found)} packages, not one")
+        return found[0]
+
+    def version(p):
+        commit = re.search(r"^git\+[^#]*#([0-9a-f]+)$", p.get("source", ""))
+        if commit:
+            return f"{p['version']} ({commit[1][:8]})"
+        if "source" not in p and p["name"] in forks:
+            return f"{p['version']} (rind's fork in `{forks[p['name']]}`)"
+        return p["version"]
+
+    (bench,) = by_name["rind-bench"]
+    direct = [resolve(d) for d in bench["dependencies"]]
+    seen, stack, reached = set(), list(direct), {}
+    while stack:
+        p = stack.pop()
+        if (p["name"], p["version"]) in seen:
+            continue
+        seen.add((p["name"], p["version"]))
+        reached.setdefault(p["name"], set()).add(version(p))
+        if "source" in p:
+            stack += [resolve(d) for d in p.get("dependencies", [])]
+    versions = {name: ", ".join(sorted(v)) for name, v in reached.items()}
+    return versions | {p["name"]: version(p) for p in direct}
 
 
 def toolchain(env):
@@ -811,10 +849,9 @@ def run(args):
     env["RIND_BENCH_CPUS"] = str(result["cpu"]["logical_cpus"])
     cargo, versions, openssl = toolchain(env)
     result["toolchain"] = versions
-    locked = locked_versions()
-    result["libraries"] = {
-        lib: {crate: ", ".join(locked.get(crate, ["?"])) for crate in crates} for lib, crates in CRATES.items()
-    }
+    with open(os.path.join(ROOT, "Cargo.lock")) as f:
+        locked = bench_versions(f.read())
+    result["libraries"] = {lib: {crate: locked.get(crate, "?") for crate in crates} for lib, crates in CRATES.items()}
     # The OpenSSL the benchmarks link, beside its crates.
     result["libraries"]["openssl"]["linked"] = output([openssl, "version"], env)
 
@@ -2661,6 +2698,63 @@ def site_data(hosts, tiers, verified, gaps):
     return data
 
 
+def methodology(hosts, shown):
+    """How the hosts' times were taken, and the versions each timed."""
+    toolchain = pinned_toolchain()
+    criterion = " ".join(CRITERION_ARGS[1:])
+    md = [
+        "## Methodology",
+        "",
+        "Each host runs `cargo bench -p rind-bench --features __bench_openssl`, passing criterion "
+        f"`{criterion}` and a filter for the report's rows, as `criterion_args` in its "
+        "`benchmarks/data/<host>.json` records.",
+        "",
+        "On aarch64, every rind row except those marked *DIT set per call* holds a `rind::cpu::Dit::hold()` guard "
+        "across the timed loop "
+        "(`rind_dit` in `rind-bench/benches/criterion/mod.rs`), so it pays for turning DIT on and off once, as "
+        "a caller holding the guard around a batch of calls does. A caller holding none pays it on every call: "
+        "the rows marked *DIT set per call* time rind that way. On x86_64 the guard does nothing, and no other "
+        "library sets DIT.",
+        "",
+        "To time a row without Nix, install the pinned toolchain and run its bench target, here AES-128-GCM's "
+        "rows. aws-lc-rs and ring need a C compiler, and on Unix the OpenSSL column needs OpenSSL 3's headers "
+        "and pkg-config.",
+        "",
+        "```sh",
+        f"rustup toolchain install {toolchain}",
+        f"cargo +{toolchain} bench -p rind-bench --features __bench_openssl --bench aes_gcm -- {criterion} "
+        "'^aes128-gcm/'",
+        "```",
+        "",
+        "### Versions",
+        "",
+        "The versions of each library's crates that `rind-bench` built, from `Cargo.lock` at each host's "
+        "measured commit, and the OpenSSL each host linked. A version some hosts did not build names the hosts that did.",
+        "",
+        "| Library | Crate | Version |",
+        "|---|---|---|",
+    ]
+    libs = {lib: None for host in shown for lib in hosts[host].get("libraries", {})}
+    for lib in libs:
+        crates = {c: None for host in shown for c in hosts[host].get("libraries", {}).get(lib, {})}
+        for crate in crates:
+            by_version = {}
+            for host in shown:
+                version = hosts[host].get("libraries", {}).get(lib, {}).get(crate, "?")
+                if version != "?":
+                    by_version.setdefault(version, []).append(f"`{host}`")
+            if not by_version:
+                continue
+            if len(by_version) == 1 and sum(map(len, by_version.values())) == len(shown):
+                cell = next(iter(by_version))
+            else:
+                cell = "; ".join(f"{v} on {', '.join(h)}" for v, h in by_version.items())
+            name = COLUMNS.get(lib, "rustls" if lib == "tls" else lib)
+            md.append(f"| {name} | {'linked library' if crate == 'linked' else f'`{crate}`'} | {cell} |")
+    md.append("")
+    return md
+
+
 def report(hosts, tiers, verified, gaps):
     """BENCHMARKS.md, its SVGs, the site's data, and the README with its
     comparison, by path."""
@@ -2691,6 +2785,8 @@ def report(hosts, tiers, verified, gaps):
         "`admin/bench-report` only when idle. Times are criterion's estimates.",
         "",
     ]
+    if shown:
+        md += methodology(hosts, shown)
     if shown:
         md += [
             "## Speed",

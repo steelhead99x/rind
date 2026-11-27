@@ -209,6 +209,12 @@ impl PublicKey {
         self.key.modulus_len_bits().div_ceil(8)
     }
 
+    /// The modulus's length in bits, for a caller that enforces its own floor,
+    /// such as one mirroring a library that refuses a key under 2048 bits.
+    pub fn modulus_bits(&self) -> usize {
+        self.key.modulus_len_bits()
+    }
+
     /// Verifies `signature` over `message` with `algorithm`, refusing a
     /// malformed signature, and refusing the key if its modulus is below
     /// the algorithm's floor.
@@ -255,7 +261,7 @@ The model departs from the Rust in these ways, and adds no axiom:
   `pkcs1_components` and `spki_components`, which `from_pkcs1_der` and
   `from_spki_der` read their components with.
 - `?` is a `match`, since each error it passes on is already an `Error`.
-- `to_spki`, `modulus_len`, and `PublicKey`'s `AsRef`, which no theorem here
+- `to_spki`, `modulus_len`, `modulus_bits`, and `PublicKey`'s `AsRef`, which no theorem here
   is about, are not modelled.
 
 Drops are not modelled, as everywhere in the translation.
@@ -350,11 +356,11 @@ theorem bind_eq_ok {α β : Type} {m : Result α} {k : α → Result β} {y : β
     rw [bind_div, WP.spec_div] at this; exact this.elim
 
 /-- A public key `PublicKey::from_key` returns holds the key it was given,
-which for a loaded `(N, E)` key has a modulus of 1024 to 8192 bits. -/
+which for a loaded `(N, E)` key has a modulus of 1017 to 8192 bits. -/
 theorem from_key_ok {key : high.rsa.VerifyingKey} {N E : Nat} (hk : KeyLoaded key N E)
     {pk : high.signature.rsa.PublicKey}
     (hpk : high.signature.rsa.PublicKey.from_key key = ok (.Ok pk)) :
-    KeyLoaded pk.key N E ∧ 1024 ≤ N.size ∧ N.size ≤ 8192 := by
+    KeyLoaded pk.key N E ∧ 1017 ≤ N.size ∧ N.size ≤ 8192 := by
   unfold high.signature.rsa.PublicKey.from_key at hpk
   obtain ⟨b, -, hb⟩ := bind_eq_ok hpk
   split at hb
@@ -366,11 +372,11 @@ theorem from_key_ok {key : high.rsa.VerifyingKey} {N E : Nat} (hk : KeyLoaded ke
     exact ⟨hk, hmin, hmax⟩
   · simp at hb
 
-/-- `PublicKey::new`: a key it returns is an `(N, E)` key of 1024 to 8192
+/-- `PublicKey::new`: a key it returns is an `(N, E)` key of 1017 to 8192
 bits, which `der` encodes as PKCS#1 DER the ✓ leaves out. -/
 theorem rsa_signature_new_spec (h : Runs) (hheld : low.entry.Entry.assert_held = ok ()) (der : Slice U8)
     (pk : high.signature.rsa.PublicKey) (hpk : high.signature.rsa.PublicKey.new der = ok (.Ok pk)) :
-    ∃ N E, KeyLoaded pk.key N E ∧ 1024 ≤ N.size ∧ N.size ≤ 8192 := by
+    ∃ N E, KeyLoaded pk.key N E ∧ 1017 ≤ N.size ∧ N.size ≤ 8192 := by
   unfold high.signature.rsa.PublicKey.new high.rsa.VerifyingKey.from_pkcs1_der at hpk
   obtain ⟨r, hr, hk⟩ := bind_eq_ok hpk
   obtain ⟨_, -, hr⟩ := bind_eq_ok hr
@@ -389,12 +395,12 @@ theorem rsa_signature_new_spec (h : Runs) (hheld : low.entry.Entry.assert_held =
     subst hr
     simp at hk
 
-/-- `PublicKey::from_spki`: a key it returns is an `(N, E)` key of 1024 to
+/-- `PublicKey::from_spki`: a key it returns is an `(N, E)` key of 1017 to
 8192 bits, which `der` encodes as `SubjectPublicKeyInfo` DER the ✓ leaves
 out. -/
 theorem rsa_signature_from_spki_spec (h : Runs) (hheld : low.entry.Entry.assert_held = ok ()) (der : Slice U8)
     (pk : high.signature.rsa.PublicKey) (hpk : high.signature.rsa.PublicKey.from_spki der = ok (.Ok pk)) :
-    ∃ N E, KeyLoaded pk.key N E ∧ 1024 ≤ N.size ∧ N.size ≤ 8192 := by
+    ∃ N E, KeyLoaded pk.key N E ∧ 1017 ≤ N.size ∧ N.size ≤ 8192 := by
   unfold high.signature.rsa.PublicKey.from_spki high.rsa.VerifyingKey.from_spki_der at hpk
   obtain ⟨r, hr, hk⟩ := bind_eq_ok hpk
   obtain ⟨_, -, hr⟩ := bind_eq_ok hr
@@ -411,12 +417,12 @@ theorem rsa_signature_from_spki_spec (h : Runs) (hheld : low.entry.Entry.assert_
     simp at hk
 
 /-- `PublicKey::from_components(&PublicKeyComponents { n, e })`: a key it
-returns has the modulus and exponent `n` and `e` encode, of 1024 to 8192
+returns has the modulus and exponent `n` and `e` encode, of 1017 to 8192
 bits. -/
 theorem rsa_signature_from_components_spec (h : Runs) (hheld : low.entry.Entry.assert_held = ok ())
     (n e : Slice U8) (pk : high.signature.rsa.PublicKey)
     (hpk : high.signature.rsa.PublicKey.from_components n e = ok (.Ok pk)) :
-    KeyLoaded pk.key (beNat n.val) (beNat e.val) ∧ 1024 ≤ (beNat n.val).size ∧ (beNat n.val).size ≤ 8192 := by
+    KeyLoaded pk.key (beNat n.val) (beNat e.val) ∧ 1017 ≤ (beNat n.val).size ∧ (beNat n.val).size ≤ 8192 := by
   unfold high.signature.rsa.PublicKey.from_components at hpk
   obtain ⟨r, hr, hk⟩ := bind_eq_ok hpk
   have hs := from_components_spec h hheld n e
@@ -490,6 +496,6 @@ theorem rsa2048_mont_products (o : Option low.x86_64.cpu.HaveBmi2Adx)
     (hcheck : low.x86_64.cpu.HaveBmi2Adx.check = ok o) (hsome : o.isSome) (N : Nat) (hN : N.size = 2048) :
     MontProducts ((N.size + 63) / 64) := by
   rw [hN]
-  exact mont_products o hcheck (Or.inr ⟨hsome, Or.inr rfl⟩)
+  exact karatsuba_products o hcheck hsome (Or.inr rfl)
 
 end rind.x86_64

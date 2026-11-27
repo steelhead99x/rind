@@ -11,6 +11,10 @@ categories = ["cryptography"]
 rust-version = "1.91"
 readme = "README.md"
 
+# Every feature, so docs.rs shows the items each gates, labeled with it.
+[package.metadata.docs.rs]
+all-features = true
+
 # The openmls_traits version whose provider traits this crate implements,
 # which openmls_rust_crypto, the provider it replaces, also tracks
 # (sh/adapter-versions.sh).

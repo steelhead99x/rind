@@ -16,6 +16,7 @@
 //! each public key from its private key.
 
 use std::marker::PhantomData;
+use std::sync::Mutex;
 
 use aws_lc_rs::agreement::ParsedPublicKeyFormat as Format;
 use aws_lc_rs::encoding::{AsBigEndian, AsDer};
@@ -705,7 +706,17 @@ fn rsa_private(
     use rsa::pkcs1::EncodeRsaPublicKey;
     use rsa::pkcs8::DecodePrivateKey;
     let (ours, theirs) = (ours(input), theirs(input));
-    agree(&ours, &theirs, expect);
+    // rind loads a 2047-bit modulus, as ring does, which aws-lc refuses.
+    let two_047 = ours.as_ref().is_ok_and(|key| {
+        their_rsa::PublicKey::from_der(key.public_key().as_ref())
+            .is_ok_and(|public| modulus_bits(&public) == 2047)
+    });
+    if two_047 {
+        assert!(expect != Expect::Refused, "rind took an input it refuses");
+        assert!(theirs.is_err(), "aws-lc-rs took a 2047-bit key");
+    } else {
+        agree(&ours, &theirs, expect);
+    }
     let Ok(ours) = ours else {
         return;
     };
@@ -717,12 +728,14 @@ fn rsa_private(
     let pkcs8 = ours.to_pkcs8();
     let again = our_rsa::KeyPair::from_pkcs8(pkcs8.as_ref()).unwrap();
     assert_eq!(again.public_key().as_ref(), public.as_ref());
-    let theirs = their_rsa::KeyPair::from_pkcs8(pkcs8.as_ref()).unwrap();
-    assert_eq!(theirs.public_key().as_ref(), public.as_ref());
-    assert_eq!(
-        ours.public_key().to_spki().as_ref(),
-        theirs.public_key().as_der().unwrap().as_ref()
-    );
+    if !two_047 {
+        let theirs = their_rsa::KeyPair::from_pkcs8(pkcs8.as_ref()).unwrap();
+        assert_eq!(theirs.public_key().as_ref(), public.as_ref());
+        assert_eq!(
+            ours.public_key().to_spki().as_ref(),
+            theirs.public_key().as_der().unwrap().as_ref()
+        );
+    }
 
     // RustCrypto reads the same key, unless its primes are of such unequal
     // size as it refuses, and signs as rind does.
@@ -739,10 +752,10 @@ fn rsa_private(
 }
 
 /// aws-lc-rs's key, if it takes `der` and its modulus is in rind's range,
-/// 1024 to 8192 bits.
+/// 1017 to 8192 bits.
 fn their_rsa_public(der: &[u8]) -> Result<their_rsa::PublicKey, &'static str> {
     let key = their_rsa::PublicKey::from_der(der).map_err(|_| "refused")?;
-    match (1024..=8192).contains(&modulus_bits(&key)) {
+    match (1017..=8192).contains(&modulus_bits(&key)) {
         true => Ok(key),
         false => Err("modulus out of range"),
     }
@@ -806,10 +819,24 @@ fn rsa_reencode(rsa: &Rsa, key: &our_rsa::PublicKey) {
     use rsa::pkcs8::DecodePublicKey;
     let again = our_rsa::PublicKey::new(key.as_ref()).unwrap();
     assert_eq!(again.as_ref(), key.as_ref());
-    let independent = rsa::PublicKey::from_pkcs1_der(key.as_ref()).unwrap();
-    assert_eq!(independent.to_pkcs1_der().unwrap().as_bytes(), key.as_ref());
-    let independent = rsa::PublicKey::from_public_key_der(key.to_spki().as_ref()).unwrap();
-    assert_eq!(independent.to_pkcs1_der().unwrap().as_bytes(), key.as_ref());
+    // RustCrypto's decoders refuse a modulus under 1024 bits, so it reads
+    // one of 1017 to 1023 bits, which rind loads, from its components.
+    if key.modulus_bits() >= 1024 {
+        let independent = rsa::PublicKey::from_pkcs1_der(key.as_ref()).unwrap();
+        assert_eq!(independent.to_pkcs1_der().unwrap().as_bytes(), key.as_ref());
+        let independent = rsa::PublicKey::from_public_key_der(key.to_spki().as_ref()).unwrap();
+        assert_eq!(independent.to_pkcs1_der().unwrap().as_bytes(), key.as_ref());
+    } else {
+        let components = their_rsa::PublicKey::from_der(key.as_ref()).unwrap();
+        let int = |x: &[u8]| rsa::BoxedUint::from_be_slice_vartime(x);
+        let independent = rsa::PublicKey::new_with_size_limits(
+            int(components.modulus().big_endian_without_leading_zero()),
+            int(components.exponent().big_endian_without_leading_zero()),
+            1017..=8192,
+        )
+        .unwrap();
+        assert_eq!(independent.to_pkcs1_der().unwrap().as_bytes(), key.as_ref());
+    }
     theirs::ParsedPublicKey::new(rsa.theirs, key.as_ref()).unwrap();
 
     let theirs = their_rsa::PublicKey::from_der(key.as_ref()).unwrap();
@@ -1276,16 +1303,37 @@ fn slh_dsa_pkcs8<P: our_slh_dsa::ParameterSet, R: slh_dsa::ParameterSet>(input: 
     let again = our_slh_dsa::KeyPair::<P>::from_pkcs8(pkcs8.as_ref()).unwrap();
     assert_eq!(again.public_key().as_ref(), public.as_ref());
 
-    // Each verifies what the other signs.
-    let message = b"rind";
-    let signature = ours.sign(message).unwrap();
-    let signature = slh_dsa::Signature::<R>::try_from(signature.as_ref()).unwrap();
-    theirs.as_ref().verify(message, &signature).unwrap();
-    let signature = theirs.try_sign_with_context(message, b"", None).unwrap();
-    public.verify(message, &signature.to_bytes()).unwrap();
+    // Each verifies what the other signs. A signature costs seconds natively
+    // and most of a minute under SDE, and the corpus keeps dozens of keys of
+    // one set, so each tier of fuzz.yml's SDE replay spent its hour signing. sh/fuzz-replay.sh asks that replay to
+    // sign only the first key of each set; the other runs sign every key.
+    if sign::<P>() {
+        let message = b"rind";
+        let signature = ours.sign(message).unwrap();
+        let signature = slh_dsa::Signature::<R>::try_from(signature.as_ref()).unwrap();
+        theirs.as_ref().verify(message, &signature).unwrap();
+        let signature = theirs.try_sign_with_context(message, b"", None).unwrap();
+        public.verify(message, &signature.to_bytes()).unwrap();
+    }
 
     slh_dsa_public::<P, R>(public.as_ref());
     slh_dsa_spki::<P, R>(public.to_spki().as_ref());
+}
+
+/// Whether to sign with this key: always, unless `RIND_FUZZ_SIGN_ONCE` limits
+/// the process to the first key of each parameter set `P`.
+fn sign<P>() -> bool {
+    static SEEN: Mutex<Vec<&str>> = Mutex::new(Vec::new());
+    if std::env::var_os("RIND_FUZZ_SIGN_ONCE").is_none() {
+        return true;
+    }
+    let name = std::any::type_name::<P>();
+    let mut seen = SEEN.lock().unwrap();
+    let first = !seen.contains(&name);
+    if first {
+        seen.push(name);
+    }
+    first
 }
 
 fn slh_dsa_public<P: our_slh_dsa::ParameterSet, R: slh_dsa::ParameterSet>(input: &[u8]) {

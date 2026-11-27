@@ -24,3 +24,79 @@ git_only = true
 [[package]]
 name = "rind-openmls"
 release = false
+
+# Corrections to a release's notes live here, on `main`, never as commits on
+# the release PR's branch: release-plz closes and reopens a PR that carries a
+# commit of its own, so each merge to `main` would drop them. Everything below
+# is generated input it reads on every run. An entry is dead once its release
+# ships (rewrites match commits already released, intros name a version), so
+# delete it then (CONTRIBUTING.md's Releases section).
+[changelog]
+# Setting these replaces release-plz's defaults, so the commit parsers and the
+# PR link are release-plz's own, restated.
+commit_preprocessors = [
+  # Rewrites of one entry's text, by the words its squash commit's title used.
+  { pattern = 'adapters build rind without ML-DSA and SLH-DSA,', replace = '''`ml-dsa` and `slh-dsa` features, on by default, so `default-features = false` leaves ML-DSA and SLH-DSA out, as the adapters build rind (rind-aws-lc-rs keeps ML-DSA for aws-lc-rs's PQDSA API);''' },
+  { pattern = 'one API shape \(#781\)', replace = 'one API shape; in rind, `aead::gcm::TagLength` is now `#[non_exhaustive]`, so a `match` on it needs a `_` arm (#781)' },
+  { pattern = 'pass the nightly on main', replace = '''fix the ctgrind nightly's failures then on main''' },
+  { pattern = 'the build nightly passes on main', replace = '''fix the build nightly's failures then on main''' },
+  { pattern = 'x86_64 SHA-384/512 and Ed25519 are proven on AVX2', replace = 'proof coverage for the x86_64 AVX2 SHA-384/512 path and Ed25519 signing; the verification it proved is superseded by half-size scalars in #768, which nothing proves yet' },
+  # A Rust path as a title's first word reads as a commit type, so release-plz
+  # prints it garbled; a `chore:` type in front lets the path through, and the
+  # entry stays in Other. Release-plz runs preprocessors twice, so each pattern
+  # must not match its own output.
+  { pattern = '^cipher::ChaCha20', replace = 'chore: `cipher::ChaCha20`' },
+  { pattern = '^rind::KeyPair loads', replace = 'chore: `rind::KeyPair` loads' },
+  { pattern = '!: ML-KEM-512 and ML-KEM-1024', replace = '''!: rind's typed ML-KEM API adds ML-KEM-512 and ML-KEM-1024''' },
+  { pattern = 'at /from/<library>,', replace = 'at `/from/<library>`,' },
+  # release-plz's default: a PR number becomes its link.
+  { pattern = '\(#([0-9]+)\)', replace = '([#${1}](https://github.com/kixel-ai/rind/pull/${1}))' },
+]
+# release-plz's default body, with each 0.4 adapter's migration note after the
+# heading.
+body = '''
+
+## [{{ version }}]{%- if release_link -%}({{ release_link }}){% endif %} - {{ timestamp | date(format="%Y-%m-%d") }}
+{% if package == "rind-aws-lc-rs" and version == "1.0.3" %}
+Requires rind 0.4. This release matches aws-lc-rs 1.x's API item for item, but for what its README lists under "What rind cannot back": the `cpu` module (`cpu::check` and `cpu::MissingFeature`) and the `wipe` feature, which aws-lc-rs lacks, are gone, so drop any `cpu::check()` call and `wipe` feature; keys always wipe. A change that restores upstream's API is a bug fix, released as a patch (CONTRIBUTING.md's Releases section). The other entries marked breaking change rind's API or another crate's, which this crate does not expose.
+{% elif package == "rind-dimpl" and version == "0.9.4" %}
+Requires rind 0.4. This release matches dimpl's `crypto::aws_lc_rs` API, but for what its README lists under "What rind cannot back": `default_provider()` returns `CryptoProvider`, not a `Result`, and `MissingFeature` is gone, so drop the `?` or `.unwrap()`. A change that restores upstream's API is a bug fix, released as a patch (CONTRIBUTING.md's Releases section). The other entries marked breaking change rind's API or another crate's, which this crate does not expose.
+{% elif package == "rind-jsonwebtoken" and version == "12.0.0" %}
+Requires rind 0.4 and jsonwebtoken 12. `DEFAULT_PROVIDER` replaces `default_provider()` and `MissingFeature`, matching jsonwebtoken's `crypto::aws_lc::DEFAULT_PROVIDER`. The other entries marked breaking change rind's API or another crate's, which this crate does not expose.
+{% elif package == "rind-object-store" and version == "0.14.4" %}
+Requires rind 0.4. `default_provider()` returns `Arc<dyn CryptoProvider>`, not a `Result`, and `MissingFeature` is gone, so drop the `?` or `.unwrap()`: the CPU check behind them could not fail on any target rind builds for. object_store keeps its own providers private, so this crate has no upstream API to copy; the maintainer chose to drop the `Result` from every adapter in patch releases. The other entries marked breaking change rind's API or another crate's, which this crate does not expose.
+{% elif package == "rind-python" and version == "0.1.3" %}
+pyrind's Python API only gains items in this release: `pyrind.cipher`, `pyrind.key_wrap`, and `copy()` on digest and HMAC contexts. The entries marked breaking, and those adding rind features such as SLH-DSA and Argon2id, change rind's Rust API, which pyrind builds on but does not expose. Its key objects wipe when Python frees them, though the `bytes` a key was loaded from or exported to are Python's and stay unwiped, and it still offers only ML-KEM-768: the typed ML-KEM API, which adds ML-KEM-512 and ML-KEM-1024, is rind's.
+{% elif package == "rind-rand-core" and version == "0.10.1" %}
+Requires rind 0.4, so `SystemRandom`'s `TryRng::Error` is rind 0.4's `rind::Error`.
+{% elif package == "rind-rcgen" and version == "0.14.4" %}
+Requires rind 0.4. This release matches `rcgen::KeyPair`'s API, but for what its README lists under "What rind cannot back": `KeyPair::generate()` takes no argument, so call `KeyPair::generate_for(alg)` where you passed one, and items rcgen lacks, such as `KeyPair::to_pkcs8` and the crate-level `check` and `MissingFeature`, are gone. `KeyPair::serialize_der()` returns a plain `Vec<u8>` that nothing wipes, so borrow `serialized_der()` where you can, and wipe the copy where you cannot. A change that restores upstream's API is a bug fix, released as a patch (CONTRIBUTING.md's Releases section). The other entries marked breaking change rind's API or another crate's, which this crate does not expose.
+{% elif package == "rind-ring" and version == "0.17.4" %}
+Requires rind 0.4. This release matches ring 0.17's API and features, but for what its README lists under "What rind cannot back": the `cpu` module (`cpu::check` and `cpu::MissingFeature`), which ring keeps private, is gone, so drop any `cpu::check()` call. A change that restores upstream's API is a bug fix, released as a patch (CONTRIBUTING.md's Releases section). The other entries marked breaking change rind's API or another crate's, which this crate does not expose.
+{% elif package == "rind-rustls" and version == "0.23.4" %}
+Requires rind 0.4. This release matches rustls's `crypto::aws_lc_rs` API item for item, but for what its README lists under "What rind cannot back", such as `kx_group::MLKEM1024`: `default_provider()` returns `CryptoProvider`, not a `Result`, so drop the `.unwrap()`, and items rustls's provider lacks, such as `MissingFeature`, `empty_provider()`, the `verify` module, and `kx_group::SECP521R1`, are gone. A change that restores upstream's API is a bug fix, released as a patch (CONTRIBUTING.md's Releases section). The provider still offers only the ML-KEM-768 key-exchange groups. The other entries marked breaking change rind's API or another crate's, which this crate does not expose.
+{% elif package == "rind-str0m" and version == "0.25.3" %}
+Requires rind 0.4 and rind-dimpl 0.9.4. This release matches str0m-aws-lc-rs's API, but for what its README lists under "What rind cannot back": `default_provider()` returns `CryptoProvider`, not a `Result`, and `MissingFeature` is gone, so drop the `?` or `.unwrap()`; `dimpl_crypto_provider()` is new. A change that restores upstream's API is a bug fix, released as a patch (CONTRIBUTING.md's Releases section). The other entries marked breaking change rind's API or another crate's, which this crate does not expose.
+{% endif -%}
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | upper_first }}
+
+{% for commit in commits %}
+{%- if commit.scope -%}
+- *({{commit.scope}})* {% if commit.breaking %}[**breaking**] {% endif %}{{ commit.message }}{%- if commit.links %} ({% for link in commit.links %}[{{link.text}}]({{link.href}}) {% endfor -%}){% endif %}
+{% else -%}
+- {% if commit.breaking %}[**breaking**] {% endif %}{{ commit.message }}
+{% endif -%}
+{% endfor -%}
+{% endfor %}'''
+commit_parsers = [
+  # Entries about the 0.4 release's own bookkeeping, which 0.4 supersedes.
+  { message = '\[#(512|548|549)\]', skip = true },
+  { message = "^feat", group = "added" },
+  { message = "^changed", group = "changed" },
+  { message = "^deprecated", group = "deprecated" },
+  { message = "^removed", group = "removed" },
+  { message = "^fix", group = "fixed" },
+  { message = "^security", group = "security" },
+  { message = ".*", group = "other" },
+]

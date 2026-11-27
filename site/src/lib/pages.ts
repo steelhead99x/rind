@@ -41,6 +41,7 @@ export const home: Page = {
 			blocks(landing.agent),
 			`## ${landing.candorTitle}`,
 			blocks(landing.candor),
+			landing.security.map((l) => `- ${link(l.label, l.href)}`).join("\n"),
 			"## Links",
 			landing.footer.map((l) => `- ${link(l.label, l.href)}`).join("\n"),
 			`Built by ${link(landing.builtBy.label, landing.builtBy.href)}.`,

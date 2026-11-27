@@ -6,8 +6,10 @@ name: prove
 # CPU, cosimulates pyca/verified-garbage's models against the code rind takes
 # from it, checks that the NEON vectors the Lean proofs test their aarch64
 # intrinsic models with are what an aarch64 CPU computes, translates rind's
-# Rust under proof to Lean and checks the proofs in `proofs/`, and tests the
-# Lean specs those proofs trust against the published vectors and rind. It
+# Rust under proof to Lean and checks the proofs in `proofs/`, checks that the
+# curve25519-dalek rind runs on armv7 translates to the code Beneficial AI
+# Foundation's Lean proofs of it are about, and tests the Lean specs those
+# proofs trust against the published vectors and rind. It
 # all runs nightly. None of it gates a merge: a failure on main alerts.
 #
 # Each HOL Light target's proofs, the Lean proofs, and the cosimulation are
@@ -23,7 +25,15 @@ name: prove
 on:
   schedule:
     - cron: "0 18 * * *"
+  # A dispatch runs every job the schedule runs, unless `jobs` names some,
+  # such as `-f jobs='hol-light-armv7 cosim'`, on a branch other than main:
+  # see sh/select-jobs.sh.
   workflow_dispatch:
+    inputs:
+      jobs:
+        description: Job IDs to run, space-separated, in workflow order; empty runs all
+        type: string
+        default: ""
   push:
     branches: [main]
     paths:
@@ -40,8 +50,12 @@ on:
       - admin/neon-vectors.rs
       - admin/avx512-vectors.rs
       - admin/upstream
+      - admin/import-dalek
+      - admin/dalek-closure
+      - admin/import-mlkem-native
       - admin/import-vg
       - admin/import-vg-models
+      - admin/vg-binding
       - admin/vg-bytes
       - admin/vg-cosim-runner.rs
       - admin/spec-tests/**
@@ -58,12 +72,44 @@ permissions:
   contents: read
 
 jobs:
+  # Checks a dispatch's `jobs` and hands each job its part, which its `if:`
+  # reads; every other job needs it, so a run without `jobs` skips it and
+  # runs them all. A release takes any passing run on main
+  # (sh/release-proved.sh), so `jobs` there fails the run.
+  select:
+    if: inputs.jobs
+    runs-on: ubuntu-latest
+    outputs:
+      jobs: ${{ steps.select.outputs.jobs }}
+    steps:
+      - if: github.ref == 'refs/heads/main'
+        run: |
+          echo "::error::prove on main checks every job, since a release takes any passing run there; dispatch it without jobs"
+          exit 1
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            .github/workflows/prove.yml
+            sh/select-jobs.sh
+          sparse-checkout-cone-mode: false
+
+      - id: select
+        run: |
+          selected=$(sh/select-jobs.sh .github/workflows/prove.yml "$JOBS")
+          tee -a "$GITHUB_OUTPUT" <<<"$selected"
+        env:
+          JOBS: ${{ inputs.jobs }}
+
   # Checks the bytes, which nothing caches, on every run: a release relies on
   # them as on the proofs (sh/release-proved.sh). On a push to main it also
   # computes the key of each cached HOL Light check and the cosimulation,
   # looking each up without downloading anything. The jobs below skip a check
   # whose key main saved. The Lean proofs compute their own key in their job.
   keys:
+    needs: select
+    if: ${{ !cancelled() && (!inputs.jobs || contains(fromJSON(needs.select.outputs.jobs || '[]'), 'keys')) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     outputs:
@@ -152,8 +198,8 @@ jobs:
   # the other aarch64 proofs, so the job can run about 100 minutes with the
   # build.
   hol-light-aarch64:
-    needs: keys
-    if: ${{ !cancelled() && needs.keys.outputs.hit-hol-light-aarch64 != 'true' }}
+    needs: [select, keys]
+    if: ${{ !cancelled() && (!inputs.jobs || contains(fromJSON(needs.select.outputs.jobs || '[]'), 'hol-light-aarch64')) && needs.keys.outputs.hit-hol-light-aarch64 != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 150
     steps:
@@ -172,8 +218,8 @@ jobs:
   # them in the AVX2 SHA-256, so at up to 2.1 times as long the job can run
   # about 80 minutes with the build.
   hol-light-x86_64:
-    needs: keys
-    if: ${{ !cancelled() && needs.keys.outputs.hit-hol-light-x86_64 != 'true' }}
+    needs: [select, keys]
+    if: ${{ !cancelled() && (!inputs.jobs || contains(fromJSON(needs.select.outputs.jobs || '[]'), 'hol-light-x86_64')) && needs.keys.outputs.hit-hol-light-x86_64 != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     steps:
@@ -189,8 +235,8 @@ jobs:
           key: ${{ needs.keys.outputs.hol-light-x86_64 }}
 
   hol-light-armv7:
-    needs: keys
-    if: ${{ !cancelled() && needs.keys.outputs.hit-hol-light-armv7 != 'true' }}
+    needs: [select, keys]
+    if: ${{ !cancelled() && (!inputs.jobs || contains(fromJSON(needs.select.outputs.jobs || '[]'), 'hol-light-armv7')) && needs.keys.outputs.hit-hol-light-armv7 != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -206,8 +252,8 @@ jobs:
           key: ${{ needs.keys.outputs.hol-light-armv7 }}
 
   cosim:
-    needs: keys
-    if: ${{ !cancelled() && needs.keys.outputs.hit-cosim != 'true' }}
+    needs: [select, keys]
+    if: ${{ !cancelled() && (!inputs.jobs || contains(fromJSON(needs.select.outputs.jobs || '[]'), 'cosim')) && needs.keys.outputs.hit-cosim != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -227,7 +273,8 @@ jobs:
   # Each run takes its run ID as the seed, so each tries new cases; the merge
   # queue's build runs x86_64's with a fixed seed.
   vg:
-    if: github.event_name != 'push'
+    needs: select
+    if: ${{ !cancelled() && (!inputs.jobs || contains(fromJSON(needs.select.outputs.jobs || '[]'), 'vg')) && github.event_name != 'push' }}
     strategy:
       fail-fast: false
       matrix:
@@ -255,7 +302,8 @@ jobs:
           VG_COSIM_SEED: ${{ github.run_id }}
 
   neon:
-    if: github.event_name != 'push'
+    needs: select
+    if: ${{ !cancelled() && (!inputs.jobs || contains(fromJSON(needs.select.outputs.jobs || '[]'), 'neon')) && github.event_name != 'push' }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
     steps:
@@ -277,6 +325,8 @@ jobs:
   # checks the proofs only if main saved no matching key; nightly and when
   # dispatched, checks them outright.
   lean:
+    needs: select
+    if: ${{ !cancelled() && (!inputs.jobs || contains(fromJSON(needs.select.outputs.jobs || '[]'), 'lean')) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
@@ -300,8 +350,25 @@ jobs:
   # inputs from the run's own seed. Linking `spec-server` compiles every
   # Mathlib module it imports to C, about 15 minutes that Mathlib's cache does
   # not save, so this job keeps that out of the lean job's time.
+  #
+  # The tests took 11,600 s of one core's time, 3,570 s of it in one ML-KEM-1024
+  # section, which with the 18-minute build took 77 to 79 minutes of the 90
+  # and twice ran past them. Each row runs one group of the driver's sections
+  # (`GROUPS` in `admin/spec-tests/src/main.rs`) on its own runner, the
+  # sections split so that none takes over about 15 minutes, so a row takes
+  # the 17 to 27-minute build plus the group's sections over four cores, 10 to
+  # 22 minutes on the runners measured, and each group checks its family's
+  # specs. ML-KEM's sections filled one runner's four cores for 28 minutes, so
+  # three groups share them. The slowest row took 50 minutes of the 90, which
+  # the runners' speed, up to 1.6 times as much between runs, makes room for.
+  # The driver prints each section's time.
   spec-tests:
-    if: github.event_name != 'push'
+    needs: select
+    if: ${{ !cancelled() && (!inputs.jobs || contains(fromJSON(needs.select.outputs.jobs || '[]'), 'spec-tests')) && github.event_name != 'push' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [mlkem.a, mlkem.b, mlkem.c, digests, rest]
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
@@ -315,5 +382,6 @@ jobs:
         run: nix develop .#prove --command admin/prove spec-tests
         env:
           SPEC_TESTS_FULL: 1
+          SPEC_TESTS_GROUP: ${{ matrix.group }}
           SPEC_TESTS_SEED: ${{ github.run_id }}
           SPEC_TESTS_RANDOM: 64

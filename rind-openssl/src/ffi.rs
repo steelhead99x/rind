@@ -330,3 +330,20 @@ macro_rules! entry {
 }
 
 pub(crate) use entry;
+
+// Key encapsulation, which OpenSSL 3.0 added.
+pub(crate) const OP_KEM: c_int = 14;
+pub(crate) const KEM_NEWCTX: c_int = 1;
+pub(crate) const KEM_ENCAPSULATE_INIT: c_int = 2;
+pub(crate) const KEM_ENCAPSULATE: c_int = 3;
+pub(crate) const KEM_DECAPSULATE_INIT: c_int = 4;
+pub(crate) const KEM_DECAPSULATE: c_int = 5;
+pub(crate) const KEM_FREECTX: c_int = 6;
+pub(crate) const KEM_SET_CTX_PARAMS: c_int = 10;
+pub(crate) const KEM_SETTABLE_CTX_PARAMS: c_int = 11;
+
+pub(crate) type KemInit = unsafe extern "C" fn(*mut c_void, *mut c_void, *const Param) -> c_int;
+pub(crate) type KemEncapsulate =
+    unsafe extern "C" fn(*mut c_void, *mut u8, *mut usize, *mut u8, *mut usize) -> c_int;
+pub(crate) type KemDecapsulate =
+    unsafe extern "C" fn(*mut c_void, *mut u8, *mut usize, *const u8, usize) -> c_int;

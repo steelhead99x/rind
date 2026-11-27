@@ -49,7 +49,9 @@ s2n-bignum <https://github.com/awslabs/s2n-bignum>
 
   What: the files under rind/src/low/x86_64 and rind/src/low/aarch64
   that begin "generated source. do not edit.", which admin/parse-asm
-  transliterates from s2n-bignum's assembly.
+  transliterates from s2n-bignum's assembly, and proofs/Rind/S2nGcm.lean
+  and proofs/Rind/S2nGcmAe.lean, Lean transliterations of its AES-GCM and
+  AES key-schedule specs in HOL Light.
   Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
   License: Apache-2.0 OR ISC OR MIT-0, except for:
 
@@ -205,7 +207,10 @@ mlkem-native <https://github.com/pq-code-package/mlkem-native>
   rind/src/low/x86_64/aws_lc/mlkem_*, which admin/import-aws-lc takes from
   mlkem-native's x86_64 AVX2 assembly as aws-lc vendors it at that commit,
   with the tables of its compress_consts.c in
-  rind/src/low/x86_64/mlkem_compress.rs.
+  rind/src/low/x86_64/mlkem_compress.rs; and
+  rind/src/low/aarch64/mlkem_native, which admin/import-mlkem-native takes
+  from mlkem-native's aarch64 compression assembly and its table at commit
+  58721ebde4b682bb3384ef7d11333e4f0ddb0164.
   Copyright (c) The mlkem-native project authors
   License: Apache-2.0 OR ISC OR MIT.
 

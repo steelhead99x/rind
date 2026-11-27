@@ -37,4 +37,3 @@ Extended with the maintainer on 2026-11-21 after profiling the last 15 self-host
 - [The merge queue builds through mbx, warm across groups](/quest/m0/queue-warm-target.md) - activates `mbx` in `flake.nix` and `queue-build.yml` so local worktrees and the thin merge queue build warm
 - [The merge queue runs rind's tests natively on aarch64](/quest/m0/mac-mini-runner.md) - adds the Mac mini as a second queue runner, which the thin merge queue keeps fast
 - [Apple-silicon nightlies run on the Mac mini](/quest/m2/confidence/apple-nightlies.md) - takes the aarch64 and macOS heavy jobs off hosted runners
-- [Split rind/tests/crosschecks.rs into per-family test binaries](/quest/m1/split-crosschecks.md) - follow-on test-binary compile/link reduction for algorithm-scoped test runs

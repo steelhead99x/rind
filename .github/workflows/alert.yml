@@ -33,6 +33,7 @@ on:
       - quality lints
       - regenerate
       - sanitizers
+      - Scorecard
       - Site deploy
       - Release
       - timing
@@ -47,8 +48,8 @@ on:
 jobs:
   discord:
     name: Discord
-    # A workflow alerts when a schedule or a push started it, whichever
-    # workflow it is, not a dispatch, since whoever dispatched one is already
+    # A workflow alerts when a schedule, a push, or a branch-protection
+    # change (Scorecard's) started it, whichever workflow it is, not a dispatch, since whoever dispatched one is already
     # watching it: prove's runs on a push to main, which gate no merge, name
     # the commit that broke a proof here. Release alerts however it ran: it
     # follows the queue's pushes to main, which nobody watches. So do Site
@@ -59,7 +60,7 @@ jobs:
     # and go to the queue watcher and fixer.
     if: >-
       contains(fromJSON('["failure", "timed_out", "cancelled"]'), github.event.workflow_run.conclusion) &&
-      (github.event.workflow_run.event == 'schedule' || github.event.workflow_run.event == 'push' ||
+      (contains(fromJSON('["schedule", "push", "branch_protection_rule"]'), github.event.workflow_run.event) ||
       contains(fromJSON('["Release", "Dart release", "Site deploy"]'), github.event.workflow_run.name))
     runs-on: ubuntu-latest
     timeout-minutes: 5

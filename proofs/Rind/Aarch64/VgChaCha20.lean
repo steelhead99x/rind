@@ -20,8 +20,8 @@ encryption, as `Rind.Spec` transliterates it.
 
 rind's NEON code has no proof yet, so `chacha20_apply_keystream`, at every
 length, takes its contract as the hypothesis `Neon`, which [the aarch64
-ChaCha20-Poly1305 quest](/quest/m4/verified/chacha20-poly1305-aarch64.md) is
-to prove. A request VG runs never reaches it.
+NEON ChaCha20 quest](/quest/m4/verified/chacha20-poly1305-aarch64/cipher.md)
+is to prove. A request VG runs never reaches it.
 
 Trusted: each restatement, and that each wrapper passes the routine its
 state's 768 bytes, which `Rind.Aarch64.TypesExternal` models as the state,

@@ -67,7 +67,9 @@ wipes!(
     crate::vrf::Seed,
 );
 
+impl ZeroizeOnDrop for crate::kem::Seed {}
 impl<A: crate::kem::Algorithm> ZeroizeOnDrop for crate::kem::DecapsulationKey<A> {}
+impl<A: crate::kem::Algorithm> ZeroizeOnDrop for crate::kem::DecapsulationKeyBytes<A> {}
 impl<A: crate::kem::Algorithm> ZeroizeOnDrop for crate::kem::SharedSecret<A> {}
 #[cfg(feature = "ml-dsa")]
 impl ZeroizeOnDrop for crate::ml_dsa::Seed {}

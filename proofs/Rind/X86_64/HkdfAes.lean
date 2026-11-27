@@ -47,7 +47,11 @@ theorem aes_header_key_from_spec (h : RunsAesHw) (a : high.hmac.Algorithm) (hr :
     rcases halg with ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ <;> rfl
   have hnk : nk alg ≤ 8 := by cases alg <;> decide
   have hpos := tagLen_pos a
+  -- The conversion opens one `Entry` over the expand and the keying, which
+  -- `RunsHmac` says succeeds.
+  obtain ⟨e, he⟩ := hr.1
   unfold aead.quic.HeaderProtectionKey.Insts.CoreConvertFromOkm0SharedStaticAlgorithm.from
+  rw [he, bind_ok]
   unfold aead.quic.Algorithm.key_len
   simp only [bind_ok]
   apply WP.spec_bind (Array.index_mut_SliceIndexRangeToUsizeSlice (Array.repeat 64#usize 0#u8)

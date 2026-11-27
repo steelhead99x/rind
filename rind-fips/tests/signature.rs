@@ -19,6 +19,7 @@ const RSA2048: &[u8] = include_bytes!("../../rind/src/high/rsa/rsa2048.pkcs8.der
 const RSA2048_PKCS1: &[u8] = include_bytes!("../../rind/src/high/rsa/rsa2048.der");
 const RSA2049: &[u8] = include_bytes!("../../rind/src/high/rsa/rsa2049.pkcs8.der");
 const RSA2050: &[u8] = include_bytes!("../../rind/src/high/rsa/rsa2050.pkcs8.der");
+const RSA2047: &[u8] = include_bytes!("../../rind/src/high/rsa/rsa2047.pkcs8.der");
 const RSA2047_PUBLIC: &[u8] = include_bytes!("../../rind/src/high/rsa/rsa2047.pub.der");
 const RSA3072: &[u8] = include_bytes!("../../rind/src/high/rsa/rsa3072.pkcs8.der");
 
@@ -786,13 +787,10 @@ fn rsa_moduli_fips_does_not_approve_are_refused() {
         Err(Error::KeyRejected(reason)) => reason,
         other => panic!("{other:?}"),
     });
-    // rind's reason for a modulus too small.
-    let reason =
-        rind::rsa::KeyPair::from_pkcs8(include_bytes!("../../rind/src/high/rsa/rsa2047.pkcs8.der"));
-    assert_eq!(
-        Some(refused.to_string()),
-        reason.err().map(|e| e.to_string())
-    );
+    // rind loads a 2047-bit key, and the module
+    // refuses it for the same reason.
+    assert!(rind::rsa::KeyPair::from_pkcs8(RSA2047).is_ok());
+    assert_eq!(rsa::KeyPair::from_pkcs8(RSA2047).err(), Some(refused));
 
     // An odd length rind signs with.
     assert!(rind::rsa::KeyPair::from_pkcs8(RSA2049).is_ok());

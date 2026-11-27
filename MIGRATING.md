@@ -171,7 +171,7 @@ agreement keys refuse.
 | `encapsulation_key()?`, then `EncapsulationKey::key_bytes()?` | `public_key()`, a borrowed `EncapsulationKey` built once at load, and its bytes through `AsRef<[u8]>` |
 | `EncapsulationKey::new(&ML_KEM_768, bytes)`, `encapsulate()` | `EncapsulationKey::<MlKem768>::new(bytes)`, `encapsulate()` |
 | `decapsulate(Ciphertext::from(bytes))` | `decapsulate(&Ciphertext::<MlKem768>::new(bytes)?)`, where `new` checks the length and `decapsulate` cannot fail |
-| `DecapsulationKey::new(alg, bytes)`, `DecapsulationKey::key_bytes()` | none: decapsulation keys are ephemeral |
+| `DecapsulationKey::new(alg, bytes)`, `DecapsulationKey::key_bytes()` | `DecapsulationKey::<MlKem768>::new(bytes)`, `to_bytes()`, FIPS 203's expanded form; or the 64-byte seed, `from_seed(seed)` and `to_seed()`, which aws-lc-rs lacks |
 | `algorithm()`, `Algorithm::id()`, `AlgorithmId`, `AlgorithmIdentifier` | none |
 
 ring has no `kem`.

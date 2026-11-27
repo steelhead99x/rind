@@ -1,0 +1,30 @@
+# The repository files outside site/ that the site reads, or links with an
+# anchor or line range, so an edit to one can change or break it. sh/dispatch.sh
+# runs the site's check on any diff that touches one, and scripts/check.ts fails
+# when the build, or a routed adapter's README, needs one this lacks. An extra
+# entry only costs a site check on that file's edits.
+README.md
+BENCHMARKS.md
+MIGRATING.md
+benchmarks/report.json
+admin/wordmark.svg
+admin/wordmark-light.svg
+proofs/README.md
+rind-ring/README.md
+rind-ring/Cargo.toml
+rind-aws-lc-rs/README.md
+rind-aws-lc-rs/Cargo.toml
+rind-rustls/README.md
+rind-rustls/Cargo.toml
+rind-rcgen/README.md
+rind-rcgen/Cargo.toml
+rind-jsonwebtoken/README.md
+rind-jsonwebtoken/Cargo.toml
+rind-dimpl/README.md
+rind-dimpl/Cargo.toml
+rind-str0m/README.md
+rind-str0m/Cargo.toml
+rind-object-store/README.md
+rind-object-store/Cargo.toml
+rind-openmls/README.md
+rind-openmls/Cargo.toml

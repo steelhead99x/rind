@@ -10,7 +10,8 @@
 # Usage: sh/fuzz-replay.sh ARCH TARGET CORPUS [ARGS...]
 #
 # ARCH is the target's: x86_64, aarch64, or armv7, which an arm64 runner runs
-# natively; or x86_64-sde, which runs it under Intel SDE.
+# natively; or x86_64-sde and x86_64-sde-vaes, which run it under Intel SDE,
+# each its own tier so that fuzz.yml gives each its own job.
 set -euo pipefail
 
 usage="usage: sh/fuzz-replay.sh ARCH TARGET CORPUS [ARGS...]"
@@ -39,16 +40,19 @@ case "$arch" in
         )
         ;;
     # A runner has AVX-512, VAES, and the SHA extensions or lacks them from run
-    # to run, so Diamond Rapids, which selects every path, runs them all, then
-    # VAES without AVX-512. The x86_64 replay covers the tiers below.
-    # LeakSanitizer is off under SDE: see UPSTREAM.md,
-    # "LeakSanitizer deadlocks under Intel SDE".
+    # to run, so Diamond Rapids, which selects every path, runs them all, and
+    # VAES without AVX-512 runs the next. The x86_64 replay covers the tiers
+    # below. LeakSanitizer is off under SDE: see UPSTREAM.md,
+    # "LeakSanitizer deadlocks under Intel SDE". RIND_FUZZ_SIGN_ONCE has
+    # `keys` sign once per SLH-DSA set, as a signature costs most of a minute
+    # here and the corpus holds dozens of keys.
     x86_64-sde)
-        runner=(env ASAN_OPTIONS=detect_leaks=0 sde -dmr --)
-        tiers=(
-            ""
-            "avx512f avx512bw"
-        )
+        runner=(env ASAN_OPTIONS=detect_leaks=0 RIND_FUZZ_SIGN_ONCE=1 sde -dmr --)
+        tiers=("")
+        ;;
+    x86_64-sde-vaes)
+        runner=(env ASAN_OPTIONS=detect_leaks=0 RIND_FUZZ_SIGN_ONCE=1 sde -dmr --)
+        tiers=("avx512f avx512bw")
         ;;
     aarch64)
         tiers=(
@@ -76,7 +80,7 @@ esac
 # denies one.
 if [[ $(basename "$target") == fips ]]; then
     case "$arch" in
-        x86_64 | x86_64-sde) required=" aes pclmulqdq adx movbe " ;;
+        x86_64 | x86_64-sde | x86_64-sde-vaes) required=" aes pclmulqdq adx movbe " ;;
         aarch64) required=" aes pmull sha2 " ;;
         *)
             echo "error: the FIPS module does not build for $arch" >&2

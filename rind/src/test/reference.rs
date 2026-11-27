@@ -10,8 +10,8 @@
 //! RustCrypto's `sha2`. It is slow, not constant time, and refuses nothing but what the
 //! standards refuse.
 //!
-//! `rind`'s unit tests, `tests/crosschecks.rs`, and the fuzz targets include
-//! this file, so it names nothing in any of them.
+//! `rind`'s unit tests, `tests/crosschecks_curves.rs`, and the fuzz targets
+//! include this file, so it names nothing in any of them.
 
 #![allow(dead_code, reason = "each crate that includes it uses part of it")]
 

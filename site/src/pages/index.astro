@@ -49,6 +49,7 @@ import { picker } from "../lib/routes";
 		<section>
 			<h2>{landing.candorTitle}</h2>
 			<Fragment set:html={html(landing.candor)} />
+			<nav class="picker">{landing.security.map((l) => <a href={l.href}>{l.label}</a>)}</nav>
 		</section>
 	</main>
 

@@ -73,6 +73,13 @@ export const agentAfter: Token[] = after;
 export const candorTitle = "Before you depend on it";
 export const candor = section(readme, candorTitle);
 
+// Where a security reviewer starts, and where to report a vulnerability, linked
+// under the candor section.
+export const security = [
+	{ label: "Security review (AUDIT.md)", href: ref("audit") },
+	{ label: "Report a vulnerability (SECURITY.md)", href: ref("security") },
+];
+
 export const footer = [
 	{ label: "GitHub", href: repoUrl },
 	{ label: "crates.io", href: "https://crates.io/crates/rind" },
