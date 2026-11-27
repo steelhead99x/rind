@@ -92,3 +92,11 @@ don't ask again (✅ is the chosen option):
     and a library crate reaches them through whatever application ships it.
   - A C ABI, and Go, JVM, Swift, and .NET packages: out on 2026-11-04 for
     needing OpenSSL's breadth, and nothing has changed.
+- Decided 2026-11-21 (maintainer, /quest-plan): add `no_std + alloc` to
+  `rind-rustls` and `rind-aws-lc-rs` (beside the `m0` fix for `rind-ring`),
+  close concrete parity gaps in `rind-rcgen`, `rind_cryptography`,
+  `rind-ring`, and `rind-aws-lc-rs`, add optional `rand_core` and `zeroize`
+  trait impls on `rind`, and expose ML-KEM and ML-DSA in `rind-openssl` (`m4`).
+  Considered and left out: standalone `no_std` `rustls-webpki`, `noq`, and
+  `instant-acme 0.9` adapters.
+

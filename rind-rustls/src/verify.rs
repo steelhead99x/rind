@@ -195,11 +195,15 @@ impl SignatureVerificationAlgorithm for Verify {
 
 #[cfg(test)]
 mod tests {
+    use std::vec::Vec;
+
     use rind::ecdsa::KeyPair as EcdsaKeyPair;
     use rind::ed25519::KeyPair as Ed25519KeyPair;
     use rind::rand;
     use rind::rsa::KeyPair as RsaKeyPair;
     use rustls::SignatureScheme;
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    use wasm_bindgen_test::wasm_bindgen_test as test;
 
     use super::*;
 

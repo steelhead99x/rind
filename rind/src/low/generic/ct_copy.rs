@@ -7,10 +7,12 @@ use core::hint::black_box;
 // the secret.
 
 /// Copy `if_false` into `output` if `cond` is false.
+// Indexed rather than zipped, which Aeneas cannot translate.
+#[allow(clippy::needless_range_loop)]
 pub(crate) fn ct_copy<const N: usize>(cond: bool, output: &mut [u8; N], if_false: &[u8; N]) {
     let mask = (black_box(cond as i16).wrapping_neg() >> 8) as u8;
-    for (out, ff) in output.iter_mut().zip(if_false.iter()) {
-        *out = *ff ^ (mask & (*out ^ *ff));
+    for i in 0..N {
+        output[i] = if_false[i] ^ (mask & (output[i] ^ if_false[i]));
     }
 }
 

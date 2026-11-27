@@ -275,8 +275,8 @@ proptest! {
     // this compares dalek with itself.
     #![proptest_config(ProptestConfig::with_cases(if cfg!(miri) { 4 } else { 64 }))]
 
-    /// Every operation against curve25519-dalek's. On armv7 and the portable
-    /// backend, which run dalek's, this checks only the wrapping.
+    /// Every operation against curve25519-dalek's, and on armv7 and the
+    /// portable backend, which run dalek's, against the textbook reference.
     #[test]
     fn matches_dalek(
         a in any::<[u8; 64]>(),
@@ -303,6 +303,38 @@ proptest! {
             let ours = Element::from_bytes(&encoding).map(|e| e.to_bytes());
             let theirs = CompressedRistretto(encoding).decompress().map(|e| e.compress().to_bytes());
             prop_assert_eq!(ours, theirs);
+        }
+
+        // armv7 and the portable backend run dalek, so there the
+        // independent oracle is the textbook reference.
+        #[cfg(all(
+            any(rind_backend = "arm", rind_backend = "portable"),
+            not(any(miri, target_family = "wasm"))
+        ))]
+        {
+            use crate::test::reference::{Edwards, edwards25519};
+            let reference = edwards25519();
+            let (ra, rb) = (
+                reference.ristretto_from_uniform_bytes(&a),
+                reference.ristretto_from_uniform_bytes(&b),
+            );
+            let k = reference.scalar_from_uniform_bytes(&s);
+            prop_assert_eq!(rs.to_bytes(), Edwards::scalar_bytes(&k));
+            prop_assert_eq!(pa.to_bytes(), reference.ristretto_encode(&ra));
+            prop_assert_eq!(pa.add(&pb).to_bytes(), reference.ristretto_encode(&reference.add(&ra, &rb)));
+            prop_assert_eq!(pa.mul(&rs).to_bytes(), reference.ristretto_encode(&reference.mul(&k, &ra)));
+            prop_assert_eq!(
+                Element::mul_base(&rs).to_bytes(),
+                reference.ristretto_encode(&reference.mul(&k, &reference.base()))
+            );
+            prop_assert_eq!(rs.mul(&rs).to_bytes(), Edwards::scalar_bytes(&(&k * &k % &reference.l)));
+            let inverse = k.modinv(&reference.l).map(|i| Edwards::scalar_bytes(&i));
+            prop_assert_eq!(rs.invert().map(|i| i.to_bytes()), inverse);
+            for encoding in [pa.to_bytes(), encoding] {
+                let ours = Element::from_bytes(&encoding).map(|e| e.to_bytes());
+                let theirs = reference.ristretto_decode(&encoding).map(|e| reference.ristretto_encode(&e));
+                prop_assert_eq!(ours, theirs);
+            }
         }
     }
 }

@@ -202,6 +202,250 @@ fn x25519() {
     }
 }
 
+// What ML-KEM and ML-DSA's checks need beyond the block above.
+unsafe extern "C" {
+    fn EVP_PKEY_get_octet_string_param(
+        pkey: *const EVP_PKEY,
+        name: *const c_char,
+        buf: *mut u8,
+        max: usize,
+        len: *mut usize,
+    ) -> c_int;
+    fn EVP_PKEY_encapsulate_init(ctx: *mut EVP_PKEY_CTX, params: *const OSSL_PARAM) -> c_int;
+    fn EVP_PKEY_encapsulate(
+        ctx: *mut EVP_PKEY_CTX,
+        out: *mut u8,
+        out_len: *mut usize,
+        secret: *mut u8,
+        secret_len: *mut usize,
+    ) -> c_int;
+    fn EVP_PKEY_decapsulate_init(ctx: *mut EVP_PKEY_CTX, params: *const OSSL_PARAM) -> c_int;
+    fn EVP_PKEY_decapsulate(
+        ctx: *mut EVP_PKEY_CTX,
+        secret: *mut u8,
+        secret_len: *mut usize,
+        input: *const u8,
+        input_len: usize,
+    ) -> c_int;
+}
+
+/// A key of `algorithm` generated from `seed`, which the caller marks.
+fn from_seed(ctx: *mut OSSL_LIB_CTX, algorithm: &CStr, seed: &mut [u8]) -> *mut EVP_PKEY {
+    unsafe {
+        let params = [
+            OSSL_PARAM_construct_octet_string(
+                c"seed".as_ptr(),
+                seed.as_mut_ptr().cast(),
+                seed.len(),
+            ),
+            OSSL_PARAM_construct_end(),
+        ];
+        let gen_ctx = EVP_PKEY_CTX_new_from_name(ctx, algorithm.as_ptr(), null());
+        assert_eq!(EVP_PKEY_keygen_init(gen_ctx), 1);
+        assert_eq!(EVP_PKEY_CTX_set_params(gen_ctx, params.as_ptr()), 1);
+        let mut key = null_mut();
+        assert_eq!(EVP_PKEY_generate(gen_ctx, &mut key), 1);
+        EVP_PKEY_CTX_free(gen_ctx);
+        assert_rind(EVP_PKEY_get0_provider(key));
+        key
+    }
+}
+
+/// A key of `algorithm` from its octet string parameters, which the caller
+/// marks.
+fn from_data(
+    ctx: *mut OSSL_LIB_CTX,
+    algorithm: &CStr,
+    params: &mut [(&CStr, &mut [u8])],
+) -> *mut EVP_PKEY {
+    let mut list: Vec<OSSL_PARAM> = params
+        .iter_mut()
+        .map(|(name, value)| unsafe {
+            OSSL_PARAM_construct_octet_string(name.as_ptr(), value.as_mut_ptr().cast(), value.len())
+        })
+        .collect();
+    list.push(unsafe { OSSL_PARAM_construct_end() });
+    unsafe {
+        let pctx = EVP_PKEY_CTX_new_from_name(ctx, algorithm.as_ptr(), null());
+        assert_eq!(EVP_PKEY_fromdata_init(pctx), 1);
+        let mut key = null_mut();
+        assert_eq!(
+            EVP_PKEY_fromdata(pctx, &mut key, EVP_PKEY_KEYPAIR, list.as_mut_ptr()),
+            1
+        );
+        EVP_PKEY_CTX_free(pctx);
+        assert_rind(EVP_PKEY_get0_provider(key));
+        key
+    }
+}
+
+/// The key's octet string parameter `name`, as OpenSSL hands it out.
+fn octets(key: *mut EVP_PKEY, name: &CStr) -> Vec<u8> {
+    let mut out = vec![0; 4896];
+    let mut len = 0;
+    assert_eq!(
+        unsafe {
+            EVP_PKEY_get_octet_string_param(
+                key,
+                name.as_ptr(),
+                out.as_mut_ptr(),
+                out.len(),
+                &mut len,
+            )
+        },
+        1
+    );
+    out.truncate(len);
+    out
+}
+
+/// Decapsulates `ct` with `key`, returning the shared secret, public.
+fn decapsulate(ctx: *mut OSSL_LIB_CTX, key: *mut EVP_PKEY, ct: &[u8]) -> [u8; 32] {
+    unsafe {
+        let pctx = EVP_PKEY_CTX_new_from_pkey(ctx, key, null());
+        assert_eq!(EVP_PKEY_decapsulate_init(pctx, null()), 1);
+        assert_rind(EVP_PKEY_CTX_get0_provider(pctx));
+        let mut secret = [0u8; 32];
+        let mut len = secret.len();
+        assert_eq!(
+            EVP_PKEY_decapsulate(pctx, secret.as_mut_ptr(), &mut len, ct.as_ptr(), ct.len()),
+            1
+        );
+        EVP_PKEY_CTX_free(pctx);
+        public(&secret);
+        secret
+    }
+}
+
+#[test]
+fn ml_kem() {
+    let ctx = context();
+    for (algorithm, ct_len) in [
+        (c"ML-KEM-512", 768),
+        (c"ML-KEM-768", 1088),
+        (c"ML-KEM-1024", 1568),
+    ] {
+        let mut seed = [0x42u8; 64];
+        secret(&seed);
+        let key = from_seed(ctx, algorithm, &mut seed);
+        let (mut ct, mut shared) = (vec![0u8; ct_len], [0u8; 32]);
+        unsafe {
+            let pctx = EVP_PKEY_CTX_new_from_pkey(ctx, key, null());
+            assert_eq!(EVP_PKEY_encapsulate_init(pctx, null()), 1);
+            assert_rind(EVP_PKEY_CTX_get0_provider(pctx));
+            let (mut ct_len, mut shared_len) = (ct.len(), shared.len());
+            assert_eq!(
+                EVP_PKEY_encapsulate(
+                    pctx,
+                    ct.as_mut_ptr(),
+                    &mut ct_len,
+                    shared.as_mut_ptr(),
+                    &mut shared_len
+                ),
+                1
+            );
+            EVP_PKEY_CTX_free(pctx);
+        }
+        public(&shared);
+        assert_eq!(decapsulate(ctx, key, &ct), shared);
+        // A tampered ciphertext takes the same path to its implicit secret.
+        ct[0] ^= 1;
+        assert_ne!(decapsulate(ctx, key, &ct), shared);
+        ct[0] ^= 1;
+
+        // Read back, and loaded again from the seed beside its expansion, and
+        // from the expansion alone, as OpenSSL moves a key between providers.
+        export(key);
+        let (mut seed, mut expanded) = (octets(key, c"seed"), octets(key, c"priv"));
+        secret(&seed[..]);
+        secret(&expanded[..]);
+        let loaded = [
+            from_data(
+                ctx,
+                algorithm,
+                &mut [(c"seed", &mut seed[..]), (c"priv", &mut expanded[..])],
+            ),
+            from_data(ctx, algorithm, &mut [(c"priv", &mut expanded[..])]),
+        ];
+        for loaded in loaded {
+            assert_eq!(decapsulate(ctx, loaded, &ct), shared);
+            unsafe { EVP_PKEY_free(loaded) };
+        }
+        unsafe { EVP_PKEY_free(key) };
+    }
+    unsafe { OSSL_LIB_CTX_free(ctx) };
+}
+
+#[test]
+fn ml_dsa() {
+    let ctx = context();
+    let message = b"rind as an OpenSSL provider";
+    for algorithm in [c"ML-DSA-44", c"ML-DSA-65", c"ML-DSA-87"] {
+        let mut seed = [0x5au8; 32];
+        secret(&seed);
+        let key = from_seed(ctx, algorithm, &mut seed);
+        let sign = |key| unsafe {
+            let md = EVP_MD_CTX_new();
+            let mut pctx = null_mut();
+            assert_eq!(
+                EVP_DigestSignInit_ex(md, &mut pctx, null(), ctx, null(), key, null()),
+                1
+            );
+            assert_rind(EVP_PKEY_CTX_get0_provider(pctx));
+            let mut signature = vec![0u8; 4627];
+            let mut len = signature.len();
+            assert_eq!(
+                EVP_DigestSign(
+                    md,
+                    signature.as_mut_ptr(),
+                    &mut len,
+                    message.as_ptr(),
+                    message.len()
+                ),
+                1
+            );
+            EVP_MD_CTX_free(md);
+            signature.truncate(len);
+            public(&signature[..]);
+            signature
+        };
+        let signature = sign(key);
+        unsafe {
+            let md = EVP_MD_CTX_new();
+            let mut pctx = null_mut();
+            assert_eq!(
+                EVP_DigestVerifyInit_ex(md, &mut pctx, null(), ctx, null(), key, null()),
+                1
+            );
+            assert_rind(EVP_PKEY_CTX_get0_provider(pctx));
+            assert_eq!(
+                EVP_DigestVerify(
+                    md,
+                    signature.as_ptr(),
+                    signature.len(),
+                    message.as_ptr(),
+                    message.len()
+                ),
+                1
+            );
+            EVP_MD_CTX_free(md);
+        }
+
+        // Read back, and loaded again from the seed alone, as OpenSSL moves a
+        // key between providers.
+        export(key);
+        let mut seed = octets(key, c"seed");
+        secret(&seed[..]);
+        let loaded = from_data(ctx, algorithm, &mut [(c"seed", &mut seed[..])]);
+        sign(loaded);
+        unsafe {
+            EVP_PKEY_free(loaded);
+            EVP_PKEY_free(key);
+        }
+    }
+    unsafe { OSSL_LIB_CTX_free(ctx) };
+}
+
 #[test]
 fn ed25519() {
     let ctx = context();

@@ -54,7 +54,11 @@ pub(crate) mod vg_chacha20_block;
 #[rustfmt::skip]
 pub(crate) mod vg_chacha20_init;
 #[rustfmt::skip]
+pub(crate) mod vg_chacha20_poly1305_open_neon;
+#[rustfmt::skip]
 pub(crate) mod vg_chacha20_poly1305_open_sve2;
+#[rustfmt::skip]
+pub(crate) mod vg_chacha20_poly1305_seal_neon;
 #[rustfmt::skip]
 pub(crate) mod vg_chacha20_poly1305_seal_sve2;
 #[rustfmt::skip]
@@ -179,6 +183,10 @@ pub(crate) mod vg_poly1305_blocks;
 pub(crate) mod vg_poly1305_finalize_scratch;
 #[rustfmt::skip]
 pub(crate) mod vg_poly1305_init;
+#[rustfmt::skip]
+pub(crate) mod vg_rsa_public_precompute;
+#[rustfmt::skip]
+pub(crate) mod vg_rsa_square_4_4;
 #[rustfmt::skip]
 pub(crate) mod vg_sha1_compress_sha2;
 #[rustfmt::skip]

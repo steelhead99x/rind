@@ -35,6 +35,9 @@ opaque low.aarch64.sha3_keccak_f1600.sha3_keccak_f1600
 opaque low.aarch64.sha3_keccak_f1600_alt.sha3_keccak_f1600
   : Array Std.U64 25#usize → Array Std.U64 24#usize → Result (Array Std.U64 25#usize)
 
+opaque low.aarch64.sha3_keccak_f1600_alt2.sha3_keccak_f1600
+  : Array Std.U64 25#usize → Array Std.U64 24#usize → Result (Array Std.U64 25#usize)
+
 opaque low.aarch64.sha3_keccak2_f1600.sha3_keccak2_f1600
   : Array (Array Std.U64 25#usize) 2#usize → Array Std.U64 24#usize →
     Result (Array (Array Std.U64 25#usize) 2#usize)
@@ -147,11 +150,6 @@ opaque low.aarch64.edwards25519_scalarmulbase.edwards25519_scalarmulbase
   Array Std.U64 8#usize → Array Std.U64 4#usize → Result (Array Std.U64
     8#usize)
 
-opaque low.aarch64.edwards25519_scalarmuldouble.edwards25519_scalarmuldouble
-  :
-  Array Std.U64 8#usize → Array Std.U64 4#usize → Array Std.U64 8#usize →
-    Array Std.U64 4#usize → Result (Array Std.U64 8#usize)
-
 opaque low.aarch64.bignum_madd_n25519.bignum_madd_n25519
   :
   Array Std.U64 4#usize → Array Std.U64 4#usize → Array Std.U64 4#usize →
@@ -167,6 +165,15 @@ opaque low.aarch64.bignum_neg_p25519.bignum_neg_p25519
 
 opaque low.aarch64.bignum_cmp_lt.bignum_cmp_lt
   : Slice Std.U64 → Slice Std.U64 → Result Std.U64
+
+/-! Ed25519 verification's half-size check, which no theorem covers yet:
+the multi-scalar multiplication it needs. -/
+
+opaque low.generic.edwards25519_msm.edwards25519_msm
+  :
+  Array Std.U64 12#usize → Array Std.U64 4#usize → Array (Array Std.U64
+    4#usize) 2#usize → Array (Array Std.U64 16#usize) 2#usize → Result
+    (Array Std.U64 12#usize)
 
 /-! P-256's ECDSA key generation, which the signing theorems model, and its
 PKCS#8 OID, which none states. -/
@@ -252,6 +259,9 @@ opaque low.aarch64.cpu.HaveSha3.check : Result (Option low.aarch64.cpu.HaveSha3)
 
 opaque low.aarch64.cpu.HaveSha3.check_keccak : Result (Option low.aarch64.cpu.HaveSha3)
 
+/-- Whether single-state Keccak-f runs `_alt2`, from `MIDR_EL1`. -/
+opaque low.aarch64.cpu.keccak_alt2 : Result Bool
+
 opaque low.aarch64.cpu.HaveCryptoExt.check : Result (Option low.aarch64.cpu.HaveCryptoExt)
 
 /-! SHA-1's block function, whose contract `Rind.Aarch64.ShaBlocks` states as a
@@ -324,25 +334,21 @@ opaque low.aarch64.p384_montjmixadd.p384_montjmixadd
   Array Std.U64 18#usize → Array Std.U64 18#usize → Array Std.U64 12#usize
     → Result (Array Std.U64 18#usize)
 
-/-- Whether pyca/verified-garbage's P-384 `d·G` runs on this CPU, which
-`admin/prove` leaves opaque, as it does the routines it calls: they are VG's
-assembly. -/
+/-! Whether the CPU runs pyca/verified-garbage's P-384 `d·G`, for key
+generation and ECDSA's nonces, and its ECDSA verification, which read no
+input, and its routines behind their Rust wrappers, whose contracts
+`Rind.Aarch64.VgP384` states. -/
+
 opaque low.aarch64.p384_vg.MulBase.check
   : Result (Option low.aarch64.p384_vg.MulBase)
 
-/-- pyca/verified-garbage's `d·G` for key generation and ECDSA's nonces,
-opaque as `low.aarch64.p384_vg.MulBase.check` is. -/
 opaque low.aarch64.p384_vg.MulBase.public_key
   : low.aarch64.p384_vg.MulBase → Array Std.U8 48#usize →
     Result (Option (Array Std.U8 97#usize))
 
-/-- Whether pyca/verified-garbage's P-384 ECDSA verification runs on this
-CPU, opaque as `low.aarch64.p384_vg.MulBase.check` is. -/
 opaque low.aarch64.p384_vg.Verify.check
   : Result (Option low.aarch64.p384_vg.Verify)
 
-/-- pyca/verified-garbage's P-384 ECDSA verification, opaque as
-`low.aarch64.p384_vg.MulBase.check` is. -/
 opaque low.aarch64.p384_vg.Verify.ecdsa_verify
   :
   low.aarch64.p384_vg.Verify → Array Std.U8 97#usize → Array Std.U8 48#usize →
@@ -446,8 +452,91 @@ def low.aarch64.aes_cbc.aese_chained (y b : core.core_arch.arm_shared.neon.uint8
     Result core.core_arch.arm_shared.neon.uint8x16_t :=
   core.core_arch.arm_shared.neon.generated.vaeseq_u8 y b
 
+/-! s2n-bignum's ML-KEM polynomial routines, whose contracts
+`Rind.Aarch64.MlKemRoutines` states: the NTTs, mulcache, and sampler take the
+tables the translated wrappers in `low::aarch64::mlkem` pass, and the rest
+are called directly. mlkem-native's NEON ciphertext compression follows,
+behind wrappers that take only the destination and polynomial, except
+`mlkem_compress_d5`'s, which also passes its table itself. -/
+
+opaque low.aarch64.mlkem_ntt.mlkem_ntt
+  : Array Std.I16 256#usize → Array Std.I16 80#usize → Array Std.I16 384#usize →
+    Result (Array Std.I16 256#usize)
+
+opaque low.aarch64.mlkem_intt.mlkem_intt
+  : Array Std.I16 256#usize → Array Std.I16 80#usize → Array Std.I16 384#usize →
+    Result (Array Std.I16 256#usize)
+
+opaque low.aarch64.mlkem_mulcache_compute.mlkem_mulcache_compute
+  : Array Std.I16 128#usize → Array Std.I16 256#usize → Array Std.I16 128#usize →
+    Array Std.I16 128#usize → Result (Array Std.I16 128#usize)
+
+/-- The sampler behind its wrapper, which passes rind's table, too long a
+literal for Lean to elaborate: `admin/prove` checks the table's text is
+s2n-bignum's, and that the wrapper is this one, which passes it:
+
+```rust
+pub(crate) fn mlkem_rej_uniform_vartime(r: &mut [i16; 256], input: &[u8]) -> u64 {
+    super::mlkem_rej_uniform_vartime::mlkem_rej_uniform_vartime(r, input, &MLKEM_REJ_UNIFORM_TABLE)
+}
+
+```
+-/
+opaque low.aarch64.mlkem.mlkem_rej_uniform_vartime
+  : Array Std.I16 256#usize → Slice Std.U8 → Result (Std.U64 × (Array Std.I16 256#usize))
+
+opaque low.aarch64.mlkem_basemul_k2.mlkem_basemul_k2
+  : Array Std.I16 256#usize → Array Std.I16 512#usize → Array Std.I16 512#usize →
+    Array Std.I16 256#usize → Result (Array Std.I16 256#usize)
+
+opaque low.aarch64.mlkem_basemul_k3.mlkem_basemul_k3
+  : Array Std.I16 256#usize → Array Std.I16 768#usize → Array Std.I16 768#usize →
+    Array Std.I16 384#usize → Result (Array Std.I16 256#usize)
+
+opaque low.aarch64.mlkem_basemul_k4.mlkem_basemul_k4
+  : Array Std.I16 256#usize → Array Std.I16 1024#usize → Array Std.I16 1024#usize →
+    Array Std.I16 512#usize → Result (Array Std.I16 256#usize)
+
+opaque low.aarch64.mlkem_reduce.mlkem_reduce
+  : Array Std.I16 256#usize → Result (Array Std.I16 256#usize)
+
+opaque low.aarch64.mlkem_tobytes.mlkem_tobytes
+  : Array Std.U8 384#usize → Array Std.I16 256#usize → Result (Array Std.U8 384#usize)
+
+opaque low.aarch64.mlkem_tomont.mlkem_tomont
+  : Array Std.I16 256#usize → Result (Array Std.I16 256#usize)
+
+opaque low.aarch64.mlkem.mlkem_compress_d4
+  : Array Std.U8 128#usize → Array Std.I16 256#usize → Result (Array Std.U8 128#usize)
+
+opaque low.aarch64.mlkem.mlkem_compress_d5
+  : Array Std.U8 160#usize → Array Std.I16 256#usize → Result (Array Std.U8 160#usize)
+
+opaque low.aarch64.mlkem.mlkem_compress_d10
+  : Array Std.U8 320#usize → Array Std.I16 256#usize → Result (Array Std.U8 320#usize)
+
+opaque low.aarch64.mlkem.mlkem_compress_d11
+  : Array Std.U8 352#usize → Array Std.I16 256#usize → Result (Array Std.U8 352#usize)
+
 /-! pyca/verified-garbage's ML-KEM-768 routines, behind their Rust wrappers,
-whose contracts `Rind.Aarch64.VgMlKem` states. -/
+whose contracts `Rind.Aarch64.VgMlKem` states, and the check for the SHA-3
+instructions encapsulation needs. -/
+
+opaque low.aarch64.mlkem768_vg.Encaps.check : Result (Option low.aarch64.mlkem768_vg.Encaps)
+
+/-- VG's key generation and decapsulation, which never run on aarch64: the
+token proving they do is an empty enum, which `check` never returns. -/
+def low.generic.mlkem768_vg.KeyPair.check : Result (Option low.generic.mlkem768_vg.KeyPair) :=
+  Std.Result.ok none
+
+def low.generic.mlkem768_vg.KeyPair.keygen (k : low.generic.mlkem768_vg.KeyPair)
+    (_ : Array Std.U8 64#usize) : Result (Option (Array Std.U8 2400#usize)) :=
+  nomatch k
+
+def low.generic.mlkem768_vg.KeyPair.decaps (k : low.generic.mlkem768_vg.KeyPair)
+    (_ : Array Std.U8 2400#usize) (_ : Array Std.U8 1088#usize) :
+    Result (Option (Array Std.U8 32#usize)) :=
+  nomatch k
 
 opaque low.aarch64.mlkem768_vg.Encaps.check_ek
   : low.aarch64.mlkem768_vg.Encaps → Array Std.U8 1184#usize → Result Bool
@@ -464,9 +553,10 @@ iteration count is the `u32` its `NonZeroU32` holds. -/
 opaque low.aarch64.pbkdf2_vg.Pbkdf2.derive
   : low.aarch64.pbkdf2_vg.Pbkdf2 → Slice Std.U8 → Slice Std.U8 → Std.U32 → Slice Std.U8 →
     Result (Slice Std.U8)
-/-! ChaCha20-Poly1305's one pass: pyca/verified-garbage's SVE2 routines,
-behind one wrapper each, whose contracts `Rind.Aarch64.VgChaCha20Poly1305`
-restates, and aws-lc's NEON routines, which no proof covers yet. -/
+/-! ChaCha20-Poly1305's one pass: pyca/verified-garbage's SVE2 and NEON
+routines, behind one wrapper each, whose SVE2 contracts
+`Rind.Aarch64.VgChaCha20Poly1305` restates, and aws-lc's NEON routines, which
+no proof covers yet. -/
 
 opaque low.aarch64.cpu.HaveSve2.check : Result (Option low.aarch64.cpu.HaveSve2)
 
@@ -484,7 +574,36 @@ opaque low.aarch64.chacha20poly1305.seal_neon
 
 opaque low.aarch64.chacha20poly1305.open_neon
   : Std.Array Std.U8 32#usize → Std.Array Std.U8 12#usize → Slice Std.U8 → Slice Std.U8 →
+    Std.Array Std.U8 16#usize → Result (Bool × (Slice Std.U8))
+
+opaque low.aarch64.chacha20poly1305.seal_aws_lc
+  : Std.Array Std.U8 32#usize → Std.Array Std.U8 12#usize → Slice Std.U8 → Slice Std.U8 →
     Result ((Std.Array Std.U8 16#usize) × (Slice Std.U8))
+
+opaque low.aarch64.chacha20poly1305.open_aws_lc
+  : Std.Array Std.U8 32#usize → Std.Array Std.U8 12#usize → Slice Std.U8 → Slice Std.U8 →
+    Result ((Std.Array Std.U8 16#usize) × (Slice Std.U8))
+
+/-! `cipher::ChaCha20`'s routines: pyca/verified-garbage's, behind one
+wrapper each, whose contracts `Rind.Aarch64.VgChaCha20` restates, and rind's
+NEON code, whose contract it takes as the hypothesis `Neon`. -/
+
+opaque low.aarch64.chacha20.VgState.uninit : Result low.aarch64.chacha20.VgState
+
+opaque low.aarch64.chacha20.VgState.init
+  : low.aarch64.chacha20.VgState → Std.Array Std.U32 8#usize → Std.Array Std.U32 4#usize →
+    Result low.aarch64.chacha20.VgState
+
+opaque low.aarch64.chacha20.VgState.apply_neon
+  : low.aarch64.chacha20.VgState → Slice Std.U8 →
+    Result (Std.U32 × low.aarch64.chacha20.VgState × (Slice Std.U8))
+
+opaque low.aarch64.chacha20.VgState.apply_sve2
+  : low.aarch64.chacha20.VgState → low.aarch64.cpu.HaveSve2 → Slice Std.U8 →
+    Result (Std.U32 × low.aarch64.chacha20.VgState × (Slice Std.U8))
+
+opaque low.aarch64.chacha20.cipher_neon
+  : Std.Array Std.U32 8#usize → Std.Array Std.U32 4#usize → Slice Std.U8 → Result (Slice Std.U8)
 
 /-! MD5, which no proof covers. -/
 
@@ -558,12 +677,88 @@ opaque low.aarch64.cpu.ct_compare_16
 
 opaque low.aarch64.cpu.ct_compare_bytes : Slice Std.U8 → Slice Std.U8 → Result Std.U8
 
-/-! AES-GCM's stitched kernels and the separate passes around them, which no
-proof covers yet, and aws-lc's NEON GHASH table. -/
 
-opaque low.aarch64.aes_gcm.cipher
-  : Bool → low.aarch64.aes.AesKey → low.aarch64.ghash.Ghash → Array Std.U8 16#usize → Slice Std.U8 →
-    Slice Std.U8 → Result (low.aarch64.ghash.Ghash × Slice Std.U8)
+/-! Field and curve routines `low::aarch64::wide_mux` also exports. The
+translation leaves `crate::low` opaque, so each is named here for the abbrev
+below. The type is the one Aeneas gives the Rust signature: a `&mut` buffer
+is an argument and the result, and a returned word is the result's first
+component. -/
+
+opaque low.aarch64.bignum_invsqrt_p25519.bignum_invsqrt_p25519
+  :
+  Array Std.U64 4#usize → Array Std.U64 4#usize → Result (Std.U64 × (Array
+    Std.U64 4#usize))
+
+opaque low.aarch64.bignum_mul_p25519.bignum_mul_p25519
+  :
+  Array Std.U64 4#usize → Array Std.U64 4#usize → Array Std.U64 4#usize →
+    Result (Array Std.U64 4#usize)
+
+opaque low.aarch64.bignum_sqr_p25519.bignum_sqr_p25519
+  : Array Std.U64 4#usize → Array Std.U64 4#usize → Result (Array Std.U64 4#usize)
+
+opaque low.aarch64.edwards25519_epadd.edwards25519_epadd
+  :
+  Array Std.U64 16#usize → Array Std.U64 16#usize → Array Std.U64 16#usize →
+    Result (Array Std.U64 16#usize)
+
+opaque low.aarch64.edwards25519_epdouble.edwards25519_epdouble
+  :
+  Array Std.U64 16#usize → Array Std.U64 12#usize → Result (Array Std.U64
+    16#usize)
+
+opaque low.aarch64.edwards25519_pdouble.edwards25519_pdouble
+  :
+  Array Std.U64 12#usize → Array Std.U64 12#usize → Result (Array Std.U64
+    12#usize)
+
+opaque low.aarch64.p521_jadd.p521_jadd
+  :
+  Array Std.U64 27#usize → Array Std.U64 27#usize → Array Std.U64 27#usize →
+    Result (Array Std.U64 27#usize)
+
+opaque low.aarch64.p521_jdouble.p521_jdouble
+  :
+  Array Std.U64 27#usize → Array Std.U64 27#usize → Result (Array Std.U64
+    27#usize)
+
+opaque low.aarch64.p521_jmixadd.p521_jmixadd
+  :
+  Array Std.U64 27#usize → Array Std.U64 27#usize → Array Std.U64 18#usize →
+    Result (Array Std.U64 27#usize)
+
+opaque low.aarch64.p521_jscalarmul.p521_jscalarmul
+  :
+  Array Std.U64 27#usize → Array Std.U64 9#usize → Array Std.U64 27#usize →
+    Result (Array Std.U64 27#usize)
+
+/-! `low::aarch64::wide_mux` picks each routine's `_alt` or narrow schedule by
+the core's multiplier, which the translation cannot see. This model is the
+wide schedule: each mux name is the `_alt` function. The narrow schedules are
+outside this claim. -/
+
+abbrev low.aarch64.wide_mux.bignum_invsqrt_p25519 := @low.aarch64.bignum_invsqrt_p25519.bignum_invsqrt_p25519
+abbrev low.aarch64.wide_mux.bignum_madd_n25519 := @low.aarch64.bignum_madd_n25519.bignum_madd_n25519
+abbrev low.aarch64.wide_mux.bignum_mul_p25519 := @low.aarch64.bignum_mul_p25519.bignum_mul_p25519
+abbrev low.aarch64.wide_mux.bignum_sqr_p25519 := @low.aarch64.bignum_sqr_p25519.bignum_sqr_p25519
+abbrev low.aarch64.wide_mux.curve25519_x25519 := @low.aarch64.curve25519_x25519.curve25519_x25519
+abbrev low.aarch64.wide_mux.curve25519_x25519base := @low.aarch64.curve25519_x25519base.curve25519_x25519base
+abbrev low.aarch64.wide_mux.edwards25519_decode := @low.aarch64.edwards25519_decode.edwards25519_decode
+abbrev low.aarch64.wide_mux.edwards25519_epadd := @low.aarch64.edwards25519_epadd.edwards25519_epadd
+abbrev low.aarch64.wide_mux.edwards25519_epdouble := @low.aarch64.edwards25519_epdouble.edwards25519_epdouble
+abbrev low.aarch64.wide_mux.edwards25519_pdouble := @low.aarch64.edwards25519_pdouble.edwards25519_pdouble
+abbrev low.aarch64.wide_mux.edwards25519_scalarmulbase := @low.aarch64.edwards25519_scalarmulbase.edwards25519_scalarmulbase
+abbrev low.aarch64.wide_mux.p256_montjmixadd := @low.aarch64.p256_montjmixadd.p256_montjmixadd
+abbrev low.aarch64.wide_mux.p256_scalarmul := @low.aarch64.p256_scalarmul.p256_scalarmul
+abbrev low.aarch64.wide_mux.p256_scalarmulbase := @low.aarch64.p256_scalarmulbase.p256_scalarmulbase
+abbrev low.aarch64.wide_mux.p384_montjmixadd := @low.aarch64.p384_montjmixadd.p384_montjmixadd
+abbrev low.aarch64.wide_mux.p384_montjscalarmul := @low.aarch64.p384_montjscalarmul.p384_montjscalarmul
+abbrev low.aarch64.wide_mux.p521_jadd := @low.aarch64.p521_jadd.p521_jadd
+abbrev low.aarch64.wide_mux.p521_jdouble := @low.aarch64.p521_jdouble.p521_jdouble
+abbrev low.aarch64.wide_mux.p521_jmixadd := @low.aarch64.p521_jmixadd.p521_jmixadd
+abbrev low.aarch64.wide_mux.p521_jscalarmul := @low.aarch64.p521_jscalarmul.p521_jscalarmul
+
+/-! aws-lc's NEON GHASH table. -/
 
 opaque low.aarch64.ghash_neon_armv8.NeonTable.new
   : Array Std.U8 16#usize → Result low.aarch64.ghash_neon_armv8.NeonTable

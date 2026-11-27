@@ -21,11 +21,10 @@
 //! proves the kernel against RFC 8439 over Lean models of its intrinsics,
 //! which `admin/prove` tests against the CPU, and
 //! `proofs/Rind/X86_64/ChaCha20Cipher.lean` proves the bytes `cipher` writes
-//! at every length the block counter covers on those and HACL*'s rounds, taking the aws-lc SSSE3
-//! routine's contract as the hypothesis `Ssse3`. That assembly is not formally
-//! verified: its correctness rests on rind's tests of it against HACL*'s
-//! rounds at each length from 129 to 1700 bytes, and on its use in OpenSSL,
-//! BoringSSL, and aws-lc.
+//! at every length the block counter covers on those, HACL*'s rounds, and the
+//! aws-lc SSSE3 routine, whose object code
+//! `proofs/hol-light/x86_64/chacha20_ctr32_ssse3_4x.ml` proves against RFC
+//! 8439 in HOL Light, of the `x86_64-unknown-linux-gnu` build, in place on a nonempty buffer.
 
 use core::arch::x86_64::*;
 use core::mem::MaybeUninit;
@@ -209,8 +208,12 @@ unsafe fn cipher_ssse3_4x(
     // SAFETY: `buffer` is `len` readable and writable bytes, at least one as
     // the caller ensures, which the routine allows to alias exactly, and
     // `key` and `counter_nonce` are 8 and 4 words. The token proves the
-    // `ssse3` cpu feature. Its 32-bit counter wraps unspecified past 2^32
-    // blocks, which callers rule out.
+    // `ssse3` cpu feature. Its 32-bit counter adds the block index mod 2^32,
+    // so it wraps once the counter plus the blocks passes 2^32, which can be
+    // before 2^32 blocks. Callers rule that out with `check_counter`, apart
+    // from the nonempty check above. That bounds the blocks that supply
+    // output, not the ones computed: the routine's fourth lane may wrap past
+    // the last block, whose keystream nothing reads.
     unsafe {
         asm_call!(unsafe extern "sysv64" chacha20_ctr32_ssse3_4x(ptr, ptr, len, key, counter_nonce))
     }
@@ -255,7 +258,21 @@ struct Words([u32; 32]);
 #[repr(C, align(64))]
 struct Bytes([u8; 49]);
 
+// On Linux both tables share one section, so the routine's object, as
+// `admin/prove` extracts it for its HOL Light proof, reads one read-only
+// section, the one s2n-bignum's ELF reader takes.
+// SAFETY: the attribute only names the output section, which the linker
+// places with the other `.rodata.*` sections. The bytes are these tables.
+#[cfg_attr(
+    target_os = "linux",
+    unsafe(link_section = ".rodata.rind_chacha20_ssse3_4x")
+)]
 static ZERO: Words = Words(include!("aws_lc/chacha-x86_64.zero.rs"));
+// SAFETY: as `ZERO`'s.
+#[cfg_attr(
+    target_os = "linux",
+    unsafe(link_section = ".rodata.rind_chacha20_ssse3_4x")
+)]
 static ROT16: Bytes = Bytes(include!("aws_lc/chacha-x86_64.rot16.rs"));
 
 // The routine takes the System V ABI on every OS, since its text is aws-lc's

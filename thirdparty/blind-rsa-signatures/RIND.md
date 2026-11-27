@@ -2,14 +2,16 @@
 
 This directory is rind's fork of
 [blind-rsa-signatures](https://github.com/jedisct1/rust-blind-rsa-signatures),
-the RFC 9474 implementation `rind/tests/crosschecks.rs` checks rind's blind RSA
-against. The workspace's `[patch.crates-io]` builds it in place of crates.io's
+the RFC 9474 implementation `rind/tests/crosschecks_rsa.rs` checks rind's
+blind RSA against. The workspace's `[patch.crates-io]` builds it in place of crates.io's
 0.18.0, which does not build on `rsa` 0.10.0.
 
 Base: `45d0abfa829c3623389daae30bc35e9b2f3b550c`
 
-Every file here is upstream's at that commit, its tag `0.18.0`, unchanged, except this one and
-those listed under "Changed files", so each change can be offered upstream.
+Every file here is upstream's at that commit, its tag `0.18.0`, unchanged, except this one,
+`.rustfmt.toml`, and those listed under "Changed files", so each change can be
+offered upstream. `.rustfmt.toml` keeps `cargo fmt --all`, which formats the
+members' path dependencies too, from restyling upstream's code.
 
 ## Moving the base
 
@@ -32,7 +34,11 @@ Each bullet names one file.
   `p_params`/`q_params`, still `None`, so a derived key signs without CRT as
   before. Also `rsa`'s renamed `PrivateKey`/`PublicKey` and crypto-bigint's
   `bit_width`, for their deprecated names.
-- `src/lib.rs`: the same renames.
+- `src/lib.rs`: the same renames, and `to_bytes_be_padded` trims a
+  `BoxedUint`'s leading zero bytes to the length it is asked for. Upstream
+  returned all of them, so a modulus whose size is not a multiple of 64 bits,
+  such as 2056 bits, blinded, signed, and finalized to values longer than the
+  modulus, which RFC 9474 and rind refuse.
 - `tests/vectors.rs`: decodes the vectors' byte strings as hex instead of
   through a `BoxedUint`, which since crypto-bigint 0.7.11 turns an empty
   string, such as the PSSZERO salt, into eight zero bytes and fails the RFC

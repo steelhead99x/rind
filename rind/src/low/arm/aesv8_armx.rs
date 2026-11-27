@@ -110,12 +110,15 @@ impl AesHwKey {
     /// The counter blocks are `ivec`, then `ivec` with its last four bytes,
     /// a big-endian counter, incremented with 32-bit wrapping.
     pub(crate) fn ctr32(&self, ivec: &[u8; 16], inout: &mut [[u8; 16]]) {
-        // SAFETY: `inout` is `inout.len()` readable and writable blocks, which
+        // One pointer for input and output, so neither reborrow invalidates
+        // the other.
+        let io = inout.as_mut_ptr().cast::<u8>();
+        // SAFETY: `io` is `inout.len()` readable and writable blocks, which
         // aws-lc allows to alias. Only a `HaveCryptoExt` token builds `self`.
         unsafe {
             asm_call!(unsafe extern "C" aes_hw_ctr32_encrypt_blocks(
-                inout.as_ptr().cast(),
-                inout.as_mut_ptr().cast(),
+                io,
+                io,
                 inout.len(),
                 self,
                 ivec,
@@ -165,11 +168,10 @@ impl AesHwDecKey {
 
     /// Decrypts one block in place.
     pub(crate) fn decrypt_block(&self, inout: &mut [u8; 16]) {
-        // SAFETY: `inout` is one readable and writable block, which aws-lc
+        let io = inout.as_mut_ptr();
+        // SAFETY: `io` is one readable and writable block, which aws-lc
         // allows to alias. Only a `HaveCryptoExt` token builds `self`.
-        unsafe {
-            asm_call!(unsafe extern "C" aes_hw_decrypt(inout.as_ptr(), inout.as_mut_ptr(), self))
-        }
+        unsafe { asm_call!(unsafe extern "C" aes_hw_decrypt(io, io, self)) }
     }
 
     /// Decrypts whole blocks in place in CBC mode, the first chained from
@@ -189,13 +191,14 @@ impl AesHwDecKey {
 unsafe fn cbc(blocks: &mut [[u8; 16]], key: *const u8, iv: &[u8; 16], enc: i32) {
     // The routine leaves the next IV here; CBC callers here start afresh.
     let mut ivec = *iv;
-    // SAFETY: `blocks` is `16 * blocks.len()` readable and writable bytes,
+    let io = blocks.as_mut_ptr().cast::<u8>();
+    // SAFETY: `io` is `16 * blocks.len()` readable and writable bytes,
     // which aws-lc allows to alias, and the caller vouches for `key`. The
     // routine returns at once for fewer than 16 bytes.
     unsafe {
         asm_call!(unsafe extern "C" aes_hw_cbc_encrypt(
-            blocks.as_ptr().cast(),
-            blocks.as_mut_ptr().cast(),
+            io,
+            io,
             16 * blocks.len(),
             key,
             &mut ivec,

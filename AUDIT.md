@@ -7,7 +7,8 @@ the checks are thinnest. Each section is a map: it says what holds and
 links the document with the detail.
 
 Report a vulnerability as [SECURITY.md](SECURITY.md) says, never in an issue
-or pull request.
+or pull request. What the formal proofs trust, on one page, is [the TCB & Axiom
+Ledger](proofs/README.md#tcb--axiom-ledger).
 
 ## Scope
 
@@ -32,6 +33,9 @@ CPU tier, and [PLATFORMS.md](PLATFORMS.md) which CPU features each tier
 needs. A backend requires only what its target enables at compile time, so
 rind runs on every CPU its target does, and each other feature only picks a
 faster path.
+
+[AUDIT-SCOPE.md](AUDIT-SCOPE.md) scopes a phased third-party audit of this
+code.
 
 ## Threat model
 
@@ -64,10 +68,19 @@ Outside the model:
 - Speculative execution beyond what the constant-time rule gives: only
   secret-independent control flow and addresses stand against it. The one
   speculation barrier rind adds follows setting DIT on Apple's platforms, as
-  Apple asks, so no instruction after it runs speculatively without DIT.
+  Apple asks, so no instruction after it runs speculatively without DIT. On
+  other aarch64 cores, where rind sets DIT too, it adds none and relies on
+  the Arm architecture (Arm ARM DDI 0487 M.d, C5.1.3.3 and B1.5.6),
+  untested on hardware. The FIPS module's code keeps Apple's barrier on
+  every target, its glibc Linux cores included. `admin/dit-disasm` checks
+  the emitted sequence per target; benchmarks/apple-dit-barrier.md collects
+  the sources.
 - A compromised toolchain, build machine, or dependency. `cargo deny`
-  checks crates against RustSec's advisories, licenses, and sources; nothing
-  checks a release's build is reproducible.
+  checks crates against RustSec's advisories, licenses, and sources, and
+  `cargo vet` holds the published crate's dependencies to audits; a release's
+  prebuilt libraries and wheels are built twice and must match, but on one
+  runner with one toolchain, which a compromise would reach both times
+  (see [SECURITY.md](SECURITY.md#supply-chain)).
 - A compiler or flags other than CI's: constant time is checked on the
   builds CI makes for Linux, so a user's own toolchain, a non-Linux target,
   or a wasm engine may emit code no check has seen.
@@ -105,6 +118,7 @@ The pins, as `admin/audit` renders them from the files that hold them, so
 | OpenSSL | `2f4e3a5fec05` | `admin/import-openssl` | copied code |
 | HACL\* | `f557259007db` | `admin/import-hacl` | Vale's x86_64 AES-GCM |
 | pyca/verified-garbage | `0aa40d6c21fd` | `admin/import-vg` | copied code and the Lean ISA models its proofs rest on |
+| mlkem-native | `58721ebde4b6` | `admin/import-mlkem-native` | aarch64 ML-KEM ciphertext compression, and the HOL Light proofs of it and of x86_64's |
 | s2n-bignum | `3f01260ff1bd` | `thirdparty/s2n-bignum/RIND.md` | assembly and the HOL Light proofs of it |
 | aws-lc | `c21d40da4bbe` | `admin/prove-bytes` | the routines aws-lc-verification's SHA-384/512 proofs are about |
 | ACVP-Server | `975de31eb83d` | `admin/sync-acvp` | test vectors |
@@ -126,7 +140,6 @@ The pins, as `admin/audit` renders them from the files that hold them, so
 | libcrux-hacl-rs | 0.0.6 | `Cargo.lock` | the runtime of the HACL\* ChaCha20 rounds rind copied |
 | libcrux-macros | 0.0.4 | `Cargo.lock` | the same |
 | libcrux-poly1305 | 0.0.7 | `Cargo.lock` | HACL\*'s Poly1305, on 32-bit portable targets |
-| libcrux-sha2 | 0.0.9 | `Cargo.lock` | HACL\*'s SHA-2 block functions, on the portable backend |
 <!-- admin/audit pins: end -->
 
 Code taken once, with no importer to rerun, carries no machine-readable pin:
@@ -141,9 +154,9 @@ only for crates.
 How copied code is regenerated and checked:
 
 - `admin/import-aws-lc`, `admin/import-boringssl`, `admin/import-openssl`,
-  `admin/import-hacl`, and `admin/import-vg` fetch their upstream at its
-  `REV` and write its assembly under `rind/src/low` as Rust naked functions
-  or `global_asm!`.
+  `admin/import-hacl`, `admin/import-vg`, and `admin/import-mlkem-native`
+  fetch their upstream at its `REV` and write its assembly under
+  `rind/src/low` as Rust naked functions or `global_asm!`.
 - `admin/parse-asm` transliterates s2n-bignum's assembly, from rind's fork
   in `thirdparty/s2n-bignum`, into Rust `asm!`. The fork's
   [RIND.md](thirdparty/s2n-bignum/RIND.md) lists every file that differs
@@ -170,17 +183,19 @@ establishes, and what it does not:
   [TESTING.md's tier table](TESTING.md#tiers) names. They check only the
   cases published, and each tier only where CI runs it, natively, under
   Intel SDE, or under qemu.
-- **Differential tests** against aws-lc-rs, or a Rust crate where aws-lc-rs
-  lacks the primitive, on the same tiers. Where rind runs aws-lc's own
-  routine, as for ChaCha20-Poly1305 on x86_64 and aarch64 or RSA's RSAZ
-  exponentiation, the test compares that routine with itself, so it
-  checks rind's glue around it, and only vectors check the routine. wasm runs
-  none, since aws-lc does not build for it.
+- **Differential tests** against aws-lc-rs, where it has the primitive, and
+  against the independent oracle [TESTING.md's primitives
+  table](TESTING.md#primitives) names, a Rust implementation that shares no
+  code with the path rind runs, on the same tiers. Where rind runs aws-lc's
+  own routine, as for ChaCha20-Poly1305 on x86_64 and aarch64 or RSA's RSAZ
+  exponentiation, aws-lc-rs compares that routine with itself, so it checks
+  rind's glue around it, and the oracle checks the routine. wasm runs none,
+  since aws-lc does not build for it.
 - **Fuzz targets**, weekly for twenty minutes each against aws-lc-rs,
   replayed on every tier and against the portable backend. The ECVRF, OPRF,
   and blind RSA targets compare rind with itself, so they find panics and
   hangs, not wrong answers. Coverage does not measure what fuzzing reaches.
-  [OSS-Fuzz](/quest/m4/oss-fuzz.md) is not running yet.
+  [OSS-Fuzz](/quest/m2/confidence/oss-fuzz.md) is not running yet.
 - **ctgrind** (`admin/ctgrind`, weekly, in release and debug builds, armv7's
   included) runs the unit tests under valgrind, failing on a branch or address
   that depends on a marked secret. It sees only the paths the tests take,
@@ -199,18 +214,19 @@ establishes, and what it does not:
 - **`admin/ct-vartime`**, in `just ci`, scans the release builds of every
   Linux target rind builds for divisions and floating point, against an
   allowlist of public operands. On the x86_64 backend it also fails on a
-  multiply whose timing depends on MXCSR that an export reaches outside
-  `rind::low::Mcdt`, the mitigation; on 32-bit x86 and the portable backend,
+  multiply whose timing depends on MXCSR that an export reaches on a path
+  that has not entered `rind::low::Mcdt`, the mitigation, or has left it; on
+  32-bit x86 and the portable backend,
   that every call enters it is unchecked. It takes the integer multiplier to
   run in constant time, and on x86 it refuses `vsha512*`.
 - **s2n-bignum's `_SAFE` theorems** prove the routines
   [ALGORITHMS.md](ALGORITHMS.md#s2n-bignums-constant-time-theorems) lists
   constant time for every input, variable-time instructions included, but
   not the Rust that calls them.
-- **Timing tests** (`admin/timing`, weekly on GitHub's runners) run dudect
-  over each secret the API lets them set, and the Marvin toolkit against
-  RSA-OAEP decryption. They are statistical, on shared hardware, and cannot
-  time key generation or encapsulation.
+- **The Marvin timing test** (`admin/timing`, weekly on GitHub's runners) runs
+  the Marvin toolkit against RSA-OAEP decryption. It is statistical, on shared
+  hardware, and times nothing else: rind runs no dudect, whose noise on
+  shared runners outweighed what the constant-time checks above leave.
 - **Proofs**: s2n-bignum's, HACL\*'s, Vale's, fiat-crypto's, and
   aws-lc-verification's published proofs, and rind's own HOL Light and Lean
   proofs in [`proofs/`](proofs/README.md), checked nightly by `admin/prove`.
@@ -223,29 +239,38 @@ establishes, and what it does not:
   compiled from HACL\*'s verified C by an unverified step.
 - **Zeroing**: `rind/tests/zeroing.rs` drops each value holding a secret and
   fails on any byte left nonzero, and `rind/tests/heap_scratch.rs` fails on a
-  freed heap block that differs between two keys. Both see only the value
+  freed heap block that differs between two keys, or, for a randomized
+  protocol step, that holds one of its secrets. Both see only the value
   itself and the heap blocks it frees.
 - **Bounds**: `low::guard_pages` runs each kernel that takes a caller's
   slice against `PROT_NONE` pages, at lengths up to 1100 bytes and, for the
   AEADs, 2000 to 2600, on Unix. It is the only bounds check on the assembly
-  valgrind cannot run, since AddressSanitizer, nightly in `asan`, does not
+  valgrind cannot run, since AddressSanitizer, nightly in `sanitizers`, does not
   instrument assembly.
 - **Calling convention**: `low::abi` calls every assembly routine through a
   trampoline that fails when a register its ABI preserves, the stack
   pointer, or x86_64's direction flag comes back changed, and
   `admin/prove-bytes clobbers` checks each s2n-bignum block declares what
   its proof says it may change.
-- **Miri**, weekly, runs the portable backend's unit tests on x86_64 and
-  big-endian s390x, failing on undefined behavior. It runs no assembly, and
-  skips the slow tests `sh/miri.sh` lists.
+- **Miri**, weekly, runs the portable backend's unit tests on x86_64,
+  big-endian s390x, and 32-bit i686, failing on undefined behavior. It runs
+  no assembly, and skips the slow tests `sh/miri.sh` lists.
+- **Sanitizers**, nightly in `sanitizers`: AddressSanitizer and
+  ThreadSanitizer run the native backends' tests and rind-fips's module,
+  failing on an out-of-bounds or freed access or a data race in Rust code.
 - **Mutation testing** (`admin/mutants`) fails on a mutant of rind's Rust
   that no test catches. Weekly, on native x86_64 and aarch64 Linux runners
   and the portable backend, it mutates only the Rust that changed in the
   last week; a campaign over the whole workspace runs only when dispatched.
   It skips generated assembly, which proofs and differential tests own.
-- **Coverage** (`admin/coverage`, nightly on Linux and macOS) reports the
-  published functions no test runs, under `cargo test`, `dart test`, and
-  pyrind's tests, on each runner's tiers, but not under fuzzing.
+- **Coverage** (`admin/coverage`, nightly on x86_64 and aarch64 Linux,
+  macOS, the portable backend, and armv7) fails on a published function no
+  test runs on any tier, under `cargo test`, `dart test`, and pyrind's tests,
+  unless `admin/coverage.allow` says why, and on a file whose uncovered
+  regions, branches, or monomorphization gaps rise past
+  `admin/coverage.baseline`, which leaves out the regions and branches of
+  rind's backends (`rind/src/low/`), as they vary with the runner's CPU;
+  fuzzing doesn't count.
 - **Adapter fuzz targets**, for rind-rustls, rind-dimpl, and rind-str0m,
   feed a hostile peer's bytes and whole handshakes edited in flight, against
   upstream's aws-lc-rs provider, and rind-openssl's calls its C ABI as
@@ -255,8 +280,8 @@ establishes, and what it does not:
 ## Where the checks are thinnest
 
 Built from TESTING.md's tables, ALGORITHMS.md's ✓ marks,
-`benchmarks/verified.toml`, and the nightly coverage run of 2026-11-13 at
-`67a476ff`. Every primitive has a differential test and vectors, but for
+`benchmarks/verified.toml`, and the nightly coverage gate's
+`admin/coverage.allow`. Every primitive has a differential test and vectors, but for
 random bytes, which have neither, and the constant-time compare, which has
 no published vectors. These are the places where a check is weak, and what
 still reaches each.
@@ -267,7 +292,8 @@ Hand-written arithmetic no proof covers, by where it came from:
   ✓, such as ChaCha20-Poly1305 on x86_64 and aarch64, RSAZ, Montgomery
   multiplication off ADX, the AVX2 and SHA512-instruction SHA-2, VAES
   AES-GCM, and all of armv7's. Vectors and fuzzing reach each on its tier;
-  the differential test, which runs aws-lc's code too, checks only the glue.
+  aws-lc-rs, which runs that code too, checks only the glue, and the
+  independent oracle checks the routine.
 - **Graviola's** code under AES, GHASH, SHA-256, HMAC, P-256, P-384,
   ML-KEM, and RSA, wherever ALGORITHMS.md names it. Vectors, differential
   tests independent of it, and fuzzing reach each.
@@ -284,8 +310,8 @@ Hand-written arithmetic no proof covers, by where it came from:
   against the AVX2 and Neon routines.
 - **curve25519-dalek's serial backend**, X25519, Ed25519, and ristretto255
   on armv7 and the portable backend. There ristretto255's differential test
-  compares dalek with itself, so only RFC 9496's and RFC 9497's vectors
-  check it.
+  compares dalek with itself, so beside RFC 9496's and RFC 9497's vectors
+  only the textbook reference in `rind/src/test/reference.rs` checks it.
 - **x86_64 P-256's mixed addition on macOS**, aws-lc's: rind's HOL Light
   proofs check the Linux build's object, and Apple's text can place the
   routines' helpers at other offsets.
@@ -307,36 +333,44 @@ Constant time is checked by no tool on:
   which ctgrind, `admin/ct-sde`, and `admin/ct-qemu` cover for one or two
   secrets.
 
-Functions no test runs, from the nightly coverage report: in the `rind`
-crate, 80 of 2,889 on Linux and 76 of 2,589 on macOS, most in `high/`
-(`hpke.rs`, `spake2plus.rs`, `blind_rsa.rs`, `oprf.rs`, `vrf.rs`, and
-`signature.rs`); and in the adapters and bindings, 127 in rind-aws-lc-rs, 33
-in rind-ring, 23 in rind-python, and 12 or fewer in each of the rest.
+Functions no test runs: the nightly `coverage` workflow fails on a
+published function that no tier runs, unless `admin/coverage.allow` gives
+a reason. It allows the unpublished rind-fips and rind-openssl and rind's
+FIPS code, which only rind-fips runs; the decryption keys' wipes that drop
+glue never reaches; error arms for failures no test can cause; and pyrind's
+and rind-dart's functions their 0.4 reshapes rewrite, which
 [Every published function runs under a test](/quest/m2/confidence/uncovered-functions.md)
-closes them. The report's "Measure coverage" step lists each file.
+then tests.
 
 ## `unsafe`
 
-`unsafe` appears only in `low`, the FIPS build's DRBG handle, the bindings,
-rind-openssl, and test code. Every block in `rind`, rind-dart, and
-rind-openssl carries a `SAFETY:` comment, which clippy's
+`unsafe` appears only in `low`, the FIPS build's DRBG handle, rind-aws-lc-rs's
+KEM keys, the bindings, rind-openssl, and test code. Every block in `rind`,
+rind-dart, and rind-openssl carries a `SAFETY:` comment, which clippy's
 `undocumented_unsafe_blocks` lint enforces in CI.
-Counted outside comments and literals by `admin/audit unsafe` at `2abc90e9`:
+CI's `admin/audit check` fails when `unsafe` (outside comments and literals)
+appears in an area the table does not name, or an area it names holds none.
+`admin/audit unsafe` prints each area's current count; the table leaves the
+counts out, since nearly every change to `low` moves them:
 
-| Area | `unsafe` | What it is | What justifies it |
-|---|---|---|---|
-| `rind/src/low/x86_64` | 453 | `asm!`, naked functions, and intrinsics | [`rind::doc::inline_assembly_safety`](rind/src/low/inline_assembly_safety.rs), with the calling-convention, bounds, and `admin/prove bytes` checks above |
-| `rind/src/low/aarch64` | 304 | the same | the same |
-| `rind/src/low/arm` | 89 | `global_asm!` and the calls into it | the same |
-| `rind/src/low/generic` | 22 | SSE2 intrinsics in `aes_nohw`, `ReuseCache`'s one-time initialization, the volatile wipe, a cast between same-layout arrays, and MD5's empty `asm!` barrier | each block's `SAFETY:` comment; Miri checks `ReuseCache` and the wipe |
-| `rind/src/low/portable` | 3 | volatile writes and reads for the wipe and the constant-time compare | the same |
-| other `rind/src/low` files | 89 | test harnesses (`abi`, `guard_pages`, `ct_binsec`, `tests`, `vartime_planted`), the `asm_call!` macro, and `Mcdt`'s MXCSR loads and `cpuid` | test code, but for the macro and `Mcdt`, which `SAFETY:` comments and `admin/ct-vartime` cover |
-| `rind/src/mid` | 2 | a test's call into aws-lc | test code |
-| `rind/src` | 10 | the FIPS build's DRBG handle, its test's `fork`, and a test helper | `SAFETY:` comments |
-| `rind-dart` | 235 | the C ABI Dart's FFI calls | `SAFETY:` comments, `dart test`, and ctgrind over its exports |
-| `rind-python` | 6 | Python's buffer protocol | `SAFETY:` comments |
-| `rind-openssl` | 245 | the C ABI OpenSSL's core calls, and the `OSSL_PARAM` arrays it passes | `SAFETY:` comments, `fuzz::openssl`, and OpenSSL's own tests with it loaded |
-| `rind-fips` | 608 | the unpublished FIPS module's C ABI | out of scope until published |
+<!-- admin/audit unsafe: begin -->
+| Area | What it is | What justifies it |
+|---|---|---|
+| `rind/src/low/x86_64` | `asm!`, naked functions, and intrinsics | [`rind::doc::inline_assembly_safety`](rind/src/low/inline_assembly_safety.rs), with the calling-convention, bounds, and `admin/prove bytes` checks above |
+| `rind/src/low/aarch64` | the same | the same |
+| `rind/src/low/arm` | `global_asm!` and the calls into it | the same |
+| `rind/src/low/generic` | SSE2 intrinsics in `aes_nohw`, Argon2's memory of blocks set one at a time, `ReuseCache`'s one-time initialization, the volatile wipe, a cast between same-layout arrays, the link section that puts SHA-256's constants in ESP-IDF's internal RAM, and MD5's empty `asm!` barrier | each block's `SAFETY:` comment; Miri checks `ReuseCache` and the wipe |
+| `rind/src/low/portable` | volatile writes and reads for the wipe and the constant-time compare, and Xtensa `asm!` in SHA-256 for ESP-IDF | the same |
+| other `rind/src/low` files | test harnesses (`abi`, `guard_pages`, `ct_binsec`, `vartime_planted`), the `asm_call!` macro, and `Mcdt`'s MXCSR loads and `cpuid` | test code, but for the macro and `Mcdt`, which `SAFETY:` comments and `admin/ct-vartime` cover |
+| `rind/src/mid` | a test's call into aws-lc | test code |
+| `rind/src/fips_rng.rs` | the FIPS build's DRBG handle and its test's `fork` | `SAFETY:` comments |
+| `rind/src/test.rs` | a test helper | `SAFETY:` comments |
+| `rind-aws-lc-rs/src` | `Send` and `Sync` for the KEM keys, bounded as aws-lc-rs bounds them | `SAFETY:` comments, and a compile-time check that what the keys hold is `Send` and `Sync` |
+| `rind-dart` | the C ABI Dart's FFI calls | `SAFETY:` comments, `dart test`, and ctgrind over its exports |
+| `rind-python` | Python's buffer protocol | `SAFETY:` comments |
+| `rind-openssl` | the C ABI OpenSSL's core calls, and the `OSSL_PARAM` arrays it passes | `SAFETY:` comments, `fuzz::openssl`, and OpenSSL's own tests with it loaded |
+| `rind-fips` | the unpublished FIPS module's C ABI | out of scope until published |
+<!-- admin/audit unsafe: end -->
 
-The rest, in `rind/tests`, rind-rcgen's tests, the fuzz targets, `admin`,
-and the unpublished bench, timing, and cpuid crates, is test code or tooling.
+The rest, in each crate's `tests`, the fuzz targets, `admin`, and the
+unpublished ACVP, bench, timing, and cpuid crates, is test code or tooling.

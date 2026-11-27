@@ -40,6 +40,8 @@ mod unit {
     mod error;
     mod hkdf;
     mod hmac;
+    #[cfg(feature = "ring-io")]
+    mod io;
     mod iv;
     mod kem;
     mod key_wrap;

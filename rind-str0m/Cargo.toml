@@ -18,7 +18,7 @@ module = ""
 [dependencies]
 dimpl = { version = "0.9", default-features = false }
 rcgen = { version = "0.14", default-features = false }
-rind = { version = "0.3.2", path = "../rind" }
+rind = { version = "0.3.2", path = "../rind", default-features = false }
 rind-dimpl = { version = "0.9.4", path = "../rind-dimpl" }
 rind-rcgen = { version = "0.14.3", path = "../rind-rcgen" }
 # Its default features compile aws-lc-rs.

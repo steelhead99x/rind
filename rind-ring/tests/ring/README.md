@@ -6,9 +6,8 @@ run against rind-ring renamed to `ring`. They keep ring's licenses: see
 `LICENSE`. They are excluded from the published crate.
 
 `test.rs` is ring's `src/testutil.rs` test harness, without its fixed
-random sources and with its failure logging always on, plus the part of
-ring's `io::der` the RSA tests read their vectors with; rind-ring offers
-neither. `ecdsa_sign_*_tests.txt` and
+random sources and with its failure logging always on, which rind-ring
+does not offer. `ecdsa_sign_*_tests.txt` and
 `signature_rsa_example_private_key.der` come from ring's `src/`.
 
 Changes to what a test checks are marked `rind-ring:` where they are made:

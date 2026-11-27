@@ -309,7 +309,8 @@ theorem expand_key128_mode_spec (h : RunsAesHw) (key : Slice U8) (hk : key.lengt
       k128.round_keys.val = keyToRoundKeys .AES_128 (seqNat8ToSeqNat32LE (bvs key.val)) ∧
       k128.rounds = 9#u32 ⦄ := by
   obtain ⟨-, ⟨hw, hhw⟩, ⟨ss, hss⟩⟩ := h
-  unfold mid.aes.expand_key low.x86_64.aes.AesKey.new low.x86_64.aes.AesKey128.new
+  rw [expand_key_16_eq key hk]
+  unfold mid.aes.expand_copy low.x86_64.aes.AesKey.new low.x86_64.aes.AesKey128.new
   step*
   have hl : copy_key1.len.val = 16 := by rw [Slice.len_val, copy_key1_post]; exact hk
   have hl' : copy_key1.len = 16#usize := by scalar_tac
@@ -327,7 +328,8 @@ theorem expand_key256_mode_spec (h : RunsAesHw) (key : Slice U8) (hk : key.lengt
       k256.round_keys.val = keyToRoundKeys .AES_256 (seqNat8ToSeqNat32LE (bvs key.val)) ∧
       k256.rounds = 13#u32 ⦄ := by
   obtain ⟨-, ⟨hw, hhw⟩, ⟨ss, hss⟩⟩ := h
-  unfold mid.aes.expand_key low.x86_64.aes.AesKey.new low.x86_64.aes.AesKey256.new
+  rw [expand_key_32_eq key hk]
+  unfold mid.aes.expand_copy low.x86_64.aes.AesKey.new low.x86_64.aes.AesKey256.new
   step*
   have hl : copy_key1.len.val = 32 := by rw [Slice.len_val, copy_key1_post]; exact hk
   have hl' : copy_key1.len = 32#usize := by scalar_tac
@@ -345,7 +347,8 @@ theorem expand_key192_mode_spec (h : RunsAesHw) (key : Slice U8) (hk : key.lengt
       k192.round_keys.val = keyToRoundKeys .AES_192 (seqNat8ToSeqNat32LE (bvs key.val)) ∧
       k192.rounds = 11#u32 ⦄ := by
   obtain ⟨-, ⟨hw, hhw⟩, ⟨ss, hss⟩⟩ := h
-  unfold mid.aes.expand_key low.x86_64.aes.AesKey.new low.x86_64.aes.AesKey192.new
+  rw [expand_key_24_eq key hk]
+  unfold mid.aes.expand_copy low.x86_64.aes.AesKey.new low.x86_64.aes.AesKey192.new
   step*
   have hl : copy_key1.len.val = 24 := by rw [Slice.len_val, copy_key1_post]; exact hk
   have hl' : copy_key1.len = 24#usize := by scalar_tac

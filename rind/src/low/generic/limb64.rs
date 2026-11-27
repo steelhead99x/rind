@@ -16,6 +16,10 @@ use fiat_crypto::{
 type Limb = u64;
 /// Twice a limb, which holds a product of two and two more limbs.
 type Wide = u128;
+/// A limb, signed, as `safegcd` takes its values.
+type Signed = i64;
+/// Twice a signed limb.
+type SignedWide = i128;
 
 /// `x`'s limbs, which are its words, so `_buf` goes unused.
 fn limbs<'a, const N: usize>(x: &'a [u64], _buf: &'a mut [Limb; N]) -> &'a [Limb] {
@@ -68,3 +72,11 @@ mod p384_mul;
     reason = "shared with `limb32`, whose limbs are narrower than a word"
 )]
 pub(crate) mod p521;
+#[path = "safegcd.rs"]
+#[allow(
+    clippy::duplicate_mod,
+    clippy::useless_conversion,
+    trivial_numeric_casts,
+    reason = "shared with `limb32`, whose limbs are narrower than a word"
+)]
+pub(crate) mod safegcd;
