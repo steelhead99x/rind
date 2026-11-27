@@ -146,15 +146,18 @@ final class BenchView extends LinearLayout {
 
         // Run status card.
         statusCard = Theme.card(host);
-        statusTitle = Theme.text(host, "Loading tests…", Theme.Type.TITLE_MEDIUM, Theme.onSurface);
+        statusTitle = Theme.text(host, "Loading tests…", Theme.Type.TITLE_MEDIUM, Theme.primary);
+        statusTitle.setTypeface(Typeface.create("sans-serif-condensed", Typeface.BOLD));
         statusTitle.setAccessibilityLiveRegion(ACCESSIBILITY_LIVE_REGION_POLITE);
         statusLbl = Theme.text(host, "", Theme.Type.BODY_MEDIUM, Theme.onSurfaceVariant);
         statusLbl.setVisibility(GONE);
         progress = Theme.progress(host);
         progress.setVisibility(GONE);
         progress.setContentDescription("Run progress");
-        resultsTeaser = Theme.text(host, "", Theme.Type.BODY_SMALL, Theme.onSurface);
+        resultsTeaser = Theme.text(host, "", Theme.Type.BODY_SMALL, Theme.onPrimaryContainer);
         resultsTeaser.setTypeface(Typeface.MONOSPACE);
+        resultsTeaser.setBackground(Theme.shape(Theme.primaryContainer, Theme.dp(host, 6)));
+        resultsTeaser.setPadding(s2, s2, s2, s2);
         resultsTeaser.setVisibility(GONE);
         resultsBtn = Theme.button(host, "View results", Theme.Btn.TONAL, null);
         resultsBtn.setOnClickListener(v -> openResults());
@@ -1011,7 +1014,22 @@ final class BenchView extends LinearLayout {
 
     void openDetails() {
         String col = (colHost == null || colHost.isEmpty()) ? "None" : (colHost + ":" + colPort + " (" + colHow + ")");
-        Sheet.show(host, "Details", Sheet.body(host, detailsText + "\nCollector: " + col, true));
+        LinearLayout panel = new LinearLayout(host);
+        panel.setOrientation(VERTICAL);
+        LinearLayout publisher = new LinearLayout(host);
+        publisher.setGravity(Gravity.CENTER_VERTICAL);
+        int inset = Theme.dpi(host, 8);
+        ImageView mark = Theme.brandImage(host, "kixel_mark");
+        LayoutParams logo = new LayoutParams(Theme.dpi(host, 30), Theme.dpi(host, 30));
+        logo.setMarginEnd(inset);
+        publisher.addView(mark, logo);
+        publisher.addView(Theme.text(host, "Kixel AI", Theme.Type.TITLE_SMALL, Theme.onSurface));
+        LayoutParams publisherSize = new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT);
+        publisherSize.setMarginStart(Theme.dpi(host, 24));
+        publisherSize.bottomMargin = inset;
+        panel.addView(publisher, publisherSize);
+        panel.addView(Sheet.body(host, detailsText + "\nCollector: " + col, true));
+        Sheet.show(host, "Details", panel);
     }
 
     private void openResults() {

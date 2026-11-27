@@ -30,10 +30,8 @@ import android.widget.Switch;
 import android.widget.TextView;
 
 /**
- * Material 3 tokens built on platform widgets (this build has no AndroidX).
- * Colour follows the system: dynamic colour on Android 12+, a fixed green
- * scheme before that, light or dark from the system setting. Type uses the
- * M3 scale in sp with no cap, so it follows font size up to 200%.
+ * Instrument-panel colours on platform widgets, with day and night palettes.
+ * The type scale uses sp so labels and readouts follow the system font size.
  */
 final class Theme {
     // Colour roles, set by init().
@@ -47,79 +45,40 @@ final class Theme {
     static void init(Context c) {
         dark = (c.getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK)
                 == Configuration.UI_MODE_NIGHT_YES;
-        if (Build.VERSION.SDK_INT >= 31) dynamic(c);
-        else fallback();
+        instrumentColors();
         error = dark ? 0xFFFFB4AB : 0xFFBA1A1A;
         errorContainer = dark ? 0xFF93000A : 0xFFFFDAD6;
         onErrorContainer = dark ? 0xFFFFDAD6 : 0xFF410002;
     }
 
-    private static void dynamic(Context c) {
-        // Same tone mapping as Material's dynamic colour (accent1 = primary, accent2 = secondary, neutral = surfaces).
-        if (!dark) {
-            primary = col(c, android.R.color.system_accent1_600);
-            onPrimary = col(c, android.R.color.system_accent1_0);
-            primaryContainer = col(c, android.R.color.system_accent1_100);
-            onPrimaryContainer = col(c, android.R.color.system_accent1_900);
-            secondaryContainer = col(c, android.R.color.system_accent2_100);
-            onSecondaryContainer = col(c, android.R.color.system_accent2_900);
-            surface = col(c, android.R.color.system_neutral1_10);
-            surfaceContainerLow = mix(col(c, android.R.color.system_neutral1_10), col(c, android.R.color.system_neutral1_50), 0.6f);
-            surfaceContainer = col(c, android.R.color.system_neutral1_50);
-            surfaceContainerHigh = mix(col(c, android.R.color.system_neutral1_50), col(c, android.R.color.system_neutral1_100), 0.5f);
-            surfaceContainerHighest = col(c, android.R.color.system_neutral1_100);
-            onSurface = col(c, android.R.color.system_neutral1_900);
-            onSurfaceVariant = col(c, android.R.color.system_neutral2_700);
-            outline = col(c, android.R.color.system_neutral2_500);
-            outlineVariant = col(c, android.R.color.system_neutral2_200);
+    /** Rind green identifies controls. Kixel graphite and amber frame the timing display. */
+    private static void instrumentColors() {
+        if (dark) {
+            primary = 0xFFA1C702; onPrimary = 0xFF192400;
+            primaryContainer = 0xFF35270E; onPrimaryContainer = 0xFFFFB020;
+            secondaryContainer = 0xFF2B3613; onSecondaryContainer = 0xFFDAEE9A;
+            surface = 0xFF07090D; surfaceContainerLow = 0xFF0D1118; surfaceContainer = 0xFF121820;
+            surfaceContainerHigh = 0xFF1B2430; surfaceContainerHighest = 0xFF253140;
+            onSurface = 0xFFE7ECF2; onSurfaceVariant = 0xFFB5C0CE;
+            outline = 0xFF8B96A5; outlineVariant = 0xFF2A3340;
         } else {
-            primary = col(c, android.R.color.system_accent1_200);
-            onPrimary = col(c, android.R.color.system_accent1_800);
-            primaryContainer = col(c, android.R.color.system_accent1_700);
-            onPrimaryContainer = col(c, android.R.color.system_accent1_100);
-            secondaryContainer = col(c, android.R.color.system_accent2_700);
-            onSecondaryContainer = col(c, android.R.color.system_accent2_100);
-            int n900 = col(c, android.R.color.system_neutral1_900), n800 = col(c, android.R.color.system_neutral1_800);
-            surface = mix(n900, Color.BLACK, 0.25f);
-            surfaceContainerLow = n900;
-            surfaceContainer = mix(n900, n800, 0.25f);
-            surfaceContainerHigh = mix(n900, n800, 0.6f);
-            surfaceContainerHighest = n800;
-            onSurface = col(c, android.R.color.system_neutral1_100);
-            onSurfaceVariant = col(c, android.R.color.system_neutral2_200);
-            outline = col(c, android.R.color.system_neutral2_400);
-            outlineVariant = col(c, android.R.color.system_neutral2_700);
+            primary = 0xFF4D6500; onPrimary = 0xFFFFFFFF;
+            primaryContainer = 0xFFFBEBCB; onPrimaryContainer = 0xFF704400;
+            secondaryContainer = 0xFFDFE9BE; onSecondaryContainer = 0xFF334700;
+            surface = 0xFFF5F6F8; surfaceContainerLow = 0xFFFCFDFE; surfaceContainer = 0xFFEBEEF2;
+            surfaceContainerHigh = 0xFFE1E6ED; surfaceContainerHighest = 0xFFD7DEE7;
+            onSurface = 0xFF161C24; onSurfaceVariant = 0xFF425064;
+            outline = 0xFF566579; outlineVariant = 0xFF9FAFC1;
         }
     }
 
-    /** Material 3 scheme from a green seed (close to the rind "peel" brand colour). */
-    private static void fallback() {
-        if (!dark) {
-            primary = 0xFF4C662B; onPrimary = 0xFFFFFFFF;
-            primaryContainer = 0xFFCDEDA3; onPrimaryContainer = 0xFF354E16;
-            secondaryContainer = 0xFFDCE7C8; onSecondaryContainer = 0xFF404A33;
-            surface = 0xFFF9FAEF; surfaceContainerLow = 0xFFF3F4E9; surfaceContainer = 0xFFEEEFE3;
-            surfaceContainerHigh = 0xFFE8E9DE; surfaceContainerHighest = 0xFFE2E3D8;
-            onSurface = 0xFF1A1C16; onSurfaceVariant = 0xFF44483D;
-            outline = 0xFF75796C; outlineVariant = 0xFFC5C8BA;
-        } else {
-            primary = 0xFFB1D18A; onPrimary = 0xFF1F3701;
-            primaryContainer = 0xFF354E16; onPrimaryContainer = 0xFFCDEDA3;
-            secondaryContainer = 0xFF404A33; onSecondaryContainer = 0xFFDCE7C8;
-            surface = 0xFF12140E; surfaceContainerLow = 0xFF1A1C16; surfaceContainer = 0xFF1E201A;
-            surfaceContainerHigh = 0xFF282B24; surfaceContainerHighest = 0xFF33362E;
-            onSurface = 0xFFE2E3D8; onSurfaceVariant = 0xFFC5C8BA;
-            outline = 0xFF8F9285; outlineVariant = 0xFF44483D;
-        }
-    }
-
-    private static int col(Context c, int id) { return c.getColor(id); }
-
-    static int mix(int a, int b, float t) {
-        return Color.argb(255,
-                Math.round(Color.red(a) + (Color.red(b) - Color.red(a)) * t),
-                Math.round(Color.green(a) + (Color.green(b) - Color.green(a)) * t),
-                Math.round(Color.blue(a) + (Color.blue(b) - Color.blue(a)) * t));
+    /** Brand art retains its original colors. */
+    static ImageView brandImage(Context c, String name) {
+        ImageView image = new ImageView(c);
+        image.setImageResource(c.getResources().getIdentifier(name, "drawable", c.getPackageName()));
+        image.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        image.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        return image;
     }
 
     static int alpha(int color, float a) { return (color & 0x00FFFFFF) | (Math.round(a * 255) << 24); }
@@ -261,7 +220,7 @@ final class Theme {
         }
     }
 
-    // ---- Buttons. 48dp tall (40dp visual + touch), fully rounded, sentence case.
+    // ---- Buttons. 48dp tall (40dp visual + touch), compact corners, sentence case.
     enum Btn { FILLED, TONAL, OUTLINED, TEXT }
 
     static Button button(Context c, String title, Btn kind, String iconName) {
@@ -282,7 +241,7 @@ final class Theme {
 
     static void styleButton(Button b, Btn kind, String iconName) {  // b must come from button()
         Context c = b.getContext();
-        float r = dp(c, 24);
+        float r = dp(c, 10);
         int fg, bg;
         switch (kind) {
             case FILLED: fg = onPrimary; bg = primary; break;
@@ -334,7 +293,7 @@ final class Theme {
     static void selectSegment(Button b, boolean selected, boolean enabled) {
         Context c = b.getContext();
         int[] ic = (int[]) b.getTag();
-        float r = dp(c, 20);
+        float r = dp(c, 10);
         float[] radii = ic[0] == 0 ? new float[]{r, r, 0, 0, 0, 0, r, r}
                 : ic[0] == ic[1] - 1 ? new float[]{0, 0, r, r, r, r, 0, 0} : new float[8];
         GradientDrawable g = new GradientDrawable();
@@ -538,12 +497,14 @@ final class Theme {
         return t;
     }
 
-    /** Filled card: surface container, 12dp corners, no border, no shadow. */
+    /** Instrument panel with a thin outline and compact corners. */
     static LinearLayout card(Context c) {
         LinearLayout l = new LinearLayout(c);
         l.setOrientation(LinearLayout.VERTICAL);
         l.setPadding(dpi(c, S4), dpi(c, S4), dpi(c, S4), dpi(c, S4));
-        l.setBackground(shape(surfaceContainer, dp(c, 12)));
+        GradientDrawable panel = shape(surfaceContainer, dp(c, 8));
+        panel.setStroke(Math.max(1, dpi(c, 1)), outlineVariant);
+        l.setBackground(panel);
         return l;
     }
 

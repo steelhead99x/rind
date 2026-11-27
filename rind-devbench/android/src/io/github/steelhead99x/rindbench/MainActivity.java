@@ -24,7 +24,7 @@ import android.widget.TextView;
 public class MainActivity extends Activity {
     static final int WIDE_DP = 600;
     private static final String[] TAB_NAMES = {"Bench", "Learn", "Contender"};
-    private static final String[] TAB_ICONS = {"ic_speed", "ic_help", "ic_groups"};
+    private static final String[] TAB_ICONS = {"ic_attitude", "ic_help", "ic_groups"};
 
     private LinearLayout root, appBar, column, navBar, rail;
     private FrameLayout content;
@@ -79,7 +79,7 @@ public class MainActivity extends Activity {
         rail = new LinearLayout(this);
         rail.setOrientation(LinearLayout.VERTICAL);
         rail.setGravity(Gravity.CENTER_HORIZONTAL);
-        rail.setBackgroundColor(Theme.surface);
+        rail.setBackgroundColor(Theme.surfaceContainerLow);
         for (int i = 0; i < 3; i++) {
             barItems[i] = new NavItem(i, false);
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1);
@@ -101,8 +101,14 @@ public class MainActivity extends Activity {
         h.setGravity(Gravity.CENTER_VERTICAL);
         h.setBackgroundColor(Theme.surface);
         h.setMinimumHeight(Theme.dpi(this, 64));
+        ImageView mark = Theme.brandImage(this, "rindlogo");
+        LinearLayout.LayoutParams markSize = new LinearLayout.LayoutParams(
+                Theme.dpi(this, 40), Theme.dpi(this, 40));
+        markSize.setMarginEnd(Theme.dpi(this, 12));
+        h.addView(mark, markSize);
         TextView title = Theme.heading(this, "rind-bench", Theme.Type.TITLE_LARGE, Theme.onSurface);
         title.setSingleLine(false);
+        title.setTypeface(android.graphics.Typeface.create("sans-serif-condensed", android.graphics.Typeface.BOLD));
         LinearLayout.LayoutParams tl = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1);
         tl.topMargin = tl.bottomMargin = Theme.dpi(this, 8);
         h.addView(title, tl);
@@ -151,7 +157,7 @@ public class MainActivity extends Activity {
         }
 
         void setSelected(boolean on) {
-            pill.setBackground(on ? Theme.shape(Theme.secondaryContainer, Theme.dp(MainActivity.this, 16)) : null);
+            pill.setBackground(on ? Theme.shape(Theme.secondaryContainer, Theme.dp(MainActivity.this, 8)) : null);
             icon.setImageDrawable(Theme.icon(MainActivity.this, TAB_ICONS[index],
                     on ? Theme.onSecondaryContainer : Theme.onSurfaceVariant));
             label.setTextColor(on ? Theme.onSurface : Theme.onSurfaceVariant);
