@@ -89,6 +89,8 @@ final class BenchView extends LinearLayout {
      * a list that failed in part) still reaches the library's own check.
      */
     private List<String> launchLibs, launchSecs;
+    /** The pending launch left out `host`, so its autostart probes the collector afresh (a blank one keeps it). */
+    private boolean launchNoHost;
     /** Whether the Bench tab is the one shown, as MainActivity's tab selection sets it. */
     private boolean tabShown = true;
     /** Set once the list of tests has loaded, so a launch before then waits for it. */
@@ -453,6 +455,7 @@ final class BenchView extends LinearLayout {
         countsChanged();
         agreeChanged();
         JSONObject st = nativeStatus();
+        reportStarted(st);
         // The launches that came while the list loaded, over the first launch's selection, before
         // anything can start a run from it; none changes the selection of a run that's going.
         if (!st.optBoolean("running"))
@@ -546,15 +549,17 @@ final class BenchView extends LinearLayout {
             return;
         }
         final List<String> libs = launchLibs, secs = launchSecs;
+        final boolean noHost = launchNoHost;
         autostart = new Runnable() {
             private boolean probed;
 
             @Override public void run() {
                 // A launch without `host` probes the collector afresh, as it may have changed since the
-                // last probe (as `adb reverse` turned on after a run over Wi-Fi), USB first.
+                // last probe (as `adb reverse` turned on after a run over Wi-Fi), USB first. A blank `host`
+                // keeps the collector as it is (README), so it doesn't.
                 if (!probed) {
                     probed = true;
-                    if (runnerHost == null) findCollector();
+                    if (noHost) findCollector();
                 }
                 // Until the collector probe answers, the run's collector isn't known: wait for it, still queued.
                 if (probing) { ui.postDelayed(this, 250); return; }
@@ -801,6 +806,7 @@ final class BenchView extends LinearLayout {
 
     /** Keeps a runner launch's `libraries` and `sections` extras for its autostart, as named. */
     private void setLaunchNames(Intent it) {
+        launchNoHost = !it.hasExtra("host");
         launchLibs = it.hasExtra("libraries") ? new ArrayList<>(csv(it.getStringExtra("libraries"))) : null;
         launchSecs = it.hasExtra("sections") ? new ArrayList<>(csv(it.getStringExtra("sections"))) : null;
     }
@@ -862,7 +868,10 @@ final class BenchView extends LinearLayout {
                 return;
             }
             // What the run takes, for a device runner checking a launch's selection without a person:
-            //   RINDBENCH_RUN {"started":true,"preset":"quick","libraries":[...],"sections":[...],"host":...,"port":...}
+            //   RINDBENCH_RUN {"started":true,"preset":"quick","libraries":[...],"sections":[...],
+            //                  "sections_missing":[...],"host":...,"port":...}
+            // logged once the library has picked the run's rows (reportStarted), so `sections` are the groups
+            // that run and `sections_missing` the ones named that had no row.
             JSONObject run = new JSONObject();
             run.put("started", true);
             run.put("preset", full ? "full" : "quick");
@@ -870,7 +879,8 @@ final class BenchView extends LinearLayout {
             run.put("sections", cfg.get("sections"));
             run.put("host", colHost);
             run.put("port", colPort);
-            android.util.Log.i("RindBench", "RINDBENCH_RUN " + run);
+            startLine = run;
+            startNo = nativeStatus().optLong("acked_start", -1);
         } catch (Exception e) {
             setStatus("Could not start", Status.ERROR);
             setBody(String.valueOf(e));
@@ -986,10 +996,36 @@ final class BenchView extends LinearLayout {
         return t >= android.os.PowerManager.THERMAL_STATUS_SEVERE;
     }
 
+    /** The started line of this process's last start, until the library picks its rows; and that start's number. */
+    private static JSONObject startLine;
+    private static long startNo;
+
+    /**
+     * Logs the last start's RINDBENCH_RUN started line once its status shows the rows picked, with the
+     * groups that run; a start refused once listed, or ended without picking rows, logs it as asked,
+     * before its refusal line.
+     */
+    private static void reportStarted(JSONObject s) {
+        if (startLine == null) return;
+        try {
+            if (s.optLong("run_start", -2) == startNo) {
+                startLine.put("sections", s.optJSONArray("sections_run") != null ? s.optJSONArray("sections_run") : new JSONArray());
+                startLine.put("sections_missing", s.optJSONArray("sections_missing") != null ? s.optJSONArray("sections_missing") : new JSONArray());
+            } else if (!(lateRefusal(s) && s.optLong("refused_start") == startNo)
+                    // A start that ended without picking rows, as a panic on its thread, still logs it.
+                    && (s.optBoolean("running") || s.optLong("acked_start", -2) != startNo)) {
+                return;
+            }
+            android.util.Log.i("RindBench", "RINDBENCH_RUN " + startLine);
+        } catch (Exception ignored) {}
+        startLine = null;
+    }
+
     private void poll() {
         if (!running) return;
         try {
             JSONObject s = new JSONObject(Native.status());
+            reportStarted(s);
             boolean still = s.optBoolean("running");
             running = still;
             int done = s.optInt("done"), total = Math.max(1, s.optInt("total"));
