@@ -56,14 +56,16 @@ static BOOL ArgOn(NSString *k) {
   NSString *v = Arg(k).lowercaseString;
   return [v isEqual:@"yes"] || [v isEqual:@"true"] || [v isEqual:@"1"];
 }
-static NSSet<NSString *> *ArgList(NSString *k) {
-  NSMutableSet *out = [NSMutableSet new];
+// A comma-separated argument's names, in order and without repeats.
+static NSArray<NSString *> *ArgNames(NSString *k) {
+  NSMutableOrderedSet *out = [NSMutableOrderedSet new];
   for (NSString *p in [Arg(k) componentsSeparatedByString:@","]) {
     NSString *t = [p stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
     if (t.length) [out addObject:t];
   }
-  return out;
+  return out.array;
 }
+static NSSet<NSString *> *ArgList(NSString *k) { return [NSSet setWithArray:ArgNames(k)]; }
 
 #define RGB(r, g, b) [UIColor colorWithRed:(r) / 255.0 green:(g) / 255.0 blue:(b) / 255.0 alpha:1]
 #define C_BG RGB(13, 15, 20)
@@ -395,7 +397,9 @@ static void SetTitle(UIButton *b, NSString *t) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
       if (!self->autostartQueued) return;  // a run started by hand while it waited took its place
       self->autostartQueued = NO;
-      self->agree.on = YES; [self agreeChanged]; [self startTapped];
+      // The launch's own -libraries and -sections go to the native start as given, so a name the picker
+      // lacks (as after a list that failed in part) still reaches the library's own check.
+      self->agree.on = YES; [self agreeChanged]; [self startWithLibs:ArgNames(@"libraries") secs:ArgNames(@"sections")];
     });
   }
 }
@@ -498,12 +502,18 @@ static void SetTitle(UIButton *b, NSString *t) {
   [self setPicking:YES]; [self agreeChanged]; [self ready]; [self findCollector];
 }
 
-- (void)startTapped {
+- (void)startTapped { [self startWithLibs:nil secs:nil]; }
+
+// Starts a run of the picker's selection, or, for an autostart, of the names its launch gave (an empty
+// or nil list keeps the picker's).
+- (void)startWithLibs:(NSArray<NSString *> *)wantLibs secs:(NSArray<NSString *> *)wantSecs {
   if (!agree.on || !catalog) return;
   NSMutableArray *libs = [NSMutableArray new], *secs = [NSMutableArray new];
   for (NSString *k in libChips) if (libChips[k].selected) [libs addObject:k];
   for (NSString *k in secChips) if (secChips[k].selected) [secs addObject:k];
   if (moreChip.selected) [secs addObjectsFromArray:moreSections];
+  if (wantLibs.count) libs = [wantLibs mutableCopy];
+  if (wantSecs.count) secs = [wantSecs mutableCopy];
   if (!libs.count || !secs.count) { statusLbl.text = @"Pick at least one library and one operation"; return; }
   BOOL full = preset.selectedSegmentIndex == 1;
   NSString *docs = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;

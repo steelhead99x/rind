@@ -83,6 +83,12 @@ final class BenchView extends LinearLayout {
     private Runnable autostart;
     /** A runner launch with `autostart` not yet scheduled: each fresh launch sets it, and scheduling consumes it. */
     private boolean launchPending;
+    /**
+     * The pending launch's `libraries` and `sections` extras as it named them, null for one it doesn't
+     * name: its autostart passes them to the native start unchanged, so a name the picker lacks (as after
+     * a list that failed in part) still reaches the library's own check.
+     */
+    private List<String> launchLibs, launchSecs;
     /** Whether the Bench tab is the one shown, as MainActivity's tab selection sets it. */
     private boolean tabShown = true;
     /** Set once the list of tests has loaded, so a launch before then waits for it. */
@@ -106,6 +112,7 @@ final class BenchView extends LinearLayout {
         this.restored = restored;
         // A restored activity gets its old intent again: only a fresh launch asks for a run.
         launchPending = Collector.RUNNER && !restored && intent != null && intent.getBooleanExtra("autostart", false);
+        if (launchPending) setLaunchNames(intent);
         setBackgroundColor(Theme.surface);
         setContentDescription("Bench page");
         int s2 = Theme.dpi(host, 8), s4 = Theme.dpi(host, 16);
@@ -492,6 +499,7 @@ final class BenchView extends LinearLayout {
             // An earlier launch still waiting or queued is replaced: it gets its own outcome first.
             dropLaunch("a later launch replaced it");
             launchPending = true;
+            setLaunchNames(it);
             if (loadedOnce) scheduleAutostart();
         }
     }
@@ -537,8 +545,17 @@ final class BenchView extends LinearLayout {
             notStarted("the Bench tab isn't shown");
             return;
         }
+        final List<String> libs = launchLibs, secs = launchSecs;
         autostart = new Runnable() {
+            private boolean probed;
+
             @Override public void run() {
+                // A launch without `host` probes the collector afresh, as it may have changed since the
+                // last probe (as `adb reverse` turned on after a run over Wi-Fi), USB first.
+                if (!probed) {
+                    probed = true;
+                    if (runnerHost == null) findCollector();
+                }
                 // Until the collector probe answers, the run's collector isn't known: wait for it, still queued.
                 if (probing) { ui.postDelayed(this, 250); return; }
                 autostart = null;
@@ -550,7 +567,7 @@ final class BenchView extends LinearLayout {
                 // while it waited leaves them shown; the collector was just probed, so no new probe.
                 if (!nativeStatus().optString("run_id", "").isEmpty()) clearResults(false);
                 agree.setChecked(true);
-                startTapped();
+                start(libs, secs);
             }
         };
         ui.postDelayed(autostart, 3000);
@@ -782,7 +799,22 @@ final class BenchView extends LinearLayout {
         shareBtn.setAlpha(1f);
     }
 
+    /** Keeps a runner launch's `libraries` and `sections` extras for its autostart, as named. */
+    private void setLaunchNames(Intent it) {
+        launchLibs = it.hasExtra("libraries") ? new ArrayList<>(csv(it.getStringExtra("libraries"))) : null;
+        launchSecs = it.hasExtra("sections") ? new ArrayList<>(csv(it.getStringExtra("sections"))) : null;
+    }
+
     private void startTapped() {
+        start(null, null);
+    }
+
+    /**
+     * Starts a run of the picker's selection; an autostart passes the names its launch gave in
+     * {@code wantLibs} and {@code wantSecs} (null where it gave none), which go to the native start as
+     * given, in place of the picker's, so the library judges names the picker doesn't list.
+     */
+    private void start(List<String> wantLibs, List<String> wantSecs) {
         // Any start, the person's or the runner's own, takes the place of a queued autostart. The
         // autostart's own start clears it first, so one still queued here is replaced by hand: say so.
         if (autostart != null) notStarted("a start by hand took its place");
@@ -795,6 +827,8 @@ final class BenchView extends LinearLayout {
         List<String> libs = new ArrayList<>(), secs = new ArrayList<>();
         for (Map.Entry<String, CompoundButton> e : libSw.entrySet()) if (e.getValue().isChecked()) libs.add(e.getKey());
         for (Map.Entry<String, CompoundButton> e : secSw.entrySet()) if (e.getValue().isChecked()) secs.add(e.getKey());
+        if (wantLibs != null && !wantLibs.isEmpty()) libs = wantLibs;
+        if (wantSecs != null && !wantSecs.isEmpty()) secs = wantSecs;
         if (libs.isEmpty() || secs.isEmpty()) {
             setStatus("Nothing picked", Status.NEUTRAL);
             setBody("Turn on at least one library and group.");
