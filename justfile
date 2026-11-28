@@ -17,11 +17,11 @@ default:
 check $BASE="":
     sh/dispatch.sh check "$BASE"
 
-# Run CI's gate over the branch diff against BASE; missing tools fail.
+# Run the PR check's gate over the branch diff against BASE; missing tools fail.
 ci $BASE="":
     CI_STRICT=1 sh/dispatch.sh ci "$BASE"
 
-# Run CI's gate over every crate.
+# Run every CI module over every crate, as check.yml does nightly.
 gate:
     just ci --all
 
@@ -67,7 +67,7 @@ xtensa:
 miri TARGET="x86_64-unknown-linux-gnu":
     nix develop .#miri --command sh/miri.sh {{TARGET}}
 
-# Run openmls's own test suite on rind-openmls, passing ARGS to cargo test.
+# Run openmls's own test suite on rind-openmls, passing ARGS to cargo nextest run.
 openmls *ARGS:
     nix develop --command sh/openmls.sh {{ARGS}}
 

@@ -21,14 +21,17 @@ export CARGO_TARGET_WASM32_WASIP2_RUNNER="wasmtime run --dir $root::$root --env 
 # Optimised, as the armv7 run is, but keeping the checks a debug build has.
 export CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS=true
 export CARGO_PROFILE_RELEASE_OVERFLOW_CHECKS=true
-SLOW_TESTS=1 cargo test -p rind --locked --release --target wasm32-wasip2
+# wasmtime's hang bound (.config/nextest.toml). The doc tests, which only show
+# the API, run on the native targets.
+export NEXTEST_PROFILE=emulated
+SLOW_TESTS=1 cargo nextest run -p rind --locked --release --target wasm32-wasip2
 # Without the examples, whose tokio needs the threads and sockets wasm lacks.
-cargo test -p rind-rustls -p rind-ring --lib --tests --locked --release --target wasm32-wasip2
+cargo nextest run -p rind-rustls -p rind-ring --lib --tests --locked --release --target wasm32-wasip2
 
 # The browser's target runs the same code but for what it takes from
 # JavaScript: rind's random source and rustls's clock. rind's own tests read
 # their vectors from files, which it has no way to open, so only the adapters'
 # run there, with their vectors and keys compiled in.
 export CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner
-cargo test -p rind-ring --test ring --features wasm32_unknown_unknown_js --locked --release --target wasm32-unknown-unknown
-cargo test -p rind-rustls --lib --tests --locked --release --target wasm32-unknown-unknown
+cargo nextest run -p rind-ring --test ring --features wasm32_unknown_unknown_js --locked --release --target wasm32-unknown-unknown
+cargo nextest run -p rind-rustls --lib --tests --locked --release --target wasm32-unknown-unknown

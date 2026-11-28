@@ -3,9 +3,14 @@
 //! ChaCha20-Poly1305 in one pass: pyca/verified-garbage's SVE2 routines
 //! where the CPU has SVE2; otherwise VG's NEON routines at the lengths
 //! `seal_runs_vg` and `open_runs_vg` name, both imported by
-//! `admin/import-vg`, and at the rest aws-lc's `chacha20_poly1305_armv8`,
-//! which interleaves NEON ChaCha20 with scalar Poly1305, imported by
-//! `admin/import-aws-lc`.
+//! `admin/import-vg`, and at the rest rind's copy of aws-lc's
+//! `chacha20_poly1305_armv8`, which interleaves NEON ChaCha20 with scalar
+//! Poly1305. The copy keeps aws-lc's instructions but inlines its AAD helper
+//! and lays each routine's control flow out as the `ite` and `loop` of rind's
+//! Lean model of AArch64, where `RindIsa/AArch64/ChaCha20Poly1305.lean` holds
+//! each routine as one program; `admin/prove lean` checks that rind's Linux
+//! build emits that program's bytes. The `.apple.s` bodies, which it does not
+//! check, hold the same instructions in Apple's syntax.
 //!
 //! VG proves in Lean that its routines meet RFC 8439 and take the same
 //! branches and memory addresses whatever the key, nonce, and data, but for
@@ -13,8 +18,8 @@
 //! are over its models of the instructions, which `admin/prove vg` cosimulates.
 //! `proofs/Rind/Aarch64/VgChaCha20Poly1305.lean` takes those theorems as
 //! axioms about `seal_sve2`, `open_sve2`, `seal_neon`, and `open_neon` and
-//! proves `seal` and `open` from them wherever those routines run. The aws-lc
-//! assembly is not formally verified: its correctness rests on its use and
+//! proves `seal` and `open` from them wherever those routines run. The copy
+//! of aws-lc's is not yet proven: its correctness rests on aws-lc's use and
 //! testing in BoringSSL and aws-lc. rind tests every path against RFC 8439,
 //! Wycheproof, aws-lc-rs, and separate ChaCha20 and Poly1305 passes.
 //!
@@ -173,16 +178,13 @@ fn open_aws_lc(key: &[u8; 32], nonce: &[u8; 12], aad: &[u8], inout: &mut [u8]) -
     data.tag()
 }
 
-/// The routines' argument block: aws-lc's `chacha20_poly1305_seal_data`,
-/// whose first 48 bytes are its `chacha20_poly1305_open_data`. On return,
-/// the tag overwrites the start of the key.
+/// The routines' argument block: the key and the nonce, after the counter
+/// they start from. On return, the tag overwrites the start of the key.
 #[repr(C, align(16))]
 struct Data {
     key: [u8; 32],
     counter: u32,
     nonce: [u8; 12],
-    extra_ciphertext: *const u8,
-    extra_ciphertext_len: usize,
 }
 
 impl Data {
@@ -192,8 +194,6 @@ impl Data {
             // Block 0 keys Poly1305.
             counter: 0,
             nonce: *nonce,
-            extra_ciphertext: core::ptr::null(),
-            extra_ciphertext_len: 0,
         }
     }
 
@@ -213,52 +213,35 @@ static CHACHA20_CONSTS: Consts = Consts(include!(
     "aws_lc/chacha20_poly1305_armv8.chacha20_consts.rs"
 ));
 
-/// Defines a naked function running an imported routine, which reaches its
-/// table and helper through the `sym` operands listed.
+/// Defines a naked function running rind's structured copy of an aws-lc
+/// routine, `chacha20poly1305/<file>.<os>.s`, which reads `CHACHA20_CONSTS`.
 macro_rules! routine {
-    ($name:ident($($arg:ident: $ty:ty),*) { $($op:ident = $sym:ident),* }) => {
+    ($name:ident, $file:literal) => {
         #[unsafe(naked)]
-        unsafe extern "C" fn $name($($arg: $ty),*) {
+        unsafe extern "C" fn $name(
+            out: *mut u8,
+            input: *const u8,
+            len: usize,
+            aad: *const u8,
+            aad_len: usize,
+            data: *mut Data,
+        ) {
             #[cfg(not(target_vendor = "apple"))]
             core::arch::naked_asm!(
-                include_str!(concat!("aws_lc/", stringify!($name), ".linux.s"))
-                $(, $op = sym $sym)*
+                include_str!(concat!("chacha20poly1305/", $file, ".linux.s")),
+                chacha20_consts = sym CHACHA20_CONSTS,
             );
             #[cfg(target_vendor = "apple")]
             core::arch::naked_asm!(
-                include_str!(concat!("aws_lc/", stringify!($name), ".apple.s"))
-                $(, $op = sym $sym)*
+                include_str!(concat!("chacha20poly1305/", $file, ".apple.s")),
+                chacha20_consts = sym CHACHA20_CONSTS,
             );
         }
     };
 }
 
-routine!(chacha20_poly1305_seal(
-    out: *mut u8,
-    input: *const u8,
-    len: usize,
-    aad: *const u8,
-    aad_len: usize,
-    data: *mut Data
-) {
-    chacha20_consts = CHACHA20_CONSTS,
-    poly_hash_ad_internal = poly_hash_ad_internal
-});
-routine!(chacha20_poly1305_open(
-    out: *mut u8,
-    input: *const u8,
-    len: usize,
-    aad: *const u8,
-    aad_len: usize,
-    data: *mut Data
-) {
-    chacha20_consts = CHACHA20_CONSTS,
-    poly_hash_ad_internal = poly_hash_ad_internal
-});
-
-// Hashes the AAD into the Poly1305 state the routines keep in registers, so
-// only they call it.
-routine!(poly_hash_ad_internal() { poly_hash_ad_internal = poly_hash_ad_internal });
+routine!(chacha20_poly1305_seal, "seal");
+routine!(chacha20_poly1305_open, "open");
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]

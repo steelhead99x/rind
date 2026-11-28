@@ -10,11 +10,11 @@
 //! otherwise, as aws-lc's configurations do.
 //!
 //! The S-box is a circuit of ANDs and XORs, so no branch or memory index
-//! depends on the key or data. Its encryption rounds in 32-bit words are
-//! proven in Lean, in `proofs/Rind/Armv7/AesNohw*.lean`; the rest, the key
-//! schedule and the wider words among it, rests on its use and testing in
-//! BoringSSL and aws-lc, and on rind's tests of it against FIPS-197,
-//! Wycheproof, aws-lc-rs, and each CPU's faster AES.
+//! depends on the key or data. In 32-bit words, its key schedule, rounds,
+//! and counter mode are proven in Lean, in `proofs/Rind/Armv7/AesNohw*.lean`;
+//! the wider words rest on its use and testing in BoringSSL and aws-lc, and
+//! on rind's tests of it against FIPS-197, Wycheproof, aws-lc-rs, and each
+//! CPU's faster AES.
 //! It follows <https://bearssl.org/constanttime.html#aes>,
 //! <https://eprint.iacr.org/2009/129.pdf>, and
 //! <https://eprint.iacr.org/2009/191.pdf>.

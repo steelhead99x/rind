@@ -82,6 +82,10 @@ p256-voprf = { package = "p256", version = "0.13", default-features = false, fea
 p384-voprf = { package = "p384", version = "0.13", default-features = false, features = ["hash2curve", "voprf"] }
 p521-voprf = { package = "p521", version = "0.13.3", default-features = false, features = ["hash2curve", "voprf"] }
 rand_core-voprf = { package = "rand_core", version = "0.6", features = ["getrandom"] }
+# RFC 9807's OPAQUE, which aws-lc-rs does not offer, with the SHA-2 its
+# suites name.
+opaque-ke = { version = "4.0.1", default-features = false, features = ["ristretto255"] }
+sha2-opaque = { package = "sha2", version = "0.10", default-features = false }
 # SPAKE2+, which aws-lc-rs does not offer; `test-utils` takes the ephemeral
 # scalars the fuzzer writes.
 pakery-crypto = { version = "0.6.2", default-features = false, features = ["std", "p256"] }
@@ -314,6 +318,13 @@ bench = false
 [[bin]]
 name = "frost"
 path = "fuzzer/frost.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "opaque"
+path = "fuzzer/opaque.rs"
 test = false
 doc = false
 bench = false

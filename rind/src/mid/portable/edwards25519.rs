@@ -83,9 +83,18 @@ const P_MINUS_ONE: [u8; 32] = {
     p
 };
 
-/// Whether the little-endian `y` is below `p = 2^255 - 19`.
+/// Whether the little-endian `y` is below `p = 2^255 - 19`: whether, at its
+/// highest byte that differs from `p - 1`'s, it is the smaller, or no byte
+/// differs.
 fn is_below_p(y: &[u8; 32]) -> bool {
-    y.iter().rev().cmp(P_MINUS_ONE.iter().rev()).is_le()
+    let mut i = y.len();
+    while i > 0 {
+        i -= 1;
+        if y[i] != P_MINUS_ONE[i] {
+            return y[i] < P_MINUS_ONE[i];
+        }
+    }
+    true
 }
 
 /// An integer modulo the prime order `L` of edwards25519's base point,

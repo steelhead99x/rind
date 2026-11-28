@@ -13,9 +13,11 @@ where a proof covers the code the one pass runs, which `SealCovered` and
 `OpenCovered` state: on a CPU with SVE2, pyca/verified-garbage's SVE2
 routines, at every length; on one without it, VG's NEON routines at the
 lengths `SealsNeon` and `OpensNeon` name, and aws-lc's NEON routines at the
-rest, which the theorems take as the hypothesis `AwsLc`. No proof covers
-aws-lc's routines yet, so `seals_sve2`, `opens_sve2`, `seals_neon`, and
-`opens_neon` state where the theorems earn the ✓.
+rest, which the theorems take as the hypothesis `AwsLc`. rind runs its
+structured copy of aws-lc's routines, whose constant time
+`Rind.Aarch64.ChaCha20Poly1305Asm` proves but whose results no proof covers
+yet, so `seals_sve2`, `opens_sve2`, `seals_neon`, and `opens_neon` state
+where the theorems earn the ✓.
 -/
 
 namespace rind.aarch64

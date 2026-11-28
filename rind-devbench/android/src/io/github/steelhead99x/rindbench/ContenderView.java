@@ -297,15 +297,17 @@ final class ContenderView extends LinearLayout {
     private void joinTapped() {
         if (!enabledOn) return;
         String code = ContenderClient.codeFromQRString(codeField.getText() == null ? "" : codeField.getText().toString());
+        // Lookups can overlap each other or the health probe, a second Join or scan before the first
+        // answers: only the newest may change the screen, so an older, slower answer can't replace it.
+        // Every Join counts, one with no code too, so a lookup still out can't open a code since cleared.
+        final int seq = ++lookupSeq;
         if (code == null || code.isEmpty()) {
+            lookingUp = false;
             setStatus("Enter a code", ASK, "Type the session code or scan its QR code.", false);
             return;
         }
         setStatus("Looking up session…", BUSY, "Checking code " + code + ".", false);
-        // Lookups can overlap each other or the health probe, a second Join or scan before the first
-        // answers: only the newest may change the screen, so an older, slower answer can't replace it.
         probeSeq++;
-        final int seq = ++lookupSeq;
         lookingUp = true;
         client.lookupSession(code, (session, error) -> ui.post(() -> {
             if (!enabledOn || seq != lookupSeq) return;

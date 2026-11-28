@@ -1,16 +1,18 @@
 #!/usr/bin/env bash
 # Run `just check`, `just fix`, or `just ci` over one resolved branch diff.
-# ci runs every module the diff reaches; check, the local loop before a push,
-# runs only the Rust tests and the repository lints that take a second.
+# check, the local loop before a push, runs only the Rust tests and the
+# repository lints that take a second. ci over a diff runs the PR check's
+# gate: check's modules, adding the Rust targets' other builds and docs, and
+# the modules marked `pr` below. CHECK_QUEUE=1 leaves the `pr` ones out, for
+# the merge queue. `ci --all`, check.yml's nightly run, runs every module over
+# the whole tree.
 # check and ci run CHECK_JOBS lanes of modules at once (default 3); 1 runs
 # them in order and streams their output. CHECK_MODULES limits the selection to
-# the modules it names, or skips those named with a leading `-`.
+# the modules it names, or skips those named with a leading `-`; ci's may name
+# any module, in the gate or not.
 # CHECK_FAIL_FAST=1 stops every lane at the first failed module, for the merge
 # queue, which ejects a failing group either way and gains nothing from the
 # rest.
-# CHECK_QUEUE=1 makes ci also run checks that otherwise run only in scheduled
-# workflows of their own, when the diff touches their paths, for the merge
-# queue (see the queue modules below).
 # CHECK_TIMES=FILE also writes each module's wall seconds, CPU milliseconds,
 # and name there, one per line, ending with the whole run's.
 # `--query` prints the selection before CI installs its toolchain and caches.
@@ -83,15 +85,18 @@ fi
 #                      module order; every other module is a lane of its own,
 #                      and lanes run concurrently. Cargo's build directory
 #                      lock already serializes builds sharing a target.
-#   check              `just check` runs it too; ci runs every module.
+#   check              `just check` runs it too, as do the merge queue and
+#                      the PR check.
+#   pr                 The PR check runs it too, but not the merge queue,
+#                      where it would cost every group minutes to catch only
+#                      a break two PRs make together, which check.yml's
+#                      nightly run catches. A module marked neither `check`
+#                      nor `pr` runs only there.
 #   fix                `just fix` runs it too.
-#   queue              Its lane runs beside the CHECK_JOBS others, never in
-#                      one of their slots, since it waits on Lean and
-#                      emulators rather than competing with Cargo. Register
-#                      it first, so it starts at once.
-declare -A scope=() tools=() check_tools=() compiles=() lane=() queue=()
+declare -A scope=() tools=() check_tools=() compiles=() lane=()
 cis=()
 checks=()
+prs=()
 fixes=()
 module() {
     local name=$1 option
@@ -107,8 +112,8 @@ module() {
             compiles) compiles[$name]=1 ;;
             lane=*) lane[$name]=${option#lane=} ;;
             check) checks+=("$name") ;;
+            pr) prs+=("$name") ;;
             fix) fixes+=("$name") ;;
-            queue) queue[$name]=1 ;;
             *)
                 echo "error: module $name has an unknown option '$option'" >&2
                 exit 2
@@ -117,58 +122,9 @@ module() {
     done
 }
 
-# The paths that trigger a workflow on a push to main, as one anchored regex
-# over sh/changed.sh's paths: GitHub's `*` stays within a directory and `**`
-# crosses them. A glob this cannot convert is an error.
-push_paths() {
-    local globs glob regex=
-    globs=$(yq '.on.push.paths[]' ".github/workflows/$1")
-    [[ -n "$globs" ]] || {
-        echo "error: $1 lists no push paths" >&2
-        return 1
-    }
-    while IFS= read -r glob; do
-        [[ "$glob" =~ ^[A-Za-z0-9_./*-]+$ ]] || {
-            echo "error: $1's push path '$glob' uses a pattern sh/dispatch.sh cannot convert" >&2
-            return 1
-        }
-        glob=${glob//./\\.}
-        glob=${glob//\*\*\//$'\1'}
-        glob=${glob//\*\*/$'\2'}
-        glob=${glob//\*/'[^/]*'}
-        glob=${glob//$'\1'/'(.*/)?'}
-        glob=${glob//$'\2'/'.*'}
-        regex+=${regex:+|}$glob
-    done <<<"$globs"
-    echo "^($regex)$"
-}
-
-# The merge queue's build gates on checks that otherwise run only in a
-# workflow of their own, when the group touches their inputs.
-# Only the group's x86_64 build sets CHECK_QUEUE (its aarch64 jobs run `rs`
-# alone), so `vg` checks only x86_64's code; the nightly `prove` covers
-# aarch64's.
-if [[ "$action" == ci && -n "${CHECK_QUEUE:-}" ]]; then
-    # pyca/verified-garbage's code against its Lean models, as `prove`'s vg
-    # job runs it, with a fixed seed, on the paths that start `prove` on
-    # main, read from its workflow so the two cannot drift apart. A plain
-    # assignment, so a failed read stops the run instead of reading as a
-    # repository-wide pattern.
-    paths=$(push_paths prove.yml)
-    module vg "$paths" tools='nix yq' queue
-    # Every importer and generator at its pinned upstream revision.
-    module regenerate '^(admin/|thirdparty/s2n-bignum/|flake\.(nix|lock)$|\.github/workflows/regenerate\.yml$)' \
-        tools='nix git' queue
-    # The tests under every Intel SDE model x86-cpu.yml runs, when the group
-    # reaches x86_64 code (see `check:sde` below), so a fault on one CPU's
-    # dispatch paths cannot land.
-    module sde '^(rind/|rind-[^/]*/|thirdparty/|Cargo\.(toml|lock)$|rust-toolchain(\.toml)?$|\.cargo/|flake\.(nix|lock)$|sh/(backends|changed)\.sh$|admin/x86-cpu$|\.github/(actions/|workflows/x86-cpu\.yml$))' \
-        tools='nix' queue
-fi
-
 # sh/select.sh narrows this to the changed crates and their dependents.
-module rs '^(rind[^/]*/|fuzz/|thirdparty/|Cargo\.(toml|lock)$|\.rustfmt(\.unstable)?\.toml$|flake\.(nix|lock)$)' \
-    tools='cargo jq rustfmt-unstable' check-tools='cargo-nextest clippy-driver python3' compiles check fix
+module rs '^(rind[^/]*/|fuzz/|thirdparty/|Cargo\.(toml|lock)$|\.rustfmt(\.unstable)?\.toml$|\.config/nextest\.toml$|flake\.(nix|lock)$)' \
+    tools='cargo jq rustfmt-unstable' check-tools='cargo-nextest clippy-driver python3 timeout' compiles check fix
 # The map admin/test-scope scopes `just check`'s rind tests by, against the
 # tests `cargo nextest list` finds: on a change to the map, its script, or a
 # test, or one adding or deleting a file under rind/src/{low,mid,high}/ (see
@@ -235,10 +191,10 @@ module dit '^(rind/src/|admin/dit-coverage(\.txt)?$)' \
 module ditbarrier '^(rind/(src/low/(aarch64/|entry)|build\.rs$|Cargo\.toml$)|admin/dit-disasm$|flake\.(nix|lock)$)' \
     tools='nix' compiles
 # admin/build-cost builds these against rind's public API, and
-# admin/binary-size holds what rind adds to each to its record, which any
-# change to rind's code or the toolchain can move.
-module fixtures '^(rind/(src/|Cargo\.toml$|build\.rs$)|rind-rustls/(src/|Cargo\.toml$|build\.rs$)|Cargo\.toml$|flake\.(nix|lock)$|admin/build-cost-fixtures/(rind|rustls)/|admin/binary-size(\.txt|-[a-z]+\.lock)?$)' \
-    tools='cargo nm python3' compiles fix
+# admin/binary-size reports what the diff does to rind's size in each, which
+# any change to rind's code or the toolchain can move, passing whatever it is.
+module fixtures '^(rind/(src/|Cargo\.toml$|build\.rs$)|rind-rustls/(src/|Cargo\.toml$|build\.rs$)|Cargo\.toml$|flake\.(nix|lock)$|admin/build-cost-fixtures/(rind|rustls)/|admin/binary-size(-[a-z]+\.lock)?$)' \
+    tools='cargo git nm python3' compiles pr
 # Advisories, licenses, and sources move with any manifest or the policy.
 module deny '(^|/)Cargo\.(toml|lock)$|^deny\.toml$' \
     tools='cargo-deny' check
@@ -250,7 +206,7 @@ module vet '(^|/)Cargo\.(toml|lock)$|^supply-chain/' \
 # .cargo/mutants.toml's exclusions name mutants by file, line, and function,
 # so moving code can leave one matching nothing.
 module mutants '^(rind[^/]*/src/|\.cargo/mutants\.toml$|admin/mutants$)' \
-    tools='cargo-mutants python3'
+    tools='cargo-mutants python3' pr
 # proofs/README.md's TCB & Axiom Ledger counts the axioms the Lean files
 # declare, and fails on a `sorry` or an axiom its groups do not name.
 module ledger '^(proofs/(README\.md|.*\.lean)$|AUDIT\.md$|admin/(ledger|prove)$)' \
@@ -261,7 +217,7 @@ module versions '^(rind-[^/]+/Cargo\.toml$|sh/adapter-versions\.sh$)' \
 # A published crate's public API against the merge-base's: a break needs a `!`
 # mark, and an adapter's one that names it (sh/semver.sh).
 module semver '^(rind[^/]*/(src/|Cargo\.toml$)|sh/semver\.sh$)' \
-    tools='cargo cargo-semver-checks jq' compiles
+    tools='cargo cargo-semver-checks jq' compiles pr
 # Each adapter's API against its upstream's, which reaches rind only through a
 # lockfile change, as read by the flake's rustdoc. rind-object-store and
 # rind-rand-core have none to copy.
@@ -299,7 +255,7 @@ while IFS= read -r input; do
     site_inputs+="|${input//./\\.}\$"
 done <site/inputs.txt
 module site "^(site/|sh/site\.sh$|flake\.(nix|lock)$|\.github/(workflows/pr-check\.yml$|actions/(just|nix)/)$site_inputs)" \
-    tools='nix'
+    tools='nix' pr
 # Quest documents form one graph, so any change validates the whole tree, as
 # does a bump of the flake-pinned validator.
 module quest '^(quest/|flake\.lock$)' \
@@ -373,6 +329,16 @@ for word in ${CHECK_MODULES:-}; do
     if [[ "$word" == -* ]]; then skip[$name]=1; else only[$name]=1; fi
 done
 
+# ci over a diff runs the gate's modules alone, unless CHECK_MODULES names
+# others: check's and, but for the merge queue, the PR check's. A diff to the
+# orchestration that reads as every path keeps to them too; `--all` does not.
+declare -A gate=()
+if [[ "$action" == ci && "$base" != --all ]] && ((${#only[@]} == 0)); then
+    gated=("${checks[@]}")
+    [[ -n "${CHECK_QUEUE:-}" ]] || gated+=("${prs[@]}")
+    for name in "${gated[@]}"; do gate[$name]=1; done
+fi
+
 # Whether the branch deleted a path, a rename's old one included, which
 # sh/changed.sh lists among the changed ones without saying so.
 deleted=
@@ -391,7 +357,8 @@ fi
 selected=()
 missing=()
 for module in "${modules[@]}"; do
-    if [[ -v "skip[$module]" ]] || { ((${#only[@]})) && [[ ! -v "only[$module]" ]]; }; then
+    if [[ -v "skip[$module]" ]] || { ((${#only[@]})) && [[ ! -v "only[$module]" ]]; } ||
+        { ((${#gate[@]})) && [[ ! -v "gate[$module]" ]]; }; then
         continue
     fi
     pattern=${scope[$module]}
@@ -404,13 +371,6 @@ for module in "${modules[@]}"; do
     if [[ "$verb:$module" == check:cross ]]; then
         cross_reach=$(reach cross)
         reaches "$cross_reach" aarch64 arm portable || continue
-    fi
-    # x86-cpu.yml's scope, over the same whole diff: one that changes the
-    # models' own files, or that sh/backends.sh says reaches x86_64.
-    if [[ "$verb:$module" == check:sde && -z "$all" ]] &&
-        ! grep -qxE '\.github/workflows/x86-cpu\.yml|admin/x86-cpu' "$changed"; then
-        sde_reach=$(sh/backends.sh "$changed")
-        grep -qxE 'all|x86_64' <<<"$sde_reach" || continue
     fi
     # Selection must not depend on the tools setup has yet to install.
     if [[ -n "$query" ]]; then
@@ -500,6 +460,23 @@ names() {
     return 1
 }
 
+# Whether the Cargo arguments after WHICH, as sh/select.sh prints them, select
+# a target that `--tests` (WHICH is tests) or `--all-targets` builds: one
+# `cargo metadata` lists, with `test` set for the first, whose required
+# features are all on by default, which is none. A build of none compiles no
+# unit, so its `--timings` fails with "no timing data found in log".
+has_targets() {
+    local which=$1 arg crates=()
+    shift
+    (($#)) || return 0
+    for arg; do
+        [[ "$arg" != --workspace ]] || return 0
+        [[ "$arg" == -p ]] || crates+=("$arg")
+    done
+    cargo metadata --format-version 1 --no-deps --locked |
+        jq -e --arg which "$which" --args '[.packages[] | select(.name | IN($ARGS.positional[])) | .targets[] | select((.["required-features"] // []) == [] and (if $which == "tests" then .test else (.kind | index("custom-build") | not) end))] | length > 0' "${crates[@]}" >/dev/null
+}
+
 # One module's check or fix, run through `run`.
 step() {
     local listed=$logs/$2.files packages libs backends target targets
@@ -536,6 +513,14 @@ step() {
             local RUSTC_WORKSPACE_WRAPPER CARGO_BUILD_WARNINGS=deny
             RUSTC_WORKSPACE_WRAPPER=$(command -v clippy-driver)
             export RUSTC_WORKSPACE_WRAPPER CARGO_BUILD_WARNINGS
+            # CI keeps Cargo's per-crate build timings of the two main builds,
+            # which queue-build.yml uploads, so a compile regression shows
+            # without profiling by hand. The test build's is taken by whichever
+            # command builds the test binaries first. A build that selects no
+            # target has no timings to report, so it passes none.
+            local timings=() build_timings=()
+            ! github || ! has_targets tests "${packages[@]}" || timings=(--timings)
+            ! github || ! has_targets all "${packages[@]}" || build_timings=(--timings)
             # A unit test admin/test-scope.toml names may have been renamed by
             # an edit that selects no `scope` module. Listed with the package
             # and target arguments of the run that tests rind, so the two
@@ -543,7 +528,7 @@ step() {
             if [[ -n "$filter" ]]; then
                 run python3 admin/test-scope units -p rind --lib
             elif [[ -n "$rind" || ${#packages[@]} -eq 0 || " ${packages[*]} " == *" --workspace "* ]]; then
-                run python3 admin/test-scope units "${packages[@]}" --tests
+                run python3 admin/test-scope units "${packages[@]}" --tests "${timings[@]}"
             fi
             # nextest runs the test binaries in parallel but not doc tests. Like
             # `cargo test`, it passes a selection with no tests.
@@ -556,7 +541,7 @@ step() {
                     run cargo nextest run "${rest[@]}" --tests --locked --no-tests=warn --cargo-profile test-fast
                 fi
             else
-                run cargo nextest run "${packages[@]}" --tests --locked --no-tests=warn --cargo-profile test-fast
+                run cargo nextest run "${packages[@]}" --tests --locked --no-tests=warn --cargo-profile test-fast "${timings[@]}"
             fi
             # The local loop stops at the tests but for the FIPS crates' own
             # changes, below; ci goes on.
@@ -564,7 +549,7 @@ step() {
                 # What --tests leaves unbuilt, and so unlinted: benches,
                 # examples, binaries that set `test = false`, such as the fuzz
                 # targets, and a library no test links.
-                run cargo build "${packages[@]}" --all-targets --locked --profile test-fast
+                run cargo build "${packages[@]}" --all-targets --locked --profile test-fast "${build_timings[@]}"
                 if names rind "${packages[@]}"; then
                     # rind's `zeroize` feature, whose impls the zeroing test
                     # holds to their claim: it requires `ZeroizeOnDrop` of
@@ -616,7 +601,16 @@ step() {
             # Doc tests need a library. No packages at all means the workspace.
             mapfile -t libs < <(sh/select.sh "$changed" "$all" --lib)
             if ((${#libs[@]} > 0 || ${#packages[@]} == 0)); then
-                run cargo test "${libs[@]}" --locked --doc --profile test-fast
+                # nextest runs no doc tests, so this bounds theirs. timeout
+                # leads a process group of its own and kills all of it at the
+                # deadline, a deadlocked doctest included. A lane cancel's
+                # TERM goes to the lane's group, so the trap forwards it to
+                # timeout, which passes it on to its group. `$!` is set as
+                # soon as the fork returns, before a pending trap runs.
+                trap 'kill -TERM "$!" 2>/dev/null; stop; exit 143' TERM
+                timeout 5m cargo test "${libs[@]}" --locked --doc --profile test-fast &
+                wait "$!"
+                trap 'stop; exit 143' TERM
                 # A broken or private intra-doc link renders as plain text on
                 # docs.rs. Its dependencies build in check mode, which the
                 # tests' build never shares, so clippy there would only cost.
@@ -625,11 +619,13 @@ step() {
             ;;
         check:scope)
             # Under the wrapper and warnings `rs` builds rind's tests with,
-            # so the two share one build.
-            local RUSTC_WORKSPACE_WRAPPER CARGO_BUILD_WARNINGS=deny
+            # so the two share one build, and timed in CI as `rs` is, since
+            # whichever lane gets there first compiles the tests.
+            local RUSTC_WORKSPACE_WRAPPER CARGO_BUILD_WARNINGS=deny timings=()
             RUSTC_WORKSPACE_WRAPPER=$(command -v clippy-driver)
             export RUSTC_WORKSPACE_WRAPPER CARGO_BUILD_WARNINGS
-            run python3 admin/test-scope check
+            ! github || timings=(--timings)
+            run python3 admin/test-scope check "${timings[@]}"
             ;;
         fix:rs)
             mapfile -t packages < <(sh/select.sh "$changed" "$all")
@@ -822,18 +818,6 @@ step() {
             fi
             run nix develop .#ct-vartime --command admin/ct-vartime "${targets[@]}"
             ;;
-        check:vg) run nix develop .#vg --command admin/prove vg ;;
-        # Its own target directory, so its release build runs beside rs's
-        # rather than behind Cargo's lock on target/.
-        check:sde) CARGO_TARGET_DIR=target/sde run nix develop .#sde --command admin/x86-cpu all ;;
-        check:regenerate)
-            # admin/regenerate rewrites rind/src/low/, which other modules
-            # build, and .tmp/upstream/, which vg reads, so it runs in a
-            # clone of its own.
-            run git clone -q --shared --no-checkout . "$logs/regenerate"
-            run git -C "$logs/regenerate" checkout -q --detach "$(git rev-parse HEAD)"
-            run nix develop "$logs/regenerate#regenerate" --command "$logs/regenerate/admin/regenerate"
-            ;;
         check:structure) run admin/structure ;;
         check:dit) run python3 admin/dit-coverage ;;
         check:ditbarrier) run nix develop .#dit-disasm --command admin/dit-disasm ;;
@@ -866,8 +850,10 @@ step() {
             run python3 admin/bench-report render --check
             ;;
         # Each fixture is its own workspace and resolves its own lockfile.
-        check:fixtures) run admin/binary-size ;;
-        fix:fixtures) run admin/binary-size --write ;;
+        # `--all` has no base to compare with.
+        check:fixtures)
+            if [[ -z "${merge_base:-}" ]]; then run admin/binary-size; else run admin/binary-size --base "$merge_base"; fi
+            ;;
         check:patch) run sh/patch.sh ;;
         fix:patch) run cargo fmt --manifest-path patch/fixture/Cargo.toml ;;
         check:py) run sh/python.sh test ;;
@@ -916,13 +902,9 @@ if [[ ! "$limit" =~ ^[1-9][0-9]*$ ]]; then
     exit 2
 fi
 
-# Lanes stream their output only while one runs at a time, which a queue
-# module's lane beside the others rules out.
+# Lanes stream their output only while one runs at a time.
 stream=
 ((limit > 1)) || stream=1
-for module in "${selected[@]}"; do
-    [[ ! -v "queue[$module]" ]] || stream=
-done
 
 lanes=()
 declare -A members=()
@@ -1074,13 +1056,10 @@ trap 'exit 143' TERM
 # cancels the running lanes and starts no more.
 set -m
 stopping=
-# How many queue modules' lanes run, each named after its module.
-beside=0
 while true; do
-    while [[ -z "$stopping" ]] && ((next < ${#lanes[@]} && ${#running[@]} - beside < limit)); do
+    while [[ -z "$stopping" ]] && ((next < ${#lanes[@]} && ${#running[@]} < limit)); do
         name=${lanes[next]}
         next=$((next + 1))
-        [[ ! -v "queue[$name]" ]] || beside=$((beside + 1))
         read -ra lane_modules <<<"${members[$name]}"
         if [[ -n "$stream" ]]; then
             run_lane "$logs/$name.times" "${lane_modules[@]}" </dev/null 3>/dev/null &
@@ -1095,7 +1074,6 @@ while true; do
     wait -n -p pid "${!running[@]}" || status=$?
     name=${running[$pid]}
     unset "running[$pid]"
-    [[ ! -v "queue[$name]" ]] || beside=$((beside - 1))
     if ((status)) && [[ -z "$stopping" ]]; then
         failed+=("$name")
         ((failed_status)) || failed_status=$status

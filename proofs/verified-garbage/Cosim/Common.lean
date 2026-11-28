@@ -73,8 +73,9 @@ def targetAddr : Nat := insnAddr + 0x100
 /-- The data the runner maps, at `dataBase`, `dataLen` bytes of it, all
 compared after each case. The model may access only the middle half,
 `window`, so a CPU access the model does not make shows as a changed byte
-outside it. -/
-def dataBase : Nat := 0x2000000000
+outside it. It is within 2 GiB of the code, so an x86_64 RIP-relative
+operand reaches it. -/
+def dataBase : Nat := 0x1040000000
 def dataLen : Nat := 2048
 def windowBase : Nat := dataBase + 512
 def windowLen : Nat := 1024

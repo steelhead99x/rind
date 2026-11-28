@@ -371,6 +371,11 @@ fn median(v: &mut [f64]) -> f64 {
 fn select(cfg: &Config, rows: &[Value]) -> Vec<(String, String)> {
     let mut selected: Vec<(String, String)> = Vec::new(); // (id, file)
     let want_ids: HashSet<&str> = cfg.ids.iter().map(|s| s.as_str()).collect();
+    // A library filter that names no library the catalog has selects nothing, before the "More" fallback
+    // below could take rows for it, as it would for a misspelt name beside a More group.
+    if want_ids.is_empty() && !cfg.libraries.is_empty() && !cfg.libraries.iter().any(|l| rows.iter().any(|r| r["library"] == l.as_str())) {
+        return selected;
+    }
     for r in rows {
         let id = r["id"].as_str().unwrap();
         let extra = r["extra"] == true;
@@ -435,10 +440,38 @@ fn after_relist(cfg: &Config, checked: Arc<Value>, relisted: Arc<Value>) -> Arc<
     }
 }
 
+/// The values of `field` (`"section"` or `"library"`) that `selected` takes rows from, in catalog order, and
+/// the ones `named` lists that it takes none from (none when `cfg` selects by ids, which ignore both).
+fn taken(cfg: &Config, rows: &[Value], selected: &[(String, String)], field: &str, named: &[String]) -> (Vec<String>, Vec<String>) {
+    let ids: HashSet<&str> = selected.iter().map(|(i, _)| i.as_str()).collect();
+    let mut ran: Vec<String> = Vec::new();
+    for r in rows {
+        if let (Some(id), Some(v)) = (r["id"].as_str(), r[field].as_str()) {
+            if ids.contains(id) && !ran.iter().any(|x| x == v) {
+                ran.push(v.to_string());
+            }
+        }
+    }
+    let missing = if cfg.ids.is_empty() { named.iter().filter(|s| !ran.contains(s)).cloned().collect() } else { vec![] };
+    (ran, missing)
+}
+
+/// [`taken`] for groups.
+fn groups_run(cfg: &Config, rows: &[Value], selected: &[(String, String)]) -> (Vec<String>, Vec<String>) {
+    taken(cfg, rows, selected, "section", &cfg.sections)
+}
+
+/// [`taken`] for libraries.
+fn libraries_run(cfg: &Config, rows: &[Value], selected: &[(String, String)]) -> (Vec<String>, Vec<String>) {
+    taken(cfg, rows, selected, "library", &cfg.libraries)
+}
+
 /// `cat` is the catalog `start()` checked the selection against, or the one the run's thread listed again
-/// when that one failed in part (see [`after_relist`]).
-fn run(cfg: Config, cat: Arc<Value>) {
+/// when that one failed in part (see [`after_relist`]). `start_no` is the start's number, as `acked_start`.
+fn run(cfg: Config, cat: Arc<Value>, start_no: u64) {
     let selected = select(&cfg, cat["rows"].as_array().unwrap());
+    let (sections_run, sections_missing) = groups_run(&cfg, rows_of(&cat), &selected);
+    let (libraries_run, libraries_missing) = libraries_run(&cfg, rows_of(&cat), &selected);
     let rounds = cfg.rounds.unwrap_or(3).max(1);
     let warm_ms = cfg.warm_ms.unwrap_or(300);
     let sample_ms = cfg.sample_ms.unwrap_or(100);
@@ -471,9 +504,12 @@ fn run(cfg: Config, cat: Arc<Value>) {
     };
     let total = selected.len() * rounds as usize;
     set_status(|s| {
+        // `run_start` and the groups once the rows are picked, so an app can report what this start runs.
         *s = json!({"running": true, "run_id": run_id, "started": started, "total": total, "done": 0,
             "round": 0, "rounds": rounds, "current": null, "sink": sink.state, "lines": 0, "errors": 0,
-            "results": {}, "rind_commit": RIND_COMMIT});
+            "results": {}, "rind_commit": RIND_COMMIT, "acked_start": start_no, "run_start": start_no,
+            "sections_run": sections_run, "sections_missing": sections_missing,
+            "libraries_run": libraries_run, "libraries_missing": libraries_missing});
     });
     sink.send(&json!({"t": "start", "schema": SCHEMA, "run_id": run_id, "started": started,
         "rind_commit": RIND_COMMIT, "target": TARGET, "device": cat["device"],
@@ -653,6 +689,11 @@ pub fn start(config_json: &str) -> Result<(), String> {
     drop(cache);
     let before_run = before.clone();
     let start_no = STARTS.fetch_add(1, Ordering::SeqCst) + 1;
+    // The start's number, under the status lock and before its thread exists, so it can't land after the
+    // thread released the slot and a later start wrote its own; every status the thread writes carries it
+    // too. An app reads it once start() returns, to tell this start's status (`run_start`, `refused_start`)
+    // from an earlier one's.
+    set_status(|s| s["acked_start"] = json!(start_no));
     std::thread::Builder::new()
         .name("devbench".into())
         .stack_size(64 << 20)
@@ -663,7 +704,7 @@ pub fn start(config_json: &str) -> Result<(), String> {
                     let rounds = cfg.rounds.unwrap_or(3).max(1);
                     set_status(|s| {
                         *s = json!({"running": true, "current": "listing tests", "done": 0, "total": 0,
-                            "round": 0, "rounds": rounds})
+                            "round": 0, "rounds": rounds, "acked_start": start_no})
                     });
                     let relisted = catalog_in(&mut catalogs(), true);
                     match cached {
@@ -684,9 +725,9 @@ pub fn start(config_json: &str) -> Result<(), String> {
                     // Its reason is `refused_reason`, apart from `start_error`, which a later start refused before
                     // acknowledgement (as "already running") writes without touching it.
                     // Written below, with the slot's release.
-                    return Some(json!({"running": false, "error": why, "refused_reason": why, "refused_start": start_no}));
+                    return Some(json!({"running": false, "error": why, "refused_reason": why, "refused_start": start_no, "acked_start": start_no}));
                 }
-                run(cfg, cat);
+                run(cfg, cat, start_no);
                 None
             }));
             // The final status and the run slot's release in one step under the status lock, which status()
@@ -695,11 +736,14 @@ pub fn start(config_json: &str) -> Result<(), String> {
             match r {
                 Ok(Some(refusal)) => *st = Some(refusal),
                 Ok(None) => {}
-                Err(_) => {
-                    let v = st.get_or_insert_with(|| json!({}));
+                // A panic once run() wrote this start's status keeps its partial results; one before then
+                // replaces the status, so an earlier start's refusal can't stand in for it.
+                Err(_) if st.as_ref().is_some_and(|v| v["run_start"] == start_no) => {
+                    let v = st.as_mut().expect("checked above");
                     v["running"] = json!(false);
                     v["error"] = json!("runner panicked");
                 }
+                Err(_) => *st = Some(json!({"running": false, "error": "runner panicked", "acked_start": start_no})),
             }
             RUNNING.store(false, Ordering::SeqCst);
         })
@@ -851,6 +895,35 @@ mod tests {
         assert!(select(&cfg(json!({"libraries": ["ring"], "sections": ["ML-KEM"]})), &rows()).is_empty());
         assert_eq!(select(&cfg(json!({"libraries": ["ring"], "sections": ["AEADs"]})), &rows()).len(), 1);
         assert_eq!(select(&cfg(json!({"libraries": ["rind"]})), &rows()).len(), 2);
+    }
+
+    #[test]
+    fn a_library_filter_naming_no_library_selects_nothing_even_with_a_more_group() {
+        let mut rows = rows();
+        // A More group's row whose library the report doesn't list, which its group alone selects.
+        rows.push(json!({"id": "s", "file": "g", "library": "fips205", "section": "More: slhdsa", "extra": true}));
+        let more = |libs: Value| select(&cfg(json!({"libraries": libs, "sections": ["More: slhdsa"]})), &rows);
+        // A misspelt library beside the More group: refused, not run as fips205.
+        assert!(more(json!(["rign"])).is_empty());
+        // A known library keeps the More fallback, and the More row's own library selects it.
+        assert_eq!(more(json!(["ring"])).len(), 1);
+        assert_eq!(more(json!(["fips205"])).len(), 1);
+        assert_eq!(more(json!(["rign", "ring"])).len(), 1);
+    }
+
+    #[test]
+    fn a_run_reports_the_groups_and_libraries_it_takes_and_the_named_ones_it_cannot() {
+        let c = cfg(json!({"libraries": ["rind"], "sections": ["AEADs", "TLS 1.3 with rustls"]}));
+        let sel = select(&c, &rows());
+        assert_eq!(groups_run(&c, &rows(), &sel), (vec!["AEADs".to_string()], vec!["TLS 1.3 with rustls".to_string()]));
+        // A library named beside one that runs, which takes no row: reported, not dropped silently.
+        let c = cfg(json!({"libraries": ["rind", "rign"], "sections": ["AEADs"]}));
+        let sel = select(&c, &rows());
+        assert_eq!(sel.len(), 1);
+        assert_eq!(libraries_run(&c, &rows(), &sel), (vec!["rind".to_string()], vec!["rign".to_string()]));
+        // By ids, groups don't select, so none is missing.
+        let c = cfg(json!({"ids": ["a"], "sections": ["TLS"]}));
+        assert_eq!(groups_run(&c, &rows(), &select(&c, &rows())), (vec!["ML-KEM".to_string()], vec![]));
     }
 
     #[test]

@@ -25,6 +25,24 @@ opaque low.entry.Entry.assert_held : Result Unit
 opaque low.generic.zeroise.zeroise_value {T : Type} (ZeroableInst : low.generic.zeroise.Zeroable T) :
   T → Result T
 
+/-- What `zeroise` leaves in `v`, as `Rind.X86_64.FunsExternal` models it: no
+proof reads a slice after its wipe. -/
+opaque low.generic.zeroise.wiped {T : Type _} (v : Slice T) : Slice T := v
+
+/-- `zeroise`, which returns, as `Rind.X86_64.FunsExternal` models it. -/
+def low.generic.zeroise.zeroise {T : Type _} (_ZeroableInst : low.generic.zeroise.Zeroable T)
+    (v : Slice T) : Result (Slice T) :=
+  ok (low.generic.zeroise.wiped v)
+
+/-! aws-lc's `sha512-armv4` routines, behind their Rust wrappers, which
+`Rind.Armv7.Sha512Entry` states. -/
+
+opaque low.arm.sha_armv4.compress_neon
+  : low.arm.cpu.HaveNeon → Array Std.U64 8#usize → Slice Std.U8 → Result (Array Std.U64 8#usize)
+
+opaque low.arm.sha_armv4.compress_nohw
+  : Array Std.U64 8#usize → Slice Std.U8 → Result (Array Std.U64 8#usize)
+
 /-- `ZeroableRef::new`, as `Rind.Armv7.Dispatch` models a `ZeroableRef`: its
 value. -/
 def low.generic.zeroise.ZeroableRef.new {T : Type} (value : T) :
@@ -50,6 +68,73 @@ opaque curve25519_dalek.montgomery.MontgomeryPoint.mul_clamped
 
 opaque curve25519_dalek.montgomery.MontgomeryPoint.mul_base_clamped
   : Array Std.U8 32#usize → Result curve25519_dalek.montgomery.MontgomeryPoint
+
+/-! curve25519-dalek's Ed25519 arithmetic, whose Beneficial AI Foundation
+theorems `Rind.Armv7.Dalek` restates too. -/
+
+opaque curve25519_dalek.edwards.CompressedEdwardsY.decompress
+  : curve25519_dalek.edwards.CompressedEdwardsY → Result (Option curve25519_dalek.edwards.EdwardsPoint)
+
+opaque curve25519_dalek.edwards.EdwardsPoint.compress
+  : curve25519_dalek.edwards.EdwardsPoint → Result curve25519_dalek.edwards.CompressedEdwardsY
+
+opaque curve25519_dalek.edwards.EdwardsPoint.Insts.CoreOpsArithNegEdwardsPoint.neg
+  : curve25519_dalek.edwards.EdwardsPoint → Result curve25519_dalek.edwards.EdwardsPoint
+
+opaque curve25519_dalek.edwards.EdwardsPoint.mul_base
+  : curve25519_dalek.scalar.Scalar → Result curve25519_dalek.edwards.EdwardsPoint
+
+opaque curve25519_dalek.edwards.EdwardsPoint.vartime_double_scalar_mul_basepoint
+  : curve25519_dalek.scalar.Scalar → curve25519_dalek.edwards.EdwardsPoint →
+    curve25519_dalek.scalar.Scalar → Result curve25519_dalek.edwards.EdwardsPoint
+
+opaque curve25519_dalek.scalar.Scalar.from_bytes_mod_order
+  : Array Std.U8 32#usize → Result curve25519_dalek.scalar.Scalar
+
+opaque curve25519_dalek.scalar.Scalar.from_bytes_mod_order_wide
+  : Array Std.U8 64#usize → Result curve25519_dalek.scalar.Scalar
+
+opaque curve25519_dalek.scalar.Scalar.from_canonical_bytes
+  : Array Std.U8 32#usize → Result (subtle.CtOption curve25519_dalek.scalar.Scalar)
+
+opaque curve25519_dalek.scalar.Scalar.Insts.CoreOpsArithMulScalarScalar.mul
+  : curve25519_dalek.scalar.Scalar → curve25519_dalek.scalar.Scalar → Result curve25519_dalek.scalar.Scalar
+
+opaque curve25519_dalek.scalar.Scalar.Insts.CoreOpsArithAddScalarScalar.add
+  : curve25519_dalek.scalar.Scalar → curve25519_dalek.scalar.Scalar → Result curve25519_dalek.scalar.Scalar
+
+/-! Three getters whose bodies the translation does not reach: subtle's two
+that its `From<CtOption<T>> for Option<T>`, which the translation reads from
+subtle's source, calls, and dalek's `Scalar::as_bytes`. `admin/prove` fails
+unless these quotes are still the source Cargo.lock pins:
+
+```rust
+    pub fn unwrap_u8(&self) -> u8 {
+        self.0
+    }
+
+    pub fn is_some(&self) -> Choice {
+        self.is_some
+    }
+
+    pub const fn as_bytes(&self) -> &[u8; 32] {
+        &self.bytes
+    }
+
+```
+-/
+
+/-- `Choice::unwrap_u8`: its byte. -/
+def subtle.Choice.unwrap_u8 (c : subtle.Choice) : Result Std.U8 := ok c
+
+/-- `CtOption::is_some`: its `is_some` field. -/
+def subtle.CtOption.impl.is_some {T : Type _} (o : subtle.CtOption T) : Result subtle.Choice :=
+  ok o.is_some
+
+/-- `Scalar::as_bytes`: its bytes. -/
+def curve25519_dalek.scalar.Scalar.as_bytes (s : curve25519_dalek.scalar.Scalar) :
+    Result (Array Std.U8 32#usize) :=
+  ok s.bytes
 
 opaque low.arm.curve25519.ladder_neon
   : low.arm.cpu.HaveNeon → Array Std.U8 32#usize → Array Std.U8 32#usize →
@@ -150,6 +235,21 @@ opaque mid.p521.PublicKey.from_x962_uncompressed
 opaque mid.p521.PrivateKey.diffie_hellman
   : mid.p521.PrivateKey → mid.p521.PublicKey → Result (core.result.Result mid.p521.SharedSecret error.Error)
 
+/-! ChaCha20-Poly1305, which `aead::Key` holds and whose armv7 code no proof
+covers yet. -/
+
+opaque mid.chacha20poly1305.ChaCha20Poly1305.new
+  : Array Std.U8 32#usize → Result mid.chacha20poly1305.ChaCha20Poly1305
+
+opaque mid.chacha20poly1305.ChaCha20Poly1305.encrypt
+  : mid.chacha20poly1305.ChaCha20Poly1305 → Array Std.U8 12#usize → Slice Std.U8 → Slice Std.U8 →
+    Array Std.U8 16#usize →
+    Result ((core.result.Result Unit error.Error) × (Slice Std.U8) × (Array Std.U8 16#usize))
+
+opaque mid.chacha20poly1305.ChaCha20Poly1305.decrypt
+  : mid.chacha20poly1305.ChaCha20Poly1305 → Array Std.U8 12#usize → Slice Std.U8 → Slice Std.U8 →
+    Array Std.U8 16#usize → Result ((core.result.Result Unit error.Error) × (Slice Std.U8))
+
 /-! The CPU feature checks. `Rind.Armv7.AesGcm`'s theorems take each one's
 answer as a hypothesis: no feature, on the CPUs they are about. -/
 
@@ -165,8 +265,8 @@ opaque low.arm.cpu.ct_compare_16
 
 opaque low.arm.cpu.ct_compare_bytes : Slice Std.U8 → Slice Std.U8 → Result Std.U8
 
-/-! aws-lc's AES and GHASH assembly for the crypto extension and for NEON,
-which no proof covers. -/
+/-! aws-lc's AES and GHASH assembly for the crypto extension, and its AES
+for NEON, which no proof covers. -/
 
 opaque low.arm.aesv8_armx.AesHwKey.new
   : Slice Std.U8 → low.arm.cpu.HaveCryptoExt → Result low.arm.aesv8_armx.AesHwKey
@@ -194,6 +294,9 @@ opaque low.arm.vpaes_armv7.NeonKey.encrypt_block
 opaque low.arm.vpaes_armv7.NeonKey.ctr32
   : low.arm.vpaes_armv7.NeonKey → Array Std.U8 16#usize → Slice (Array Std.U8 16#usize) →
     Result (Slice (Array Std.U8 16#usize))
+
+/-! aws-lc's GHASH for NEON, whose HOL Light proofs `Rind.Armv7.GhashNeon`
+restates. -/
 
 opaque low.arm.ghash_armv4.NeonTable.new
   : Array Std.U8 16#usize → low.arm.cpu.HaveNeon → Result low.arm.ghash_armv4.NeonTable

@@ -1,5 +1,5 @@
 import Rind.X86_64.Hkdf
-import Rind.X86_64.AesGcmAead
+import Rind.X86_64.AesGcmApi
 import Rind.X86_64.ChaCha20Poly1305
 open Aeneas Aeneas.Std Result rind.vale rind.spec
 
@@ -8,7 +8,7 @@ open Aeneas Aeneas.Std Result rind.vale rind.spec
 
 `From<Okm<&'static aead::Algorithm>> for aead::Key` fills the algorithm's key
 length of HKDF-Expand into a buffer, then keys the algorithm with it through
-`Key::new`. This file composes that with `AesGcmAead`'s `aes_gcm_new`, so the key
+`Key::new`. This file composes that with `AesGcmApi`'s `aes_gcm_new`, so the key
 holds AES-GCM for the HKDF bytes, and with
 `ChaCha20Poly1305`'s `chacha20_poly1305_new`, so it holds ChaCha20-Poly1305
 for them. It lives apart from `Hkdf` because these proofs are x86_64's, and

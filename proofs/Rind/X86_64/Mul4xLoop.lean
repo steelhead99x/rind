@@ -2,30 +2,14 @@ import Rind.X86_64.Mul4xAsm
 
 /-! # bn_mul4x_mont's loops
 
-The general loop rule, the facts that carry a pass's memory from block to block, and the first
-pass, `body0`, its loop of `first`, and `firstTail`. -/
+The facts that carry a pass's memory from block to block, and the first pass, `body0`, its loop
+of `first`, and `firstTail`. -/
 
 open VG VG.X86_64 Rind.X86_64.Mul4x rind.x86_64.asm
 
 set_option linter.unusedSimpArgs false
 
 namespace rind.x86_64.mul4x
-
-/-! ## Frames -/
-
-theorem Frame.refl (s : S) (gs : List Reg) : Frame s s gs := ⟨fun _ _ => rfl, rfl, rfl, rfl, rfl⟩
-
-theorem Frame.trans {s₁ s₂ s₃ : S} {gs : List Reg} (h₁ : Frame s₁ s₂ gs) (h₂ : Frame s₂ s₃ gs) :
-    Frame s₁ s₃ gs :=
-  ⟨fun r hr => (h₂.gpr r hr).trans (h₁.gpr r hr), h₂.others.trans h₁.others, h₂.wr.trans h₁.wr,
-    h₂.xmm.trans h₁.xmm, h₂.lo.trans h₁.lo⟩
-
-theorem Frame.mono {s s' : S} {gs gs' : List Reg} (h : Frame s s' gs) (hg : ∀ r ∈ gs, r ∈ gs') :
-    Frame s s' gs' :=
-  ⟨fun r hr => h.gpr r fun h' => hr (hg r h'), h.others, h.wr, h.xmm, h.lo⟩
-
-theorem Frame.rd {s s' : S} {gs : List Reg} (h : Frame s s' gs) : s'.vg.rd = s.vg.rd :=
-  congrArg (fun x => x.2.2.2.2.2.1) h.others
 
 theorem Arrays.frame {s s' : S} {k : Nat} {ap bp np n0p tp : Addr} {gs : List Reg}
     (ar : Arrays s k ap bp np n0p tp) (h : Frame s s' gs) : Arrays s' k ap bp np n0p tp := by
@@ -100,37 +84,6 @@ theorem readW_tp_ne {M : Mem} {tp : Addr} {i j k : Nat} (v : BitVec 64) (htp : t
     (hi : i < k + 3) (hj : j < k + 3) (hne : i ≠ j) :
     (M.writeW (wa tp j) v).readW (wa tp i) 64 = M.readW (wa tp i) 64 :=
   readW_writeW_sep _ _ _ _ (by unfold Apart; simp only [wa]; constructor <;> bv_omega)
-
-/-! ## Loops -/
-
-/-- A loop's trace from index `j`, `m + 1` iterations long, each `d` on from the last. -/
-def loopTrace (T : Nat → List Leak) (d j : Nat) : Nat → List Leak
-  | 0 => T j ++ [.branch false]
-  | m + 1 => T j ++ .branch true :: loopTrace T d (j + d) m
-
-/-- A loop that runs `m + 1` times: each iteration, from index `j` in range, keeps `Inv`, and continues
-while `go j`. -/
-theorem loop_ok {body : Prog I} {c : Rind.X86_64.Cond} (Inv : Nat → S → Prop) (R : Nat → Prop) (go : Nat → Bool)
-    (T : Nat → List Leak) (d : Nat)
-    (hstep : ∀ j s, Inv j s → R j → ∃ s', Exec I body s (T j) s' ∧ I.eval c s' = some (go j) ∧ Inv (j + d) s') :
-    ∀ m j s, Inv j s → (∀ i ≤ m, R (j + d * i)) → (∀ i < m, go (j + d * i) = true) → go (j + d * m) = false →
-      ∃ s', Exec I (.loop body c) s (loopTrace T d j m) s' ∧ Inv (j + d * (m + 1)) s' := by
-  intro m
-  induction m with
-  | zero =>
-    intro j s hI hR _ hg
-    obtain ⟨s', hx, hc, hI'⟩ := hstep j s hI (by simpa using hR 0 (by omega))
-    refine ⟨s', Exec.loopExit hx ?_, by simpa using hI'⟩
-    rw [hc]; simpa using hg
-  | succ m ih =>
-    intro j s hI hR hgo hg
-    obtain ⟨s₁, hx, hc, hI₁⟩ := hstep j s hI (by simpa using hR 0 (by omega))
-    obtain ⟨s', hx', hI'⟩ := ih (j + d) s₁ hI₁
-      (fun i hi => by have := hR (i + 1) (by omega); rwa [show j + d * (i + 1) = j + d + d * i by ring] at this)
-      (fun i hi => by have := hgo (i + 1) (by omega); rwa [show j + d * (i + 1) = j + d + d * i by ring] at this)
-      (by rwa [show j + d * (m + 1) = j + d + d * m by ring] at hg)
-    refine ⟨s', Exec.loopNext hx (by rw [hc]; simpa using hgo 0 (by omega)) hx', ?_⟩
-    rwa [show j + d * (m + 1 + 1) = j + d + d * (m + 1) by ring]
 
 /-! ## The first pass -/
 

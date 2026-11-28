@@ -3,7 +3,8 @@
 //! explicit parameters, and DSA and DH keys. `keys.rs` checks each public key
 //! through `rsa::PublicEncryptingKey::from_der` and `parity.rs` each private
 //! key through `signature::PqdsaKeyPair::from_pkcs8`, both refusing it with
-//! aws-lc-rs's kind.
+//! aws-lc-rs's kind, but for the mismatched EC keys README.md lists under
+//! "Behaves differently", which `mismatched_private_keys` holds.
 //!
 //! The curves' parameters are the crate's own `src/evp/*.der`, OpenSSL's
 //! `openssl ecparam -name <curve> -param_enc explicit -outform DER`. The
@@ -298,6 +299,19 @@ pub fn public_keys() -> Vec<Case> {
         add("infinity", &named, &[0], INVALID);
         add("no point", &named, &[], INVALID);
         add("truncated", &named, &g[..g.len() - 1], INVALID);
+        // A coordinate's value is right, its length is not.
+        add(
+            "G, a zero before y",
+            &named,
+            &[&g[..=len], &[0], &g[len + 1..]].concat(),
+            INVALID,
+        );
+        add(
+            "G compressed, a zero before x",
+            &named,
+            &[&[0x02 | (g[2 * len] & 1), 0], &g[1..=len]].concat(),
+            INVALID,
+        );
         add(
             "x = all ones",
             &named,
@@ -384,6 +398,40 @@ pub fn public_keys() -> Vec<Case> {
         add(
             "explicit, then NULL",
             &[explicit.encode(), vec![0x05, 0x00]].concat(),
+            &g,
+            INVALID,
+        );
+        // aws-lc splits the base's coordinates in half, then compares each
+        // as a number, so zeros before both halves are tolerated and before
+        // one alone are not.
+        let x = &g[1..=len];
+        let y = &g[len + 1..];
+        let base = |point: &[u8]| explicit.with(3, Some((0x04, point.to_vec())));
+        add(
+            "explicit, zeros before the base's x and y",
+            &base(&[&[0x04, 0], x, &[0], y].concat()),
+            &g,
+            WRONG,
+        );
+        add(
+            "explicit, a zero before the base's y",
+            &base(&[&[0x04], x, &[0], y].concat()),
+            &g,
+            INVALID,
+        );
+        let mut curve_then_null = explicit.0[2].1.clone();
+        curve_then_null.extend([0x05, 0x00]);
+        add(
+            "explicit, NULL after the curve's b",
+            &explicit.with(2, Some((0x30, curve_then_null))),
+            &g,
+            INVALID,
+        );
+        let mut cofactor_then_null = explicit.0.clone();
+        cofactor_then_null.push((0x05, Vec::new()));
+        add(
+            "explicit, NULL after the cofactor",
+            &der(0x30, &join(&cofactor_then_null)),
             &g,
             INVALID,
         );
@@ -611,8 +659,7 @@ fn offset(order: &[u8], delta: i16) -> Vec<u8> {
     out
 }
 
-/// Every EC and DSA PKCS#8 case but [`mismatched_private_keys`], which
-/// shares no keys with these.
+/// Every EC and DSA PKCS#8 case but [`mismatched_private_keys`].
 pub fn private_keys() -> Vec<Case> {
     let mut cases = Vec::new();
     for (index, curve) in CURVES.iter().enumerate() {
@@ -905,8 +952,9 @@ pub fn private_keys() -> Vec<Case> {
 }
 
 /// Keys on curves rind cannot back whose public key is on the curve but is
-/// not the scalar's. aws-lc refuses them (`InvalidEncoding`), and so does
-/// rind, which computes the scalar's point in constant time to tell.
+/// not the scalar's. aws-lc refuses them (`InvalidEncoding`); rind cannot
+/// compute the scalar's point on these curves, so it refuses them as
+/// another algorithm (`WrongAlgorithm`).
 pub fn mismatched_private_keys() -> Vec<Case> {
     CURVES
         .iter()

@@ -124,7 +124,7 @@ narrow_args!(u64);
 pub(crate) trait Ret {
     /// Calls the routine through `call` with `words`, its arguments, and
     /// returns what it returned.
-    fn returned(words: Words, call: impl FnOnce(&Words) -> Word) -> Self;
+    fn returned(words: Words, call: impl FnOnce(&Words) -> arch::Returned) -> Self;
 }
 
 /// A return value the routine leaves in the return register.
@@ -134,8 +134,17 @@ trait InRegister {
 }
 
 impl<T: InRegister> Ret for T {
-    fn returned(words: Words, call: impl FnOnce(&Words) -> Word) -> Self {
-        T::from_word(call(&words))
+    fn returned(words: Words, call: impl FnOnce(&Words) -> arch::Returned) -> Self {
+        T::from_word(arch::return_register(call(&words)))
+    }
+}
+
+/// Two words, which the System V ABI returns in `rax` and `rdx`: only for
+/// `extern "sysv64"` routines, since Win64 returns them in `xmm0`.
+#[cfg(target_arch = "x86_64")]
+impl Ret for u128 {
+    fn returned(words: Words, call: impl FnOnce(&Words) -> Self) -> Self {
+        call(&words)
     }
 }
 
@@ -143,7 +152,7 @@ impl<T: InRegister> Ret for T {
 /// passed before the arguments.
 #[cfg(target_arch = "x86_64")]
 impl Ret for [u8; 32] {
-    fn returned(words: Words, call: impl FnOnce(&Words) -> Word) -> Self {
+    fn returned(words: Words, call: impl FnOnce(&Words) -> arch::Returned) -> Self {
         let mut out = [0; 32];
         let mut all = Words {
             words: [0; MAX_WORDS],
@@ -350,7 +359,7 @@ pub(crate) fn hold() -> std::sync::MutexGuard<'static, ()> {
     LOCK.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-fn run(conv: Convention, f: Word, words: &Words, name: &str) -> Word {
+fn run(conv: Convention, f: Word, words: &Words, name: &str) -> arch::Returned {
     let (ret, after) = {
         let _held = LOCK.lock().unwrap_or_else(PoisonError::into_inner);
         // SAFETY: `_held` gives this thread sole use of `STATE`, which the
@@ -499,9 +508,18 @@ mod arch {
         }
     }
 
+    /// What a routine leaves in `rax` and, above it, `rdx`, which the
+    /// trampolines leave as it did.
+    pub(super) type Returned = u128;
+
+    /// `rax`, the register a routine returns a word in.
+    pub(super) fn return_register(r: Returned) -> Word {
+        r as Word
+    }
+
     /// The trampolines' own convention is the same on every OS, unlike
     /// `extern "C"`, which on Windows also preserves what they canary.
-    pub(super) type Trampoline = unsafe extern "sysv64" fn(Word, *const Word, Word) -> Word;
+    pub(super) type Trampoline = unsafe extern "sysv64" fn(Word, *const Word, Word) -> Returned;
 
     pub(super) fn trampoline(conv: Convention) -> Trampoline {
         match conv {
@@ -517,7 +535,7 @@ mod arch {
     // flags, and return what the routine did.
 
     #[unsafe(naked)]
-    unsafe extern "sysv64" fn sysv(f: Word, args: *const Word, len: Word) -> Word {
+    unsafe extern "sysv64" fn sysv(f: Word, args: *const Word, len: Word) -> Returned {
         core::arch::naked_asm!(
             "push rbp",
             "push rbx",
@@ -586,7 +604,7 @@ mod arch {
     }
 
     #[unsafe(naked)]
-    unsafe extern "sysv64" fn win64(f: Word, args: *const Word, len: Word) -> Word {
+    unsafe extern "sysv64" fn win64(f: Word, args: *const Word, len: Word) -> Returned {
         core::arch::naked_asm!(
             "push rbp",
             "push rbx",
@@ -752,6 +770,14 @@ mod arch {
     /// Linux lets use x18, as rustc's does under AddressSanitizer. The x18
     /// rule is for rind's assembly, which no compiler checks.
     const COMPILED: &[&str] = &["c_words", "rust_words"];
+
+    /// What a routine leaves in `x0`.
+    pub(super) type Returned = Word;
+
+    /// `x0`, the register a routine returns a word in.
+    pub(super) fn return_register(r: Returned) -> Word {
+        r
+    }
 
     pub(super) type Trampoline = unsafe extern "C" fn(Word, *const Word, Word) -> Word;
 

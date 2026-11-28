@@ -6,16 +6,19 @@
 fn main() {}
 
 #[cfg(not(target_arch = "xtensa"))]
-mod criterion;
-#[cfg(not(target_arch = "xtensa"))]
-use std::hint::black_box;
+mod common;
 
 #[cfg(not(target_arch = "xtensa"))]
-use criterion::{BatchSize, Criterion, Throughput, criterion_group, criterion_main};
+use std::hint::black_box;
+#[cfg(not(target_arch = "xtensa"))]
+use std::sync::Once;
+
+#[cfg(not(target_arch = "xtensa"))]
+use common::Dit;
 #[cfg(not(target_arch = "xtensa"))]
 use getrandom::{SysRng, rand_core::UnwrapErr};
 #[cfg(not(target_arch = "xtensa"))]
-use rind::spake2plus::{ProverSecrets, RFC9383, Session, VerifierRecord};
+use rind::spake2plus::{ProverSecrets, RFC9383, Rfc9383, Session, VerifierRecord};
 #[cfg(not(target_arch = "xtensa"))]
 use spake2plus::{Context, P256Sha256, Prover, ProverSecret, Verifier};
 
@@ -49,18 +52,30 @@ fn context() -> Context<'static> {
 }
 
 #[cfg(not(target_arch = "xtensa"))]
+fn rng() -> UnwrapErr<SysRng> {
+    UnwrapErr(SysRng)
+}
+
+#[cfg(not(target_arch = "xtensa"))]
 fn rustcrypto_secret() -> ProverSecret<P256Sha256> {
     ProverSecret::from_pbkdf_output(&[W0S, W1S].concat()).unwrap()
 }
 
-// A rind prover and the other library's verifier agree on a key, so the rows
-// time the same protocol.
+/// Checks, once a process, that a rind prover and the other library's
+/// verifier agree on a key, so the rows time the same protocol. Every row's
+/// setup runs it.
 #[cfg(not(target_arch = "xtensa"))]
 fn check_interop() {
+    static CHECKED: Once = Once::new();
+    CHECKED.call_once(interop);
+}
+
+#[cfg(not(target_arch = "xtensa"))]
+fn interop() {
     let prover = ProverSecrets::new(&W0S, &W1S).unwrap();
     let record = rustcrypto_secret().verifier_record();
     let (share_p, prover) = prover.start(&RFC9383, &SESSION).unwrap();
-    let (verifier, share_v) = Verifier::start(&record, &context(), &mut UnwrapErr(SysRng));
+    let (verifier, share_v) = Verifier::start(&record, &context(), &mut rng());
     let (verifier, confirm_v) = verifier
         .receive(&spake2plus::ShareP::from_bytes(share_p.as_ref()).unwrap())
         .unwrap();
@@ -74,121 +89,197 @@ fn check_interop() {
 }
 
 #[cfg(not(target_arch = "xtensa"))]
-fn bench(c: &mut Criterion) {
+fn secrets() -> ProverSecrets {
     check_interop();
-    let secrets = ProverSecrets::new(&W0S, &W1S).unwrap();
-    let record = VerifierRecord::from_w1(&W0S, &W1S).unwrap();
-    let rc_secret = rustcrypto_secret();
-    let rc_record = rc_secret.verifier_record();
-    let context = context();
-    let rng = || UnwrapErr(SysRng);
-
-    let mut group = c.benchmark_group("spake2plus-p256-prover-start");
-    group.throughput(Throughput::Elements(1));
-    group.bench_function("rind", |b| {
-        let _dit = criterion::rind_dit();
-        b.iter(|| black_box(secrets.start(&RFC9383, &SESSION).unwrap()));
-    });
-    group.bench_function("rustcrypto", |b| {
-        let mut rng = rng();
-        b.iter(|| black_box(Prover::start(&rc_secret, &context, &mut rng)));
-    });
-    group.finish();
-
-    // The verifier's share and its confirmation of the prover's share.
-    let mut group = c.benchmark_group("spake2plus-p256-verifier-start");
-    group.throughput(Throughput::Elements(1));
-    group.bench_function("rind", |b| {
-        let _dit = criterion::rind_dit();
-        let (share_p, _) = secrets.start(&RFC9383, &SESSION).unwrap();
-        b.iter(|| black_box(record.start(&RFC9383, &SESSION, &share_p).unwrap()));
-    });
-    group.bench_function("rustcrypto", |b| {
-        let mut rng = rng();
-        let (_, share_p) = Prover::start(&rc_secret, &context, &mut rng);
-        b.iter(|| {
-            let (verifier, share_v) = Verifier::start(&rc_record, &context, &mut rng);
-            black_box((share_v, verifier.receive(&share_p).unwrap()))
-        });
-    });
-    group.finish();
-
-    // Each side's finish consumes its state, so each iteration runs the
-    // steps before it, untimed.
-    let mut group = c.benchmark_group("spake2plus-p256-prover-finish");
-    group.throughput(Throughput::Elements(1));
-    group.bench_function("rind", |b| {
-        let _dit = criterion::rind_dit();
-        b.iter_batched(
-            || {
-                let (share_p, prover) = secrets.start(&RFC9383, &SESSION).unwrap();
-                let (share_v, confirm_v, _) = record.start(&RFC9383, &SESSION, &share_p).unwrap();
-                (prover, share_v, confirm_v)
-            },
-            |(prover, share_v, confirm_v)| black_box(prover.finish(&share_v, &confirm_v).unwrap()),
-            BatchSize::SmallInput,
-        );
-    });
-    group.bench_function("rustcrypto", |b| {
-        let mut rng = rng();
-        b.iter_batched(
-            || {
-                let (prover, share_p) = Prover::start(&rc_secret, &context, &mut rng);
-                let (verifier, share_v) = Verifier::start(&rc_record, &context, &mut rng);
-                let (_, confirm_v) = verifier.receive(&share_p).unwrap();
-                (prover, share_v, confirm_v)
-            },
-            |(prover, share_v, confirm_v)| {
-                black_box(
-                    prover
-                        .receive(&share_v)
-                        .unwrap()
-                        .finish(&confirm_v)
-                        .unwrap(),
-                )
-            },
-            BatchSize::SmallInput,
-        );
-    });
-    group.finish();
-
-    let mut group = c.benchmark_group("spake2plus-p256-verifier-finish");
-    group.throughput(Throughput::Elements(1));
-    group.bench_function("rind", |b| {
-        let _dit = criterion::rind_dit();
-        b.iter_batched(
-            || {
-                let (share_p, prover) = secrets.start(&RFC9383, &SESSION).unwrap();
-                let (share_v, confirm_v, verifier) =
-                    record.start(&RFC9383, &SESSION, &share_p).unwrap();
-                let (confirm_p, _) = prover.finish(&share_v, &confirm_v).unwrap();
-                (verifier, confirm_p)
-            },
-            |(verifier, confirm_p)| black_box(verifier.finish(&confirm_p).unwrap()),
-            BatchSize::SmallInput,
-        );
-    });
-    group.bench_function("rustcrypto", |b| {
-        let mut rng = rng();
-        b.iter_batched(
-            || {
-                let (prover, share_p) = Prover::start(&rc_secret, &context, &mut rng);
-                let (verifier, share_v) = Verifier::start(&rc_record, &context, &mut rng);
-                let (verifier, confirm_v) = verifier.receive(&share_p).unwrap();
-                let (confirm_p, _) = prover
-                    .receive(&share_v)
-                    .unwrap()
-                    .finish(&confirm_v)
-                    .unwrap();
-                (verifier, confirm_p)
-            },
-            |(verifier, confirm_p)| black_box(verifier.finish(&confirm_p).unwrap()),
-            BatchSize::SmallInput,
-        );
-    });
+    ProverSecrets::new(&W0S, &W1S).unwrap()
 }
 
 #[cfg(not(target_arch = "xtensa"))]
-criterion_group!(benches, bench);
+fn record() -> VerifierRecord {
+    VerifierRecord::from_w1(&W0S, &W1S).unwrap()
+}
+
+/// RustCrypto's prover secret and the verifier's record of it.
 #[cfg(not(target_arch = "xtensa"))]
-criterion_main!(benches);
+struct RustCrypto {
+    secret: ProverSecret<P256Sha256>,
+    record: spake2plus::VerifierRecord<P256Sha256>,
+    context: Context<'static>,
+}
+
+#[cfg(not(target_arch = "xtensa"))]
+fn rustcrypto() -> RustCrypto {
+    check_interop();
+    let secret = rustcrypto_secret();
+    let record = secret.verifier_record();
+    RustCrypto {
+        secret,
+        record,
+        context: context(),
+    }
+}
+
+#[cfg(not(target_arch = "xtensa"))]
+mod spake2plus_p256_prover_start {
+    use swole::bench;
+
+    use super::*;
+
+    fn rind_input() -> Dit<ProverSecrets> {
+        Dit::hold(secrets())
+    }
+
+    #[bench(setup = rind_input)]
+    fn rind(secrets: &Dit<ProverSecrets>) {
+        black_box(secrets.start(&RFC9383, &SESSION).unwrap());
+    }
+
+    #[bench(setup = super::rustcrypto)]
+    fn rustcrypto(input: &RustCrypto) {
+        black_box(Prover::start(&input.secret, &input.context, &mut rng()));
+    }
+}
+
+/// The verifier's share and its confirmation of the prover's share.
+#[cfg(not(target_arch = "xtensa"))]
+mod spake2plus_p256_verifier_start {
+    use swole::bench;
+
+    use super::*;
+
+    type Rind = Dit<(VerifierRecord, rind::spake2plus::Share<Rfc9383>)>;
+
+    fn rind_input() -> Rind {
+        let (share_p, _) = secrets().start(&RFC9383, &SESSION).unwrap();
+        Dit::hold((record(), share_p))
+    }
+
+    #[bench(setup = rind_input)]
+    fn rind(input: &Rind) {
+        let (record, share_p) = &**input;
+        black_box(record.start(&RFC9383, &SESSION, share_p).unwrap());
+    }
+
+    type RustCryptoInput = (RustCrypto, spake2plus::ShareP<P256Sha256>);
+
+    fn rustcrypto_input() -> RustCryptoInput {
+        let input = super::rustcrypto();
+        let (_, share_p) = Prover::start(&input.secret, &context(), &mut rng());
+        (input, share_p)
+    }
+
+    #[bench(setup = rustcrypto_input)]
+    fn rustcrypto((input, share_p): &RustCryptoInput) {
+        let (verifier, share_v) = Verifier::start(&input.record, &input.context, &mut rng());
+        black_box((share_v, verifier.receive(share_p).unwrap()));
+    }
+}
+
+/// Each side's finish consumes its state, so each call runs the steps before
+/// it untimed, and returns its output, which drops untimed.
+#[cfg(not(target_arch = "xtensa"))]
+mod spake2plus_p256_prover_finish {
+    use swole::bench;
+
+    use super::*;
+
+    /// The prover's state and the verifier's reply, with the DIT guard held
+    /// across the call that consumes them.
+    type Rind = (
+        rind::cpu::Dit,
+        rind::spake2plus::ProverAwaiting<Rfc9383>,
+        rind::spake2plus::Share<Rfc9383>,
+        rind::spake2plus::Confirm<Rfc9383>,
+    );
+
+    fn rind_input() -> Rind {
+        let (share_p, prover) = secrets().start(&RFC9383, &SESSION).unwrap();
+        let (share_v, confirm_v, _) = record().start(&RFC9383, &SESSION, &share_p).unwrap();
+        (rind::cpu::Dit::hold(), prover, share_v, confirm_v)
+    }
+
+    #[bench(setup = rind_input)]
+    fn rind((dit, prover, share_v, confirm_v): Rind) -> impl Sized + use<> {
+        (prover.finish(&share_v, &confirm_v).unwrap(), dit)
+    }
+
+    type RustCryptoInput = (
+        Prover<P256Sha256>,
+        spake2plus::ShareV<P256Sha256>,
+        spake2plus::ConfirmV<P256Sha256>,
+    );
+
+    fn rustcrypto_input() -> RustCryptoInput {
+        let input = super::rustcrypto();
+        let context = context();
+        let (prover, share_p) = Prover::start(&input.secret, &context, &mut rng());
+        let (verifier, share_v) = Verifier::start(&input.record, &context, &mut rng());
+        let (_, confirm_v) = verifier.receive(&share_p).unwrap();
+        (prover, share_v, confirm_v)
+    }
+
+    #[bench(setup = rustcrypto_input)]
+    fn rustcrypto((prover, share_v, confirm_v): RustCryptoInput) -> impl Sized + use<> {
+        prover
+            .receive(&share_v)
+            .unwrap()
+            .finish(&confirm_v)
+            .unwrap()
+    }
+}
+
+#[cfg(not(target_arch = "xtensa"))]
+mod spake2plus_p256_verifier_finish {
+    use swole::bench;
+
+    use super::*;
+
+    /// The verifier's state and the prover's confirmation, with the DIT
+    /// guard held across the call that consumes them.
+    type Rind = (
+        rind::cpu::Dit,
+        rind::spake2plus::VerifierAwaiting<Rfc9383>,
+        rind::spake2plus::Confirm<Rfc9383>,
+    );
+
+    fn rind_input() -> Rind {
+        let (share_p, prover) = secrets().start(&RFC9383, &SESSION).unwrap();
+        let (share_v, confirm_v, verifier) = record().start(&RFC9383, &SESSION, &share_p).unwrap();
+        let (confirm_p, _) = prover.finish(&share_v, &confirm_v).unwrap();
+        (rind::cpu::Dit::hold(), verifier, confirm_p)
+    }
+
+    #[bench(setup = rind_input)]
+    fn rind((dit, verifier, confirm_p): Rind) -> impl Sized + use<> {
+        (verifier.finish(&confirm_p).unwrap(), dit)
+    }
+
+    type RustCryptoInput = (
+        spake2plus::VerifierConfirming<P256Sha256>,
+        spake2plus::ConfirmP<P256Sha256>,
+    );
+
+    fn rustcrypto_input() -> RustCryptoInput {
+        let input = super::rustcrypto();
+        let context = context();
+        let (prover, share_p) = Prover::start(&input.secret, &context, &mut rng());
+        let (verifier, share_v) = Verifier::start(&input.record, &context, &mut rng());
+        let (verifier, confirm_v) = verifier.receive(&share_p).unwrap();
+        let (confirm_p, _) = prover
+            .receive(&share_v)
+            .unwrap()
+            .finish(&confirm_v)
+            .unwrap();
+        (verifier, confirm_p)
+    }
+
+    #[bench(setup = rustcrypto_input)]
+    fn rustcrypto((verifier, confirm_p): RustCryptoInput) -> impl Sized + use<> {
+        verifier.finish(&confirm_p).unwrap()
+    }
+}
+
+#[cfg(not(target_arch = "xtensa"))]
+fn main() {
+    swole::main();
+}

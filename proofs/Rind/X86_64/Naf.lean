@@ -4,12 +4,12 @@ import Mathlib.Tactic.Ring
 open Aeneas Aeneas.Std Result rind.spec
 
 /-!
-# The non-adjacent form, `mid::util::public_naf`
+# The non-adjacent form, `low::generic::naf::public_naf`
 
-`naf_spec` proves that `public_naf::<W>`, for a width of 5 or 6, writes the
+`naf_spec` proves that `public_naf::<W>`, for a width of 5, 6, or 8, writes the
 width-`W` NAF of a scalar of `L` 64-bit words into `64L + 1` digits: digits
 that name the scalar, each zero or odd and below 2^(W-1) in magnitude. P-256's
-and P-384's ECDSA verification read them. `admin/prove` writes the aarch64
+and P-384's ECDSA verification read them, and x86_64's Ed25519 verification. `admin/prove` writes the aarch64
 proof from this file by renaming the target.
 -/
 
@@ -41,7 +41,7 @@ def nafDigit (A : Int) (d : Int) : Prop := d = 0 ∨ (d % 2 = 1 ∧ -A < d ∧ d
 /-- One digit of the NAF, for `A` = 2^(W-1): the window `w` of the remainder
 `R` = w + 2A·H yields digit `d`, and the next window and remainder halve what
 is left, which stays within the halved bound `M`. -/
-theorem naf_step (A w H b H' M : Int) (hA : A = 16 ∨ A = 32) (hw0 : 0 ≤ w) (hw : w ≤ 2 * A)
+theorem naf_step (A w H b H' M : Int) (hA : A = 16 ∨ A = 32 ∨ A = 128) (hw0 : 0 ≤ w) (hw : w ≤ 2 * A)
     (hH : H = b + 2 * H') (hb : b = 0 ∨ b = 1) (hH' : 0 ≤ H')
     (hR : w + 2 * A * H ≤ M) (hM : (∃ t, M = 2 * A * t) ∨ M ≤ A) (hM2 : M % 2 = 0 ∨ M ≤ 1) :
     let d := if w % 2 = 1 then (if w < A then w else w - 2 * A) else 0
@@ -50,7 +50,7 @@ theorem naf_step (A w H b H' M : Int) (hA : A = 16 ∨ A = 32) (hw0 : 0 ≤ w) (
       w + 2 * A * H - d = 2 * (w'' + 2 * A * H') ∧ w'' + 2 * A * H' ≤ M / 2 := by
   intro d w''
   subst hH
-  obtain rfl | rfl := hA <;> obtain rfl | rfl := hb <;> rcases hM with ⟨t, rfl⟩ | hM <;>
+  obtain rfl | rfl | rfl := hA <;> obtain rfl | rfl := hb <;> rcases hM with ⟨t, rfl⟩ | hM <;>
     simp only [d, w'', nafDigit] <;> split_ifs <;> omega
 
 theorem div_split_hi (a X r : Nat) (ha : a < 2 ^ 64) : (a + 2 ^ 64 * X) / 2 ^ (64 + r) = X / 2 ^ r := by
@@ -91,8 +91,8 @@ theorem wordsNat_mod (l : List U64) (hl : 0 < l.length) (w : Nat) (hw : w ≤ 64
 
 @[step]
 theorem bit_spec (k : Slice U64) (i : Usize) :
-    mid.util.bit k i ⦃ r => r.val = ((wordsNat k.val / 2 ^ i.val % 2 : Nat) : Int) ⦄ := by
-  unfold mid.util.bit Shared0U64.Insts.CoreOpsBitShrUsizeU64.shr
+    low.generic.naf.bit k i ⦃ r => r.val = ((wordsNat k.val / 2 ^ i.val % 2 : Nat) : Int) ⦄ := by
+  unfold low.generic.naf.bit Shared0U64.Insts.CoreOpsBitShrUsizeU64.shr
   rw [wordsNat_bit]
   step as ⟨i1, hi1⟩
   simp only [core.slice.Slice.get, core.slice.index.Usize.get, bind_ok, Slice.getElem?_Usize_eq, hi1]
@@ -115,14 +115,14 @@ theorem bit_spec (k : Slice U64) (i : Usize) :
 theorem i32_bv (x : I32) : x.bv = BitVec.ofInt IScalarTy.I32.numBits x.val :=
   BitVec.ofInt_toInt.symm
 
-theorem i32_and_one (x : I32) (hx0 : 0 ≤ x.val) (hx : x.val ≤ 64) : (x &&& 1#i32).val = x.val % 2 := by
+theorem i32_and_one (x : I32) (hx0 : 0 ≤ x.val) (hx : x.val ≤ 256) : (x &&& 1#i32).val = x.val % 2 := by
   have h : (x &&& 1#i32).val = (BitVec.ofInt IScalarTy.I32.numBits x.val &&& (1#i32).bv).toInt := by
     rw [← i32_bv]; rfl
   rw [h]
   generalize x.val = v at hx0 hx ⊢
   interval_cases v <;> decide
 
-theorem M_facts (B i w : Nat) (hw : w = 5 ∨ w = 6) (hi : i < B + 1) :
+theorem M_facts (B i w : Nat) (hw : w = 5 ∨ w = 6 ∨ w = 8) (hi : i < B + 1) :
     ((∃ t, ((2 ^ B / 2 ^ i : Nat) : Int) = 2 * 2 ^ (w - 1) * t) ∨
         ((2 ^ B / 2 ^ i : Nat) : Int) ≤ 2 ^ (w - 1)) ∧
       (((2 ^ B / 2 ^ i : Nat) : Int) % 2 = 0 ∨ ((2 ^ B / 2 ^ i : Nat) : Int) ≤ 1) ∧
@@ -163,14 +163,14 @@ theorem nafVal_take_succ (l : List I8) (i : Nat) (hi : i < l.length) (d : I8) :
     List.length_take, Nat.min_eq_left (by omega)]
   simp [nafVal]
 
-theorem naf_inv_step (B w K i : Nat) (hw : w = 5 ∨ w = 6) (hi : i < B + 1) (ds : List I8) (win : Int)
+theorem naf_inv_step (B w K i : Nat) (hw : w = 5 ∨ w = 6 ∨ w = 8) (hi : i < B + 1) (ds : List I8) (win : Int)
     (hinv : nafInv B w K i ds win) (dd : I8)
     (hdd : dd.val = if win % 2 = 1 then (if win < 2 ^ (w - 1) then win else win - 2 * 2 ^ (w - 1)) else 0) :
     nafInv B w K (i + 1) (ds.set i dd)
       ((win - dd.val) / 2 + ((K / 2 ^ (i + w) % 2 : Nat) : Int) * 2 ^ (w - 1)) := by
   obtain ⟨hlen, hw0, hw2, hsum, hbound, hdig⟩ := hinv
-  have hA : (2 : Int) ^ (w - 1) = 16 ∨ (2 : Int) ^ (w - 1) = 32 := by
-    rcases hw with rfl | rfl <;> norm_num
+  have hA : (2 : Int) ^ (w - 1) = 16 ∨ (2 : Int) ^ (w - 1) = 32 ∨ (2 : Int) ^ (w - 1) = 128 := by
+    rcases hw with rfl | rfl | rfl <;> norm_num
   have hH : ((K / 2 ^ (i + w) : Nat) : Int) =
       ((K / 2 ^ (i + w) % 2 : Nat) : Int) + 2 * ((K / 2 ^ (i + 1 + w) : Nat) : Int) := by
     have : K / 2 ^ (i + 1 + w) = K / 2 ^ (i + w) / 2 := by
@@ -201,21 +201,21 @@ theorem naf_inv_step (B w K i : Nat) (hw : w = 5 ∨ w = 6) (hi : i < B + 1) (ds
       rw [this]; exact hdig j (by omega)
 
 set_option maxHeartbeats 1000000 in
-theorem naf_loop_spec (W : U32) (hW : W.val = 5 ∨ W.val = 6) (k : Slice U64) (B : Nat)
+theorem naf_loop_spec (W : U32) (hW : W.val = 5 ∨ W.val = 6 ∨ W.val = 8) (k : Slice U64) (B : Nat)
     (hk : 64 * k.length = B) (hB : B < 2 ^ 16) (iter : core.ops.range.Range Usize) (digits : Slice I8) (window : I32)
     (he : iter.end.val = B + 1) (hs : iter.start.val ≤ B + 1)
     (hinv : nafInv B W.val (wordsNat k.val) iter.start.val digits.val window.val) :
-    mid.util.public_naf_loop W iter k digits window ⦃ r =>
+    low.generic.naf.public_naf_loop W iter k digits window ⦃ r =>
       r.length = B + 1 ∧ nafVal r.val = wordsNat k.val ∧
         ∀ j < B + 1, nafDigit (2 ^ (W.val - 1)) (r.val[j]!).val ⦄ := by
-  unfold mid.util.public_naf_loop
+  unfold low.generic.naf.public_naf_loop
   apply loop.spec_decr_nat (fun x => B + 1 - x.1.start.val)
     (fun x => x.1.end.val = B + 1 ∧ x.1.start.val ≤ B + 1 ∧
       nafInv B W.val (wordsNat k.val) x.1.start.val x.2.1.val x.2.2.val)
   · rintro ⟨it, ds, win⟩ ⟨he, hs, hinv⟩
     simp only at he hs hinv ⊢
     obtain ⟨hlen, hw0, hw, hsum, hbound, hdig⟩ := hinv
-    unfold mid.util.public_naf_loop.body
+    unfold low.generic.naf.public_naf_loop.body
     step as ⟨o, iter1, ho, he1⟩
     split_ifs at ho with hlt
     · obtain ⟨rfl, hst⟩ := ho
@@ -223,10 +223,10 @@ theorem naf_loop_spec (W : U32) (hW : W.val = 5 ∨ W.val = 6) (k : Slice U64) (
       have hi : it.start.val < ds.length := by simp [Slice.length, hlen]; omega
       step with Slice.index_mut_usize_spec ds it.start hi as ⟨x, back, hx, hback⟩
       step as ⟨i1, hi1, _⟩
-      have hA : (2 : Int) ^ (W.val - 1) = 16 ∨ (2 : Int) ^ (W.val - 1) = 32 := by
-        rcases hW with h | h <;> rw [h] <;> norm_num
+      have hA : (2 : Int) ^ (W.val - 1) = 16 ∨ (2 : Int) ^ (W.val - 1) = 32 ∨ (2 : Int) ^ (W.val - 1) = 128 := by
+        rcases hW with h | h | h <;> rw [h] <;> norm_num
       rw [i32_and_one win hw0 (by omega)] at hi1
-      have hWv : (W.val : Int) = 5 ∨ (W.val : Int) = 6 := by omega
+      have hWv : (W.val : Int) = 5 ∨ (W.val : Int) = 6 ∨ (W.val : Int) = 8 := by omega
       have hA2 : (2 : Int) ^ W.val = 2 * 2 ^ (W.val - 1) := by
         rw [← pow_succ']; congr 1; omega
       apply WP.spec_bind (Pₘ := fun r : Slice I8 × I32 × core.ops.range.Range Usize =>
@@ -242,8 +242,8 @@ theorem naf_loop_spec (W : U32) (hW : W.val = 5 ∨ W.val = 6) (k : Slice U64) (
           have hi3v : i3.val = 2 ^ (W.val - 1) := by
             rw [hi3, hi2, Int.shiftLeft_eq, one_mul]
             rw [I32.size_def]
-            exact Int.bmod_eq_of_le (by rcases hA with h | h <;> rw [h] <;> norm_num [I32.numBits])
-              (by rcases hA with h | h <;> rw [h] <;> norm_num [I32.numBits])
+            exact Int.bmod_eq_of_le (by rcases hA with h | h | h <;> rw [h] <;> norm_num [I32.numBits])
+              (by rcases hA with h | h | h <;> rw [h] <;> norm_num [I32.numBits])
           have hset : ∀ (d : I8), ((back 0#i8).set it.start d).val = ds.val.set it.start.val d := by
             intro d; rw [hback, Slice.set_val_eq, Slice.set_val_eq, List.set_set]
           by_cases hlo : win.val < 2 ^ (W.val - 1)
@@ -264,8 +264,8 @@ theorem naf_loop_spec (W : U32) (hW : W.val = 5 ∨ W.val = 6) (k : Slice U64) (
             have hi5v : i5.val = 2 * 2 ^ (W.val - 1) := by
               rw [hi5, Int.shiftLeft_eq, one_mul]
               rw [I32.size_def]
-              exact Int.bmod_eq_of_le (by rcases hA with h | h <;> rw [hA2, h] <;> norm_num [I32.numBits])
-                (by rcases hA with h | h <;> rw [hA2, h] <;> norm_num [I32.numBits]) |>.trans hA2
+              exact Int.bmod_eq_of_le (by rcases hA with h | h | h <;> rw [hA2, h] <;> norm_num [I32.numBits])
+                (by rcases hA with h | h | h <;> rw [hA2, h] <;> norm_num [I32.numBits]) |>.trans hA2
             step as ⟨d, hd⟩
             step as ⟨w2, hw2⟩
             step as ⟨i4, hi4⟩
@@ -285,7 +285,7 @@ theorem naf_loop_spec (W : U32) (hW : W.val = 5 ∨ W.val = 6) (k : Slice U64) (
         have hnew := naf_inv_step B W.val (wordsNat k.val) it.start.val hW (by omega) ds.val win.val
           ⟨hlen, hw0, hw, hsum, hbound, hdig⟩ dd hdd
         have hw1r : 0 ≤ w1.val ∧ w1.val ≤ 2 * 2 ^ (W.val - 1) := by
-          rw [hw1, hdd]; rcases hA with h | h <;> rw [h] <;> split_ifs <;> omega
+          rw [hw1, hdd]; rcases hA with h | h | h <;> rw [h] <;> split_ifs <;> omega
         step as ⟨i2, hi2, _⟩
         step as ⟨i3, hi3⟩
         have hi3v : i3.val = W.val := by
@@ -306,9 +306,9 @@ theorem naf_loop_spec (W : U32) (hW : W.val = 5 ∨ W.val = 6) (k : Slice U64) (
         have hi7v : i7.val = i5.val * 2 ^ (W.val - 1) := by
           rw [hi7, Int.shiftLeft_eq, hi6, I32.size_def]
           apply Int.bmod_eq_of_le <;> rcases hb01 with h | h <;> rw [h] <;>
-            rcases hA with h' | h' <;> rw [h'] <;> norm_num [I32.numBits]
+            rcases hA with h' | h' | h' <;> rw [h'] <;> norm_num [I32.numBits]
         step as ⟨w3, hw3⟩
-        · rw [hi2v, hi7v]; rcases hb01 with h | h <;> rw [h] <;> rcases hA with h' | h' <;> rw [h'] <;>
+        · rw [hi2v, hi7v]; rcases hb01 with h | h <;> rw [h] <;> rcases hA with h' | h' | h' <;> rw [h'] <;>
             scalar_tac
         simp only at he1 hst
         refine ⟨by rw [he1]; exact he, by omega, ?_, by omega⟩
@@ -340,19 +340,19 @@ theorem naf_loop_spec (W : U32) (hW : W.val = 5 ∨ W.val = 6) (k : Slice U64) (
 
 /-- `public_naf::<W>` writes the width-`W` NAF of `k`, `B` = 64 times its
 length bits, into `B + 1` digits. -/
-theorem naf_spec (W : U32) (hW : W.val = 5 ∨ W.val = 6) (k : Slice U64) (B : Nat)
+theorem naf_spec (W : U32) (hW : W.val = 5 ∨ W.val = 6 ∨ W.val = 8) (k : Slice U64) (B : Nat)
     (hk : 64 * k.length = B) (hB : B < 2 ^ 16) (hk0 : 0 < k.length) (digits : Slice I8) (hd : digits.length = B + 1) :
-    mid.util.public_naf W k digits ⦃ r =>
+    low.generic.naf.public_naf W k digits ⦃ r =>
       r.length = B + 1 ∧ nafVal r.val = wordsNat k.val ∧
         ∀ j < B + 1, nafDigit (2 ^ (W.val - 1)) (r.val[j]!).val ⦄ := by
-  unfold mid.util.public_naf
+  unfold low.generic.naf.public_naf
   have hkl : 0 < k.val.length := hk0
   step as ⟨i, hi⟩
   step as ⟨i1, hi1, _⟩
   · omega
   have hi1v : i1.val = 2 ^ W.val := by
     rw [hi1, Nat.shiftLeft_eq, one_mul]; apply Nat.mod_eq_of_lt
-    rcases hW with h | h <;> rw [h] <;> norm_num [U64.size, U64.numBits]
+    rcases hW with h | h | h <;> rw [h] <;> norm_num [U64.size, U64.numBits]
   step as ⟨i2, hi2⟩
   · rw [hi1v]; (try simp)
   step as ⟨i3, hi3, _⟩
@@ -370,7 +370,7 @@ theorem naf_spec (W : U32) (hW : W.val = 5 ∨ W.val = 6) (k : Slice U64) (B : N
     rw [hwin, UScalar.hcast_val_eq, hi3v]
     apply Int.bmod_eq_of_le <;>
       · have := Nat.mod_lt (wordsNat k.val) (show 2 ^ W.val > 0 by positivity)
-        rcases hW with h | h <;> rw [h] at this ⊢ <;> norm_num [IScalarTy.numBits] at this ⊢ <;> omega
+        rcases hW with h | h | h <;> rw [h] at this ⊢ <;> norm_num [IScalarTy.numBits] at this ⊢ <;> omega
   apply naf_loop_spec W hW k B hk hB _ digits win (by simp [Slice.len, hd]) (by simp)
   have hA2' : (2 : Int) * 2 ^ (W.val - 1) = ((2 ^ W.val : Nat) : Int) := by
     rw [hA2]; push_cast; ring
@@ -385,6 +385,38 @@ theorem naf_spec (W : U32) (hW : W.val = 5 ∨ W.val = 6) (k : Slice U64) (B : N
   · rw [h0, Nat.zero_add, hwinv, hA2', pow_zero, Nat.div_one]
     exact_mod_cast (show wordsNat k.val % 2 ^ W.val + 2 ^ W.val * (wordsNat k.val / 2 ^ W.val) ≤ 2 ^ B by
       rw [Nat.mod_add_div]; omega)
+
+/-- `i8::unsigned_abs`, a digit's magnitude. -/
+@[step]
+theorem unsigned_abs_spec (x : I8) : core.num.I8.unsigned_abs x ⦃ r => r.val = x.val.natAbs ⦄ := by
+  unfold core.num.I8.unsigned_abs
+  simp only [WP.spec_ok]
+  have := x.hBounds
+  simp only [IScalarTy.numBits] at this
+  show (BitVec.ofNat 8 x.val.natAbs).toNat = _
+  rw [BitVec.toNat_ofNat]; omega
+
+/-- A step down a reversed range: its top, until it meets its start. -/
+@[step]
+theorem rev_next_spec (r : core.iter.adapters.rev.Rev (core.ops.range.Range Usize)) :
+    core.iter.adapters.rev.Rev.Insts.CoreIterTraitsIteratorIterator.next
+      (core.ops.range.Range.Insts.DoubleEndedIterator core.iter.range.StepUsize) r ⦃ o r' =>
+      r'.iter.start = r.iter.start ∧
+        (if r.iter.start.val < r.iter.end.val then o = some r'.iter.end ∧ r'.iter.end.val + 1 = r.iter.end.val
+          else o = none) ⦄ := by
+  unfold core.iter.adapters.rev.Rev.Insts.CoreIterTraitsIteratorIterator.next
+  simp only [
+    core.ops.range.Range.Insts.CoreIterTraitsDoubleEndedIterator.next_back, core.iter.range.StepUsize,
+    core.iter.range.UScalarStep, core.iter.range.UScalarStep.backward_checked]
+  by_cases hlt : r.iter.start.val < r.iter.end.val
+  · have hb : liftFun2 core.cmp.impls.PartialOrdUsize.lt r.iter.start r.iter.end = ok true := by
+      simp [liftFun2, core.cmp.impls.PartialOrdUsize.lt, hlt]
+    have h1 : (1#usize).val ≤ r.iter.end.val := by simp; omega
+    simp only [hb, bind_ok, ↓reduceIte, h1, ↓reduceDIte, hlt]
+    simp [UScalar.ofNatCore_val_eq]; omega
+  · have hb : liftFun2 core.cmp.impls.PartialOrdUsize.lt r.iter.start r.iter.end = ok false := by
+      simp [liftFun2, core.cmp.impls.PartialOrdUsize.lt, hlt]
+    simp [hb, hlt, WP.spec_ok]
 
 end Naf
 

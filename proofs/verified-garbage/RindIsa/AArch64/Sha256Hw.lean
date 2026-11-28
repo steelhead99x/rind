@@ -81,6 +81,6 @@ def epilogue : List Instr := [.st1 2 .s4 .v0 .x0 false, .ldrFp]
 /-- The function, but for its `ret`: the blocks in a loop while `x2`, the
 count left, is not zero, so at least one runs. -/
 def prog : Prog isa :=
-  .seq (.block prologue) (.seq (.loop (.block body) (.nonzero .x .x2)) (.block epilogue))
+  .seq (.block prologue) (.seq (.loop (.block body) (.vg (.nonzero .x .x2))) (.block epilogue))
 
 end Rind.AArch64.Sha256Hw

@@ -26,7 +26,9 @@ set -e
 # ChaCha20-Poly1305, X25519, Ed25519, and P-256 ECDH go unchecked here. `admin/ct-sde` checks
 # them under Intel SDE, all but Graviola's AVX-512 sampler for ML-KEM-512,
 # ML-KEM-1024, and ML-KEM-768's fallback from pyca/verified-garbage, which
-# samples only the public matrix.
+# samples only the public matrix, and verified-garbage's AVX-512 ML-KEM-768,
+# whose leakage is its proven contract (`Rind.X86_64.VgMlKem768Ct`) and whose
+# Rust `admin/ct-binsec` checks with the routines stubbed.
 # See UPSTREAM.md, "Valgrind cannot run x86_64's newest extensions".
 #
 # On aarch64 it hides SHA3, which rind takes for its eight-way AES-GCM
@@ -83,6 +85,8 @@ export CARGO_PROFILE_RELEASE_DEBUG=line-tables-only
 # See UPSTREAM.md, "cpufeatures reports SHA3 from SHA-512 alone".
 export RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }--cfg keccak_backend=\"soft\""
 
+# valgrind's hang bound (.config/nextest.toml).
+export NEXTEST_PROFILE=ctgrind
 export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER="$self --run"
 export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUNNER="$self --run"
 export CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_RUNNER="$self --run"

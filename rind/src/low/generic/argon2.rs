@@ -49,8 +49,10 @@ impl Argon2Kernel {
 /// Wipes itself on drop: it is as good as the password to an attacker, who
 /// could otherwise finish the hash from it without paying for the memory.
 pub(crate) struct Argon2Memory {
-    // Reserved, and never given a length: `set` says what is initialized.
-    blocks: Vec<Argon2Block>,
+    // One reservation per lane, never given a length: `set` says what is
+    // initialized. Separate, since one allocation of RFC 9106's first
+    // recommendation, 2 GiB, passes `isize::MAX` on 32-bit targets.
+    lanes: Vec<Vec<Argon2Block>>,
     lane_len: usize,
     // How many blocks from the start of each lane are set.
     set: Vec<usize>,
@@ -59,16 +61,23 @@ pub(crate) struct Argon2Memory {
 impl Argon2Memory {
     /// Reserves `lanes` lanes of `lane_len` blocks, none of them set.
     pub(crate) fn new(lanes: usize, lane_len: usize) -> Result<Self, Error> {
-        let mut blocks = Vec::new();
+        // Built apart from `Self`, so a failed reservation frees the earlier
+        // ones without `drop` writing to their untouched pages.
+        let mut reserved = Vec::new();
         let mut set = Vec::new();
-        lanes
-            .checked_mul(lane_len)
-            .and_then(|len| blocks.try_reserve_exact(len).ok())
-            .and_then(|()| set.try_reserve_exact(lanes).ok())
-            .ok_or(Error::OutOfMemory)?;
+        reserved
+            .try_reserve_exact(lanes)
+            .and_then(|()| set.try_reserve_exact(lanes))
+            .map_err(|_| Error::OutOfMemory)?;
+        for _ in 0..lanes {
+            let mut lane = Vec::new();
+            lane.try_reserve_exact(lane_len)
+                .map_err(|_| Error::OutOfMemory)?;
+            reserved.push(lane);
+        }
         set.resize(lanes, 0);
         Ok(Self {
-            blocks,
+            lanes: reserved,
             lane_len,
             set,
         })
@@ -78,16 +87,16 @@ impl Argon2Memory {
     pub(crate) fn push(&mut self, lane: usize, block: Argon2Block) {
         let column = self.set[lane];
         assert!(column < self.lane_len);
-        self.blocks.spare_capacity_mut()[lane * self.lane_len + column].write(block);
+        self.lanes[lane].spare_capacity_mut()[column].write(block);
         self.set[lane] += 1;
     }
 
     /// Block `column` of `lane`, which must be set.
     pub(crate) fn block(&self, lane: usize, column: usize) -> &Argon2Block {
         assert!(column < self.set[lane]);
-        // SAFETY: the block lies in the reservation, since `set` counts no
-        // further than `lane_len` and `lane` indexed it, and is set.
-        unsafe { &*self.blocks.as_ptr().add(lane * self.lane_len + column) }
+        // SAFETY: the block lies in the lane's reservation, since `set`
+        // counts no further than `lane_len`, and is set.
+        unsafe { &*self.lanes[lane].as_ptr().add(column) }
     }
 
     /// Sets block `column` of `lane` to G of the block before it, wrapping
@@ -108,25 +117,30 @@ impl Argon2Memory {
         let set = self.set[lane];
         assert!(column < self.lane_len && column <= set && previous < set);
         assert!(reference_column < self.set[reference_lane]);
-        let at = |lane: usize, column: usize| lane * self.lane_len + column;
-        let (out, previous, reference) = (
-            at(lane, column),
-            at(lane, previous),
-            at(reference_lane, reference_column),
-        );
-        assert!(previous != out && reference != out);
+        assert!(previous != column && (reference_lane, reference_column) != (lane, column));
 
-        let (before, rest) = self.blocks.spare_capacity_mut().split_at_mut(out);
-        let (out_block, after) = rest.split_first_mut().unwrap();
-        let pick = |i: usize| match i < out {
-            true => &before[i],
-            false => &after[i - out - 1],
+        let (before, rest) = self.lanes.split_at_mut(lane);
+        let (current, after) = rest.split_first_mut().unwrap();
+        let other = match reference_lane < lane {
+            true => Some(&before[reference_lane]),
+            false => after.get(reference_lane.wrapping_sub(lane + 1)),
         };
-        // SAFETY: both are set, as asserted above.
+        let (head, rest) = current.spare_capacity_mut().split_at_mut(column);
+        let (out_block, tail) = rest.split_first_mut().unwrap();
+        let pick = |i: usize| match i < column {
+            true => &head[i],
+            false => &tail[i - column - 1],
+        };
+        // SAFETY: both are set, as asserted above, and another lane's block
+        // lies in its reservation, since its `set` counts no further than
+        // `lane_len`.
         let (previous, reference) = unsafe {
             (
                 pick(previous).assume_init_ref(),
-                pick(reference).assume_init_ref(),
+                match other {
+                    Some(other) => &*other.as_ptr().add(reference_column),
+                    None => pick(reference_column).assume_init_ref(),
+                },
             )
         };
         match column == set {
@@ -146,13 +160,24 @@ impl Argon2Memory {
 
 impl Drop for Argon2Memory {
     fn drop(&mut self) {
-        let reserved = self.set.len() * self.lane_len;
-        // SAFETY: the reservation holds `reserved` blocks, any of whose bytes
-        // may be overwritten.
+        for mut lane in self.lanes.drain(..) {
+            // SAFETY: the reservation holds `capacity` blocks, any of whose
+            // bytes may be overwritten.
+            unsafe {
+                zero_bytes(
+                    lane.as_mut_ptr().cast(),
+                    lane.capacity() * size_of::<Argon2Block>(),
+                )
+            };
+        }
+        // The lanes' addresses, which differ from call to call, so that
+        // `tests/heap_scratch.rs` cannot tell them from bytes of the key.
+        // SAFETY: the drained reservation holds `capacity` lanes, any of
+        // whose bytes may be overwritten.
         unsafe {
             zero_bytes(
-                self.blocks.as_mut_ptr().cast(),
-                reserved * size_of::<Argon2Block>(),
+                self.lanes.as_mut_ptr().cast(),
+                self.lanes.capacity() * size_of::<Vec<Argon2Block>>(),
             )
         };
     }

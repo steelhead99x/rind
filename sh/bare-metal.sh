@@ -159,9 +159,9 @@ if [[ ${1:-} == xtensa ]]; then
         lint "$target" -Zbuild-std=core,alloc
     done
     check_lib xtensa-esp32s3-espidf -Zbuild-std=std,panic_abort
-    # Every bench is an empty program on Xtensa. criterion's wait-timeout does
-    # not build against ESP-IDF's libc, and ring and OpenSSL have no Xtensa
-    # port, so those paths are `cfg`'d out. This check compiles the empty
+    # Every bench is an empty program on Xtensa. ring and OpenSSL have no
+    # Xtensa port, and swole's harness is not checked there, so those paths
+    # are `cfg`'d out. This check compiles the empty
     # programs. A name inside that `cfg` is not typechecked. ESP-IDF uses
     # getrandom's own backend.
     run_cargo xtensa-esp32s3-espidf "" "${cargo[@]}" check -Zbuild-std=std,panic_abort \

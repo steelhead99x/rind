@@ -11,7 +11,3 @@ Every operation earns the ✓ on aarch64 cores without the crypto extension (the
 - The AES and GCM specs: `common/gcm.ml` and `common/fips197.ml` at rind's s2n-bignum pin, `3f01260f`, which has [awslabs/s2n-bignum#490](https://github.com/awslabs/s2n-bignum/pull/490)'s rewrite of both.
 - Spec: [awslabs/s2n-bignum#415](https://github.com/awslabs/s2n-bignum/pull/415)'s spec, unmerged, as rind's vendored s2n-bignum fork carries it; `benchmarks/verified.toml`'s ✓ notes the unmerged PR until upstream merges it (maintainer, 2026-11-13: rind forks an upstream it needs changed and vendors the fork, replacing the 2026-11-07 pin by commit from [kixel-ai/rind#448](https://github.com/kixel-ai/rind/pull/448)).
 - Upstream: offering this work to awslabs/s2n-bignum is optional, and there is no standing approval: stop and ask the maintainer before posting there or anywhere outside [the orgs AGENTS.md lists](/AGENTS.md#development) (decided with the maintainer on 2026-11-07 on [kixel-ai/rind#448](https://github.com/kixel-ai/rind/pull/448)).
-
-## Required
-
-- [AES-GCM on aarch64 is proven](/quest/m4/verified/aes-gcm-aarch64.md) - the AEAD glue this tier shares

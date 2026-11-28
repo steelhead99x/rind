@@ -11,8 +11,8 @@ counter block of a 96-bit nonce and of any other IV under 2^61 bytes is Vale's
 the message's blocks, each rounded up, number at most 15 sealing or 31
 opening, is Vale's GCTR and `gcm_hash` from the counter block it is given,
 so `tagged` with a 96-bit nonce is `gcm_encrypt_LE` and `gcm_decrypt_LE`.
-`Rind.Aarch64.AesGcmLong` covers longer messages with AES-128 and AES-256
-keys, which run `cipher`'s s2n-bignum kernels.
+`Rind.Aarch64.AesGcmLong` covers longer messages, which run `cipher`'s
+s2n-bignum kernels, or for AES-192 on cores without SHA3, `composed`.
 -/
 
 namespace rind.aarch64

@@ -261,6 +261,19 @@ theorem readW_writeW_self (m : Mem) (a : Addr) (v : BitVec 64) : (m.writeW a v).
 theorem readW_writeW_eq (m : Mem) (a b : Addr) (v : BitVec 64) (h : a = b) :
     (m.writeW a v).readW b 64 = v := h ▸ readW_writeW_self m a v
 
+theorem readW_writeW_disj (m : Mem) (a b : Addr) {w : Nat} (v : BitVec w) (w' : Nat)
+    (h : w / 8 ≤ (b - a).toNat ∧ w' / 8 ≤ (a - b).toNat) : (m.writeW a v).readW b w' = m.readW b w' := by
+  simp only [Mem.readW, Mem.writeW]
+  congr 1
+  apply read_congr
+  intro k hk
+  apply write_other
+  obtain ⟨h1, h2⟩ := h
+  have : (b + BitVec.ofNat 64 k - a).toNat = (b - a).toNat + k := by
+    have : (BitVec.ofNat 64 k).toNat = k := by simp; omega
+    bv_omega
+  omega
+
 /-- An access `n` bytes long at `a`, which lies in the region `r` of `rs`. -/
 theorem inR {rs : List Region} {r : Region} {a : Addr} {n : Nat} (hr : r ∈ rs)
     (h : (a - r.base).toNat + n ≤ r.len) : InRegions rs a n := ⟨r, hr, h⟩
@@ -370,5 +383,59 @@ theorem acc_toNat (p : BitVec 64 × BitVec 64) (d : BitVec 64)
     (h : p.2.toNat * 2 ^ 64 + p.1.toNat + d.toNat < 2 ^ 64 * 2 ^ 64) :
     (acc p d).2.toNat * 2 ^ 64 + (acc p d).1.toNat = p.2.toNat * 2 ^ 64 + p.1.toNat + d.toNat :=
   addc_toNat _ _ _ h
+
+/-! ## Frames and loops -/
+
+/-- What a block leaves unchanged: the general registers but `gs`, and the rest of the state but memory and
+the flags. -/
+structure Frame (s s' : S) (gs : List Reg) : Prop where
+  gpr : ∀ r, r ∉ gs → s'.vg.gpr r = s.vg.gpr r
+  others : others s'.vg = others s.vg
+  wr : s'.vg.wr = s.vg.wr
+  xmm : s'.vg.xmm = s.vg.xmm
+  lo : s'.lo = s.lo
+
+theorem Frame.refl (s : S) (gs : List Reg) : Frame s s gs := ⟨fun _ _ => rfl, rfl, rfl, rfl, rfl⟩
+
+theorem Frame.trans {s₁ s₂ s₃ : S} {gs : List Reg} (h₁ : Frame s₁ s₂ gs) (h₂ : Frame s₂ s₃ gs) :
+    Frame s₁ s₃ gs :=
+  ⟨fun r hr => (h₂.gpr r hr).trans (h₁.gpr r hr), h₂.others.trans h₁.others, h₂.wr.trans h₁.wr,
+    h₂.xmm.trans h₁.xmm, h₂.lo.trans h₁.lo⟩
+
+theorem Frame.mono {s s' : S} {gs gs' : List Reg} (h : Frame s s' gs) (hg : ∀ r ∈ gs, r ∈ gs') :
+    Frame s s' gs' :=
+  ⟨fun r hr => h.gpr r fun h' => hr (hg r h'), h.others, h.wr, h.xmm, h.lo⟩
+
+theorem Frame.rd {s s' : S} {gs : List Reg} (h : Frame s s' gs) : s'.vg.rd = s.vg.rd :=
+  congrArg (fun x => x.2.2.2.2.2.1) h.others
+
+/-- A loop's trace from index `j`, `m + 1` iterations long, each `d` on from the last. -/
+def loopTrace (T : Nat → List Leak) (d j : Nat) : Nat → List Leak
+  | 0 => T j ++ [.branch false]
+  | m + 1 => T j ++ .branch true :: loopTrace T d (j + d) m
+
+/-- A loop that runs `m + 1` times: each iteration, from index `j` in range, keeps `Inv`, and continues
+while `go j`. -/
+theorem loop_ok {body : Prog I} {c : Rind.X86_64.Cond} (Inv : Nat → S → Prop) (R : Nat → Prop) (go : Nat → Bool)
+    (T : Nat → List Leak) (d : Nat)
+    (hstep : ∀ j s, Inv j s → R j → ∃ s', Exec I body s (T j) s' ∧ I.eval c s' = some (go j) ∧ Inv (j + d) s') :
+    ∀ m j s, Inv j s → (∀ i ≤ m, R (j + d * i)) → (∀ i < m, go (j + d * i) = true) → go (j + d * m) = false →
+      ∃ s', Exec I (.loop body c) s (loopTrace T d j m) s' ∧ Inv (j + d * (m + 1)) s' := by
+  intro m
+  induction m with
+  | zero =>
+    intro j s hI hR _ hg
+    obtain ⟨s', hx, hc, hI'⟩ := hstep j s hI (by simpa using hR 0 (by omega))
+    refine ⟨s', Exec.loopExit hx ?_, by simpa using hI'⟩
+    rw [hc]; simpa using hg
+  | succ m ih =>
+    intro j s hI hR hgo hg
+    obtain ⟨s₁, hx, hc, hI₁⟩ := hstep j s hI (by simpa using hR 0 (by omega))
+    obtain ⟨s', hx', hI'⟩ := ih (j + d) s₁ hI₁
+      (fun i hi => by have := hR (i + 1) (by omega); rwa [show j + d * (i + 1) = j + d + d * i by ring] at this)
+      (fun i hi => by have := hgo (i + 1) (by omega); rwa [show j + d * (i + 1) = j + d + d * i by ring] at this)
+      (by rwa [show j + d * (m + 1) = j + d + d * m by ring] at hg)
+    refine ⟨s', Exec.loopNext hx (by rw [hc]; simpa using hgo 0 (by omega)) hx', ?_⟩
+    rwa [show j + d * (m + 1 + 1) = j + d + d * (m + 1) by ring]
 
 end rind.x86_64.asm

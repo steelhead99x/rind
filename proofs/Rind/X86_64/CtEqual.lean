@@ -12,14 +12,14 @@ opaque Rust wrapper around the block. The restatement, and that the wrapper
 passes the arguments the theorem names, are trusted. Each file's `_SAFE`
 theorem proves the block's loads and branches depend only on the
 addresses and lengths, which no Lean theorem states. `admin/prove` writes
-the aarch64 proof from this file by renaming the target.
+the aarch64 and armv7 proofs from this file by renaming the target.
 -/
 
 namespace rind.x86_64
 
 /-- `CT_COMPARE_16_CORRECT`, in `proofs/hol-light/x86_64/ct_compare_16.ml`:
-the wrapper loads each block as two little-endian words, and the block's
-result is zero exactly when both pairs of words are equal. -/
+the wrapper loads each block as little-endian words, and the block's result
+is zero exactly when each pair of words is equal. -/
 @[step]
 axiom ct_compare_16_spec (a b : Std.Array U8 16#usize) :
     low.x86_64.cpu.ct_compare_16 a b ⦃ r => (r.val = 0 ↔ a.val = b.val) ⦄

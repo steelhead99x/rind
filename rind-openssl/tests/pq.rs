@@ -406,6 +406,18 @@ impl Context {
         message: &[u8],
         signature: &[u8],
     ) -> (bool, String) {
+        self.verify_with(key, propq, message, signature, null())
+    }
+
+    /// As [`Self::verify`], with `params` set on the operation.
+    fn verify_with(
+        &self,
+        key: &Key,
+        propq: Option<&CStr>,
+        message: &[u8],
+        signature: &[u8],
+        params: *const OSSL_PARAM,
+    ) -> (bool, String) {
         unsafe {
             let md = non_null(EVP_MD_CTX_new());
             let mut pctx = null_mut();
@@ -416,7 +428,7 @@ impl Context {
                 self.0,
                 propq.map_or(null(), CStr::as_ptr),
                 key.0,
-                null(),
+                params,
             ));
             let ok = EVP_DigestVerify(
                 md,
@@ -793,22 +805,125 @@ fn ml_dsa_agrees_with_the_default_provider() {
     }
 }
 
-/// What OpenSSL takes but rind does not back fails with rind's error, rather
-/// than signing something else.
-#[test]
-fn ml_dsa_refuses_what_rind_cannot_back() {
-    let ctx = Context::new();
-    let key = ctx.generate(c"ML-DSA-65", None, None);
-    let mut context = *b"context";
-    let mut entropy = [0u8; 32];
-    let (mut deterministic, mut raw, mut mu) = (1 as c_int, 0 as c_int, 1 as c_int);
-    let cases = unsafe {
+/// The `context-string` parameter for `context`, ended.
+fn context_params(context: &mut [u8]) -> [OSSL_PARAM; 2] {
+    unsafe {
         [
             OSSL_PARAM_construct_octet_string(
                 c"context-string".as_ptr(),
                 context.as_mut_ptr().cast(),
                 context.len(),
             ),
+            OSSL_PARAM_construct_end(),
+        ]
+    }
+}
+
+/// A context string signs and verifies as the default provider's does: each
+/// provider verifies the other's signature under it, neither verifies under
+/// another, one past 255 bytes is refused, and the operation keeps the last
+/// one it was given, the empty string included.
+#[test]
+fn ml_dsa_binds_the_context_string() {
+    let ctx = Context::new();
+    let reference = has_reference("ml_dsa_binds_the_context_string (the cross-checks)");
+    let message = b"rind as an OpenSSL provider";
+    for algorithm in ML_DSA {
+        let key = ctx.generate(algorithm, None, None);
+        let mut context = *b"context";
+        let mut other = *b"another";
+        let with = context_params(&mut context);
+        let (signature, provider) = ctx.sign(&key, message, None, with.as_ptr()).unwrap();
+        assert_eq!(provider, "rind");
+        let verify = |params: &[OSSL_PARAM; 2], propq| {
+            ctx.verify_with(&key, propq, message, &signature, params.as_ptr())
+        };
+        assert_eq!(verify(&with, None), (true, "rind".into()));
+        assert!(!ctx.verify(&key, None, message, &signature).0);
+        assert!(!verify(&context_params(&mut other), None).0);
+        assert!(!verify(&context_params(&mut []), None).0);
+        // Only the empty context signs what an unset one verifies.
+        let (empty, _) = ctx
+            .sign(&key, message, None, context_params(&mut []).as_ptr())
+            .unwrap();
+        assert!(ctx.verify(&key, None, message, &empty).0);
+        assert!(!verify_under(&ctx, &key, message, &empty, &mut context));
+
+        if reference {
+            assert_eq!(verify(&with, Some(DEFAULT)), (true, "default".into()));
+            assert!(!verify(&context_params(&mut other), Some(DEFAULT)).0);
+            assert!(!ctx.verify(&key, Some(DEFAULT), message, &signature).0);
+            let (theirs, provider) = ctx
+                .sign(&key, message, Some(DEFAULT), with.as_ptr())
+                .unwrap();
+            assert_eq!(provider, "default");
+            assert!(
+                ctx.verify_with(&key, None, message, &theirs, with.as_ptr())
+                    .0
+            );
+        }
+
+        // 255 bytes is the longest, and one more is refused, as OpenSSL
+        // refuses it.
+        let mut longest = [7u8; 255];
+        let params = context_params(&mut longest);
+        let (long, _) = ctx.sign(&key, message, None, params.as_ptr()).unwrap();
+        assert!(
+            ctx.verify_with(&key, None, message, &long, params.as_ptr())
+                .0
+        );
+        let mut too_long = [7u8; 256];
+        let params = context_params(&mut too_long);
+        let error = ctx.sign(&key, message, None, params.as_ptr()).unwrap_err();
+        assert!(error.contains("255 bytes"), "{error}");
+
+        // The operation keeps the context it was given, until a refused one
+        // clears it.
+        unsafe {
+            let (md, pctx) = sign_init(&ctx, &key);
+            check(EVP_PKEY_CTX_set_params(pctx, with.as_ptr()));
+            let signature = digest_sign_bytes(md, message).unwrap();
+            assert!(
+                ctx.verify_with(&key, None, message, &signature, with.as_ptr())
+                    .0
+            );
+            assert!(!ctx.verify(&key, None, message, &signature).0);
+            EVP_MD_CTX_free(md);
+
+            let (md, pctx) = sign_init(&ctx, &key);
+            check(EVP_PKEY_CTX_set_params(pctx, with.as_ptr()));
+            assert_ne!(EVP_PKEY_CTX_set_params(pctx, params.as_ptr()), 1);
+            ERR_clear_error();
+            let signature = digest_sign_bytes(md, message).unwrap();
+            assert!(ctx.verify(&key, None, message, &signature).0);
+            EVP_MD_CTX_free(md);
+        }
+    }
+}
+
+/// Whether `signature` verifies over `message` under `context`.
+fn verify_under(
+    ctx: &Context,
+    key: &Key,
+    message: &[u8],
+    signature: &[u8],
+    context: &mut [u8],
+) -> bool {
+    let params = context_params(context);
+    ctx.verify_with(key, None, message, signature, params.as_ptr())
+        .0
+}
+
+/// What OpenSSL takes but rind does not back fails with rind's error, rather
+/// than signing something else.
+#[test]
+fn ml_dsa_refuses_what_rind_cannot_back() {
+    let ctx = Context::new();
+    let key = ctx.generate(c"ML-DSA-65", None, None);
+    let mut entropy = [0u8; 32];
+    let (mut deterministic, mut raw, mut mu) = (1 as c_int, 0 as c_int, 1 as c_int);
+    let cases = unsafe {
+        [
             OSSL_PARAM_construct_octet_string(
                 c"test-entropy".as_ptr(),
                 entropy.as_mut_ptr().cast(),
@@ -826,19 +941,6 @@ fn ml_dsa_refuses_what_rind_cannot_back() {
             .unwrap_err();
         assert!(error.contains("unsupported by rind"), "{error}");
     }
-    // The empty context string is pure ML-DSA's own.
-    let params = unsafe {
-        [
-            OSSL_PARAM_construct_octet_string(
-                c"context-string".as_ptr(),
-                context.as_mut_ptr().cast(),
-                0,
-            ),
-            OSSL_PARAM_construct_end(),
-        ]
-    };
-    ctx.sign(&key, b"message", None, params.as_ptr()).unwrap();
-
     // OpenSSL signs with fresh randomness at `deterministic` 2.
     let mut hedged = 2 as c_int;
     let params = unsafe {
@@ -930,8 +1032,12 @@ unsafe fn sign_init(ctx: &Context, key: &Key) -> (*mut EVP_MD_CTX, *mut EVP_PKEY
 
 /// Signs a message, as the operation's parameters allow.
 unsafe fn digest_sign(md: *mut EVP_MD_CTX) -> Result<(), String> {
+    unsafe { digest_sign_bytes(md, b"message") }.map(drop)
+}
+
+/// Signs `message`, as the operation's parameters allow.
+unsafe fn digest_sign_bytes(md: *mut EVP_MD_CTX, message: &[u8]) -> Result<Vec<u8>, String> {
     unsafe {
-        let message = b"message";
         let mut len = 0;
         check(EVP_DigestSign(
             md,
@@ -951,7 +1057,8 @@ unsafe fn digest_sign(md: *mut EVP_MD_CTX) -> Result<(), String> {
         {
             return Err(errors());
         }
-        Ok(())
+        signature.truncate(len);
+        Ok(signature)
     }
 }
 

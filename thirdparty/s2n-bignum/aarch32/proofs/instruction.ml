@@ -1223,7 +1223,10 @@ let aarch32_pmull8 = define
     simd8 (word_pmul:int16->int16->int16) (usimd8 word_zx n) (usimd8 word_zx m)`;;
 
 (* What the step conversion unfolds a decoded operation with, before the
-   widths' `dimindex` and the lanes' subwords reduce. *)
+   widths' `dimindex` and the lanes' subwords reduce. A VTBL lane stays
+   `aarch32_tbl` until its index is a numeral, since unfolding one with a
+   variable index leaves a conditional per lane, and vpaes's lookups chain
+   dozens of them. *)
 
 let AARCH32_SIMD_EXPANSIONS =
   [usimd16; usimd8; usimd4; usimd2; simd16; simd8; simd4; simd2;
@@ -1234,7 +1237,23 @@ let AARCH32_SIMD_EXPANSIONS =
    aarch32_trn2; aarch32_pair; aarch32_dup8; aarch32_dup16; aarch32_dup32;
    aarch32_ins; aarch32_umull_lane; aarch32_smull_lane; aarch32_umlal_lane;
    aarch32_smlal_lane; aarch32_umlal; aarch32_smlal; aarch32_umull;
-   aarch32_smull; aarch32_pmull8; aarch32_tbl];;
+   aarch32_smull; aarch32_pmull8];;
+
+(* A VTBL lane whose index is a numeral, as the step's simplification and
+   cosimulation meet it once the index register's value is known: the
+   table's byte there, or zero. *)
+
+let AARCH32_TBL_CONV tm =
+  match tm with
+    Comb(Comb(Comb(Const("aarch32_tbl",_),_),_),
+         Comb(Const("word",_),n)) when is_numeral n ->
+      (GEN_REWRITE_CONV I [aarch32_tbl] THENC
+       DEPTH_CONV WORD_RED_CONV THENC NUM_REDUCE_CONV THENC
+       REWRITE_CONV[] THENC
+       TOP_DEPTH_CONV WORD_SIMPLE_SUBWORD_CONV) tm
+  | _ -> failwith "AARCH32_TBL_CONV";;
+
+extra_word_CONV := AARCH32_TBL_CONV :: !extra_word_CONV;;
 
 (* ------------------------------------------------------------------------- *)
 (* Advanced SIMD loads and stores. A D register is the eight bytes at its    *)

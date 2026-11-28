@@ -421,6 +421,8 @@ impl low::Zeroable for Sender {}
 
 impl Drop for Sender {
     fn drop(&mut self) {
+        // The key's own drop runs after this wipe, too late to free its heap.
+        self.sealing.key.release();
         low::zeroise_value(self);
     }
 }
@@ -488,6 +490,8 @@ impl low::Zeroable for Recipient {}
 
 impl Drop for Recipient {
     fn drop(&mut self) {
+        // The key's own drop runs after this wipe, too late to free its heap.
+        self.sealing.key.release();
         low::zeroise_value(self);
     }
 }

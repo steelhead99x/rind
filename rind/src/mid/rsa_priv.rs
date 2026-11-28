@@ -101,7 +101,15 @@ impl RsaPrivateKey {
 
         let p_montifier: SecretRsaPosIntModP = p.montifier().into();
         let q_montifier = q.montifier().into();
-        let iqmp_mont: SecretRsaPosIntModP = iqmp.to_montgomery(&p_montifier, &p).into();
+        // Montgomery multiplication takes operands below the modulus, and
+        // iqmp is checked against p only with the other relations, so this
+        // reduces it first: a no-op for a valid key, and a refused key's
+        // value is never used.
+        let iqmp_wide: RsaPosIntModN = iqmp.widen();
+        let iqmp_mont: SecretRsaPosIntModP = iqmp_wide
+            .reduce(&p, &p_montifier)
+            .to_montgomery(&p_montifier, &p)
+            .into();
         let p0 = p.mont_neg_inverse();
         let q0 = q.mont_neg_inverse();
 

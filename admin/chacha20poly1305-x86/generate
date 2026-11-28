@@ -1,0 +1,466 @@
+#!/usr/bin/env python3
+"""Writes rind's structured copy of the AVX2 half of aws-lc's x86_64
+ChaCha20-Poly1305 seal, from aws-lc's text as `admin/import-aws-lc` writes
+it: its `.s` files, `rind/src/low/x86_64/chacha20poly1305/`, and the Lean
+program `admin/prove lean` checks they assemble to,
+`proofs/verified-garbage/RindIsa/X86_64/ChaCha20Poly1305.lean`, from one
+tree of aws-lc's blocks laid out as `Code`'s `ite` and `loop`.
+
+Usage: admin/chacha20poly1305-x86/generate
+
+`admin/regenerate` runs it after `admin/import-aws-lc`, and fails if either
+output differs from the committed one. The tree restates aws-lc's jumps and
+compares, so it fails too if the aws-lc text it copies changes: a changed
+routine needs its tree re-derived.
+"""
+import hashlib, re, sys, os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from blocks import parse
+from translate import tr, normalize, COND
+
+ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))
+AWS = os.path.join(ROOT, 'rind/src/low/x86_64/aws_lc')
+ASM_DIR = os.path.join(ROOT, 'rind/src/low/x86_64/chacha20poly1305')
+LEAN_PATH = os.path.join(ROOT, 'proofs/verified-garbage/RindIsa/X86_64/ChaCha20Poly1305.lean')
+
+# -- the tree ---------------------------------------------------------------
+
+
+class Node:
+    pass
+
+
+class Ins(Node):
+    """Straight-line instructions, each aws-lc's text (or an `.align`), with
+    a comment naming where they come from."""
+
+    def __init__(s, lines, note=None):
+        s.lines, s.note = lines, note
+
+
+class HashAd(Node):
+    """rind's structured `poly_hash_ad_internal`, inlined."""
+
+
+class Seq(Node):
+    def __init__(s, *xs):
+        s.xs = [x for x in xs if x is not None]
+
+
+class Ite(Node):
+    def __init__(s, c, t, e, note=None):
+        s.c, s.t, s.e, s.note = c, t, e, note
+
+
+class Loop(Node):
+    def __init__(s, body, c, note=None):
+        s.body, s.c, s.note = body, c, note
+
+
+class Routine:
+    def __init__(s, path, first, last, shared, digest):
+        """aws-lc's routine in `path`: the blocks from `first` to `last` and
+        the `shared` ones it jumps to. The tree restates their jumps and
+        compares, so generation fails unless their text, labels and jumps
+        included, and their alignment, still hashes to the `digest` the tree was written for."""
+        blocks = parse(path)
+        s.blocks = {b.name: b for b in blocks}
+        names = [b.name for b in blocks]
+        s.text = names[names.index(first):names.index(last) + 1] + list(shared)
+        text = ''.join(f'{n} {s.blocks[n].term}\n' + ''.join(a + '\n' for a in s.blocks[n].aligns)
+                       + ''.join(t + '\n' for _, t in s.blocks[n].lines) for n in s.text)
+        got = hashlib.sha256(text.encode()).hexdigest()
+        assert got == digest, f'aws-lc changed {first}: re-derive its tree, then take digest {got}'
+        s.used = set()
+
+    def done(s, restates):
+        """Fails unless the tree took every block of the routine that holds
+        an instruction but those it `restates`."""
+        left = {n for n in s.text if s.blocks[n].lines} - s.used
+        assert left == set(restates), sorted(left ^ set(restates))
+
+    def blk(s, name, drop=(), sub=None, tail=()):
+        """The instructions of aws-lc's block `name`, but its `rep ret`, those
+        `drop` names, and the `tail` it ends with, the `call` inlined."""
+        b = s.blocks[name]
+        s.used.add(name)
+        lines = [normalize(t) for _, t in b.lines if t != '.byte\t0xf3,0xc3']
+        if tail:
+            assert lines[-len(tail):] == list(tail), (name, lines[-len(tail):])
+            lines = lines[:-len(tail)]
+        for d in drop:
+            assert d in lines, (name, d)
+            lines.remove(d)
+        if sub:
+            for a, c in sub.items():
+                assert a in lines, (name, a)
+                lines[lines.index(a)] = c
+        out = []
+        cur = []
+        for t in lines:
+            if t.startswith('call'):
+                out.append(Ins(cur, name))
+                out.append(HashAd())
+                cur = []
+                name = name + ', after the call'
+            else:
+                cur.append(t)
+        out.append(Ins(cur, name))
+        aligns = [Ins([a.replace('.align\t', '.align ')], None) for a in b.aligns]
+        return Seq(*(aligns + [o for o in out if not (isinstance(o, Ins) and not o.lines)]))
+
+
+def X(*lines):
+    return Ins(list(lines), None)
+
+
+# -- emitting ---------------------------------------------------------------
+
+def ident(name):
+    s = re.sub(r'[^A-Za-z0-9]+', '_', name).strip('_')
+    parts = s.split('_')
+    return parts[0] + ''.join(p[:1].upper() + p[1:] for p in parts[1:])
+
+
+HASHAD_S = os.path.join(ROOT, 'rind/src/low/x86_64/poly_hash_ad.s')
+
+
+def hashad_lines():
+    out = []
+    for raw in open(HASHAD_S):
+        t = raw.rstrip('\n')
+        if not t.strip() or t.lstrip().startswith('#') or t == '\t.byte\t0xf3,0xc3':
+            continue
+        out.append(t)
+    return out
+
+
+class Emit:
+    def __init__(s, fn, prefix):
+        s.fn, s.n, s.prefix = fn, 0, prefix
+        s.defs = []        # (lean name, note, [terms])
+        s.defnames = {}
+
+    def label(s):
+        s.n += 1
+        return f'{s.prefix}{s.fn}_{s.n}'
+
+    def block_def(s, ins):
+        terms = []
+        for t in ins.lines:
+            if t.startswith('.align '):
+                terms.append(f'.align {int(t.split()[1])}')
+            else:
+                terms.append(tr(t))
+        for name, note, lines, _ in s.defs:
+            if note == ins.note and lines == ins.lines:
+                return name
+        if ins.note:
+            base = lean_name(ins.note)
+        else:
+            base = ident('_'.join(ins.lines))
+        k = s.defnames.get(base, 0)
+        s.defnames[base] = k + 1
+        name = base if k == 0 else f'{base}{k + 1}'
+        s.defs.append((name, ins.note, ins.lines, terms))
+        return name
+
+    def asm(s, node, cfi):
+        """The `.s` lines of `node`."""
+        if isinstance(node, Ins):
+            out = []
+            if node.note:
+                out.append(f"# rind's {node.note}" if node.note in FRAME else f'# {node.note}')
+            for t in node.lines:
+                if t.startswith('.align '):
+                    n = int(t.split()[1])
+                    out.append(f'.p2align\t{n.bit_length() - 1}')
+                    continue
+                out.append('\t' + t.replace('{and_masks}', '{chacha20_consts}+192'))
+                if cfi:
+                    out += cfi_for(t)
+            return out
+        if isinstance(node, HashAd):
+            return ['# poly_hash_ad_internal'] + hashad_lines()
+        if isinstance(node, Seq):
+            return [l for x in node.xs for l in s.asm(x, cfi)]
+        if isinstance(node, Ite):
+            j = jname(node.c)
+            if is_empty(node.t):
+                end = s.label()
+                return [f'\t{j}\t{end}'] + s.asm(node.e, cfi) + [f'{end}:']
+            lt, end = s.label(), s.label()
+            ta = s.asm(node.t, cfi)
+            lead, rest = split_align(ta)
+            return ([f'\t{j}\t{lt}'] + s.asm(node.e, cfi) + [f'\tjmp\t{end}'] + lead +
+                    [f'{lt}:'] + rest + [f'{end}:'])
+        if isinstance(node, Loop):
+            l = s.label()
+            ba = s.asm(node.body, cfi)
+            lead, rest = split_align(ba)
+            return lead + [f'{l}:'] + rest + [f'\t{jname(node.c)}\t{l}']
+        raise TypeError(node)
+
+    def lean(s, node, ind):
+        """The Lean term of `node`, a `Prog isa`."""
+        pad = ' ' * ind
+        if isinstance(node, Ins):
+            return f'.block {s.block_def(node)}' if node.lines else '.block []'
+        if isinstance(node, HashAd):
+            return 'PolyHashAd.prog'
+        if isinstance(node, Seq):
+            items = [s.lean(x, ind + 2) for x in node.xs]
+            if len(items) == 1:
+                return items[0]
+            sep = ',\n' + pad + '  '
+            return 'seqs\n' + pad + '  [' + sep.join(items) + ']'
+        if isinstance(node, Ite):
+            note = f' -- {node.note}' if node.note else ''
+            return (f'.ite ({COND[jname(node.c)]}){note}\n{pad}  ({s.lean(node.t, ind + 3)})\n'
+                    f'{pad}  ({s.lean(node.e, ind + 3)})')
+        if isinstance(node, Loop):
+            note = f' -- {node.note}' if node.note else ''
+            return f'.loop{note}\n{pad}  ({s.lean(node.body, ind + 3)})\n{pad}  ({COND[jname(node.c)]})'
+        raise TypeError(node)
+
+
+def lean_name(note):
+    """A block's Lean name, from aws-lc's label: `seal_avx2_tail_128+2` is
+    `tail128_2`, `seal_avx2_192` `upTo192`."""
+    after = note.endswith(', after the call')
+    note = note.removesuffix(', after the call')
+    label, _, k = note.partition('+')
+    label = re.sub(r'^chacha20_poly1305_(seal|open)_(avx2|sse)$', 'begin', label)
+    label = re.sub(r'^(seal|open)_(avx2|sse)_', '', label)
+    if label[0].isdigit():
+        label = 'up_to_' + label
+    return ident(label) + ('AfterAd' if after else '') + (f'_{k}' if k else '')
+
+
+def jname(c):
+    return {'z': 'je', 'nz': 'jne'}.get(c, 'j' + c)
+
+
+def is_empty(n):
+    if isinstance(n, Ins):
+        return not n.lines
+    if isinstance(n, Seq):
+        return all(is_empty(x) for x in n.xs)
+    return False
+
+
+def split_align(lines):
+    """The `.p2align` a program begins with, which its label follows."""
+    for i, l in enumerate(lines):
+        if l.startswith('#'):
+            continue
+        if l.startswith('.p2align'):
+            return lines[:i + 1], lines[i + 1:]
+        break
+    return [], lines
+
+
+PUSH_OFF = {}
+
+
+def cfi_for(t):
+    """aws-lc's CFI for the frame instructions, which the Linux flavor
+    keeps."""
+    m = re.fullmatch(r'pushq\t%(\w+)', t)
+    if m:
+        r = m.group(1)
+        PUSH_OFF[r] = -16 - 8 * len(PUSH_OFF)
+        return ['.cfi_adjust_cfa_offset\t8', f'.cfi_offset\t%{r},{PUSH_OFF[r]}']
+    m = re.fullmatch(r'popq\t%(\w+)', t)
+    if m:
+        return ['.cfi_adjust_cfa_offset\t-8', f'.cfi_restore\t%{m.group(1)}']
+    m = re.fullmatch(r'subq\t\$(.*),%rsp', t)
+    if m:
+        return [f'.cfi_adjust_cfa_offset\t{m.group(1)}']
+    m = re.fullmatch(r'addq\t\$(.*),%rsp', t)
+    if m:
+        return [f'.cfi_adjust_cfa_offset\t-({m.group(1)})']
+    return []
+
+
+# -- the shared frame -------------------------------------------------------
+
+PROLOGUE = X('pushq\t%rbp', 'pushq\t%rbx', 'pushq\t%r12', 'pushq\t%r13', 'pushq\t%r14', 'pushq\t%r15',
+             'subq\t$288 + 0 + 32,%rsp', 'leaq\t32(%rsp),%rbp', 'andq\t$-32,%rbp',
+             'movq\t%rdx,%rbx', 'movq\t%r8,0+0+32(%rbp)', 'movq\t%rbx,8+0+32(%rbp)')
+PROLOGUE.note = 'prologue'
+
+# The notes of rind's frame, which names no aws-lc block.
+FRAME = {
+    'prologue': "rind's prologue: aws-lc's entry, but for saving `r9`, adding `extra_in`'s length, and "
+                "testing `ia32cap`",
+    'epilogue': "rind's epilogue: aws-lc's, but returning the tag in `rax` and `rdx`",
+}
+
+EPILOGUE_OLD = ['addq\t$288 + 0 + 32,%rsp', 'popq\t%r9', 'movq\t%r10,(%r9)', 'movq\t%r11,8(%r9)',
+                'popq\t%r15', 'popq\t%r14', 'popq\t%r13', 'popq\t%r12', 'popq\t%rbx', 'popq\t%rbp']
+EPILOGUE = ['movq\t%r10,%rax', 'movq\t%r11,%rdx', 'addq\t$288 + 0 + 32,%rsp',
+            'popq\t%r15', 'popq\t%r14', 'popq\t%r13', 'popq\t%r12', 'popq\t%rbx', 'popq\t%rbp']
+
+
+def seal_tail(r):
+    """The seal's last partial block, length block, and tag: aws-lc's
+    `seal_sse_tail_16` on, without `extra_in`."""
+    return Seq(
+        r.blk('seal_sse_tail_16'),
+        Ite('e', X(), Seq(
+            r.blk('seal_sse_tail_16+1'),
+            Loop(r.blk('seal_sse_tail_16_compose'), 'ne'),
+            r.blk('seal_sse_tail_16_compose+1', sub={'movdqu\t%xmm15,%xmm0': 'movdqa\t%xmm15,%xmm0'}),
+            Loop(r.blk('seal_sse_tail_16_extract'), 'ne'),
+            r.blk('process_partial_block'))),
+        r.blk('do_length_block', tail=EPILOGUE_OLD),
+        Ins(EPILOGUE, 'epilogue'))
+
+
+def x3x2(r, head, x3, x2, note):
+    """aws-lc's tail rounds loop entered at `x3`, which hashes one block more
+    while `rcx` counts down: `x3: A; x2: B; dec rcx; jg x3; dec r8; jge x2`.
+    Here as two do-while loops, `A` run where `rcx` is still positive."""
+    return Seq(
+        r.blk(head),
+        Loop(Seq(
+            Loop(Seq(X('testq\t%rcx,%rcx'), Ite('le', X(), r.blk(x3)), r.blk(x2)), 'g'),
+            r.blk(x2 + '+1')), 'ge', note))
+
+
+def seal_avx2():
+    r = Routine(os.path.join(AWS, 'chacha20_poly1305_seal.linux.s'),
+                'chacha20_poly1305_seal_avx2', 'seal_avx2_exit',
+                ['seal_sse_tail_16', 'seal_sse_tail_16+1', 'seal_sse_tail_16_compose',
+                 'seal_sse_tail_16_compose+1', 'seal_sse_tail_16_extract', 'process_partial_block',
+                 'do_length_block'],
+                '37fddb6b3008caa3cd0c0c3ebf856c5833c598dad55b9d35eeb4d300d5f51b2a')
+    t = lambda n: f'seal_avx2_tail_{n}'
+    rnd = lambda n, k: f'seal_avx2_tail_{n}_rounds_and_{k}xhash'
+    tails = {n: Seq(x3x2(r, t(n), rnd(n, 3), rnd(n, 2), t(n)), r.blk(rnd(n, 2) + '+2'))
+             for n in (128, 256, 384, 512)}
+    tails[128] = Seq(tails[128], X('xorl\t%ecx,%ecx'))
+    main_loop = Seq(
+        r.blk('seal_avx2_init_rounds+6'),
+        Loop(Seq(
+            Loop(Seq(
+                X('.align 32'),
+                r.blk('seal_avx2_main_loop_rounds_entry'),
+                Ite('e', X(), Seq(r.blk('seal_avx2_main_loop_rounds'), X('testq\t%rcx,%rcx')))),
+                'ne', 'seal_avx2_main_loop_rounds'),
+            r.blk('seal_avx2_main_loop_rounds_entry+1'),
+            Ite('le', X(), Seq(r.blk('seal_avx2_main_loop'), r.blk('seal_avx2_main_loop_rounds'),
+                               X('cmpq\t$512,%rbx')))),
+            'g', 'seal_avx2_main_loop'),
+        r.blk('seal_avx2_main_loop_rounds_entry+2', tail=['cmpq\t$384,%rbx']))
+    dispatch = Seq(
+        X('cmpq\t$384,%rbx'),
+        Ite('a', tails[512], Seq(
+            X('cmpq\t$256,%rbx'),
+            Ite('a', tails[384], Seq(
+                X('cmpq\t$128,%rbx'),
+                Ite('a', tails[256], tails[128]))))))
+    short = Seq(
+        X('cmpq\t$192,%rbx'),
+        Ite('be',
+            Seq(r.blk('seal_avx2_192'), Loop(r.blk('seal_avx2_192_rounds'), 'ne'), r.blk('seal_avx2_192_rounds+1')),
+            Seq(r.blk('seal_avx2_320'), Loop(r.blk('seal_avx2_320_rounds'), 'ne'), r.blk('seal_avx2_320_rounds+1')),
+            'seal_avx2_192'),
+        r.blk('seal_avx2_short'))
+    long = Seq(
+        r.blk('chacha20_poly1305_seal_avx2+2'),
+        Loop(r.blk('seal_avx2_init_rounds'), 'ne'),
+        r.blk('seal_avx2_init_rounds+1'),
+        Ite('be', X(), Seq(
+            r.blk('seal_avx2_init_rounds+2', tail=['cmpq\t$128,%rbx']),
+            X('cmpq\t$512,%rbx'),
+            Ite('be', X(), main_loop),
+            dispatch)))
+    body = Seq(
+        PROLOGUE,
+        r.blk('chacha20_poly1305_seal_avx2', tail=['cmpq\t$192,%rbx']),
+        X('cmpq\t$320,%rbx'),
+        Ite('be', short, long, 'seal_avx2_320'),
+        r.blk('seal_avx2_short_hash_remainder'),
+        Ite('b', X(), Loop(Seq(r.blk('seal_avx2_short_hash_remainder+1'), X('cmpq\t$16,%rcx')), 'ae')),
+        r.blk('seal_avx2_short_loop'),
+        Ite('b', X(), Loop(Seq(r.blk('seal_avx2_short_loop+1'), X('cmpq\t$32,%rbx')), 'ae')),
+        r.blk('seal_avx2_short_tail'),
+        Ite('b', X(), r.blk('seal_avx2_short_tail+1')),
+        r.blk('seal_avx2_exit'),
+        seal_tail(r))
+    # The compares of aws-lc's dispatch chains, which `cmpq` restates in the
+    # order the tree tests them.
+    r.done(['chacha20_poly1305_seal_avx2+1', 'seal_avx2_init_rounds+3', 'seal_avx2_init_rounds+4',
+            'seal_avx2_init_rounds+5', 'seal_avx2_main_loop_rounds_entry+3',
+            'seal_avx2_main_loop_rounds_entry+4'])
+    return body
+
+
+ROUTINES = [('sealAvx2', 'seal_avx2', seal_avx2,
+             "the AVX2 half of aws-lc's `chacha20_poly1305_seal`")]
+
+S_HEADER = """# Copyright (c) 2015, CloudFlare Ltd.
+# SPDX-License-Identifier: ISC
+#
+# rind's structured copy of {what}, from
+# crypto/cipher_extra/asm/chacha20_poly1305_x86_64.pl at aws-lc
+# 5ed12cce0fd4453f2f63300d44325ed14f845d6f: aws-lc's instructions, in the
+# structure of `{lean}` in
+# `proofs/verified-garbage/RindIsa/X86_64/ChaCha20Poly1305.lean`, whose bytes
+# `admin/prove lean` checks this assembles to. Each comment names the aws-lc
+# block the instructions after it come from.
+"""
+
+
+def consts_bytes():
+    out = []
+    for f in ('chacha20_poly1305_x86_64.chacha20_consts.rs', 'chacha20_poly1305_x86_64.and_masks.rs'):
+        t = open(os.path.join(AWS, f)).read()
+        t = '\n'.join(l for l in t.splitlines() if not l.lstrip().startswith('//'))
+        out += [int(b, 16) for b in re.findall(r'0x[0-9a-fA-F]+', t)]
+    assert len(out) == 448, len(out)
+    return out
+
+
+def main(asm_dir, lean_path):
+    os.makedirs(asm_dir, exist_ok=True)
+    lean_defs, lean_progs = [], []
+    for lean_name, fn, build, what in ROUTINES:
+        tree = build()
+        for flavor, prefix, cfi in (('linux', '.L', True), ('apple', 'L$', False)):
+            PUSH_OFF.clear()
+            lines = Emit(fn, prefix).asm(tree, cfi) + ['\t.byte\t0xf3,0xc3']
+            with open(os.path.join(asm_dir, f'{fn}.{flavor}.s'), 'w') as f:
+                f.write(S_HEADER.format(what=what, lean=lean_name) + '\n'.join(lines) + '\n')
+        e = Emit(fn, '.L')
+        term = e.lean(tree, 2)
+        ns = lean_name[0].upper() + lean_name[1:]
+        out = [f'namespace {ns}\n']
+        for name, note, lines, terms in e.defs:
+            doc = FRAME.get(note, "aws-lc's `" + str(note) + "`")
+            out.append(f'/-- {doc}. -/' if note else '')
+            out.append(f'def {name} : List Instr :=\n  [' + ',\n   '.join(terms) + ']\n')
+        out.append(f'end {ns}\n')
+        out.append(f'/-- {what[0].upper() + what[1:]}, but for its `ret`. -/')
+        out.append(f'def {lean_name} : Prog isa :=\n  open {ns} in\n  {term}\n')
+        lean_progs.append('\n'.join(l for l in out if l is not None))
+    cb = consts_bytes()
+    ws = [int.from_bytes(bytes(cb[i:i + 8]), 'little') for i in range(0, len(cb), 8)]
+    rows = ',\n   '.join(', '.join(f'0x{w:016x}' for w in ws[i:i + 4]) for i in range(0, len(ws), 4))
+    with open(lean_path, 'w') as f:
+        f.write(LEAN_HEADER)
+        f.write(f'def consts : List (BitVec 64) :=\n  [{rows}]\n\n')
+        f.write(LEAN_HELPERS)
+        f.write('\n'.join(lean_progs))
+        f.write('\nend Rind.X86_64.ChaCha20Poly1305\n')
+
+
+LEAN_HEADER = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'header.lean')).read()
+LEAN_HELPERS = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'helpers.lean')).read()
+
+if __name__ == '__main__':
+    if len(sys.argv) != 1:
+        sys.exit(__doc__.split('\n\n')[1])
+    main(ASM_DIR, LEAN_PATH)

@@ -215,9 +215,9 @@ impl Key {
 
 // All-zero is the `AesGcm` variant with an all-zero key and table and a
 // `None` `ZeroableRef`, which `Zeroable` requires to be valid: every other
-// field is a plain integer or vector. Neither cipher owns memory beyond
-// itself, so its drop does nothing but wipe what `Inner`'s drop wipes anyway;
-// `ManuallyDrop` skips that second pass.
+// field is a plain integer or vector. A cipher's drop does nothing but wipe
+// what `Inner`'s drop wipes anyway, once `Cipher::release` has freed what it
+// keeps on the heap; `ManuallyDrop` skips that second pass.
 //
 // Boxing the AES-GCM table would allocate for every key to save space only on
 // ChaCha20-Poly1305 keys; the 32-bit arm table is small, so the lint is allowed
@@ -253,6 +253,10 @@ trait Cipher: Sized + 'static {
     fn new(key: &[u8]) -> Self;
 
     fn inner(sealer: Sealer<Self>) -> Inner;
+
+    /// Wipes and frees what the key keeps on the heap, before [`Inner`]'s
+    /// whole-value wipe, which skips the key's drop.
+    fn release(&mut self) {}
 
     fn seal(
         &self,
@@ -320,6 +324,11 @@ impl Cipher for AesGcm {
 
     fn inner(sealer: Sealer<Self>) -> Inner {
         Inner::AesGcm(sealer)
+    }
+
+    #[cfg(rind_backend = "x86_64")]
+    fn release(&mut self) {
+        Self::release(self);
     }
 
     fn seal(
@@ -390,8 +399,29 @@ impl fmt::Debug for Key {
     }
 }
 
+impl Key {
+    /// Wipes and frees what the key keeps on the heap: a whole-value wipe of
+    /// a value holding this key, which runs before or instead of this key's
+    /// drop, must call this first.
+    pub(crate) fn release(&mut self) {
+        self.0.release();
+    }
+}
+
+impl Inner {
+    /// Wipes and frees what the cipher keeps on the heap, as a whole-value
+    /// wipe of this, or of a value holding it, must first.
+    fn release(&mut self) {
+        match self {
+            Self::AesGcm(sealer) => Cipher::release(&mut *sealer.key),
+            Self::ChaCha20Poly1305(sealer) => Cipher::release(&mut *sealer.key),
+        }
+    }
+}
+
 impl Drop for Inner {
     fn drop(&mut self) {
+        self.release();
         // Wipes the discriminant and the space a smaller variant leaves unused,
         // not only the variant's own key.
         zeroise_value(self);

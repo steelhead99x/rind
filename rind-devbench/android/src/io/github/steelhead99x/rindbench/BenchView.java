@@ -83,6 +83,14 @@ final class BenchView extends LinearLayout {
     private Runnable autostart;
     /** A runner launch with `autostart` not yet scheduled: each fresh launch sets it, and scheduling consumes it. */
     private boolean launchPending;
+    /**
+     * The pending launch's `libraries` and `sections` extras as it named them, null for one it doesn't
+     * name: its autostart passes them to the native start unchanged, so a name the picker lacks (as after
+     * a list that failed in part) still reaches the library's own check.
+     */
+    private List<String> launchLibs, launchSecs;
+    /** The pending launch left out `host`, so its autostart probes the collector afresh (a blank one keeps it). */
+    private boolean launchNoHost;
     /** Whether the Bench tab is the one shown, as MainActivity's tab selection sets it. */
     private boolean tabShown = true;
     /** Set once the list of tests has loaded, so a launch before then waits for it. */
@@ -106,6 +114,7 @@ final class BenchView extends LinearLayout {
         this.restored = restored;
         // A restored activity gets its old intent again: only a fresh launch asks for a run.
         launchPending = Collector.RUNNER && !restored && intent != null && intent.getBooleanExtra("autostart", false);
+        if (launchPending) setLaunchNames(intent);
         setBackgroundColor(Theme.surface);
         setContentDescription("Bench page");
         int s2 = Theme.dpi(host, 8), s4 = Theme.dpi(host, 16);
@@ -333,6 +342,9 @@ final class BenchView extends LinearLayout {
             colHow = "set by adb";
             // After setup, probe the new target; a probe of the old one still out is then ignored.
             if (changed && probeGen > 0) findCollector();
+            // A launch waiting or queued keeps the collector it came with: one that isn't itself an
+            // autostart launch but moves the collector drops it, rather than sending its run elsewhere.
+            if (changed && !it.getBooleanExtra("autostart", false)) dropLaunch("a later launch changed its collector");
         } else if (!it.hasExtra("host") && runnerHost != null && Collector.RUNNER && it.getBooleanExtra("autostart", false)) {
             // A runner launch without `host` goes to the USB or built-in collector, not the last launch's.
             runnerHost = null;
@@ -463,7 +475,7 @@ final class BenchView extends LinearLayout {
         if (!run.isEmpty()) {
             if (!run.equals(clearedRun)) showFinished(st, false);
         } else if (lateRefusal(st) && st.optLong("refused_start") != clearedRefusal) {
-            // Refused while no view polled, as across a recreation: show it, and report it if nobody has.
+            // Refused while no view polled, as across a recreation: show it (RunReporter logs it).
             showLateRefusal(st);
         } else {
             reportLayout("ready");
@@ -492,6 +504,7 @@ final class BenchView extends LinearLayout {
             // An earlier launch still waiting or queued is replaced: it gets its own outcome first.
             dropLaunch("a later launch replaced it");
             launchPending = true;
+            setLaunchNames(it);
             if (loadedOnce) scheduleAutostart();
         }
     }
@@ -537,15 +550,18 @@ final class BenchView extends LinearLayout {
             notStarted("the Bench tab isn't shown");
             return;
         }
+        final List<String> libs = launchLibs, secs = launchSecs;
+        final boolean noHost = launchNoHost;
         autostart = new Runnable() {
-            private boolean cleared;
+            private boolean probed;
 
             @Override public void run() {
-                // A finished run's results are cleared once, as the Clear button does, so Start can run;
-                // Clear probes the collector again.
-                if (!cleared && onScreen && tabShown && !running) {
-                    cleared = true;
-                    if (!nativeStatus().optString("run_id", "").isEmpty()) clearTapped();
+                // A launch without `host` probes the collector afresh, as it may have changed since the
+                // last probe (as `adb reverse` turned on after a run over Wi-Fi), USB first. A blank `host`
+                // keeps the collector as it is (README), so it doesn't.
+                if (!probed) {
+                    probed = true;
+                    if (noHost) findCollector();
                 }
                 // Until the collector probe answers, the run's collector isn't known: wait for it, still queued.
                 if (probing) { ui.postDelayed(this, 250); return; }
@@ -554,8 +570,11 @@ final class BenchView extends LinearLayout {
                     notStarted(running ? "a run is going" : "the app or the Bench tab was left");
                     return;
                 }
+                // A finished run's results are cleared only now, right before Start, so a launch dropped
+                // while it waited leaves them shown; the collector was just probed, so no new probe.
+                if (!nativeStatus().optString("run_id", "").isEmpty()) clearResults(false);
                 agree.setChecked(true);
-                startTapped();
+                start(libs, secs);
             }
         };
         ui.postDelayed(autostart, 3000);
@@ -573,31 +592,14 @@ final class BenchView extends LinearLayout {
         return s.optString("run_id", "").isEmpty() && s.optLong("refused_start") > 0;
     }
 
-    /** Shows a late refusal as a refused start, not as a finished run, and reports it to a device runner. */
+    /** Shows a late refusal as a refused start, not as a finished run. */
     private void showLateRefusal(JSONObject s) {
         String why = s.optString("refused_reason");
         showFinished(s, false);
         progress.setVisibility(GONE);
         setStatus("Could not start", Status.ERROR);
         setBody(why);
-        refusedAfterStart(s.optLong("refused_start"), why);
-    }
-
-    /** The last late refusal reported, per process: a recreated view doesn't report it again. */
-    private static long refusalReported;
-
-    /**
-     * A start the library refused after acknowledging it, for a device runner: it ends the launch with
-     * RINDBENCH_RUN {"started":false,"reason":...,"after_start":true}, after its "started":true line, once
-     * per refused start (`refused_start` in the native status), whichever view sees it first.
-     */
-    private static synchronized void refusedAfterStart(long start, String why) {
-        if (start <= refusalReported) return;
-        refusalReported = start;
-        try {
-            android.util.Log.w("RindBench", "RINDBENCH_RUN " + new JSONObject().put("started", false)
-                    .put("reason", "the native start refused it: " + why).put("after_start", true));
-        } catch (Exception ignored) {}
+        // RunReporter logs it for a device runner, once, whether or not a view sees it.
     }
 
     private void cancelAutostart() {
@@ -787,7 +789,23 @@ final class BenchView extends LinearLayout {
         shareBtn.setAlpha(1f);
     }
 
+    /** Keeps a runner launch's `libraries` and `sections` extras for its autostart, as named. */
+    private void setLaunchNames(Intent it) {
+        launchNoHost = !it.hasExtra("host");
+        launchLibs = it.hasExtra("libraries") ? new ArrayList<>(csv(it.getStringExtra("libraries"))) : null;
+        launchSecs = it.hasExtra("sections") ? new ArrayList<>(csv(it.getStringExtra("sections"))) : null;
+    }
+
     private void startTapped() {
+        start(null, null);
+    }
+
+    /**
+     * Starts a run of the picker's selection; an autostart passes the names its launch gave in
+     * {@code wantLibs} and {@code wantSecs} (null where it gave none), which go to the native start as
+     * given, in place of the picker's, so the library judges names the picker doesn't list.
+     */
+    private void start(List<String> wantLibs, List<String> wantSecs) {
         // Any start, the person's or the runner's own, takes the place of a queued autostart. The
         // autostart's own start clears it first, so one still queued here is replaced by hand: say so.
         if (autostart != null) notStarted("a start by hand took its place");
@@ -800,6 +818,8 @@ final class BenchView extends LinearLayout {
         List<String> libs = new ArrayList<>(), secs = new ArrayList<>();
         for (Map.Entry<String, CompoundButton> e : libSw.entrySet()) if (e.getValue().isChecked()) libs.add(e.getKey());
         for (Map.Entry<String, CompoundButton> e : secSw.entrySet()) if (e.getValue().isChecked()) secs.add(e.getKey());
+        if (wantLibs != null && !wantLibs.isEmpty()) libs = wantLibs;
+        if (wantSecs != null && !wantSecs.isEmpty()) secs = wantSecs;
         if (libs.isEmpty() || secs.isEmpty()) {
             setStatus("Nothing picked", Status.NEUTRAL);
             setBody("Turn on at least one library and group.");
@@ -825,6 +845,8 @@ final class BenchView extends LinearLayout {
             JSONObject env = new JSONObject();
             env.put("RIND_BENCH_KEYS_DIR", keysDir);
             cfg.put("env", env);
+            // The last start's line, if its status hasn't been read yet, before this start replaces that status.
+            RunReporter.flush();
             if (Native.start(cfg.toString()) != 0) {
                 String why = new JSONObject(Native.status()).optString("start_error");
                 notStarted("the native start refused it: " + why);
@@ -833,15 +855,20 @@ final class BenchView extends LinearLayout {
                 return;
             }
             // What the run takes, for a device runner checking a launch's selection without a person:
-            //   RINDBENCH_RUN {"started":true,"preset":"quick","libraries":[...],"sections":[...],"host":...,"port":...}
+            //   RINDBENCH_RUN {"started":true,"start":N,"preset":"quick","libraries":[...],"sections":[...],"host":...,"port":...}
+            // logged as the start is accepted, with the libraries and groups asked for; RunReporter then logs
+            // the groups that run, or a refusal once listed, under the same start number N.
+            long startNo = nativeStatus().optLong("acked_start", 0);
             JSONObject run = new JSONObject();
             run.put("started", true);
+            run.put("start", startNo);
             run.put("preset", full ? "full" : "quick");
             run.put("libraries", cfg.get("libraries"));
             run.put("sections", cfg.get("sections"));
             run.put("host", colHost);
             run.put("port", colPort);
             android.util.Log.i("RindBench", "RINDBENCH_RUN " + run);
+            if (startNo > 0) RunReporter.watch(startNo);
         } catch (Exception e) {
             setStatus("Could not start", Status.ERROR);
             setBody(String.valueOf(e));
@@ -883,6 +910,11 @@ final class BenchView extends LinearLayout {
     }
 
     private void clearTapped() {
+        clearResults(true);
+    }
+
+    /** Clears a finished run's results, as Clear does; {@code probe} also probes the collector again. */
+    private void clearResults(boolean probe) {
         if (running) return;
         JSONObject cleared = nativeStatus();
         clearedRun = cleared.optString("run_id", "");
@@ -902,7 +934,7 @@ final class BenchView extends LinearLayout {
         setStatus("Ready", Status.OK);
         setBody("");
         agreeChanged();
-        findCollector();
+        if (probe) findCollector();
     }
 
     private static JSONObject nativeStatus() {

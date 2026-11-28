@@ -23,7 +23,8 @@
 # host's own schedule, the elliptic-curve and 16- and 32-word Montgomery tests run
 # again with `RIND_CPU_DISABLE_wide_mul=1` and with `RIND_CPU_FORCE_wide_mul=1`,
 # each checked to take effect first: either host would otherwise prove only
-# its own schedule.
+# its own schedule. A test may force the CPU check of a routine in
+# `CONTRACTS`, which this stubs, to check the Rust around it on any CPU.
 #
 # Run it in `nix develop .#binsec`.
 
@@ -37,13 +38,41 @@ GDB = r"""
 import gdb, os
 gdb.execute("set pagination off")
 gdb.execute("set confirm off")
+gdb.execute("starti")
+pid = gdb.selected_inferior().pid
+# The kernel maps the test binary before its first instruction, and it binds
+# every symbol at load, so its GOT holds the function glibc picked for each,
+# which its own calls into glibc take too.
+exe = os.path.realpath(gdb.current_progspace().filename)
+for line in open("/proc/{}/maps".format(pid)):
+    fields = line.split()
+    if len(fields) == 6 and fields[2] == "00000000" and os.path.realpath(fields[5]) == exe:
+        base = int(fields[0].split("-")[0], 16)
+        break
+print("BASE {:#x}".format(base))
+arch = gdb.selected_frame().architecture().name()
+# Each routine in `CONTRACTS` returns success at once, writing nothing, in
+# the native run too, which may lack the CPU features it needs.
+stubbed = set(base + addr for addr in CONTRACTS.values())
+for addr in stubbed:
+    gdb.Breakpoint("*{:#x}".format(addr), internal=True)
+def resume(cmd):
+    gdb.execute(cmd)
+    while gdb.selected_inferior().pid and int(gdb.parse_and_eval("(unsigned long)$pc")) in stubbed:
+        if arch == "aarch64":
+            gdb.execute("set $x0 = 1")
+            gdb.execute("set $pc = $x30")
+        else:
+            gdb.execute("set $rax = 1")
+            gdb.execute("set $pc = *(unsigned long *)$sp")
+            gdb.execute("set $sp = $sp + 8")
+        gdb.execute("continue")
 # At each marker's first instruction, not past its prologue, where gdb
 # would break by name, and where `$pc` would not be the marker's address.
 gdb.execute("break *rind_ct_binsec_start")
-gdb.execute("run")
-if not gdb.selected_thread() or not gdb.selected_thread().is_valid():
+resume("continue")
+if not gdb.selected_inferior().pid:
     raise gdb.GdbError("ct-binsec: the test never entered its region")
-pid = gdb.selected_inferior().pid
 sp = int(gdb.parse_and_eval("(unsigned long)$sp"))
 # glibc marks a thread stack's guard pages with MADV_GUARD_INSTALL, inside
 # the stack's own mapping, so gdb fails to read the mapping and dumps it
@@ -61,28 +90,19 @@ for sym in SYMBOLS:
 gdb.execute("queue-signal SIGUSR1")
 gdb.execute("generate-core-file " + CORE)
 gdb.execute("queue-signal 0")
-# The test binary binds every symbol at load, so its GOT holds the function
-# glibc picked for each, which its own calls into glibc take too.
-exe = os.path.realpath(gdb.current_progspace().filename)
-for line in open("/proc/{}/maps".format(pid)):
-    fields = line.split()
-    if len(fields) == 6 and fields[2] == "00000000" and os.path.realpath(fields[5]) == exe:
-        base = int(fields[0].split("-")[0], 16)
-        break
 for name, got in GOT.items():
     print("LIBC {} {:#x}".format(name, int(gdb.parse_and_eval("*(unsigned long *){}".format(base + got)))))
 for line in open("/proc/{}/maps".format(pid)):
     if os.path.basename(line.split()[-1]).startswith("libc.so"):
         print("FILE " + line.split()[-1])
         break
-arch = gdb.selected_frame().architecture().name()
 if arch == "aarch64":
     print("TPIDR {:#x}".format(int(gdb.parse_and_eval("(unsigned long)$tpidr"))))
 args = {"i386:x86-64": ("$rdi", "$rsi"), "aarch64": ("$x0", "$x1"), "arm": ("$r0", "$r1")}[arch]
 public = gdb.Breakpoint("*rind_ct_binsec_public", internal=True)
 stop = gdb.Breakpoint("*rind_ct_binsec_stop", internal=True)
 while True:
-    gdb.execute("continue")
+    resume("continue")
     if not gdb.selected_inferior().pid:
         raise gdb.GdbError("ct-binsec: the test left its region without stopping")
     pc = int(gdb.parse_and_eval("(unsigned long)$pc"))
@@ -92,7 +112,7 @@ while True:
     print("PUBLIC " + bytes(gdb.selected_inferior().read_memory(value, size)).hex())
 public.delete()
 stop.delete()
-gdb.execute("continue")
+resume("continue")
 if gdb.selected_inferior().pid:
     raise gdb.GdbError("ct-binsec: the test entered a second region")
 print("EXIT {}".format(int(gdb.parse_and_eval("$_exitcode"))))
@@ -110,6 +130,33 @@ UNDECODED = {
     "x86_64": ["aes", "vaes", "avx512f", "avx512dq", "avx512ifma", "avx512bw"]
     + ["avx512vl", "avx512vbmi", "avx512vbmi2"],
     "aarch64": ["aes", "pmull", "sha2", "sha3", "sve2", "dit"],
+}
+
+# pyca/verified-garbage's routines whose leakage rind imports as VG's proven
+# contract, `proofs/Rind/<Arch>/Vg*Ct.lean`, and which BINSEC cannot decode,
+# by name: how many pointer arguments each takes, the (argument, length) of
+# each output it writes, and the (argument, offset, length) of each input its
+# contract lets its trace depend on, besides the pointers. A test forces the
+# CPU check that picks them, so that BINSEC checks the Rust around them, which
+# replaces each with a stub that loads through every pointer and branches on
+# each bit its contract leaks, so that a secret pointer or leaked byte
+# fails, writes fresh secret bytes to each output, and returns success, 1.
+# gdb's native run, whose CPU may lack their features, returns 1 at once and
+# writes nothing. Each fails only on public data, which the stubs' success
+# fixes. So a check passes only if the Rust that calls the routine gives it
+# public pointers and public leaked bytes, and branches on and indexes by
+# none of the secrets it gives or takes.
+CONTRACTS = {
+    "x86_64": {
+        # (seed, ek, dk, scratch), (dk, ct, key, scratch), (ek, m, key, ct,
+        # scratch), and (ek, h, m, key, ct, scratch), each leaking `ρ`, the
+        # last 32 bytes of `ek`, which `dk` holds after `dkPKE`:
+        # `Rind.X86_64.VgMlKem768Ct`.
+        "vg_mlkem768_keygen_avx512": (4, [(1, 1184), (2, 2400)], []),
+        "vg_mlkem768_decaps_avx512": (4, [(2, 32)], [(0, 2304, 32)]),
+        "vg_mlkem768_encaps_avx512": (5, [(2, 32), (3, 1088)], [(0, 1152, 32)]),
+        "vg_mlkem768_encaps_h_avx512": (6, [(3, 32), (4, 1088)], [(0, 1152, 32)]),
+    },
 }
 
 # glibc picks each of these for the runner's CPU, such as an EVEX one with
@@ -568,15 +615,20 @@ def dump(exe, name, target, tmp, env):
     functions in `LIBC` glibc picked, the values the region declassified,
     and the stubs of the instructions BINSEC cannot decode."""
     got = got_offsets(exe)
+    contracts = contract_offsets(exe, target)
     core = os.path.join(tmp, "core")
     script = os.path.join(tmp, "dump.py")
     with open(script, "w") as f:
-        f.write("CORE = {!r}\nSYMBOLS = {!r}\nGOT = {!r}\n".format(core, SYMBOLS, got) + GDB)
+        f.write("CORE = {!r}\nSYMBOLS = {!r}\nGOT = {!r}\nCONTRACTS = {!r}\n".format(core, SYMBOLS, got, contracts) + GDB)
     cmd = ["gdb", "-batch", "-nx", "-x", script, "--args", exe]
     cmd += ["--ignored", "--exact", name, "--test-threads=1", "-q"]
+    # The tests that force a routine in `CONTRACTS` refuse to run without
+    # this, since only the stubs keep them off a CPU without its features.
+    env = dict(env, RIND_CT_BINSEC="1")
     out = subprocess.run(
         cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, encoding="utf-8", env=env
     ).stdout
+    base = re.search(r"^BASE (\S+)$", out, re.M)
     symbols = dict((m[1], int(m[2], 16)) for m in re.finditer(r"^SYMBOL (\S+) (\S+)$", out, re.M))
     libc = dict((m[1], int(m[2], 16)) for m in re.finditer(r"^LIBC (\S+) (\S+)$", out, re.M))
     public = [bytes.fromhex(m) for m in re.findall(r"^PUBLIC ([0-9a-f]*)$", out, re.M)]
@@ -585,11 +637,52 @@ def dump(exe, name, target, tmp, env):
     exit = re.search(r"^EXIT (\d+)$", out, re.M)
     if len(set(symbols.values())) != len(SYMBOLS) or len(libc) != len(got):
         sys.exit("ct-binsec: {} failed under gdb:\n{}".format(name, out))
-    if not exit or exit[1] != "0" or not libc_file or not os.path.exists(core):
+    if not exit or exit[1] != "0" or not libc_file or not base or not os.path.exists(core):
         sys.exit("ct-binsec: {} failed under gdb:\n{}".format(name, out))
     keep_first_thread(core)
     stubbed = stubs(target, [exe, libc_file[1]], int(tpidr[1], 16) if tpidr else None)
+    stubbed += contract_stubs(target, {n: int(base[1], 16) + a for n, a in contracts.items()})
     return core, symbols, libc, public, stubbed
+
+
+def contract_stubs(target, addrs):
+    """The stub of each routine in `CONTRACTS`, at its address in `addrs`."""
+    word = WORD[arch(target)]
+    out = ""
+    for name, addr in sorted(addrs.items()):
+        count, outputs, leaked = CONTRACTS[arch(target)][name]
+        args = ["vg{}".format(i) for i in range(count)]
+        out += "\nreplace {:#x} ({}) by\n".format(addr, ", ".join(args))
+        for a in args:
+            out += "  libc_i := uext{} @[{}]\n".format(word, a)
+        for i, offset, size in leaked:
+            out += "  for i<{}> in {} to {} do\n".format(word, offset, offset + size - 1)
+            # Each bit, so that a byte whose secret part leaves it nonzero
+            # still fails.
+            for b in range(8):
+                out += "    if @[vg{} + i]{{{}}} then\n      libc_i := 0\n    end\n".format(i, b)
+            out += "  end\n"
+        for i, size in outputs:
+            out += "  for i<{}> in 0 to {} do\n    @[vg{} + i] := secret\n  end\n".format(word, size - 1, i)
+        out += "  return 1\nend\n"
+    return out
+
+
+def contract_offsets(exe, target):
+    """The address in the test binary of each routine in `CONTRACTS`, by
+    name: every one, or none in a build that holds none, such as the portable
+    backend's. A build that holds only some has renamed the rest."""
+    names = CONTRACTS.get(arch(target), {})
+    out = subprocess.run(["nm", "--defined-only", "-C", exe], stdout=subprocess.PIPE, check=True, encoding="utf-8").stdout
+    found = {}
+    for m in re.finditer(r"^([0-9a-f]+) [tT] (?:.*::)?vg::(\w+)::(\w+)(?:::h[0-9a-f]{16})?$", out, re.M):
+        if m[2] == m[3] and m[2] in names:
+            if m[2] in found:
+                sys.exit("ct-binsec: the test binary holds {} twice".format(m[2]))
+            found[m[2]] = int(m[1], 16)
+    if found and len(found) != len(names):
+        sys.exit("ct-binsec: the test binary holds no {}".format(", ".join(sorted(set(names) - set(found)))))
+    return found
 
 
 def got_offsets(exe):

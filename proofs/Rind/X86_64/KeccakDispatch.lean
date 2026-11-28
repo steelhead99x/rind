@@ -1,5 +1,5 @@
 import Rind.X86_64.S2nBignum
-import Rind.KeccakStates
+import Rind.X86_64.Keccak8Avx512
 open Aeneas Aeneas.Std Result rind.spec
 
 /-!
@@ -8,7 +8,8 @@ open Aeneas Aeneas.Std Result rind.spec
 What the routines rind's sponge calls compute, from s2n-bignum's contracts in
 `Rind.X86_64.S2nBignum`: `keccak_f1600_spec`, one state; `keccak4_f1600_spec`,
 four; `keccak_nof4_f1600_spec`, the first `N` of four; and
-`keccak_nof8_f1600_spec`, the first `n` of eight. The sponge's proof,
+`keccak_nof8_f1600_spec`, the first `n` of eight, on AVX-512 through rind's own
+eight-way kernel, which `Rind.X86_64.Keccak8Avx512` proves. The sponge's proof,
 which `admin/prove` writes for aarch64 from x86_64's, uses these names on both,
 and `Rind.Aarch64.KeccakDispatch` proves aarch64's.
 -/
@@ -17,14 +18,11 @@ namespace rind.x86_64
 
 /-- rind's SHA-3 runs on this CPU: its entry guard, the debug build's check
 that one is held, and its AVX2 and AVX-512 checks pass, none reading an
-input; and rind's own eight-way AVX-512 Keccak-f, which no proof covers yet,
-computes Keccak-f on each of its eight states. -/
+input. -/
 def RunsSha3 : Prop :=
   (∃ e, low.entry.Entry.new_secret = ok e) ∧ low.entry.Entry.assert_held = ok () ∧
     (∃ t, low.x86_64.cpu.HaveAvx2.check = ok t) ∧
-    (∃ t, low.x86_64.cpu.HaveAvx512Vl.check = ok t) ∧
-    ∀ a t, low.x86_64.sha3_keccak8_f1600.permute a mid.sha3.RC t ⦃ r =>
-      states8 r = (states8 a).map (keccak 24) ⦄
+    (∃ t, low.x86_64.cpu.HaveAvx512Vl.check = ok t)
 
 theorem sha3_new_secret_spec (h : RunsSha3) : low.entry.Entry.new_secret ⦃ _ => True ⦄ := by
   obtain ⟨⟨e, he⟩, -⟩ := h
@@ -240,12 +238,12 @@ theorem generic_nof8_spec (h : RunsSha3) (n : Usize) (hn : 1 ≤ n.val ∧ n.val
       states_getElem! x i hi4, hx0, getElem!_take' _ _ _ hi4]
 
 /-- `keccak_nof8_f1600_spec`: the first `n` of eight states, all eight at
-once on AVX-512, as `RunsSha3` takes its kernel to compute. -/
+once on AVX-512, through `Rind.X86_64.Keccak8Avx512`'s kernel. -/
 theorem keccak_nof8_f1600_spec (h : RunsSha3) (n : Usize) (hn : 1 ≤ n.val ∧ n.val ≤ 8)
     (a : Std.Array (Std.Array U64 25#usize) 8#usize) :
     low.x86_64.sha3_keccak8_f1600.sha3_keccak_nof8_f1600 a n mid.sha3.RC ⦃ r =>
       (states8 r).take n.val = ((states8 a).take n.val).map (keccak 24) ⦄ := by
-  obtain ⟨-, -, -, ⟨t, ht⟩, hp⟩ := id h
+  obtain ⟨-, -, -, ⟨t, ht⟩⟩ := id h
   unfold low.x86_64.sha3_keccak8_f1600.sha3_keccak_nof8_f1600
   rw [ht, bind_ok]
   cases t with
@@ -253,7 +251,7 @@ theorem keccak_nof8_f1600_spec (h : RunsSha3) (n : Usize) (hn : 1 ≤ n.val ∧ 
   | some t =>
     simp only
     split
-    · apply WP.spec_mono (hp a t)
+    · apply WP.spec_mono (keccak8.permute_spec a mid.sha3.RC rc_bv t)
       intro r hr
       rw [hr, List.map_take]
     · exact generic_nof8_spec h n hn a

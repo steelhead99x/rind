@@ -29,43 +29,136 @@ fn permute(a: &mut [[u64; 25]; 8], rc: &[u64; 24], _: HaveAvx512Vl) {
 
 /// Gathers each state's lanes into vectors, permutes them, and scatters them
 /// back.
+//
+// Builds vectors element by element rather than loading through pointers,
+// which Aeneas cannot translate, so `proofs/` can prove it; LLVM still loads
+// each row whole.
 #[target_feature(enable = "avx512f")]
-unsafe fn permute_transposing(a: &mut [[u64; 25]; 8], rc: &[u64; 24]) {
-    let mut v = [_mm512_setzero_si512(); 25];
-    for block in 0..3 {
-        // SAFETY: each state has 25 lanes, so lanes `8 * block` on are in
-        // bounds for the eight a 64-byte load reads.
-        let rows: [__m512i; 8] = core::array::from_fn(|j| unsafe {
-            _mm512_loadu_si512(a[j][8 * block..].as_ptr().cast())
-        });
-        v[8 * block..8 * block + 8].copy_from_slice(&transpose(rows));
-    }
-    v[24] = _mm512_setr_epi64(
-        a[0][24] as i64,
-        a[1][24] as i64,
-        a[2][24] as i64,
-        a[3][24] as i64,
-        a[4][24] as i64,
-        a[5][24] as i64,
-        a[6][24] as i64,
-        a[7][24] as i64,
-    );
+fn permute_transposing(a: &mut [[u64; 25]; 8], rc: &[u64; 24]) {
+    let b0 = transpose(rows(a, 0));
+    let b1 = transpose(rows(a, 8));
+    let b2 = transpose(rows(a, 16));
+    let mut v = [
+        b0[0],
+        b0[1],
+        b0[2],
+        b0[3],
+        b0[4],
+        b0[5],
+        b0[6],
+        b0[7],
+        b1[0],
+        b1[1],
+        b1[2],
+        b1[3],
+        b1[4],
+        b1[5],
+        b1[6],
+        b1[7],
+        b2[0],
+        b2[1],
+        b2[2],
+        b2[3],
+        b2[4],
+        b2[5],
+        b2[6],
+        b2[7],
+        _mm512_setr_epi64(
+            a[0][24] as i64,
+            a[1][24] as i64,
+            a[2][24] as i64,
+            a[3][24] as i64,
+            a[4][24] as i64,
+            a[5][24] as i64,
+            a[6][24] as i64,
+            a[7][24] as i64,
+        ),
+    ];
 
     keccak8_f1600(&mut v, rc);
 
-    for block in 0..3 {
-        let rows = transpose(v[8 * block..8 * block + 8].try_into().unwrap());
-        for (j, row) in rows.iter().enumerate() {
-            // SAFETY: as for the loads.
-            unsafe { _mm512_storeu_si512(a[j][8 * block..].as_mut_ptr().cast(), *row) };
-        }
-    }
-    let mut last = [0u64; 8];
-    // SAFETY: `last` is 8 * 8 = 64 bytes, exactly the width of one `__m512i`.
-    unsafe { _mm512_storeu_si512(last.as_mut_ptr().cast(), v[24]) };
-    for (state, lane) in a.iter_mut().zip(last) {
-        state[24] = lane;
-    }
+    set_rows(
+        a,
+        0,
+        transpose([v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7]]),
+    );
+    set_rows(
+        a,
+        8,
+        transpose([v[8], v[9], v[10], v[11], v[12], v[13], v[14], v[15]]),
+    );
+    set_rows(
+        a,
+        16,
+        transpose([v[16], v[17], v[18], v[19], v[20], v[21], v[22], v[23]]),
+    );
+    let lo = _mm512_extracti64x4_epi64::<0>(v[24]);
+    let hi = _mm512_extracti64x4_epi64::<1>(v[24]);
+    a[0][24] = _mm256_extract_epi64::<0>(lo) as u64;
+    a[1][24] = _mm256_extract_epi64::<1>(lo) as u64;
+    a[2][24] = _mm256_extract_epi64::<2>(lo) as u64;
+    a[3][24] = _mm256_extract_epi64::<3>(lo) as u64;
+    a[4][24] = _mm256_extract_epi64::<0>(hi) as u64;
+    a[5][24] = _mm256_extract_epi64::<1>(hi) as u64;
+    a[6][24] = _mm256_extract_epi64::<2>(hi) as u64;
+    a[7][24] = _mm256_extract_epi64::<3>(hi) as u64;
+}
+
+/// Lanes `i` to `i + 7` of each state, a vector each.
+#[inline]
+#[target_feature(enable = "avx512f")]
+fn rows(a: &[[u64; 25]; 8], i: usize) -> [__m512i; 8] {
+    [
+        row(&a[0], i),
+        row(&a[1], i),
+        row(&a[2], i),
+        row(&a[3], i),
+        row(&a[4], i),
+        row(&a[5], i),
+        row(&a[6], i),
+        row(&a[7], i),
+    ]
+}
+
+/// Lanes `i` to `i + 7` of `s`, lane `i` in element 0.
+#[inline]
+#[target_feature(enable = "avx512f")]
+fn row(s: &[u64; 25], i: usize) -> __m512i {
+    _mm512_setr_epi64(
+        s[i] as i64,
+        s[i + 1] as i64,
+        s[i + 2] as i64,
+        s[i + 3] as i64,
+        s[i + 4] as i64,
+        s[i + 5] as i64,
+        s[i + 6] as i64,
+        s[i + 7] as i64,
+    )
+}
+
+/// Sets lanes `i` to `i + 7` of each state to a vector each.
+#[inline]
+#[target_feature(enable = "avx512f")]
+fn set_rows(a: &mut [[u64; 25]; 8], i: usize, r: [__m512i; 8]) {
+    set_row(&mut a[0], i, r[0]);
+    set_row(&mut a[1], i, r[1]);
+    set_row(&mut a[2], i, r[2]);
+    set_row(&mut a[3], i, r[3]);
+    set_row(&mut a[4], i, r[4]);
+    set_row(&mut a[5], i, r[5]);
+    set_row(&mut a[6], i, r[6]);
+    set_row(&mut a[7], i, r[7]);
+}
+
+/// Sets lanes `i` to `i + 7` of `s` to `v`'s elements, element 0 in lane `i`.
+//
+// The one store through a pointer, which `proofs/` models by hand: LLVM splits
+// a store built from `v`'s elements into 128-bit pieces.
+#[inline]
+#[target_feature(enable = "avx512f")]
+fn set_row(s: &mut [u64; 25], i: usize, v: __m512i) {
+    // SAFETY: the eight lanes are 64 bytes, exactly the width of one `__m512i`.
+    unsafe { _mm512_storeu_si512(s[i..i + 8].as_mut_ptr().cast(), v) }
 }
 
 /// The 8x8 transpose of 64-bit elements: element `i` of vector `j` becomes
@@ -74,10 +167,16 @@ unsafe fn permute_transposing(a: &mut [[u64; 25]; 8], rc: &[u64; 24]) {
 #[target_feature(enable = "avx512f")]
 fn transpose(r: [__m512i; 8]) -> [__m512i; 8] {
     // Pairs of rows, interleaved: each 128-bit lane holds a 2x2 block.
-    let t: [__m512i; 8] = core::array::from_fn(|i| match i % 2 {
-        0 => _mm512_unpacklo_epi64(r[i], r[i + 1]),
-        _ => _mm512_unpackhi_epi64(r[i - 1], r[i]),
-    });
+    let t = [
+        _mm512_unpacklo_epi64(r[0], r[1]),
+        _mm512_unpackhi_epi64(r[0], r[1]),
+        _mm512_unpacklo_epi64(r[2], r[3]),
+        _mm512_unpackhi_epi64(r[2], r[3]),
+        _mm512_unpacklo_epi64(r[4], r[5]),
+        _mm512_unpackhi_epi64(r[4], r[5]),
+        _mm512_unpacklo_epi64(r[6], r[7]),
+        _mm512_unpackhi_epi64(r[6], r[7]),
+    ];
     // Then a 4x4 transpose of those 128-bit blocks, in two steps.
     let s = [
         _mm512_shuffle_i64x2::<0x44>(t[0], t[2]),
@@ -103,78 +202,101 @@ fn transpose(r: [__m512i; 8]) -> [__m512i; 8] {
 
 /// Keccak-f1600 on the eight states whose lane `i` is in the elements of
 /// `state[i]`.
+//
+// A range loop, since Aeneas translates no iterator over `rc`.
+#[allow(clippy::needless_range_loop)]
 #[target_feature(enable = "avx512f")]
 pub(super) fn keccak8_f1600(state: &mut [__m512i; 25], rc: &[u64; 24]) {
-    for round_constant in rc {
-        // Theta step.
-        //
-        // Compute the column parities C[x], then fold D[x] = C[x-1] ^ ROL(C[x+1], 1)
-        // into every lane of column x.  This is fused with the rho and pi steps below.
-        let c: [__m512i; 5] = core::array::from_fn(|x| {
-            xor3(
-                xor3(state[x], state[x + 5], state[x + 10]),
-                state[x + 15],
-                state[x + 20],
-            )
-        });
-        let c_rotated: [__m512i; 5] = core::array::from_fn(|x| _mm512_rol_epi64::<1>(c[x]));
-
-        // Rho and Pi steps.
-        //
-        // Rotate each lane by its rho offset and scatter it to its pi position
-        // B[y, 2x + 3y] = ROL(A[x, y], RHO[x][y]).  `vprolq` takes its count
-        // as an immediate, so each lane is spelled out.
-        let mut b = [_mm512_setzero_si512(); 25];
-        macro_rules! rho_pi {
-            ($(($x:literal, $y:literal, $rho:literal)),* $(,)?) => {$(
-                b[$y + 5 * ((2 * $x + 3 * $y) % 5)] = _mm512_rol_epi64::<$rho>(xor3(
-                    state[$x + 5 * $y],
-                    c[($x + 4) % 5],
-                    c_rotated[($x + 1) % 5],
-                ));
-            )*};
-        }
-        rho_pi!(
-            (0, 0, 0),
-            (0, 1, 36),
-            (0, 2, 3),
-            (0, 3, 41),
-            (0, 4, 18),
-            (1, 0, 1),
-            (1, 1, 44),
-            (1, 2, 10),
-            (1, 3, 45),
-            (1, 4, 2),
-            (2, 0, 62),
-            (2, 1, 6),
-            (2, 2, 43),
-            (2, 3, 15),
-            (2, 4, 61),
-            (3, 0, 28),
-            (3, 1, 55),
-            (3, 2, 25),
-            (3, 3, 21),
-            (3, 4, 56),
-            (4, 0, 27),
-            (4, 1, 20),
-            (4, 2, 39),
-            (4, 3, 8),
-            (4, 4, 14),
-        );
-
-        // Chi step.
-        //
-        // A[x, y] = B[x, y] ^ ((~B[x+1, y]) & B[x+2, y]).
-        for x in 0..5 {
-            for y in 0..5 {
-                state[x + 5 * y] =
-                    xor_andnot(b[x + 5 * y], b[(x + 1) % 5 + 5 * y], b[(x + 2) % 5 + 5 * y]);
-            }
-        }
-
-        // Iota step.
-        state[0] = _mm512_xor_si512(state[0], _mm512_set1_epi64(*round_constant as i64));
+    for i in 0..24 {
+        *state = round(state, rc[i]);
     }
+}
+
+/// One round on the eight states whose lane `i` is in the elements of `a[i]`.
+//
+// Builds each array whole rather than in loops, which Aeneas cannot translate,
+// so `proofs/` can prove it.
+#[inline]
+#[target_feature(enable = "avx512f")]
+fn round(a: &[__m512i; 25], rc: u64) -> [__m512i; 25] {
+    // Theta step.
+    //
+    // Compute the column parities C[x], then fold D[x] = C[x-1] ^ ROL(C[x+1], 1)
+    // into every lane of column x.  This is fused with the rho and pi steps below.
+    let c = [
+        xor3(xor3(a[0], a[5], a[10]), a[15], a[20]),
+        xor3(xor3(a[1], a[6], a[11]), a[16], a[21]),
+        xor3(xor3(a[2], a[7], a[12]), a[17], a[22]),
+        xor3(xor3(a[3], a[8], a[13]), a[18], a[23]),
+        xor3(xor3(a[4], a[9], a[14]), a[19], a[24]),
+    ];
+    let c_rotated = [
+        _mm512_rol_epi64::<1>(c[0]),
+        _mm512_rol_epi64::<1>(c[1]),
+        _mm512_rol_epi64::<1>(c[2]),
+        _mm512_rol_epi64::<1>(c[3]),
+        _mm512_rol_epi64::<1>(c[4]),
+    ];
+
+    // Rho and Pi steps.
+    //
+    // Rotate each lane by its rho offset and move it to its pi position
+    // B[y, 2x + 3y] = ROL(A[x, y], RHO[x][y]), listed here in B's order.
+    // `vprolq` takes its count as an immediate, so each lane is spelled out.
+    macro_rules! rho_pi {
+        ($(($x:literal, $y:literal, $rho:literal)),* $(,)?) => {[$(
+            _mm512_rol_epi64::<$rho>(xor3(
+                a[const { $x + 5 * $y }],
+                c[const { ($x + 4) % 5 }],
+                c_rotated[const { ($x + 1) % 5 }],
+            )),
+        )*]};
+    }
+    let b = rho_pi!(
+        (0, 0, 0),
+        (1, 1, 44),
+        (2, 2, 43),
+        (3, 3, 21),
+        (4, 4, 14),
+        (3, 0, 28),
+        (4, 1, 20),
+        (0, 2, 3),
+        (1, 3, 45),
+        (2, 4, 61),
+        (1, 0, 1),
+        (2, 1, 6),
+        (3, 2, 25),
+        (4, 3, 8),
+        (0, 4, 18),
+        (4, 0, 27),
+        (0, 1, 36),
+        (1, 2, 10),
+        (2, 3, 15),
+        (3, 4, 56),
+        (2, 0, 62),
+        (3, 1, 55),
+        (4, 2, 39),
+        (0, 3, 41),
+        (1, 4, 2),
+    );
+
+    // Chi step.
+    //
+    // A[x, y] = B[x, y] ^ ((~B[x+1, y]) & B[x+2, y]).
+    macro_rules! chi {
+        ($($y:literal),*) => {[$(
+            xor_andnot(b[const { 5 * $y }], b[const { 5 * $y + 1 }], b[const { 5 * $y + 2 }]),
+            xor_andnot(b[const { 5 * $y + 1 }], b[const { 5 * $y + 2 }], b[const { 5 * $y + 3 }]),
+            xor_andnot(b[const { 5 * $y + 2 }], b[const { 5 * $y + 3 }], b[const { 5 * $y + 4 }]),
+            xor_andnot(b[const { 5 * $y + 3 }], b[const { 5 * $y + 4 }], b[const { 5 * $y }]),
+            xor_andnot(b[const { 5 * $y + 4 }], b[const { 5 * $y }], b[const { 5 * $y + 1 }]),
+        )*]};
+    }
+    let mut out = chi!(0, 1, 2, 3, 4);
+
+    // Iota step.
+    out[0] = _mm512_xor_si512(out[0], _mm512_set1_epi64(rc as i64));
+    out
 }
 
 /// The round constants, for the callers that permute their own vectors.

@@ -8,6 +8,8 @@ Usage:
   admin/bench-report render [--from DIR] [--check]
   admin/bench-report gate DIR [--previous DIR]
   admin/bench-report summary DIR
+  admin/bench-report names [--match REGEX] [CARGO_ARGS...]
+  admin/bench-report results METRICS
 
 `run` measures the machine it is on. The result's host name is a
 filesystem-safe slug of the CPU model (`intel-core-ultra-9-275hx`,
@@ -33,21 +35,26 @@ when another machine holds its name it is not imported, and the message says
 to rerun it with a different `--host`. A file in the data directory that is
 not readable JSON is named on stderr and left as it is, and it holds its name.
 An empty, all-zero, or uninitialized machine id is not a tag.
-A host whose chosen name is that spelling is left as it is.
+A host whose chosen name is that spelling is left as it is. On Linux,
+`RIND_PINNED_CPUS` pins the run to that `taskset` CPU list, but for the rustls
+rows that time every logical CPU, which a second, unpinned pass times.
 
 `collect` is the maintainer path. It copies one commit to each machine in
 COLLECT_HOSTS in turn, waits for room under `quest gate` and for any lease it
 has, builds rind-bench there in the commit's Nix dev shell with its pinned
 toolchain, and times every operation in OPERATIONS for every library that
-offers it, then measures each library's build cost with admin/build-cost. It
-runs here for the host this is, and over ssh for the others. A host that is
-busy, unreachable, or fails is recorded and skipped, never measured. DIR
-(default `.tmp/bench-report/<commit>`) gets one `<host>.json` per host, with
-its CPU, OS, toolchain, and library versions. A machine that is not in
-COLLECT_HOSTS is measured with `run`, not `collect`.
+offers it, then measures each library's build cost with admin/build-cost. On
+a host that CI runners and agent sessions share, it times them on two cores
+it reserves for the run, and measures no build cost: see reserve(). It runs
+here for the host this is, and over ssh for the others. A host that is busy,
+unreachable, or fails is recorded and skipped, never measured. DIR (default
+`.tmp/bench-report/<commit>`) gets one `<host>.json` per host, with its CPU,
+OS, toolchain, and library versions. A machine that is not in COLLECT_HOSTS
+is measured with `run`, not `collect`.
 
 `weekly` saves the latest weekly `bench` run's results on main, with gh, as
-the report's CPU tiers. `render` writes BENCHMARKS.md and its SVGs, among
+the report's CPU tiers, and that run's measure of rind's bytes in
+admin/build-cost-fixtures' programs. `render` writes BENCHMARKS.md and its SVGs, among
 them the overview the README shows, and benchmarks/report.json, the same
 report as data for the site's benchmarks page, from benchmarks/data, the verified code in
 benchmarks/verified.toml, and the decision on each gap in
@@ -64,12 +71,18 @@ run, given by `--previous`, showed too. The weekly bench runs it.
 `summary` prints a Markdown table of every host JSON in a directory: rind's
 time per operation and host, against the fastest other library's.
 
+`names` prints the names of the rind-bench benchmarks CARGO_ARGS select, such
+as `--bench sha2`, a line each, by running each once natively as swole lists
+them, keeping those whose ID matches REGEX. `results` prints the IDs and times
+of a `swole bench --out` file as JSON. The weekly bench's native rows run both.
+
 Results written by `run` are measurements, not history.
 """
 
 import argparse
 import ctypes
 import datetime
+import fcntl
 import fnmatch
 import glob
 import hashlib
@@ -82,6 +95,7 @@ import re
 import resource
 import shlex
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -110,16 +124,18 @@ import tomllib
 # describes the machine in the report. Other work on a host with a `lease`
 # holds that lock file with flock(1) for its whole run, so collect holds it
 # too, or skips the host as busy, and leaves no copy, build, or download cache
-# behind.
+# behind. A host with `reserve` also runs CI runners and agent sessions, which
+# keep it at about twice its CPU count, so collect times it on cores it
+# reserves: see reserve().
 VPS_NOTE = "OVH VPS in {}, 4 shared vCPUs: other tenants add noise that a dedicated host's times lack."
 COLLECT_HOSTS = {
-    "nixos": {"jobs": 16},
-    "desktop": {"jobs": 12},
+    "nixos": {"jobs": 16, "reserve": True},
+    "desktop": {"jobs": 12, "reserve": True},
     "fedora": {
         "jobs": 16,
+        "reserve": True,
         "note": "The maintainer's Fedora workstation and the report's only AVX-512 host, so the one whose table "
-        "times rind's AVX-512 AES-GCM, IFMA RSA, and 8-way ML-KEM sampler against every library. It also runs CI "
-        "runners and agent sessions, so its times are noisier than the other dedicated hosts'. Zen 5 keeps its "
+        "times rind's AVX-512 AES-GCM, IFMA RSA, and 8-way ML-KEM sampler against every library. Zen 5 keeps its "
         "clock with 512-bit vectors, so this host cannot show what they cost on the Intel cores that slow down.",
     },
     "kixtop": {
@@ -150,20 +166,37 @@ COLLECT_HOSTS = {
 # under a single-threaded benchmark.
 BUSY_SHARE = 0.1
 
+# How many whole cores a shared host's run reserves for the benchmarks.
+RESERVED_CORES = 2
+
+# The top-level cgroup slice a reserved run's benchmarks run in, outside every
+# slice the reservation keeps off their cores. A dash would nest it under another.
+RESERVE_SLICE = "benchreport.slice"
+
+# The transient timer that releases a reservation if its run dies without
+# doing so, and how long after the reservation starts: longer than the
+# benchmarks take.
+RESERVE_RELEASE_UNIT = "bench-report-release"
+RESERVE_RELEASE_AFTER = "3h"
+
+# The every-logical-CPU rows, which a reserved run leaves out: two cores
+# cannot time them, and the other cores are busy.
+EVERY_CPU = re.compile(r"^rustls-[a-z]+-handshake-threads/")
+
 # Where each host keeps each collection's copy and result, and the build they
 # share, under its home directory; this host uses the checkout's `.tmp/` instead.
 REMOTE_DIR = ".cache/rind-bench-report"
 
-# Criterion's timing, shortened from 3 s of warm-up and 5 s of measurement so
-# that a host's run takes about half an hour.
-CRITERION_ARGS = ["--noplot", "--warm-up-time", "1", "--measurement-time", "3"]
+# What swole adds to RUSTFLAGS for every build, so a listing builds what swole
+# then times rather than a second copy.
+SWOLE_CFG = "--cfg=codspeed"
 
 # The prefix of a row rind-bench times rind alone in, without `Dit::hold()`,
 # naming the row it repeats.
 DIT_PER_CALL = "dit-per-call/"
 
-# The report's operations by section, most common first, as criterion IDs
-# with `{lib}` in the library's place. Each is timed for every library
+# The report's operations by section, most common first, as benchmark IDs
+# (see `bench_id`) with `{lib}` in the library's place. Each is timed for every library
 # rind-bench has a row for.
 SECTIONS = [
     # Both peers in one process.
@@ -415,39 +448,63 @@ def fail(message):
     sys.exit(f"bench-report: {message}")
 
 
-# rustls groups that time every logical CPU at once. A process pinned by
-# taskset cannot satisfy their available_parallelism assert, so when
-# RIND_PINNED_CPUS is set they run in a second, unpinned pass.
-THREADED_RUSTLS_GROUPS = (
-    "rustls-full-handshake-threads",
-    "rustls-resumed-handshake-threads",
-)
+def bench_id(name):
+    """The ID of a swole benchmark's name, as rind-bench/benches/common/mod.rs
+    describes it: `rind-bench/benches/sha2.rs::sha256::rind[32B]` is
+    `sha256/rind/32B`, the path after the file with `/` for `::` and `-` for
+    `_`, then the argument."""
+    file, sep, path = name.partition("::")
+    m = re.fullmatch(r"([A-Za-z0-9_:]+)(?:\[(.+)\])?", path)
+    if not (file.endswith(".rs") and sep and m):
+        fail(f"{name!r} is not a rind-bench benchmark's name")
+    path, arg = m.groups()
+    path = path.replace("::", "/").replace("_", "-")
+    return f"{path}/{arg}" if arg else path
 
 
-def is_threaded_rustls(op):
-    return op.split("/")[0] in THREADED_RUSTLS_GROUPS
+def bench_names(cargo, env, args, match=None):
+    """The rind-bench benchmarks `args` select, as swole names them, by running
+    each once natively as swole lists them, keeping those whose ID `match`
+    keeps."""
+    env = dict(env)
+    env["RUSTFLAGS"] = f"{env['RUSTFLAGS']} {SWOLE_CFG}" if env.get("RUSTFLAGS") else SWOLE_CFG
+    out = subprocess.run(
+        cargo + ["bench", "-q", "-p", "rind-bench", *args], env=env, check=True, stdout=subprocess.PIPE, text=True
+    ).stdout
+    names = [line[len("swole ran ") :] for line in out.splitlines() if line.startswith("swole ran ")]
+    if not names:
+        fail(f"cargo bench {' '.join(args)} ran no benchmark")
+    return [n for n in names if match is None or match(bench_id(n))]
 
 
-def pinned_pass_operations():
-    return [op for op in OPERATIONS if not is_threaded_rustls(op)]
+def swole_times(path):
+    """Each benchmark's ID and nanoseconds a call in a `swole bench --out` file."""
+    with open(path) as f:
+        samples = json.load(f)["samples"]
+    # With a base, the base's sample comes first; the run's own is last.
+    times = []
+    for name, measures in samples[-1]["metrics"].items():
+        (measure,) = [m for m in measures if m.startswith("time (")]
+        times.append({"id": bench_id(name), "ns": measures[measure]["value"]})
+    return times
 
 
-def threaded_pass_operations():
-    return [op for op in OPERATIONS if is_threaded_rustls(op)]
+def swole():
+    """The swole flake.nix pins, built."""
+    out = subprocess.run(
+        ["nix", "build", f"path:{ROOT}#swole", "--no-link", "--print-out-paths"],
+        check=True,
+        stdout=subprocess.PIPE,
+        text=True,
+    ).stdout
+    return os.path.join(out.strip(), "bin", "swole")
 
 
-def operation_regex(refused=(), operations=None):
-    """A criterion filter matching exactly the report's operations, without
-    the libraries in `refused`. `operations` defaults to every report row."""
-    # Name the report's libraries rather than match any, so a bench's extra
-    # row (slhdsa's fips205) costs no time and ranks nothing. The regex crate
-    # has no lookahead, so `refused` drops out of the list too.
-    lib = "(" + "|".join(re.escape(row) for row, name in LIBRARIES.items() if name not in refused) + ")"
-    ops = OPERATIONS if operations is None else list(operations)
-    if not ops:
-        fail("no operations in the criterion filter")
-    pattern = "|".join(re.escape(op).replace(re.escape("{lib}"), lib) for op in ops)
-    return f"^({pattern})$"
+def swole_pmu_cpus(text):
+    """The CPUs `swole fingerprint bench`'s report says swole pins timed jobs to, or None when it found no
+    perf counters and so times by wall clock without pinning."""
+    m = re.search(r"^PMU: \S+ on CPUs ([0-9,-]+)", text, re.M)
+    return parse_cpu_list(m.group(1).rstrip(",")) if m else None
 
 
 def pinned_cpus_on(platform, value):
@@ -463,41 +520,23 @@ def pinned_cpus():
     return pinned_cpus_on(sys.platform, os.environ.get("RIND_PINNED_CPUS"))
 
 
-def bench_passes(refused, pin):
-    """The cargo-bench passes for a run: (taskset CPU list or None, criterion args).
+def bench_passes(names, pin):
+    """The swole passes for a run: (taskset CPU list or None, benchmark names).
 
-    When `pin` is set, the first pass times every report row except the
-    threaded rustls groups under `taskset -c`, and the second pass times
-    only those groups, unpinned, into the same criterion directory. Criterion
-    still calls each group's setup function even when the filter skips its
-    rows, so the first pass omits `RIND_BENCH_CPUS` to leave rustls.rs's
-    assert unchanged rather than fire it under the pin. The second pass
-    keeps `RIND_BENCH_CPUS` as the host's logical count.
+    With `pin`, the first pass times every benchmark but the rows that time
+    every logical CPU under `taskset -c`, since a pinned process cannot
+    satisfy their available_parallelism assert, and the second times those
+    rows, unpinned. A pass with no benchmark is left out.
     """
-    if pin:
-        return [
-            (pin, CRITERION_ARGS + [operation_regex(refused, pinned_pass_operations())]),
-            (None, CRITERION_ARGS + [operation_regex(refused, threaded_pass_operations())]),
-        ]
-    return [(None, CRITERION_ARGS + [operation_regex(refused)])]
-
-
-def run_cargo_bench(bench, criterion_args, env, pin=None):
-    cmd = list(bench) + ["--"] + list(criterion_args)
-    if pin:
-        cmd = ["taskset", "-c", pin] + cmd
-    pass_env = dict(env)
-    if pin:
-        pass_env.pop("RIND_BENCH_CPUS", None)
-    try:
-        subprocess.run(cmd, env=pass_env, check=True)
-    except FileNotFoundError as e:
-        program = cmd[0]
-        fail(f"{program}: {e}")
+    if not pin:
+        return [(None, list(names))]
+    every = [n for n in names if EVERY_CPU.match(bench_id(n))]
+    passes = [(pin, [n for n in names if n not in every]), (None, every)]
+    return [(cpus, chosen) for cpus, chosen in passes if chosen]
 
 
 def operation_of(full_id):
-    """The operation and library of a criterion ID, or None if it is not one."""
+    """The operation and library of a benchmark ID, or None if it is not one."""
     for op in OPERATIONS:
         pattern = "^" + re.escape(op).replace(re.escape("{lib}"), "([^/]+)") + "$"
         m = re.match(pattern, full_id)
@@ -514,6 +553,15 @@ def pinned_toolchain():
     return m.group(1)
 
 
+def pinned_swole():
+    """The commit of kixel-ai/swole that flake.nix pins."""
+    with open(os.path.join(ROOT, "flake.nix")) as f:
+        m = re.search(r'swole\.url = "github:kixel-ai/swole/([0-9a-f]{40})"', f.read())
+    if not m:
+        fail("flake.nix pins no swole commit")
+    return m.group(1)
+
+
 # --- host side --------------------------------------------------------------
 
 
@@ -525,8 +573,19 @@ def busy_limit():
     return max(1.0, BUSY_SHARE * cpu_count())
 
 
-def cpu_times():
-    """The system's (busy, total) CPU time in clock ticks."""
+def cpu_times(cpus=None):
+    """The system's (busy, total) CPU time in clock ticks, or only that of
+    the logical CPUs in `cpus`, on Linux."""
+    if cpus is not None:
+        busy = total = 0
+        with open("/proc/stat") as f:
+            for line in f:
+                name, *fields = line.split()
+                if name.startswith("cpu") and name[3:] and int(name[3:]) in cpus:
+                    fields = [int(x) for x in fields[:8]]
+                    busy += sum(fields) - fields[3] - fields[4]
+                    total += sum(fields)
+        return busy, total
     if sys.platform == "darwin":
         # host_statistics(HOST_CPU_LOAD_INFO): user, system, idle, nice.
         libc = ctypes.CDLL(None)
@@ -537,17 +596,19 @@ def cpu_times():
         user, system, idle, nice = ticks
         return user + system + nice, user + system + idle + nice
     # The first eight fields, since user and nice already count guest time.
+    # The per-CPU lines above read them the same way.
     with open("/proc/stat") as f:
         fields = [int(x) for x in f.readline().split()[1:9]]
     idle = fields[3] + fields[4]
     return sum(fields) - idle, sum(fields)
 
 
-def busy_cpus_since(start):
-    """How many logical CPUs were busy on average since `start`, a cpu_times()."""
+def busy_cpus_since(start, cpus=None):
+    """How many logical CPUs were busy on average since `start`, a
+    cpu_times(cpus), of all of them or of those in `cpus`."""
     # macOS's counters are 32 bits, so they wrap after weeks of uptime.
-    busy, total = ((now - then) % 2**32 for now, then in zip(cpu_times(), start))
-    return busy / max(1, total) * cpu_count()
+    busy, total = ((now - then) % 2**32 for now, then in zip(cpu_times(cpus), start))
+    return busy / max(1, total) * (cpu_count() if cpus is None else len(cpus))
 
 
 def busy_cpus(seconds=5):
@@ -566,6 +627,124 @@ def check_idle(when):
 
 class Busy(Exception):
     pass
+
+
+def parse_cpu_list(text):
+    """The CPUs in a kernel CPU list such as `0-3,8`."""
+    cpus = []
+    for part in text.strip().split(","):
+        first, _, last = part.partition("-")
+        cpus.extend(range(int(first), int(last or first) + 1))
+    return cpus
+
+
+def reserved_cpus(candidates, siblings):
+    """The logical CPUs of the last RESERVED_CORES whole cores among
+    `candidates`, as `siblings(cpu)` lists each one's core."""
+    reserved, cores = [], 0
+    for cpu in reversed(candidates):
+        if cpu in reserved:
+            continue
+        core = siblings(cpu)
+        if not set(core) <= set(candidates):
+            fail(f"CPU {cpu}'s core holds CPUs {core}, not all of them candidates")
+        reserved.extend(core)
+        cores += 1
+        if cores == RESERVED_CORES:
+            return sorted(reserved)
+    fail(f"{len(candidates)} CPUs hold fewer than {RESERVED_CORES} whole cores to reserve")
+
+
+def reserve_candidates():
+    """The logical CPUs a reservation may take: a hybrid Intel CPU's
+    performance cores, which Linux lists in /sys/devices/cpu_core, since the
+    other hosts' tables time those; otherwise every CPU."""
+    try:
+        with open("/sys/devices/cpu_core/cpus") as f:
+            return parse_cpu_list(f.read())
+    except FileNotFoundError:
+        return list(range(cpu_count()))
+
+
+def core_siblings(cpu):
+    with open(f"/sys/devices/system/cpu/cpu{cpu}/topology/thread_siblings_list") as f:
+        return parse_cpu_list(f.read())
+
+
+def cpu_list(cpus):
+    return ",".join(map(str, cpus))
+
+
+def sudo(*cmd, check=True, **kwargs):
+    return subprocess.run(["sudo", "-n", *cmd], check=check, **kwargs)
+
+
+def reserve_lock():
+    """The host's reservation lock, held once this returns until the file it
+    returns is closed. A reserved run holds it from before its load sample
+    through the release, so another collection neither releases its cores,
+    stops its timer, nor runs on them meanwhile. Every collection on a host
+    runs as the user collect reaches it as."""
+    lock_dir = os.path.join(os.path.expanduser("~"), REMOTE_DIR)
+    os.makedirs(lock_dir, exist_ok=True)
+    lock = open(os.path.join(lock_dir, "reserve.lock"), "a")
+    fcntl.flock(lock, fcntl.LOCK_EX)
+    return lock
+
+
+def reserve(cmd, env, cpus):
+    """Runs `cmd` as this user, with `env`, on the logical CPUs `cpus` alone,
+    keeping every other top-level cgroup slice, which holds every CI runner,
+    agent session, and Nix build, off them meanwhile, and returns its exit
+    status. Other work keeps every other core, so it slows little and mbx
+    sizes its pool from them. The reservation ends with `cmd`, or after
+    RESERVE_RELEASE_AFTER if this process dies without ending it. The caller
+    holds reserve_lock(). Needs systemd and passwordless sudo."""
+    if sys.platform != "linux":
+        fail("reserving cores needs Linux's cgroups")
+    others = cpu_list(c for c in range(cpu_count()) if c not in cpus)
+    slices = sorted(n for n in os.listdir("/sys/fs/cgroup") if n.endswith(".slice") and n != RESERVE_SLICE)
+    # The whole range, since systemd 262 leaves the cpuset as it was for an
+    # empty AllowedCPUs=.
+    everything = f"0-{cpu_count() - 1}"
+    release = "; ".join(f"systemctl set-property --runtime {s} AllowedCPUs={everything}" for s in slices)
+
+    def stop(signum, frame):
+        sys.exit(128 + signum)
+
+    for signum in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM):
+        signal.signal(signum, stop)
+    # sudo drops the environment, which holds the dev shell, so a file only
+    # this user can read carries it: on sudo's command line, which other users
+    # see and sudo logs, it would expose any credential it holds.
+    fd, env_file = tempfile.mkstemp(prefix="bench-report-env.")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(env, f)
+        # A timer an earlier run left would end this reservation early.
+        sudo("systemctl", "stop", "--quiet", f"{RESERVE_RELEASE_UNIT}.timer", check=False, stderr=subprocess.DEVNULL)
+        timer = ["systemd-run", "--quiet", "--collect", f"--unit={RESERVE_RELEASE_UNIT}"]
+        sudo(*timer, f"--on-active={RESERVE_RELEASE_AFTER}", "sh", "-c", release)
+        for s in slices:
+            sudo("systemctl", "set-property", "--runtime", s, f"AllowedCPUs={others}")
+        print(f"bench-report: reserved CPUs {cpu_list(cpus)}", file=sys.stderr)
+        scope = ["systemd-run", "--scope", "--quiet", f"--slice={RESERVE_SLICE}"]
+        scope.append(f"--property=AllowedCPUs={cpu_list(cpus)}")
+        # setpriv drops root's groups, which sudo would keep.
+        user = ["setpriv", f"--reuid={os.getuid()}", f"--regid={os.getgid()}", "--init-groups"]
+        load = (
+            "import json, os, sys; env = json.load(open(sys.argv[1])); os.unlink(sys.argv[1]); "
+            "os.execve(sys.argv[2], sys.argv[2:], env)"
+        )
+        return sudo(*scope, "--", *user, "--", sys.executable, "-c", load, env_file, *cmd, check=False).returncode
+    finally:
+        # The command removes it once read, unless it never started.
+        if os.path.exists(env_file):
+            os.unlink(env_file)
+        sudo("sh", "-c", release, check=False)
+        sudo("systemctl", "stop", "--quiet", f"{RESERVE_RELEASE_UNIT}.timer", check=False, stderr=subprocess.DEVNULL)
+        for signum in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM):
+            signal.signal(signum, signal.SIG_DFL)
 
 
 def output(cmd, env=None):
@@ -836,17 +1015,25 @@ def run(args):
             json.dump(result, f, indent=1)
             f.write("\n")
 
-    try:
-        idle_before_build = check_idle("before the build")
-    except Busy as e:
-        finish("busy", reason=str(e))
-        fail(f"{host}: {e}")
+    # A reserved run's host is never idle, and its benchmarks share no core
+    # with other work, so only their own cores' load counts.
+    reserved = reserved_cpus(reserve_candidates(), core_siblings) if args.reserve else None
+    # A reserved run already keeps to its own cores.
+    pin = None if reserved else pinned_cpus()
+    if reserved is None:
+        try:
+            idle_before_build = check_idle("before the build")
+        except Busy as e:
+            finish("busy", reason=str(e))
+            fail(f"{host}: {e}")
 
     env = dict(os.environ, CARGO_BUILD_JOBS=str(args.jobs), CARGO_TERM_COLOR="never")
     env["CARGO_TARGET_DIR"] = os.path.abspath(args.target_dir)
     # The every-logical-CPU rows refuse to run on fewer CPUs than this, so the
-    # report's "all N logical CPUs" is what they measured.
-    env["RIND_BENCH_CPUS"] = str(result["cpu"]["logical_cpus"])
+    # report's "all N logical CPUs" is what they measured. A reserved run
+    # times none, but listing still runs each once, on the reserved cores.
+    if not args.reserve:
+        env["RIND_BENCH_CPUS"] = str(result["cpu"]["logical_cpus"])
     cargo, versions, openssl = toolchain(env)
     result["toolchain"] = versions
     with open(os.path.join(ROOT, "Cargo.lock")) as f:
@@ -855,8 +1042,7 @@ def run(args):
     # The OpenSSL the benchmarks link, beside its crates.
     result["libraries"]["openssl"]["linked"] = output([openssl, "version"], env)
 
-    bench = cargo + ["bench", "-p", "rind-bench", "--features", "__bench_openssl"]
-    subprocess.run(bench + ["--no-run"], env=env, check=True)
+    swole_bin = swole()
     # The CPU features rind reads, which pick its paths on this host.
     result["rind_cpu"] = json.loads(output(cargo + ["run", "-q", "--release", "-p", "rind-cpuid"], env))
     # Each library this CPU lacks a required feature for, with the features.
@@ -866,73 +1052,116 @@ def run(args):
         for lib, features in REQUIRED.items()
         if (missing := [f for f in features.get(host_arch(result), []) if not cpuid[f]])
     }
+    # rind-bench leaves out Graviola's rows where it would panic, as listing
+    # them runs each once.
+    if "graviola" in result["refused"]:
+        env["RIND_BENCH_NO_GRAVIOLA"] = "1"
+    # The report's rows, built and listed: only the report's libraries, so a
+    # bench's extra row (slhdsa's fips205) runs once, to list it, and is
+    # neither timed nor ranked.
+    bench_args = ["--features", "__bench_openssl"]
+    # Where swole times on perf counters, it pins each timed job to the counting PMU's CPUs, such as a
+    # hybrid CPU's one kind of core, so a row that needs every logical CPU would fail its assert: such a
+    # host times none of them, as a reserved run times none.
+    probe = subprocess.run([swole_bin, "fingerprint", "bench"], env=env, check=True, capture_output=True, text=True)
+    pmu_cpus = swole_pmu_cpus(probe.stdout + probe.stderr)
+    every_cpu_out = bool(reserved) or (pmu_cpus is not None and len(pmu_cpus) < result["cpu"]["logical_cpus"])
+    if every_cpu_out and not reserved:
+        print(
+            f"{host}: swole pins timing to CPUs {cpu_list(pmu_cpus)} of {result['cpu']['logical_cpus']}, "
+            "so the every-logical-CPU rows are left out",
+            file=sys.stderr,
+        )
+    names = bench_names(
+        cargo, env, bench_args, match=lambda i: operation_of(i) and not (every_cpu_out and EVERY_CPU.match(i))
+    )
+    # Beside the result, in this collection's own copy, since another may
+    # share the target directory.
+    base = os.path.join(os.path.dirname(os.path.abspath(args.out)), "bench-report")
 
-    try:
-        idle_before_run = check_idle("before the benchmarks")
-    except Busy as e:
-        finish("busy", reason=str(e))
-        fail(f"{host}: {e}")
+    if reserved is None:
+        try:
+            idle_before_run = check_idle("before the benchmarks")
+        except Busy as e:
+            finish("busy", reason=str(e))
+            fail(f"{host}: {e}")
 
-    criterion_dir = os.path.join(env["CARGO_TARGET_DIR"], "criterion")
-    shutil.rmtree(criterion_dir, ignore_errors=True)
-    # The saved filter lists every report row, as a single-pass run does.
-    # When RIND_PINNED_CPUS is set on Linux, the suite itself is two cargo
-    # bench processes writing into this same criterion directory.
-    pin = pinned_cpus()
-    criterion_args = CRITERION_ARGS + [operation_regex(result["refused"])]
+    # One pass unless RIND_PINNED_CPUS is set on Linux: then the pinned pass
+    # runs without RIND_BENCH_CPUS, which listing would otherwise check
+    # against the pinned CPU count, and the every-CPU rows follow unpinned.
+    passes = []
+    for i, (cpus, chosen) in enumerate(bench_passes(names, pin)):
+        listed, times = f"{base}.{i}.benchmarks", f"{base}.{i}.times.json"
+        with open(listed, "w") as f:
+            f.writelines(f"{n}\n" for n in chosen)
+        swole_args = ["bench", "--benchmarks", listed, "--out", times, "--", "-p", "rind-bench", *bench_args]
+        passes.append((cpus, listed, times, swole_args))
+    lock = reserve_lock() if reserved else None
     wall0 = time.monotonic()
-    ticks0 = cpu_times()
+    ticks0, reserved0 = cpu_times(), reserved and cpu_times(reserved)
     ours0 = resource.getrusage(resource.RUSAGE_CHILDREN)
-    for pass_pin, pass_args in bench_passes(result["refused"], pin):
-        run_cargo_bench(bench, pass_args, env, pin=pass_pin)
+    for cpus, _, _, swole_args in passes:
+        if reserved is not None:
+            if (code := reserve([swole_bin, *swole_args], env, reserved)) != 0:
+                fail(f"{host}: swole bench exited with {code}")
+            continue
+        cmd = [swole_bin, *swole_args]
+        pass_env = env
+        if cpus:
+            cmd = ["taskset", "-c", cpus, *cmd]
+            pass_env = {k: v for k, v in env.items() if k != "RIND_BENCH_CPUS"}
+        try:
+            subprocess.run(cmd, env=pass_env, check=True)
+        except FileNotFoundError as e:
+            fail(f"{cmd[0]}: {e}")
     ours1 = resource.getrusage(resource.RUSAGE_CHILDREN)
     wall = time.monotonic() - wall0
 
-    # Other work during the run: the system's busy CPUs less the benchmarks'.
+    # Other work during the run: the busy CPUs less the benchmarks', on the
+    # whole system, and on a reserved run's own cores, which alone count.
     ours = (ours1.ru_utime + ours1.ru_stime) - (ours0.ru_utime + ours0.ru_stime)
     other = round(max(0.0, busy_cpus_since(ticks0) - ours / wall), 2)
-    load = {
-        "limit_cpus": round(busy_limit(), 2),
-        "busy_cpus_before_build": idle_before_build,
-        "busy_cpus_before_run": idle_before_run,
-        "other_busy_cpus_during_run": other,
-        "noisy": other > busy_limit(),
-    }
+    if lock:
+        on_reserved = round(max(0.0, busy_cpus_since(reserved0, reserved) - ours / wall), 2)
+        lock.close()
+    if reserved is None:
+        load = {
+            "limit_cpus": round(busy_limit(), 2),
+            "busy_cpus_before_build": idle_before_build,
+            "busy_cpus_before_run": idle_before_run,
+            "other_busy_cpus_during_run": other,
+            "noisy": other > busy_limit(),
+        }
+    else:
+        limit = BUSY_SHARE * len(reserved)
+        load = {
+            "reserved_cpus": cpu_list(reserved),
+            "limit_cpus": round(limit, 2),
+            "other_busy_cpus_on_reserved": on_reserved,
+            "other_busy_cpus_during_run": other,
+            "noisy": on_reserved > limit,
+        }
 
     results = []
-    for path in sorted(glob.glob(os.path.join(criterion_dir, "**", "new", "benchmark.json"), recursive=True)):
-        with open(path) as f:
-            meta = json.load(f)
-        found = operation_of(meta["full_id"])
-        if found is None:
-            continue
-        op, lib = found
-        with open(os.path.join(os.path.dirname(path), "estimates.json")) as f:
-            estimates = json.load(f)
-        estimate = estimates.get("slope") or estimates["mean"]
-        results.append(
-            {
-                "operation": op,
-                "library": LIBRARIES[lib],
-                "id": meta["full_id"],
-                "ns": estimate["point_estimate"],
-                "ns_low": estimate["confidence_interval"]["lower_bound"],
-                "ns_high": estimate["confidence_interval"]["upper_bound"],
-                "throughput": meta.get("throughput"),
-            }
-        )
+    for _, _, times, _ in passes:
+        for timed in swole_times(times):
+            op, lib = operation_of(timed["id"])
+            results.append({"operation": op, "library": LIBRARIES[lib], **timed})
     order = {op: i for i, op in enumerate(OPERATIONS)}
     results.sort(key=lambda r: (order[r["operation"]], r["library"]))
     finished = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
-    extra = {"pinned_cpus": pin} if pin else {}
+    _, listed, times, swole_args = passes[0]
     finish(
         "ok",
         finished=finished,
-        criterion_args=criterion_args,
+        # What timed the report's rows, less the files it read and wrote.
+        swole_args=[a for a in swole_args if a not in (listed, times, "--benchmarks", "--out")],
         load=load,
         results=results,
-        build_cost=build_cost(env, args.jobs, result["refused"]),
-        **extra,
+        **({"pinned_cpus": pin} if pin else {}),
+        # A cold build's wall time on a host other work keeps busy measures
+        # that work, so only dedicated hosts measure build cost.
+        **({} if reserved else {"build_cost": build_cost(env, args.jobs, result["refused"])}),
     )
 
 
@@ -1025,6 +1254,10 @@ def collect_host(host, commit, out_dir):
         f"--host {q(host)} --commit {q(commit)} --jobs {COLLECT_HOSTS[host]['jobs']} "
         f"--target-dir ../target --out result.json"
     )
+    # A revision older than the reservation takes its own idle-check path.
+    runner = output(["git", "-C", ROOT, "show", f"{commit}:admin/bench-report"])
+    if COLLECT_HOSTS[host].get("reserve") and '"--reserve"' in runner:
+        cmd += " --reserve"
     # The gate admits the run only while the host has room, but other gated
     # work may share it, so these numbers are noisier than the weekly
     # runners'. The gate is this checkout's quest, so a commit pinning an
@@ -1328,6 +1561,9 @@ NAMES = {
     },
 }
 
+# Where `weekly` saves the run's bytes of rind, from admin/binary-size.
+SIZES = os.path.join(DATA_DIR, "binary-size.json")
+
 # Each build of admin/build-cost, as the report names it.
 BUILDS = {
     "rind": "rind",
@@ -1343,6 +1579,8 @@ BUILDS = {
     "rustls-aws-lc-rs": "rustls + aws-lc-rs",
     "rustls-ring": "rustls + ring",
 }
+# The admin/build-cost build of each program admin/binary-size measures.
+SIZED = {"rind": "rind", "rustls": "rustls-rind"}
 
 # The libraries the README compares rind with, by library, each with the
 # page a reader goes to.
@@ -1351,6 +1589,7 @@ COMPARED = {
     "aws-lc-rs": "https://github.com/aws/aws-lc-rs",
     "ring": "https://github.com/briansmith/ring",
     "rustcrypto": "https://github.com/RustCrypto",
+    "openssl": "https://github.com/sfackler/rust-openssl",
 }
 
 # The comparison's algorithms, as patterns over a row name, which each match
@@ -1394,6 +1633,13 @@ OUTSIDE_API = {
     ("aws-lc-rs", "XChaCha20-Poly1305"): "aws-lc has it, through aws-lc-sys",
 }
 
+# Why a library's column lacks an algorithm it has, by library and algorithm,
+# shown only while the results time none of its rows under that library.
+UNTIMED = {
+    ("openssl", "SHA-3"): "OpenSSL has it, not yet timed",
+    ("openssl", "HPKE"): "OpenSSL has it, but the openssl crate does not",
+}
+
 # A comparison cell with no data behind it, which must never read as "none".
 UNMEASURED = "not measured"
 
@@ -1409,7 +1655,7 @@ CPU_FEATURES = {
     # feature and is no host's arch, so its ✓ shows in the proof table alone.
     "portable": set(),
     "x86_64": {
-        "intel", "adx", "aes", "vaes", "pclmulqdq", "vpclmulqdq", "bmi1", "bmi2", "movbe", "popcnt", "ssse3", "sse4.1",
+        "intel", "zen4", "adx", "aes", "vaes", "pclmulqdq", "vpclmulqdq", "bmi1", "bmi2", "movbe", "popcnt", "ssse3", "sse4.1",
         "avx", "avx2", "avx512f", "avx512dq", "avx512ifma", "avx512bw", "avx512vl", "avx512vbmi", "avx512vbmi2",
         "sha", "sha512",
     },
@@ -2380,6 +2626,9 @@ def comparison_table(hosts, verified):
     for (lib, name), why in OUTSIDE_API.items():
         if lib not in COMPARED or name not in dict(ALGORITHMS):
             fail(f"OUTSIDE_API names {lib} and {name}, which the comparison lacks")
+    for (lib, name), why in UNTIMED.items():
+        if lib not in COMPARED or name not in dict(ALGORITHMS):
+            fail(f"UNTIMED names {lib} and {name}, which the comparison lacks")
     offered = {lib: set() for lib in COMPARED}
     for h in hosts.values():
         for row, libs in times(h).items():
@@ -2400,8 +2649,9 @@ def comparison_table(hosts, verified):
                 if b["name"] == lib:
                     tools.update(b["tools"])
                     built = True
+        notes = OUTSIDE_API | UNTIMED
         lacks = [
-            f"{name} ({OUTSIDE_API[lib, name]})" if (lib, name) in OUTSIDE_API else name
+            f"{name} ({notes[lib, name]})" if (lib, name) in notes else name
             for name in timed
             if name not in offered[lib] or (lib, name) in OUTSIDE_API
         ]
@@ -2701,29 +2951,42 @@ def site_data(hosts, tiers, verified, gaps):
 def methodology(hosts, shown):
     """How the hosts' times were taken, and the versions each timed."""
     toolchain = pinned_toolchain()
-    criterion = " ".join(CRITERION_ARGS[1:])
     md = [
         "## Methodology",
         "",
-        "Each host runs `cargo bench -p rind-bench --features __bench_openssl`, passing criterion "
-        f"`{criterion}` and a filter for the report's rows, as `criterion_args` in its "
-        "`benchmarks/data/<host>.json` records.",
+        "Each host lists the report's rows by running each of `rind-bench`'s once, then times them with "
+        "[swole](https://github.com/kixel-ai/swole), which `flake.nix` pins, as `swole_args` in its "
+        "`benchmarks/data/<host>.json` records: `swole bench` runs each row in a process of its own, in samples "
+        "of as many calls as fill a millisecond, for a second and ten samples at least, and takes the samples' "
+        "median time a call.",
+        *(
+            [
+                "",
+                "A host whose record holds `criterion_args` instead was timed with criterion, before `rind-bench` "
+                "moved to swole: "
+                + ", ".join(f"`{n}`" for n in shown if "criterion_args" in hosts[n])
+                + ".",
+            ]
+            if any("criterion_args" in hosts[n] for n in shown)
+            else []
+        ),
         "",
         "On aarch64, every rind row except those marked *DIT set per call* holds a `rind::cpu::Dit::hold()` guard "
-        "across the timed loop "
-        "(`rind_dit` in `rind-bench/benches/criterion/mod.rs`), so it pays for turning DIT on and off once, as "
+        "across its calls "
+        "(`Dit` in `rind-bench/benches/common/mod.rs`), so it pays for turning DIT on and off once, as "
         "a caller holding the guard around a batch of calls does. A caller holding none pays it on every call: "
         "the rows marked *DIT set per call* time rind that way. On x86_64 the guard does nothing, and no other "
         "library sets DIT.",
         "",
-        "To time a row without Nix, install the pinned toolchain and run its bench target, here AES-128-GCM's "
-        "rows. aws-lc-rs and ring need a C compiler, and on Unix the OpenSSL column needs OpenSSL 3's headers "
-        "and pkg-config.",
+        "To time rows without Nix, install the pinned toolchain and swole, and time a bench target, here "
+        "AES-GCM's rows, or name rows in a file given by `--benchmarks`. aws-lc-rs and ring need a C compiler, "
+        "and on Unix the OpenSSL column needs OpenSSL 3's headers and pkg-config, and OpenSSL 3.5 for its "
+        "post-quantum rows.",
         "",
         "```sh",
         f"rustup toolchain install {toolchain}",
-        f"cargo +{toolchain} bench -p rind-bench --features __bench_openssl --bench aes_gcm -- {criterion} "
-        "'^aes128-gcm/'",
+        f"cargo install --locked --git https://github.com/kixel-ai/swole --rev {pinned_swole()} cargo-swole",
+        f"RUSTUP_TOOLCHAIN={toolchain} swole bench -- -p rind-bench --features __bench_openssl --bench aes_gcm",
         "```",
         "",
         "### Versions",
@@ -2755,7 +3018,25 @@ def methodology(hosts, shown):
     return md
 
 
-def report(hosts, tiers, verified, gaps):
+def size_table(sizes):
+    """rind's bytes in each program, from the weekly run that measured them."""
+    return [
+        "### rind's own bytes",
+        "",
+        f"What rind and rind-rustls add to the rind and rustls + rind-rustls programs, by `admin/binary-size` in "
+        f"the weekly `bench` workflow's [run]({sizes['url']}) of {sizes['date'][:10]} at "
+        f"{commit_link(sizes['commit'])}, with {sizes['rustc']} for {sizes['target']}: the bytes of their "
+        "functions and tables the linker kept, in a release build with one codegen unit. A pull request's "
+        "check reports its change to them.",
+        "",
+        "| Build | rind's bytes |",
+        "|---|---:|",
+        *(f"| {BUILDS[SIZED[f]]} | {n:,} |" for f, n in sizes["bytes"].items()),
+        "",
+    ]
+
+
+def report(hosts, tiers, verified, gaps, sizes=None):
     """BENCHMARKS.md, its SVGs, the site's data, and the README with its
     comparison, by path."""
     files = {}
@@ -2781,8 +3062,10 @@ def report(hosts, tiers, verified, gaps):
         md += [f"| `{n}` | {hosts[n]['cpu']['model']} | {hosts[n]['os']} | {measured(hosts[n])} |" for n in shown]
         md.append("")
     md += [
-        "Each host builds with the pinned toolchain in the Nix dev shell, and runs "
-        "`admin/bench-report` only when idle. Times are criterion's estimates.",
+        "Each host builds with the pinned toolchain in the Nix dev shell. A dedicated host runs "
+        "`admin/bench-report` only when idle. A host that CI runners and agent sessions keep busy runs it on "
+        "two whole cores it keeps that work off for the timing, so the work shares only the caches and power "
+        "budget, and it times no every-logical-CPU rows and no build cost.",
         "",
     ]
     if shown:
@@ -2798,7 +3081,8 @@ def report(hosts, tiers, verified, gaps):
             "the host didn't time it, as its section says.",
             "",
             "The rustls rows run both peers in one process. The every-logical-CPU rows run one handshake per "
-            "thread on all of the host's logical CPUs at once, each thread with its own client and server, and give the "
+            "thread on all of a dedicated host's logical CPUs at once, each thread with its own client and server, "
+            "and give the "
             "machine's time per handshake; each host's text gives rind-rustls's throughput there over its "
             "one-thread rate. A full handshake over rind-rustls's default provider, both peers, makes 245 heap "
             "allocations with an ECDSA P-256 certificate on x86_64, which `rind-rustls/tests/allocations.rs` pins. "
@@ -2821,6 +3105,11 @@ def report(hosts, tiers, verified, gaps):
             f"Measured {measured(h)}, on {h['os']} with {h['toolchain']['rustc']}.",
             "",
             *([note, ""] if note else []),
+            *(
+                [f"Timed on CPUs {h['load']['reserved_cpus']}, two whole cores reserved for the run.", ""]
+                if "reserved_cpus" in h.get("load", {})
+                else []
+            ),
             *([f"Not timed on `{name}`: {', '.join(untimed)}.", ""] if untimed else []),
             *scaling(h),
             *dit_cost(h),
@@ -2859,6 +3148,7 @@ def report(hosts, tiers, verified, gaps):
             "its size; the vendored build is the static figure. verified-garbage has no P-256 key generation, so "
             "its binary imports a random scalar instead, and no rustls provider, so it has no rustls build.",
             "",
+            *(size_table(sizes) if sizes else []),
         ]
     for name in shown:
         cost = hosts[name].get("build_cost")
@@ -2949,11 +3239,15 @@ def report(hosts, tiers, verified, gaps):
         "`admin/build-cost`, on each machine in `COLLECT_HOSTS` in turn over ssh, in the Nix dev",
         "shell and under `quest gate`, which waits for the host to have room but",
         "shares it with other gated work, so its numbers are noisier than the weekly",
-        "`bench` workflow's runners, which give the clean ones; it skips any host that is still busy, and writes their results and the hosts' details as JSON under",
+        "`bench` workflow's runners, which give the clean ones. On a host that CI runners",
+        "and agent sessions share, it times the benchmarks on two whole cores it keeps",
+        "other work off for the run, and skips the build cost; this needs systemd and",
+        "passwordless sudo there.",
+        "It skips any other host that is still busy, and writes their results and the hosts' details as JSON under",
         "`.tmp/bench-report/`. `admin/bench-report weekly` saves the latest weekly",
-        "`bench` run's results, and `admin/bench-report render --from DIR` copies every",
+        "`bench` run's results and binary sizes, and `admin/bench-report render --from DIR` copies every",
         "measured host JSON from that directory into `benchmarks/data/` and writes",
-        "`BENCHMARKS.md`, its SVGs, which the README shows too, and the README's comparison table from them,",
+        "`BENCHMARKS.md`, its SVGs, which the README shows too, the README's comparison table, and",
         "`benchmarks/verified.toml`, and",
         "`benchmarks/gaps.toml`, which must hold a quest or a reason for every gap",
         "over 10%. `render --check` fails if those files are out of date and writes nothing,",
@@ -3492,6 +3786,10 @@ def render(args):
         with open(tiers_path) as f:
             tiers = json.load(f)
     verified = load_verified()
+    sizes = None
+    if os.path.exists(SIZES):
+        with open(SIZES) as f:
+            sizes = json.load(f)
     generated = sorted(glob.glob(os.path.join(REPORT_DIR, "*.svg")))
     if os.path.exists(REPORT):
         generated.append(REPORT)
@@ -3501,7 +3799,7 @@ def render(args):
         if not args.check:
             fail("no results in benchmarks/data: run `collect`, then `render --from DIR`")
         return
-    files = report(hosts, tiers, verified, load_gaps(hosts, tiers))
+    files = report(hosts, tiers, verified, load_gaps(hosts, tiers), sizes)
     if args.check:
         stale = [p for p in files if not os.path.exists(p) or open(p).read() != files[p]]
         stale += [p for p in generated if p not in files]
@@ -3585,6 +3883,27 @@ def gate(args):
     print(f"Every gap over {SLOWER}× has a decision in benchmarks/gaps.toml.")
 
 
+def run_sizes(run, scratch):
+    """The bytes of rind `run` measured, None if it measured none, failing
+    when they exist but cannot be read."""
+    artifacts = output(
+        ["gh", "api", f"repos/{REPO}/actions/runs/{run['databaseId']}/artifacts", "--paginate"]
+        + ["--jq", '.artifacts[] | select(.name == "binary-size") | .name']
+    )
+    if not artifacts.strip():
+        return None
+    subprocess.run(
+        ["gh", "run", "download", str(run["databaseId"]), "--repo", REPO, "--name", "binary-size", "--dir", scratch],
+        check=True,
+    )
+    with open(os.path.join(scratch, "binary-size.json")) as f:
+        measured = json.load(f)
+    if set(measured["bytes"]) != set(SIZED):
+        fail(f"run {run['databaseId']} measured {', '.join(measured['bytes'])}, not {', '.join(SIZED)}")
+    saved = {"schema": 1, "run": run["databaseId"], "url": run["url"], "commit": run["headSha"], "date": run["createdAt"]}
+    return saved | {k: measured[k] for k in ("target", "rustc", "bytes")}
+
+
 def weekly(args):
     """Saves the latest weekly bench's results on main as the CPU tiers,
     from a run that timed every tier, since the report reads an empty cell as
@@ -3616,6 +3935,10 @@ def weekly(args):
             incomplete.append(f"{run['databaseId']} lacks {', '.join(dict(TIERS)[k] for k in sorted(missing))}")
             continue
         tiers.sort(key=lambda t: order.get((t["target"], t["portable"], t["tier"]), len(order)))
+        # Read before either file is written, so a failure leaves both as
+        # they were: the report never pairs one run's tiers with another's
+        # sizes.
+        sizes = run_sizes(run, os.path.join(scratch, "binary-size"))
         os.makedirs(DATA_DIR, exist_ok=True)
         with open(os.path.join(DATA_DIR, "tiers.json"), "w") as f:
             json.dump(
@@ -3631,10 +3954,29 @@ def weekly(args):
                 indent=1,
             )
             f.write("\n")
+        if sizes:
+            with open(SIZES, "w") as f:
+                json.dump(sizes, f, indent=1)
+                f.write("\n")
+        else:
+            print(f"bench-report: run {run['databaseId']} measured no binary sizes", file=sys.stderr)
+            if os.path.exists(SIZES):
+                os.remove(SIZES)
         shutil.rmtree(scratch)
         print(f"bench-report: tiers from run {run['databaseId']}", file=sys.stderr)
         return
     fail("no completed weekly bench run on main timed every tier" + "".join(f"; run {r}" for r in incomplete))
+
+
+def names(args):
+    match = re.compile(args.match).search if args.match else None
+    for name in bench_names(["cargo"], os.environ, args.cargo_args, match=match):
+        print(name)
+
+
+def results(args):
+    json.dump(swole_times(args.metrics), sys.stdout, indent=1)
+    print()
 
 
 def main():
@@ -3674,15 +4016,29 @@ def main():
     p.add_argument("--previous", metavar="DIR", help="the previous run's, to fail only on a gap both show")
     p.set_defaults(func=gate)
 
+    p = sub.add_parser("names", help="list the benchmarks cargo bench arguments select")
+    p.add_argument("--match", metavar="REGEX", help="keep only the benchmarks whose ID this matches")
+    p.set_defaults(func=names)
+
+    p = sub.add_parser("results", help="print a swole bench --out file's times by benchmark ID")
+    p.add_argument("metrics")
+    p.set_defaults(func=results)
+
     p = sub.add_parser("run", help="measure this machine")
     p.add_argument("--host", help="name for this machine (default: a slug of its CPU model)")
     p.add_argument("--commit", required=True)
     p.add_argument("--jobs", type=int, required=True)
     p.add_argument("--target-dir", required=True)
     p.add_argument("--out", required=True)
+    p.add_argument("--reserve", action="store_true", help="time the benchmarks on cores reserved for them")
     p.set_defaults(func=run)
 
-    args = parser.parse_args()
+    # `names` passes what it doesn't know to cargo bench, such as `--bench sha2`.
+    args, rest = parser.parse_known_args()
+    if args.command == "names":
+        args.cargo_args = rest
+    elif rest:
+        parser.error(f"unrecognized arguments: {' '.join(rest)}")
     args.func(args)
 
 
