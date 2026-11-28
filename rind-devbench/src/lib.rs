@@ -677,6 +677,11 @@ pub fn start(config_json: &str) -> Result<(), String> {
     drop(cache);
     let before_run = before.clone();
     let start_no = STARTS.fetch_add(1, Ordering::SeqCst) + 1;
+    // The start's number, under the status lock and before its thread exists, so it can't land after the
+    // thread released the slot and a later start wrote its own; every status the thread writes carries it
+    // too. An app reads it once start() returns, to tell this start's status (`run_start`, `refused_start`)
+    // from an earlier one's.
+    set_status(|s| s["acked_start"] = json!(start_no));
     std::thread::Builder::new()
         .name("devbench".into())
         .stack_size(64 << 20)
@@ -731,9 +736,6 @@ pub fn start(config_json: &str) -> Result<(), String> {
             let _listing = catalogs(); // the environment goes back with listings kept out
             refuse(e.to_string())
         })?;
-    // The acknowledged start's number, which every status its thread writes carries too: an app reads it
-    // here to tell this start's status (`run_start`, `refused_start`) from an earlier one's.
-    set_status(|s| s["acked_start"] = json!(start_no));
     Ok(())
 }
 

@@ -455,7 +455,6 @@ final class BenchView extends LinearLayout {
         countsChanged();
         agreeChanged();
         JSONObject st = nativeStatus();
-        reportStarted(st);
         // The launches that came while the list loaded, over the first launch's selection, before
         // anything can start a run from it; none changes the selection of a run that's going.
         if (!st.optBoolean("running"))
@@ -473,7 +472,7 @@ final class BenchView extends LinearLayout {
         if (!run.isEmpty()) {
             if (!run.equals(clearedRun)) showFinished(st, false);
         } else if (lateRefusal(st) && st.optLong("refused_start") != clearedRefusal) {
-            // Refused while no view polled, as across a recreation: show it, and report it if nobody has.
+            // Refused while no view polled, as across a recreation: show it (RunReporter logs it).
             showLateRefusal(st);
         } else {
             reportLayout("ready");
@@ -590,31 +589,14 @@ final class BenchView extends LinearLayout {
         return s.optString("run_id", "").isEmpty() && s.optLong("refused_start") > 0;
     }
 
-    /** Shows a late refusal as a refused start, not as a finished run, and reports it to a device runner. */
+    /** Shows a late refusal as a refused start, not as a finished run. */
     private void showLateRefusal(JSONObject s) {
         String why = s.optString("refused_reason");
         showFinished(s, false);
         progress.setVisibility(GONE);
         setStatus("Could not start", Status.ERROR);
         setBody(why);
-        refusedAfterStart(s.optLong("refused_start"), why);
-    }
-
-    /** The last late refusal reported, per process: a recreated view doesn't report it again. */
-    private static long refusalReported;
-
-    /**
-     * A start the library refused after acknowledging it, for a device runner: it ends the launch with
-     * RINDBENCH_RUN {"started":false,"reason":...,"after_start":true}, after its "started":true line, once
-     * per refused start (`refused_start` in the native status), whichever view sees it first.
-     */
-    private static synchronized void refusedAfterStart(long start, String why) {
-        if (start <= refusalReported) return;
-        refusalReported = start;
-        try {
-            android.util.Log.w("RindBench", "RINDBENCH_RUN " + new JSONObject().put("started", false)
-                    .put("reason", "the native start refused it: " + why).put("after_start", true));
-        } catch (Exception ignored) {}
+        // RunReporter logs it for a device runner, once, whether or not a view sees it.
     }
 
     private void cancelAutostart() {
@@ -860,6 +842,8 @@ final class BenchView extends LinearLayout {
             JSONObject env = new JSONObject();
             env.put("RIND_BENCH_KEYS_DIR", keysDir);
             cfg.put("env", env);
+            // The last start's line, if its status hasn't been read yet, before this start replaces that status.
+            RunReporter.flush();
             if (Native.start(cfg.toString()) != 0) {
                 String why = new JSONObject(Native.status()).optString("start_error");
                 notStarted("the native start refused it: " + why);
@@ -868,19 +852,20 @@ final class BenchView extends LinearLayout {
                 return;
             }
             // What the run takes, for a device runner checking a launch's selection without a person:
-            //   RINDBENCH_RUN {"started":true,"preset":"quick","libraries":[...],"sections":[...],
-            //                  "sections_missing":[...],"host":...,"port":...}
-            // logged once the library has picked the run's rows (reportStarted), so `sections` are the groups
-            // that run and `sections_missing` the ones named that had no row.
+            //   RINDBENCH_RUN {"started":true,"start":N,"preset":"quick","libraries":[...],"sections":[...],"host":...,"port":...}
+            // logged as the start is accepted, with the libraries and groups asked for; RunReporter then logs
+            // the groups that run, or a refusal once listed, under the same start number N.
+            long startNo = nativeStatus().optLong("acked_start", 0);
             JSONObject run = new JSONObject();
             run.put("started", true);
+            run.put("start", startNo);
             run.put("preset", full ? "full" : "quick");
             run.put("libraries", cfg.get("libraries"));
             run.put("sections", cfg.get("sections"));
             run.put("host", colHost);
             run.put("port", colPort);
-            startLine = run;
-            startNo = nativeStatus().optLong("acked_start", -1);
+            android.util.Log.i("RindBench", "RINDBENCH_RUN " + run);
+            if (startNo > 0) RunReporter.watch(startNo);
         } catch (Exception e) {
             setStatus("Could not start", Status.ERROR);
             setBody(String.valueOf(e));
@@ -996,36 +981,10 @@ final class BenchView extends LinearLayout {
         return t >= android.os.PowerManager.THERMAL_STATUS_SEVERE;
     }
 
-    /** The started line of this process's last start, until the library picks its rows; and that start's number. */
-    private static JSONObject startLine;
-    private static long startNo;
-
-    /**
-     * Logs the last start's RINDBENCH_RUN started line once its status shows the rows picked, with the
-     * groups that run; a start refused once listed, or ended without picking rows, logs it as asked,
-     * before its refusal line.
-     */
-    private static void reportStarted(JSONObject s) {
-        if (startLine == null) return;
-        try {
-            if (s.optLong("run_start", -2) == startNo) {
-                startLine.put("sections", s.optJSONArray("sections_run") != null ? s.optJSONArray("sections_run") : new JSONArray());
-                startLine.put("sections_missing", s.optJSONArray("sections_missing") != null ? s.optJSONArray("sections_missing") : new JSONArray());
-            } else if (!(lateRefusal(s) && s.optLong("refused_start") == startNo)
-                    // A start that ended without picking rows, as a panic on its thread, still logs it.
-                    && (s.optBoolean("running") || s.optLong("acked_start", -2) != startNo)) {
-                return;
-            }
-            android.util.Log.i("RindBench", "RINDBENCH_RUN " + startLine);
-        } catch (Exception ignored) {}
-        startLine = null;
-    }
-
     private void poll() {
         if (!running) return;
         try {
             JSONObject s = new JSONObject(Native.status());
-            reportStarted(s);
             boolean still = s.optBoolean("running");
             running = still;
             int done = s.optInt("done"), total = Math.max(1, s.optInt("total"));
