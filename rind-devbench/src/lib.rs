@@ -28,7 +28,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ffi::{CStr, CString, c_char};
 use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Mutex, Once};
+use std::sync::{Arc, Mutex, MutexGuard, Once};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 pub const SCHEMA: &str = "rind-devbench/1";
@@ -38,6 +38,9 @@ pub const TARGET: &str = env!("DEVBENCH_TARGET");
 
 static STOP: AtomicBool = AtomicBool::new(false);
 static RUNNING: AtomicBool = AtomicBool::new(false);
+/// Held while the run slot is taken and its STOP cleared, and by stop(), so a stop() of a run that shows as
+/// running is never cleared by that run's start.
+static RUN_SLOT: Mutex<()> = Mutex::new(());
 static STATUS: Mutex<Option<Value>> = Mutex::new(None);
 /// The environment a catalog was listed with that decides its rows: rind-bench's rustls rows read
 /// `RIND_BENCH_KEYS_DIR` while listing, `RIND_BENCH_LOW_MEMORY` drops rows, `RIND_CPU_DISABLE_*` changes what
@@ -51,8 +54,13 @@ fn listing_env() -> ListingEnv {
 }
 
 /// Catalogs listed so far, by the environment each was listed with, so a catalog never answers for a
-/// different setting.
-static CATALOGS: Mutex<Vec<(ListingEnv, &'static Value)>> = Mutex::new(Vec::new());
+/// different setting. Its lock is held while a catalog is listed and while start() or devbench_setenv
+/// writes the environment, so a listing reads the settings its key names.
+static CATALOGS: Mutex<Vec<(ListingEnv, Arc<Value>)>> = Mutex::new(Vec::new());
+
+fn catalogs() -> MutexGuard<'static, Vec<(ListingEnv, Arc<Value>)>> {
+    CATALOGS.lock().unwrap_or_else(|e| e.into_inner())
+}
 
 fn stop_flag() -> bool {
     STOP.load(Ordering::Relaxed)
@@ -121,8 +129,8 @@ pub fn operation_of(id: &str) -> Option<(&'static str, &'static str, String)> {
 }
 
 /// (operation template, report library) of a row, from the catalog.
-fn row_meta(id: &str) -> (Value, Value) {
-    catalog()["rows"]
+fn row_meta(cat: &Value, id: &str) -> (Value, Value) {
+    cat["rows"]
         .as_array()
         .and_then(|rows| rows.iter().find(|r| r["id"] == id))
         .map(|r| (r["op"].clone(), r["library"].clone()))
@@ -165,15 +173,26 @@ fn now_rfc3339() -> String {
 }
 
 /// Lists every row of every bench file (setup code runs; nothing is timed).
-pub fn catalog() -> &'static Value {
+pub fn catalog() -> Arc<Value> {
+    catalog_in(&mut catalogs())
+}
+
+/// [`catalog`], with the cache's lock already held.
+fn catalog_in(cache: &mut Vec<(ListingEnv, Arc<Value>)>) -> Arc<Value> {
     let keys = listing_env();
-    let mut cache = CATALOGS.lock().unwrap_or_else(|e| e.into_inner());
     if let Some((_, c)) = cache.iter().find(|(k, _)| *k == keys) {
-        return c;
+        return c.clone();
     }
-    // One per setting a process uses, normally one: leaked so callers keep a plain reference.
-    let c: &'static Value = Box::leak(Box::new(list_catalog()));
-    cache.push((keys, c));
+    let c = Arc::new(list_catalog());
+    // A listing that failed, as with a keys directory not filled in yet, isn't kept: a retry lists again.
+    let failed = c.get("error").is_some() || c["files_failed_to_list"].as_array().is_some_and(|f| !f.is_empty());
+    if !failed {
+        // A process normally uses one setting; a host that varies it keeps only the latest few.
+        if cache.len() >= 4 {
+            cache.remove(0);
+        }
+        cache.push((keys, c.clone()));
+    }
     c
 }
 
@@ -354,7 +373,7 @@ fn select(cfg: &Config, rows: &[Value]) -> Vec<(String, String)> {
 }
 
 /// `cat` is the catalog `start()` checked the selection against.
-fn run(cfg: Config, cat: &'static Value) {
+fn run(cfg: Config, cat: Arc<Value>) {
     let selected = select(&cfg, cat["rows"].as_array().unwrap());
     let rounds = cfg.rounds.unwrap_or(3).max(1);
     let warm_ms = cfg.warm_ms.unwrap_or(300);
@@ -412,6 +431,7 @@ fn run(cfg: Config, cat: &'static Value) {
             }
             let main = benches::FILES.iter().find(|(f, _)| f == file).unwrap().1;
             let sk = sink.clone();
+            let cat_rows = cat.clone();
             let on_row: Box<dyn FnMut(&str, Option<&Sample>)> = Box::new(move |id, s| match s {
                 None => set_status(|st| st["current"] = json!(id)),
                 Some(s) => {
@@ -424,7 +444,7 @@ fn run(cfg: Config, cat: &'static Value) {
                             "ns_low": v.first(), "ns_high": v.last(), "samples_ns": s.samples_ns,
                             "iters": s.iters_per_sample, "throughput": throughput_json(s.throughput)})
                     };
-                    let (op, lib) = row_meta(id);
+                    let (op, lib) = row_meta(&cat_rows, id);
                     line["op"] = op;
                     line["library"] = lib;
                     let mut k = sk.borrow_mut();
@@ -477,7 +497,7 @@ fn run(cfg: Config, cat: &'static Value) {
         if let Some((meds, _all, tp)) = per_id.get(id) {
             let mut m = meds.clone();
             let med = median(&mut m);
-            let (op, lib) = row_meta(id);
+            let (op, lib) = row_meta(&cat, id);
             results.push(json!({"operation": op, "library": lib, "id": id, "ns": med,
                 "ns_low": m.first(), "ns_high": m.last(), "rounds": m.len(), "throughput": tp}));
         }
@@ -524,11 +544,16 @@ pub fn start(config_json: &str) -> Result<(), String> {
     if let Some(k) = cfg.env.iter().find(|(k, v)| k.is_empty() || k.contains(['=', '\0']) || v.contains('\0')).map(|(k, _)| k) {
         return Err(format!("environment entry {k:?} has an empty name, or a name with '=' or NUL, or a value with NUL"));
     }
-    if RUNNING.swap(true, Ordering::SeqCst) {
-        return Err("already running".into());
+    {
+        // The slot and its STOP in one step: a stop() once the run shows as running stops this run.
+        let _slot = RUN_SLOT.lock().unwrap_or_else(|e| e.into_inner());
+        if RUNNING.swap(true, Ordering::SeqCst) {
+            return Err("already running".into());
+        }
+        STOP.store(false, Ordering::SeqCst);
     }
-    // The run slot is ours: a stop() from here on, while the selection is checked, stops this run.
-    STOP.store(false, Ordering::SeqCst);
+    // No catalog is listed while the environment holds this start's settings unchecked, or put back.
+    let mut cache = catalogs();
     // The configured environment goes in before the catalog is listed, since rind-bench's rustls rows read
     // RIND_BENCH_KEYS_DIR while listing. A refused start puts back what was there.
     let before: Vec<(String, Option<std::ffi::OsString>)> = cfg.env.keys().map(|k| (k.clone(), std::env::var_os(k))).collect();
@@ -551,7 +576,7 @@ pub fn start(config_json: &str) -> Result<(), String> {
     // A selection that matches no row would run nothing yet end "done", with status "ok": refuse it
     // before acknowledging the start. Each library and group can be valid alone and still select nothing
     // together, as ring with ML-KEM does.
-    let cat = catalog();
+    let cat = catalog_in(&mut cache);
     if select(&cfg, cat["rows"].as_array().map_or(&[][..], |r| r.as_slice())).is_empty() {
         return Err(refuse("no test matches the libraries and groups picked".into()));
     }
@@ -579,6 +604,7 @@ pub fn status() -> Value {
 }
 
 pub fn stop() {
+    let _slot = RUN_SLOT.lock().unwrap_or_else(|e| e.into_inner());
     STOP.store(true, Ordering::SeqCst);
 }
 
@@ -632,6 +658,7 @@ pub unsafe extern "C" fn devbench_apply_denies() {
 pub unsafe extern "C" fn devbench_setenv(key: *const c_char, value: *const c_char) {
     let k = unsafe { CStr::from_ptr(key) }.to_string_lossy().into_owned();
     let v = unsafe { CStr::from_ptr(value) }.to_string_lossy().into_owned();
+    let _listing = catalogs(); // not while a catalog is listed
     unsafe { std::env::set_var(k, v) };
 }
 
@@ -683,7 +710,11 @@ mod tests {
         if denies_missing() {
             return; // start() refuses every run of such a build first
         }
-        let keys = "/nonexistent/rind-devbench-test-keys";
+        // An empty keys directory, as before the app copies its certificates in: rustls can't list.
+        let dir = std::env::temp_dir().join(format!("rind-devbench-test-keys-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let keys = dir.to_str().unwrap();
         let keys_before = std::env::var_os("RIND_BENCH_KEYS_DIR");
         let low_before = std::env::var_os("RIND_BENCH_LOW_MEMORY");
         let e = start(&format!(r#"{{"libraries": ["no-such-library"], "sections": ["no-such-group"],
@@ -694,17 +725,36 @@ mod tests {
         // The refused start put the environment back as it found it.
         assert_eq!(std::env::var_os("RIND_BENCH_KEYS_DIR"), keys_before);
         assert_eq!(std::env::var_os("RIND_BENCH_LOW_MEMORY"), low_before);
-        // Its check listed with the configured keys directory, where the rustls rows can't list, and that
-        // listing answers only for that setting: the catalog for the environment now has them.
-        let listed: Vec<(ListingEnv, Value)> =
-            CATALOGS.lock().unwrap().iter().map(|(k, c)| (k.clone(), (*c).clone())).collect();
+        // Its listing failed, so it wasn't kept: none cached names that directory.
         let set = |env: &ListingEnv, k: &str, v: &str| env.iter().any(|(ek, ev)| ek == k && ev == v);
-        let failed = |c: &Value| c["files_failed_to_list"].as_array().unwrap().contains(&json!("rustls"));
-        assert!(listed.iter().any(|(k, c)| set(k, "RIND_BENCH_KEYS_DIR", keys) && set(k, "RIND_BENCH_LOW_MEMORY", "1") && failed(c)));
-        if keys_before.is_none() {
-            // The default keys directory lists the rustls rows; a contributor's own setting may not.
-            assert!(!failed(catalog()), "{}", catalog()["files_failed_to_list"]);
+        assert!(!catalogs().iter().any(|(k, _)| set(k, "RIND_BENCH_KEYS_DIR", keys)));
+        // Once the certificates are in the same directory, a listing with it finds the rustls rows.
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../rind-rustls/tests/keys");
+        for d in std::fs::read_dir(&src).unwrap() {
+            let d = d.unwrap();
+            std::fs::create_dir_all(dir.join(d.file_name())).unwrap();
+            for f in std::fs::read_dir(d.path()).unwrap() {
+                let f = f.unwrap();
+                std::fs::copy(f.path(), dir.join(d.file_name()).join(f.file_name())).unwrap();
+            }
         }
+        let failed = |c: &Value| c["files_failed_to_list"].as_array().unwrap().contains(&json!("rustls"));
+        {
+            let mut cache = catalogs();
+            // SAFETY: this is the only test that writes the environment, and the lock keeps listings out.
+            // The same settings as the refused start, so a kept failure would answer here.
+            unsafe { std::env::set_var("RIND_BENCH_KEYS_DIR", keys) };
+            unsafe { std::env::set_var("RIND_BENCH_LOW_MEMORY", "1") };
+            let c = catalog_in(&mut cache);
+            for (k, v) in [("RIND_BENCH_KEYS_DIR", &keys_before), ("RIND_BENCH_LOW_MEMORY", &low_before)] {
+                match v {
+                    Some(v) => unsafe { std::env::set_var(k, v) },
+                    None => unsafe { std::env::remove_var(k) },
+                }
+            }
+            assert!(!failed(&c), "{}", c["files_failed_to_list"]);
+        }
+        let _ = std::fs::remove_dir_all(&dir);
         for bad in [r#"{"": "1"}"#, r#"{"A=B": "1"}"#, r#"{"A": "x\u0000"}"#] {
             let e = start(&format!(r#"{{"env": {bad}}}"#)).unwrap_err();
             assert!(e.contains("environment entry"), "{e}");
