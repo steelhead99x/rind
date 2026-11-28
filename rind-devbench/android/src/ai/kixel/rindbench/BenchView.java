@@ -1,4 +1,4 @@
-package io.github.steelhead99x.rindbench;
+package ai.kixel.rindbench;
 
 import android.app.Activity;
 import android.content.Context;
@@ -540,8 +540,8 @@ final class BenchView extends LinearLayout {
      * One machine-readable line per screen state, for a device runner checking the screen without a person:
      *   RINDBENCH_LAYOUT {"phase":"ready","w":411,"h":914,"wide":false,"folded":true,"fits":true,"clipped":[]}
      * w and h are dp. The library and group pickers open in sheets, so "folded" is true. "clipped" names the
-     * run controls, the status card, and the results preview ("score") when one is cut off or out of view;
-     * fits is false when any is.
+     * run controls, the status card, the results preview ("score"), and the app bar with the app's name
+     * ("title") when one is cut off or out of view; fits is false when any is.
      */
     private void reportLayout(String phase) {
         ui.postDelayed(() -> {
@@ -550,6 +550,8 @@ final class BenchView extends LinearLayout {
                 if (!onView(footer) || !whole(footer)) clipped.add("run controls");
                 if (!onView(statusCard)) clipped.add("status");
                 if (resultsTeaser.getVisibility() == VISIBLE && !onView(resultsTeaser)) clipped.add("score");
+                View bar = host instanceof MainActivity ? ((MainActivity) host).appBar() : null;
+                if (bar != null && (!onView(bar) || !whole(bar))) clipped.add("title");
                 float d = getResources().getDisplayMetrics().density;
                 View root = host.getWindow().getDecorView();
                 JSONObject o = new JSONObject();
@@ -1033,7 +1035,7 @@ final class BenchView extends LinearLayout {
         LayoutParams logo = new LayoutParams(Theme.dpi(host, 30), Theme.dpi(host, 30));
         logo.setMarginEnd(inset);
         publisher.addView(mark, logo);
-        publisher.addView(Theme.text(host, "Kixel AI", Theme.Type.TITLE_SMALL, Theme.onSurface));
+        publisher.addView(Theme.text(host, "kixel.ai", Theme.Type.TITLE_SMALL, Theme.onSurface));
         LayoutParams publisherSize = new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT);
         publisherSize.setMarginStart(Theme.dpi(host, 24));
         publisherSize.bottomMargin = inset;

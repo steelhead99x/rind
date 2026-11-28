@@ -1,4 +1,4 @@
-package io.github.steelhead99x.rindbench;
+package ai.kixel.rindbench;
 
 import android.app.Activity;
 import android.content.Intent;
@@ -16,7 +16,7 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 
 /**
- * Root chrome: a top app bar with the full "rind-bench" title, then
+ * Root chrome: a top app bar with the RindBench mark, name, and "by kixel.ai", then
  * Bench / Learn / Contender. Window size class picks the navigation:
  * compact width (under 600dp) gets a bottom navigation bar, medium and
  * expanded width (phone landscape, tablets) get a navigation rail.
@@ -95,23 +95,33 @@ public class MainActivity extends Activity {
         setContentView(root);
     }
 
+    /** The app bar, for the layout report: null before it's made. */
+    View appBar() {
+        return appBar;
+    }
+
     private LinearLayout makeAppBar() {
         LinearLayout h = new LinearLayout(this);
         h.setOrientation(LinearLayout.HORIZONTAL);
         h.setGravity(Gravity.CENTER_VERTICAL);
         h.setBackgroundColor(Theme.surface);
         h.setMinimumHeight(Theme.dpi(this, 64));
-        ImageView mark = Theme.brandImage(this, "rindlogo");
+        ImageView mark = Theme.brandImage(this, "rindbench_mark");
         LinearLayout.LayoutParams markSize = new LinearLayout.LayoutParams(
                 Theme.dpi(this, 40), Theme.dpi(this, 40));
         markSize.setMarginEnd(Theme.dpi(this, 12));
         h.addView(mark, markSize);
-        TextView title = Theme.heading(this, "rind-bench", Theme.Type.TITLE_LARGE, Theme.onSurface);
+        // The name, with its publisher under it: RindBench, by kixel.ai.
+        LinearLayout name = new LinearLayout(this);
+        name.setOrientation(LinearLayout.VERTICAL);
+        TextView title = Theme.heading(this, "RindBench", Theme.Type.TITLE_LARGE, Theme.onSurface);
         title.setSingleLine(false);
-        title.setTypeface(android.graphics.Typeface.create("sans-serif-condensed", android.graphics.Typeface.BOLD));
+        title.setTypeface(android.graphics.Typeface.create("sans-serif", android.graphics.Typeface.BOLD));
+        name.addView(title);
+        name.addView(Theme.text(this, "by kixel.ai", Theme.Type.LABEL_MEDIUM, Theme.onSurfaceVariant));
         LinearLayout.LayoutParams tl = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1);
         tl.topMargin = tl.bottomMargin = Theme.dpi(this, 8);
-        h.addView(title, tl);
+        h.addView(name, tl);
         detailsBtn = Theme.iconButton(this, "ic_info", "Details");
         detailsBtn.setTooltipText("Details");
         detailsBtn.setOnClickListener(v -> { if (bench != null) bench.openDetails(); });

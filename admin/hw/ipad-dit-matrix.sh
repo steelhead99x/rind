@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # steelhead99x/rind#277: the A/B/C/D DIT and SHA-3 matrix on the iPads
-# (rind-devbench/README.md at the PR's head): four builds of RindBench All,
+# (rind-devbench/README.md at the PR's head): four builds of RindBench,
 # each a fresh launch, read against each other.
 #
 # Host: a Mac with Xcode in /Applications/Xcode.app, xcodegen, ncat, and
@@ -75,7 +75,7 @@ for label in "${labels[@]}"; do
     tag=${ids:+-deny-${ids//,/_}}
     for d in "${devices[@]}"; do
         hw_say "building $label (${ids:-no deny}) for $d"
-        (cd "$wt/rind-devbench" && RIND_DEVBENCH_DENY=$ids hw_gate ios/build-ipa.sh "$(port_of "$d")" "$host") ||
+        (cd "$wt/rind-devbench" && VER=14.1 RIND_DEVBENCH_DENY=$ids hw_gate ios/build-ipa.sh "$(port_of "$d")" "$host") ||
             hw_die "the $label build for $d failed"
         cp "$wt/rind-devbench/ios/out/RindBenchAll-v14.1-$(port_of "$d")$tag.ipa" "$HW_RUN/ipa/$d-$label.ipa"
     done
@@ -97,8 +97,9 @@ cat <<EOF
 
 Now, on each iPad in turn, for each IPA in $HW_RUN/ipa/ in the order
 ${order[*]} (the last A is the same IPA again):
-  sign and install <device>-<label>.ipa, open RindBench All, pick Full, the
-  same libraries every time, sections Hashes, MACs and KDFs, AEADs, PAKE,
+  sign and install <device>-<label>.ipa. Open the app from the IPA you just
+  installed (RindBench All on older builds). Pick Full, the same libraries
+  every time, sections Hashes, MACs and KDFs, AEADs, PAKE,
   Signatures, KEMs and "More: dit_toggle", agree, and Start. Keep the iPad
   plugged in and awake. The script tells you when each run has arrived.
 EOF

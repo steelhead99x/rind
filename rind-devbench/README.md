@@ -1,4 +1,4 @@
-# rind-devbench — RindBench "All" for iPad/iPhone and Android
+# rind-devbench — RindBench by kixel.ai for iPad/iPhone and Android
 
 A standalone crate (own `[workspace]`), not a member of rind's workspace.
 
@@ -41,7 +41,12 @@ CAPTURE --out DIR` splits a collector capture into one JSON per run.
 - iOS (Mac, Xcode, rustup 1.98.1 + aarch64-apple-ios): `ios/build-ipa.sh PORT [HOST]`
   (e.g. 9101 for one iPad, 9102 for another; HOST is the collector's LAN address, left out = results stay on the iPad)
   → `ios/out/RindBenchAll-v15.0-<port>.ipa`, **unsigned**.
-  Bundle id `io.github.steelhead99x.rindbench.all` (installs next to v13, not over it).
+  Bundle ID `ai.kixel.rindbench`, the same as the Android package. Earlier builds
+  use separate app IDs and can stay installed beside the new one. Before
+  uninstalling an old build, use Files on iOS to copy its saved `.json` and
+  `.jsonl` reports out of the app's folder. On Android, copy the old package's
+  reports from `/sdcard/Android/data/io.github.steelhead99x.rindbench/files/` with
+  `adb pull`. The new app starts with its own results directory.
   OpenSSL is vendored (built from source) by default; `CARGO_FEATURES= ios/build-ipa.sh` leaves it out.
 - Android (Linux, SDK build-tools 35 + platform 35 + NDK, JDK 17+, rustup aarch64-linux-android):
   `JAVA_HOME=… CARGO_FEATURES="--features __bench_openssl" [COLLECTOR_HOST=<LAN address>] android/build-apk.sh` →
@@ -50,14 +55,14 @@ CAPTURE --out DIR` splits a collector capture into one JSON per run.
 
 ## Run
 - iPad: sign + install with your own Apple developer account (e.g. plumesign), start `tools/listen-devbench.sh`
-  on the collector computer, open "RindBench All", agree, Start.
+  on the collector computer, open "RindBench", agree, Start.
 - Android: `adb install -r RindBench-android.apk`;
   the collector fills itself in (127.0.0.1:9103 via `adb reverse`, else the LAN address given to build-apk.sh as `COLLECTOR_HOST`); headless, from an APK built with
   `DEVICE_RUNNER=1 android/build-apk.sh` (a normal build ignores `autostart`, `host` and `port`, since any app on the phone can start the launcher):
-  `adb shell am start -n io.github.steelhead99x.rindbench/.MainActivity --es preset quick --es libraries rind,ring --es sections AEADs --ez autostart true`;
-  results also in `/sdcard/Android/data/io.github.steelhead99x.rindbench/files/`.
+  `adb shell am start -n ai.kixel.rindbench/.MainActivity --es preset quick --es libraries rind,ring --es sections AEADs --ez autostart true`;
+  results also in `/sdcard/Android/data/ai.kixel.rindbench/files/`.
 - iPad/iPhone headless (the same choices as Android's extras, as launch arguments):
-  `xcrun devicectl device process launch --console --device UDID io.github.steelhead99x.rindbench.all -preset quick -libraries rind,ring -sections AEADs -autostart YES [-host H -port P]`.
+  `xcrun devicectl device process launch --console --device UDID ai.kixel.rindbench -preset quick -libraries rind,ring -sections AEADs -autostart YES [-host H -port P]`.
   `-host`/`-port` override the collector baked in at build time.
 
 ## Device runners
@@ -69,7 +74,7 @@ Both apps support an unattended run with no one looking at the screen (on Androi
   On Android it goes to logcat with tag `RindBench`. On iOS it goes to stderr (seen with `devicectl … --console`) and the device log.
   `w` and `h` are in points (iOS) or dp (Android).
 - `fits` is false when the run controls are cut off or off screen, or when the run panel can't show its status or score. `"picker"` in `clipped` means some chips are out of view (they scroll inside the picker), which a short screen allows.
-  On Android the library and group pickers open in sheets, so `folded` is always true and `clipped` never names `"picker"`; `"score"` there is the results preview, and `"status"` the status card, either out of view in its scrolling pane.
+  On Android the library and group pickers open in sheets, so `folded` is always true and `clipped` never names `"picker"`; `"score"` there is the results preview, and `"status"` the status card, either out of view in its scrolling pane. `"title"` is the app bar, when the app's name doesn't fit it, as at a large font size.
 - On Android, each run that starts logs `RINDBENCH_RUN {"started":true,"preset":…,"libraries":[…],"sections":[…],"host":…,"port":…}` on tag `RindBench` so a runner can check that a launch ran its own selection. A start that doesn't happen logs `RINDBENCH_RUN {"started":false,"reason":…}`: the list hasn't loaded, consent isn't given, no library or group is picked (as when a launch names none that exist), or the native start failed.
 - The run itself ends with a `done` or `stopped` line at the collector.
 
