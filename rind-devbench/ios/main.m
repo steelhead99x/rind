@@ -138,8 +138,8 @@ static NSString *const kConsent = @"The run keeps the CPU busy (minutes on Quick
   BOOL autostartRun;     // the current start is -autostart's: its refusal and picked rows go to stderr
   long long autostartNo; // its start number (`acked_start`), once accepted
   // The last run's picker selection, as sets of library and group names, and what that run sent: a run
-  // started by hand with the picker unchanged sends the same, so rerunning an autostart doesn't widen
-  // its names to what the folded picker shows (a "More" chip stands for every More group).
+  // started by hand with the picker untouched since sends the same, so rerunning an autostart doesn't widen
+  // its names to what the picker shows (a "More" chip stands for every More group); a chip tap forgets them.
   NSArray<NSSet *> *lastPicker;
   NSArray<NSString *> *lastLibs, *lastSecs;
   NSDictionary *catalog;
@@ -472,6 +472,7 @@ static void SetTitle(UIButton *b, NSString *t) {
 - (void)chipTapped:(UIButton *)b {
   if (running) return;
   b.selected = !b.selected; [self paintChip:b];
+  lastLibs = nil; lastSecs = nil;  // a picked selection, even one back where it was, runs as the picker shows it
 }
 
 - (void)showConsent {
