@@ -274,12 +274,6 @@ exclude_re = [
   # x86-cpu.yml's SDE tiers test them.
   'rind/src/low/x86_64/(aes|aes_gcm|aes_gcm_vaes|cpu|ghash)\.rs:\d+:\d+: (replace (HwKey::round_keys_512|RoundKeys512::split|_cipher_avx512|Counter512::\w+|VaesKernel::avx512|HaveAvx512(For\w+|Vl)::check|GhashTableAvx512::\w+|_mul16|_mul_tail)( -> .*)? with .*|.* in (_cipher_avx512|HaveAvx512(For\w+|Vl)::check|_mul_tail))$',
   'rind/src/low/x86_64/aes_gcm\.rs:\d+:45: replace \* with (\+|/)$',
-  # Equivalent: each batch of ML-KEM's PRF only adds outputs no polynomial
-  # reads, so taking eight at once for four or fewer, for ML-KEM-768, or
-  # never, four for one to three, or the second four again, yields the same
-  # samples; only the time differs. `sample_poly_cbd`'s `&&`, `==`, and `>`
-  # are its eight-way gate's alone.
-  'rind/src/mid/mlkem\.rs:\d+:\d+: (replace (&& with \|\||== with !=|> with (==|<|>=)) in sample_poly_cbd|delete match arm [0-3] in shake256_fours|replace \* with / in shake256_fours)$',
   'rind/src/low/posint\.rs:\d+:\d+: (replace PosInt<N>::rsaz_pair -> .*|.* in PosInt<N>::rsaz_pair)$',
   # Compiled only for armv7, which no campaign runs: the portable AES-GCM's
   # crypto-extension and NEON halves.
