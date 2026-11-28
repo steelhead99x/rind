@@ -162,6 +162,8 @@ final class BenchView extends LinearLayout {
      * it loads (null where none was): a launch that names only one keeps the other's earlier value.
      */
     private String pickLibs, pickSecs;
+    /** pickLibs and pickSecs are a picker's switches exactly (a restored one): an empty list means none, not the defaults. */
+    private boolean pickExact;
 
     /**
      * `restored`: the activity is being recreated from saved state, after a
@@ -183,6 +185,7 @@ final class BenchView extends LinearLayout {
             if (saved.getBoolean(KEY_COLLECTOR_SET)) useCollector(saved.getString(KEY_HOST), saved.getInt(KEY_PORT, Collector.PORT));
             pickLibs = saved.getString(KEY_LIBS);
             pickSecs = saved.getString(KEY_SECS);
+            pickExact = saved.getBoolean(KEY_EXACT);
             fullPreset = saved.getBoolean(KEY_FULL);
         } else if (isRunnerLaunch(intent)) {
             // A run that outlived the last activity turns the launch away now, changing nothing.
@@ -426,7 +429,7 @@ final class BenchView extends LinearLayout {
 
     private static final String KEY_HOST = "rindbench.collector_host", KEY_PORT = "rindbench.collector_port",
             KEY_COLLECTOR_SET = "rindbench.collector_set", KEY_LIBS = "rindbench.libraries",
-            KEY_SECS = "rindbench.sections", KEY_FULL = "rindbench.full";
+            KEY_SECS = "rindbench.sections", KEY_FULL = "rindbench.full", KEY_EXACT = "rindbench.picker_exact";
     /** The activity's onSaveInstanceState. */
     void saveState(Bundle out) {
         // Saved always: the collector as it is (runnerHost and runnerPort, default included) is what a restored
@@ -435,6 +438,8 @@ final class BenchView extends LinearLayout {
         // The picker as it is (or, before the list loads, what its first load will preselect), and the preset.
         out.putString(KEY_LIBS, loadedOnce ? String.join(",", checked(libSw)) : pickLibs);
         out.putString(KEY_SECS, loadedOnce ? String.join(",", checked(secSw)) : pickSecs);
+        // A loaded picker's switches exactly, so one the person turned all off stays off.
+        out.putBoolean(KEY_EXACT, loadedOnce || pickExact);
         out.putBoolean(KEY_FULL, fullPreset);
         out.putString(KEY_HOST, runnerHost);
         out.putInt(KEY_PORT, runnerPort);
@@ -447,6 +452,8 @@ final class BenchView extends LinearLayout {
     private boolean useCollector(String h, int p) {
         boolean changed = h == null ? runnerHost != null : !h.equals(runnerHost) || p != runnerPort;
         if (!changed) return false;
+        // A run by hand waiting on the old collector's probe would go where it wasn't tapped for: it's dropped.
+        cancelDeferredStart();
         runnerHost = h;
         runnerPort = h == null ? Collector.PORT : p;
         colHost = h;
@@ -530,13 +537,14 @@ final class BenchView extends LinearLayout {
             java.util.Set<String> wantSecs = csv(pickSecs);
             for (int i = 0; i < libs.length(); i++) {
                 String l = libs.getString(i);
-                boolean on = wantLibs.isEmpty() || wantLibs.contains(l);
+                boolean on = pickExact ? wantLibs.contains(l) : wantLibs.isEmpty() || wantLibs.contains(l);
                 libRows.add(checkRow(l, lc.getOrDefault(l, 0), on, true, libSw, l));
             }
             for (int i = 0; i < secs.length(); i++) {
                 String s = secs.getString(i);
                 int n = sc.getOrDefault(s, 0);
-                boolean on = n > 0 && (wantSecs.isEmpty() ? !s.startsWith("More: ") : wantSecs.contains(s));
+                boolean on = n > 0 && (pickExact ? wantSecs.contains(s)
+                        : wantSecs.isEmpty() ? !s.startsWith("More: ") : wantSecs.contains(s));
                 View row = checkRow(s.startsWith("More: ") ? s.substring(6) : s, n, on, n > 0, secSw, s);
                 if (s.startsWith("More: ")) moreRows.add(row); else groupRows.add(row);
             }
@@ -608,6 +616,7 @@ final class BenchView extends LinearLayout {
             showSelection(l.libs, l.secs, true, true);
             presetChanged();
         } else {
+            pickExact = false;
             pickLibs = l.libs == null ? null : String.join(",", l.libs);
             pickSecs = l.secs == null ? null : String.join(",", l.secs);
         }
