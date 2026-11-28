@@ -194,9 +194,12 @@ static UIButtonConfiguration *ButtonConfig(NSString *title, UIFont *font, NSDire
   b.automaticallyUpdatesConfiguration = NO;
   [b addTarget:self action:a forControlEvents:UIControlEventTouchUpInside]; return b;
 }
-// A configured button's title lives in its configuration.
+// A configured button's title lives in its configuration. With automatic updates off, a new title drops
+// the button's title label and draws none (seen on iPadOS 27.2.1), so they are on while it changes.
 static void SetTitle(UIButton *b, NSString *t) {
+  b.automaticallyUpdatesConfiguration = YES;
   UIButtonConfiguration *c = b.configuration; c.title = t; b.configuration = c;
+  b.automaticallyUpdatesConfiguration = NO;
 }
 
 #pragma mark - layout
