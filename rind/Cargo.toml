@@ -6,7 +6,7 @@ repository = "https://github.com/kixel-ai/rind"
 homepage = "https://rind.kixel.ai"
 license = "(Apache-2.0 OR ISC OR MIT-0) AND (Apache-2.0 OR ISC OR MIT) AND Apache-2.0 AND ISC AND BSD-3-Clause AND MIT"
 readme = "README.md"
-description = "Pure-Rust cryptography for MoQ, forked from graviola"
+description = "Fast pure-Rust cryptography, partly formally verified"
 keywords = ["crypto", "tls", "quic", "post-quantum", "pure-rust"]
 categories = ["network-programming", "cryptography"]
 rust-version.workspace = true
@@ -179,6 +179,11 @@ p256-voprf = { package = "p256", version = "0.13", default-features = false, fea
 p384-voprf = { package = "p384", version = "0.13", default-features = false, features = ["hash2curve", "voprf"] }
 p521-voprf = { package = "p521", version = "0.13.3", default-features = false, features = ["hash2curve", "voprf"] }
 rand_core-voprf = { package = "rand_core", version = "0.6", features = ["getrandom"] }
+# RFC 9807's OPAQUE, which aws-lc-rs does not offer: opaque-ke, which runs
+# on the voprf crate and RustCrypto's 0.13 curves above, with its Argon2id,
+# and the SHA-2 its suites name.
+opaque-ke = { version = "4.0.1", default-features = false, features = ["argon2", "ristretto255"] }
+sha2-opaque = { package = "sha2", version = "0.10", default-features = false }
 
 # These cover every algorithm, so a build that leaves one out skips them.
 [[test]]

@@ -8,11 +8,12 @@ open Aeneas Aeneas.Std Result rind.spec rind.spec.rsa
 `RsaPrivateKey::private_op` is RFC 8017's RSASP1 in its CRT form: two
 exponentiations modulo the primes, by `PosInt::mod_exp_pair`, recombined by
 Garner's formula, then checked by the public operation. This proves it for a
-key meeting `PrivKeyInv`, with primes of 16 or 32 words, on a CPU with BMI2
-and ADX, where `mont_exp` runs rind's Montgomery products, and where neither
-pyca/verified-garbage's IFMA CRT nor aws-lc's dual RSAZ runs. That
-`RsaPrivateKey::new` establishes `PrivKeyInv`, and the IFMA CRT's path, are
-left to proofs to come.
+key meeting `PrivKeyInv`, on a CPU with BMI2 and ADX, on both of the CRT's
+paths: pyca/verified-garbage's AVX-512 IFMA CRT, where the key set it up,
+through the axiom `ifma_crt_spec`; and otherwise rind's, with primes of 16 or
+32 words, where `mont_exp` runs rind's Montgomery products and aws-lc's dual
+RSAZ does not run. `RsaPrivKey.lean`'s `rsa_private_key_new_spec` proves that
+`RsaPrivateKey::new` establishes `PrivKeyInv`.
 -/
 
 namespace rind.x86_64
@@ -48,7 +49,7 @@ theorem posint_mont_mul_spec {N : Usize} (self v n : low.posint.PosInt N) (n0 : 
 /-- `to_montgomery` takes `self`, below `n`, into the Montgomery domain, given
 `montifier`, which is `R² mod n`. -/
 theorem to_montgomery_spec {N : Usize} (self montifier n : low.posint.PosInt N)
-    (hP : MontProducts n.used.val) (hk2 : 2 ≤ n.used.val) (hk32 : n.used.val < 2 ^ 32)
+    (hP : MontProducts n.used.val) (hk2 : 2 ≤ n.used.val) (hk29 : n.used.val < 2 ^ 29)
     (hk : n.used.val ≤ N.val)
     (hodd : wordsNat (lowWords n n.used) % 2 = 1)
     (hx : wordsNat (lowWords self n.used) < wordsNat (lowWords n n.used))
@@ -60,7 +61,7 @@ theorem to_montgomery_spec {N : Usize} (self montifier n : low.posint.PosInt N)
   step with mont_neg_inverse_spec n (by omega) hk hodd as ⟨i, hi⟩
   have hM0 : 0 < wordsNat (lowWords n n.used) := by omega
   step with posint_mont_mul_spec self montifier n i hP hk
-    (mont_args_of self montifier n i hk hk2 hk32 hodd hi hx (by rw [hmont]; exact Nat.mod_lt _ hM0))
+    (mont_args_of self montifier n i hk hk2 hk29 hodd hi hx (by rw [hmont]; exact Nat.mod_lt _ hM0))
     as ⟨r, hru, hr⟩
   refine ⟨hru, hr.2.1, ?_⟩
   apply mont_cancel (coprime_two_pow_odd hodd (64 * n.used.val))
@@ -74,7 +75,7 @@ theorem to_montgomery_spec {N : Usize} (self montifier n : low.posint.PosInt N)
 /-- `from_montgomery` takes what stands for `C^t` in the Montgomery domain out
 of it: `C^t mod n`. -/
 theorem from_montgomery_spec {N : Usize} (self n : low.posint.PosInt N)
-    (hP : MontProducts n.used.val) (hk2 : 2 ≤ n.used.val) (hk32 : n.used.val < 2 ^ 32)
+    (hP : MontProducts n.used.val) (hk2 : 2 ≤ n.used.val) (hk29 : n.used.val < 2 ^ 29)
     (hk : n.used.val ≤ N.val)
     (hodd : wordsNat (lowWords n n.used) % 2 = 1) (hM1 : 1 < wordsNat (lowWords n n.used))
     (C t : Nat)
@@ -85,7 +86,7 @@ theorem from_montgomery_spec {N : Usize} (self n : low.posint.PosInt N)
   step with fixed_one_spec n (by omega) hk as ⟨one, hou, hov⟩
   step with mont_neg_inverse_spec n (by omega) hk hodd as ⟨i, hi⟩
   step with posint_mont_mul_spec self one n i hP hk
-    (mont_args_of self one n i hk hk2 hk32 hodd hi hx.1 (by rw [hov]; exact hM1)) as ⟨r, hru, hr⟩
+    (mont_args_of self one n i hk hk2 hk29 hodd hi hx.1 (by rw [hov]; exact hM1)) as ⟨r, hru, hr⟩
   refine ⟨hru, ?_⟩
   have h2 := hr.2.2
   rw [lowWords_length n hk, hov, mul_one] at h2
@@ -247,7 +248,7 @@ theorem mont_redc_spec {N M : Usize} (self : low.posint.PosInt N) (n : low.posin
 `R = 2^(64k)`, given `n`'s montifier, `R² mod n`. -/
 theorem posint_reduce_spec {N M : Usize} (self : low.posint.PosInt N) (n montifier : low.posint.PosInt M)
     (hMN : M.val < N.val) (hP : MontProducts n.used.val) (hk2 : 2 ≤ n.used.val) (hk : n.used.val ≤ M.val)
-    (hk32 : n.used.val < 2 ^ 32) (hsu : self.used.val ≤ N.val) (hs61 : self.used.val < 2 ^ 61)
+    (hk29 : n.used.val < 2 ^ 29) (hsu : self.used.val ≤ N.val) (hs61 : self.used.val < 2 ^ 61)
     (hodd : wordsNat (lowWords n n.used) % 2 = 1) (hM1 : 1 < wordsNat (lowWords n n.used))
     (hmont : wordsNat (lowWords montifier n.used) = 2 ^ (128 * n.used.val) % wordsNat (lowWords n n.used))
     (hX : wordsNat (lowWords self self.used) < 2 ^ (64 * n.used.val) * wordsNat (lowWords n n.used)) :
@@ -259,7 +260,7 @@ theorem posint_reduce_spec {N M : Usize} (self : low.posint.PosInt N) (n montifi
   obtain ⟨i, -, hi⟩ := Nat.exists_mul_mod_eq_one_of_coprime (coprime_two_pow_odd hodd (64 * n.used.val)) hM1
   have hr1v := hr1 i (by rw [hi, Nat.mod_eq_of_lt hM1])
   have hM0 : 0 < wordsNat (lowWords n n.used) := by omega
-  step with to_montgomery_spec r1 montifier n hP hk2 hk32 hk hodd (by rw [hr1v]; exact Nat.mod_lt _ hM0) hmont
+  step with to_montgomery_spec r1 montifier n hP hk2 hk29 hk hodd (by rw [hr1v]; exact Nat.mod_lt _ hM0) hmont
     as ⟨r, hru, hr⟩
   refine ⟨hru, ?_⟩
   have hc : wordsNat (lowWords r n.used) ≡ wordsNat (lowWords self self.used) [MOD wordsNat (lowWords n n.used)] := by
@@ -379,13 +380,36 @@ theorem garner_h {P s1 s2 qInv d h : Nat} (hP : 0 < P)
     rw [h1]; exact (hd'.mul_right _).symm
   rw [h2, Int.toNat_natCast]
 
+/-- pyca/verified-garbage's CRT values for `key`, which `IfmaCrt::new` sets:
+none, `w = 0`, or, on a CPU whose AVX-512 check passes, the primes' width `w`,
+16, 24, or 32 words and half the modulus's; the modulus's and the primes'
+words; `dP` and `dQ`, which VG's CRT reads at that width, fitting it; and
+`VG.Spec.Rsa.privatePrecompute`'s words for the modulus and the primes. -/
+def IfmaCrtInv (key : mid.rsa_priv.RsaPrivateKey) : Prop :=
+  key.ifma.w = 0#usize ∨
+    (key.ifma.w = key.p.used ∧ (∃ t, low.x86_64.cpu.HaveAvx512ForRsa.check = ok (some t)) ∧
+      (key.ifma.w.val = 16 ∨ key.ifma.w.val = 24 ∨ key.ifma.w.val = 32) ∧
+      key.public.n.used.val = 2 * key.ifma.w.val ∧
+      wordsNat (key.ifma.pre.val.take (2 * key.ifma.w.val)) =
+        wordsNat (lowWords key.public.n key.public.n.used) ∧
+      wordsNat (key.ifma.p.val.take key.ifma.w.val) = wordsNat (lowWords key.p key.p.used) ∧
+      wordsNat (key.ifma.q.val.take key.ifma.w.val) = wordsNat (lowWords key.q key.p.used) ∧
+      wordsNat (lowWords key.dp key.p.used) = wordsNat (lowWords key.dp key.dp.used) ∧
+      wordsNat (lowWords key.dq key.p.used) = wordsNat (lowWords key.dq key.dq.used) ∧
+      VG.Spec.Rsa.privatePrecompute
+          (VG.Spec.Rsa.i2osp (wordsNat (lowWords key.public.n key.public.n.used))
+            (octetLen (wordsNat (lowWords key.public.n key.public.n.used))))
+          (VG.Spec.Rsa.i2osp (wordsNat (lowWords key.p key.p.used)) (8 * key.ifma.w.val))
+          (VG.Spec.Rsa.i2osp (wordsNat (lowWords key.q key.p.used)) (8 * key.ifma.w.val)) =
+        some ((key.ifma.pre.val.take (6 * key.ifma.w.val)).map (·.bv)))
+
 /-- What `RsaPrivateKey::new` establishes about a key, as its private
-operation by rind's exponentiations needs: its public key meets `PubKeyInv`
-with the modulus `n = p·q`; the factors `p` and `q`, which it does not require
-to be prime, are odd, above one, and as wide, `k` words; their montifiers are
-`R² mod p` and `R² mod q`, for `R = 2^(64k)`; `p0` and `q0` are `-p⁻¹` and
-`-q⁻¹ mod 2^64`; `dp` and `dq` fit their arrays; `iqmp` is below `p`; and
-`iqmp_mont` is `iqmp·R mod p`. -/
+operation needs: its public key meets `PubKeyInv` with the modulus `n = p·q`;
+the factors `p` and `q`, which it does not require to be prime, are odd, above
+one, and as wide, `k` words; their montifiers are `R² mod p` and `R² mod q`,
+for `R = 2^(64k)`; `p0` and `q0` are `-p⁻¹` and `-q⁻¹ mod 2^64`; `dp` and `dq`
+fit their arrays; `iqmp` is below `p`; `iqmp_mont` is `iqmp·R mod p`; and
+pyca/verified-garbage's CRT values meet `IfmaCrtInv`. -/
 def PrivKeyInv (key : mid.rsa_priv.RsaPrivateKey) : Prop :=
   PubKeyInv key.public ∧ key.q.used = key.p.used ∧ key.p.used.val ≤ 64 ∧ 2 ≤ key.p.used.val ∧
     wordsNat (lowWords key.p key.p.used) % 2 = 1 ∧ wordsNat (lowWords key.q key.p.used) % 2 = 1 ∧
@@ -402,7 +426,8 @@ def PrivKeyInv (key : mid.rsa_priv.RsaPrivateKey) : Prop :=
     wordsNat (lowWords key.iqmp key.p.used) < wordsNat (lowWords key.p key.p.used) ∧
     wordsNat (lowWords key.iqmp_mont key.p.used) =
       wordsNat (lowWords key.iqmp key.p.used) * 2 ^ (64 * key.p.used.val) %
-        wordsNat (lowWords key.p key.p.used)
+        wordsNat (lowWords key.p key.p.used) ∧
+    IfmaCrtInv key
 
 /-- RFC 8017's RSASP1, second form, of `c` with `key`'s components. -/
 def keyRsasp1 (key : mid.rsa_priv.RsaPrivateKey) (c : Nat) : Nat :=
@@ -423,7 +448,7 @@ theorem crt_spec (havx : ∃ t, low.x86_64.cpu.HaveAvx2.check = ok t)
       wordsNat (lowWords m m.used) = keyRsasp1 key (wordsNat (lowWords c c.used)) ∧
       wordsNat (lowWords m m.used) < wordsNat (lowWords key.public.n key.public.n.used) ∧
       wordsNat (m.words.val.drop m.used.val) = 0 ⦄ := by
-  obtain ⟨hpub, hqk, hk64, hk2, hpo, hqo, hp1, hq1, hn, hp0, hq0, hpm, hqm, hdp, hdq, hqi, hqim⟩ := hinv
+  obtain ⟨hpub, hqk, hk64, hk2, hpo, hqo, hp1, hq1, hn, hp0, hq0, hpm, hqm, hdp, hdq, hqi, hqim, -⟩ := hinv
   obtain ⟨hnk2, hnk, -⟩ := hpub
   have hk64' : key.p.used.val ≤ (64#usize : Usize).val := hk64
   have h128 : (128#usize : Usize).val = 128 := rfl
@@ -560,7 +585,164 @@ theorem crt_spec (havx : ∃ t, low.x86_64.cpu.HaveAvx2.check = ok t)
     · omega
     · exact h0
 
-theorem equals_spec (x y : RsaInt) (hx : x.used.val ≤ 128) (hy : y.used.val ≤ 128) :
+/-! ## pyca/verified-garbage's CRT -/
+
+/-- VG's `modulusValid` holds for the modulus of a key meeting `PubKeyInv`,
+at its length in octets. -/
+theorem vg_modulus_valid (N : Nat) (hodd : N % 2 = 1) (hs1 : 1017 ≤ N.size) (hs2 : N.size ≤ 8192) :
+    VG.Spec.Rsa.modulusValid N (octetLen N) = true := by
+  simp only [VG.Spec.Rsa.modulusValid, Bool.and_eq_true, beq_iff_eq, decide_eq_true_eq]
+  refine ⟨⟨⟨hodd, Nat.lt_size.mp (by omega)⟩, Nat.size_le.mp hs2⟩, ?_⟩
+  rw [show (256 : Nat) = 2 ^ 8 by rfl, ← pow_mul]
+  exact Nat.lt_size.mp (by unfold octetLen; omega)
+
+/-- A number is below `256` to the power of its length in octets. -/
+theorem lt_256_octetLen (N : Nat) : N < 256 ^ octetLen N :=
+  calc N < 2 ^ N.size := Nat.lt_size_self N
+    _ ≤ 2 ^ (8 * octetLen N) := Nat.pow_le_pow_right (by norm_num) (by unfold octetLen; omega)
+    _ = 256 ^ octetLen N := by rw [pow_mul]; norm_num
+
+/-- VG's RSADP and RSASP1 by the CRT, of octets that encode a key's
+components and an input below its modulus, is RFC 8017's `rsasp1Crt`. -/
+theorem vg_private_crt (N k P Q DP DQ QINV C w : Nat) (hmv : VG.Spec.Rsa.modulusValid N k = true)
+    (hNk : N < 256 ^ k) (hP : P < 256 ^ (8 * w)) (hQ : Q < 256 ^ (8 * w)) (hn : N = P * Q) (hqi : QINV < P)
+    (hc : C < N) (xB dPB dQB qInvB : List U8) (hx : beNat xB = C) (hdp : beNat dPB = DP)
+    (hdq : beNat dQB = DQ) (hqinv : beNat qInvB = QINV) :
+    VG.Spec.Rsa.privateCrt (VG.Spec.Rsa.i2osp N k) (xB.map (·.bv)) (VG.Spec.Rsa.i2osp P (8 * w))
+        (VG.Spec.Rsa.i2osp Q (8 * w)) (dPB.map (·.bv)) (dQB.map (·.bv)) (qInvB.map (·.bv)) =
+      some (VG.Spec.Rsa.i2osp (rsasp1Crt P Q DP DQ QINV C) k) := by
+  subst hn
+  simp only [VG.Spec.Rsa.privateCrt, VG.Spec.Rsa.decryptCrt, rsasp1Crt, vg_os2ip_i2osp _ _ hNk,
+    vg_os2ip_i2osp _ _ hP, vg_os2ip_i2osp _ _ hQ, vg_os2ip_map_bv, hx, hdp, hdq, hqinv, vg_i2osp_length,
+    hmv, hc, hqi, and_self, ↓reduceIte, Option.map_some, vg_powMod]
+
+/-- RSASP1 by the CRT is below `p·q`. -/
+theorem rsasp1Crt_lt (P Q DP DQ QINV C : Nat) (hP : 0 < P) (hQ : 0 < Q) :
+    rsasp1Crt P Q DP DQ QINV C < P * Q := by
+  unfold rsasp1Crt
+  simp only
+  have hP' : (0 : Int) < P := by exact_mod_cast hP
+  generalize (((C ^ DP % P : Nat) : Int) - (C ^ DQ % Q : Nat)) * QINV = d
+  have h1 := Int.emod_lt_of_pos d hP'
+  have h0 := Int.emod_nonneg d (by omega : (P : Int) ≠ 0)
+  generalize d % (P : Int) = r at h0 h1 ⊢
+  have hh : r.toNat + 1 ≤ P := by omega
+  have h2 : C ^ DQ % Q + 1 ≤ Q := Nat.mod_lt _ hQ
+  nlinarith
+
+/-- The CRT by pyca/verified-garbage's IFMA routine, where `IfmaCrt::new` set
+it up: RSASP1 of `c`, below `n` and zero above its width, at `n`'s width. -/
+theorem crt_ifma_spec (key : mid.rsa_priv.RsaPrivateKey) (hinv : PrivKeyInv key) (hw : key.ifma.w ≠ 0#usize)
+    (c : RsaInt) (hcz : wordsNat (c.words.val.drop c.used.val) = 0)
+    (hc : wordsNat (lowWords c c.used) < wordsNat (lowWords key.public.n key.public.n.used)) :
+    mid.rsa_priv.RsaPrivateKey.crt_ifma key c ⦃ r => match r with
+      | .Ok m => m.used = key.public.n.used ∧ wordsNat m.words.val = keyRsasp1 key (wordsNat (lowWords c c.used))
+      | .Err _ => False ⦄ := by
+  have hpub := hinv.1
+  obtain ⟨-, hqk, hk64, hk2, hpo, hqo, hp1, hq1, hn, hp0, hq0, hpm, hqm, hdp, hdq, hqi, hqim, hifma⟩ := hinv
+  rcases hifma with hw0 | ⟨hwp, ⟨t, ht⟩, hw3, hnw, hpre, hpw, hqw, hdpw, hdqw, hvg⟩
+  · exact absurd hw0 hw
+  have hpub' := hpub
+  obtain ⟨hnk2, hnk, hodd, -, -, -, -, hs1, hs2, htop⟩ := hpub'
+  unfold mid.rsa_priv.RsaPrivateKey.crt_ifma mid.rsa_priv.RsaPrivateKey.modulus_len_bytes
+    low.posint.SecretPosInt.Insts.CoreOpsDerefDerefPosInt.deref low.posint.PosInt.as_words
+  step with modulus_len_bytes_spec key.public hpub as ⟨k, hkv⟩
+  have hwv : key.ifma.w.val = key.p.used.val := by rw [hwp]
+  -- The modulus `N` of `2w` words and `k` bytes.
+  generalize hN : wordsNat (lowWords key.public.n key.public.n.used) = N at *
+  have hNw : N < 2 ^ (64 * key.public.n.used.val) := by
+    have := wordsNat_lt' (lowWords key.public.n key.public.n.used); rwa [lowWords_length _ hnk, hN] at this
+  have hsz1 := Nat.size_le.mpr hNw
+  have hsz2 := Nat.lt_size.mpr htop
+  have hk8 : 8 * key.p.used.val < k.val := by rw [hkv, octetLen]; omega
+  have hk512 : k.val ≤ 512 := by rw [hkv, octetLen]; omega
+  have hNk : N < 256 ^ k.val := by rw [hkv]; exact lt_256_octetLen N
+  step*
+  have hpl : p_len.val = 8 * key.p.used.val := by rw [p_len_post, Slice.len_val, s_post1]; ring
+  have h64 : (64#usize : Usize).val = 64 := rfl
+  step with to_bytes_fixed_spec c s1 (by rw [s1_post1]; scalar_tac) as ⟨s2, hs2l, hs2v⟩
+  step*
+  step with to_bytes_fixed_spec key.dp s3 (by rw [s3_post1, hpl, h64]; omega) as ⟨s4, hs4l, hs4v⟩
+  step*
+  step with to_bytes_fixed_spec key.dq s5 (by rw [s5_post1, hpl, h64]; omega) as ⟨s6, hs6l, hs6v⟩
+  step*
+  step with to_bytes_fixed_spec key.iqmp s7 (by rw [s7_post1, hpl, h64]; omega) as ⟨s8, hs8l, hs8v⟩
+  step as ⟨s9, back9, hs9, hs9l, hs9b⟩
+  have l1024 : ∀ a : Std.Array U8 1024#usize, a.to_slice.length = 1024 := fun a => by simp
+  have l512 : ∀ a : Std.Array U8 512#usize, a.to_slice.length = 512 := fun a => by simp
+  step with core.slice.index.SliceIndexRangeToUsizeSlice.index.step_spec { «end» := k }
+    (index_mut_back s2).to_slice (by rw [l1024]; scalar_tac) as ⟨s10, hs10, hs10l⟩
+  step with core.slice.index.SliceIndexRangeToUsizeSlice.index.step_spec { «end» := p_len }
+    (index_mut_back1 s4).to_slice (by rw [l512]; scalar_tac) as ⟨s11, hs11, hs11l⟩
+  step with core.slice.index.SliceIndexRangeToUsizeSlice.index.step_spec { «end» := p_len }
+    (index_mut_back2 s6).to_slice (by rw [l512]; scalar_tac) as ⟨s12, hs12, hs12l⟩
+  step with core.slice.index.SliceIndexRangeToUsizeSlice.index.step_spec { «end» := p_len }
+    (index_mut_back3 s8).to_slice (by rw [l512]; scalar_tac) as ⟨s13, hs13, hs13l⟩
+  -- The bytes the routine reads from each buffer are those written to it.
+  have hback : ∀ {n : Usize} (back : Slice U8 → Std.Array U8 n) (s' : Slice U8) (len : Nat),
+      (∀ s'', (back s'').val = (Array.repeat n 0#u8).val.setSlice! 0 s''.val) → s'.length = len →
+      len ≤ n.val → List.slice 0 len (back s').val = s'.val := by
+    intro n back s' len hb hl hn
+    have hr : (Array.repeat n 0#u8).val.length = n.val := by rw [Array.repeat_val, List.length_replicate]
+    have := take_setSlice! (Array.repeat n 0#u8).val s'.val 0 (by simp only [Slice.length] at hl; omega)
+    rw [List.take_zero, List.nil_append, zero_add] at this
+    rw [hb, List.slice, Nat.sub_zero, List.drop_zero, ← hl, this]
+  have hcw : wordsNat c.words.val = wordsNat (lowWords c c.used) := by
+    rw [wordsNat_take_drop c.words.val c.used, hcz, Nat.mul_zero, Nat.add_zero]; rfl
+  have h256 : ∀ x, 256 ^ (8 * x) = 2 ^ (64 * x) := fun x => by
+    rw [show (256 : Nat) = 2 ^ 8 by rfl, ← pow_mul]; ring_nf
+  have hx : beNat s10.val = wordsNat (lowWords c c.used) := by
+    rw [hs10, Array.val_to_slice, hback index_mut_back s2 k.val s1_post2 (by rw [hs2l, s1_post1]) (by simp; omega),
+      hs2v, hcw, s1_post1, Nat.mod_eq_of_lt (lt_trans hc hNk)]
+  have hdpv : beNat s11.val = wordsNat (lowWords key.dp key.dp.used) := by
+    rw [hs11, Array.val_to_slice,
+      hback index_mut_back1 s4 p_len.val s3_post2 (by rw [hs4l, s3_post1]) (by simp; omega), hs4v, s3_post1,
+      hpl, h256, ← wordsNat_take_mod]
+    exact hdpw
+  have hdqv : beNat s12.val = wordsNat (lowWords key.dq key.dq.used) := by
+    rw [hs12, Array.val_to_slice,
+      hback index_mut_back2 s6 p_len.val s5_post2 (by rw [hs6l, s5_post1]) (by simp; omega), hs6v, s5_post1,
+      hpl, h256, ← wordsNat_take_mod]
+    exact hdqw
+  have hqiv : beNat s13.val = wordsNat (lowWords key.iqmp key.p.used) := by
+    rw [hs13, Array.val_to_slice,
+      hback index_mut_back3 s8 p_len.val s7_post2 (by rw [hs8l, s7_post1]) (by simp; omega), hs8v, s7_post1,
+      hpl, h256, ← wordsNat_take_mod]
+    rfl
+  -- pyca/verified-garbage's preconditions, and its result.
+  have hw' : 1 ≤ key.ifma.w.val ∧ key.ifma.w.val ≤ 32 := by omega
+  have hk' : VG.Spec.Rsa.lenValid (((wordsNat (key.ifma.pre.val.take (2 * key.ifma.w.val))).size + 7) / 8) := by
+    rw [hpre]; unfold VG.Spec.Rsa.lenValid; omega
+  have hout : s9.length = ((wordsNat (key.ifma.pre.val.take (2 * key.ifma.w.val))).size + 7) / 8 := by
+    rw [hpre, hs9l, hkv]; rfl
+  step with ifma_crt_spec key.ifma s9 s10 s11 s12 s13 t ht hw' hk' hout (by rw [hs10l, hs9l])
+    (by rw [hs9l, hwv]; omega) (by rw [hs11l, hpl, hwv]) (by rw [hs12l, hpl, hwv]) (by rw [hs13l, hpl, hwv])
+    (by rw [hpre, hpw, hqw, hs9l, hkv]; exact hvg) as ⟨b, s14, hW⟩
+  have hPw : wordsNat (lowWords key.p key.p.used) < 256 ^ (8 * key.ifma.w.val) := by
+    rw [h256, hwv]; have := wordsNat_lt' (lowWords key.p key.p.used); rwa [lowWords_length _ (by omega)] at this
+  have hQw : wordsNat (lowWords key.q key.p.used) < 256 ^ (8 * key.ifma.w.val) := by
+    rw [h256, hwv]; have := wordsNat_lt' (lowWords key.q key.p.used); rwa [lowWords_length _ (by omega)] at this
+  rw [hpre, hpw, hqw, hs9l,
+    vg_private_crt N k.val _ _ _ _ _ _ _ (by rw [hkv]; exact vg_modulus_valid N hodd hs1 hs2) hNk hPw hQw hn hqi
+      hc s10.val s11.val s12.val s13.val hx hdpv hdqv hqiv] at hW
+  obtain ⟨rfl, hs14⟩ := hW
+  simp only [↓reduceIte]
+  have hS : keyRsasp1 key (wordsNat (lowWords c c.used)) < N := by
+    rw [hn]; exact rsasp1Crt_lt _ _ _ _ _ _ (by omega) (by omega)
+  have hs14l : s14.val.length = k.val := by
+    have := congrArg List.length hs14; rwa [List.length_map, vg_i2osp_length] at this
+  step with core.slice.index.SliceIndexRangeToUsizeSlice.index.step_spec { «end» := k }
+    (back9 s14).to_slice (by rw [l1024]; scalar_tac) as ⟨s15, hs15, hs15l⟩
+  have hs15v : beNat s15.val = keyRsasp1 key (wordsNat (lowWords c c.used)) := by
+    rw [hs15, Array.val_to_slice, hback back9 s14 k.val hs9b hs14l (by simp; omega), ← vg_os2ip_map_bv, hs14]
+    exact vg_os2ip_i2osp _ _ (lt_trans hS hNk)
+  apply WP.spec_mono (from_secret_bytes_spec s15 (by rw [hs15l]; omega))
+  rintro r ⟨m, rfl, hmu, hmv'⟩
+  refine ⟨?_, by rw [hmv', hs15v]⟩
+  rw [UScalar.eq_equiv, hmu, hs15l, hkv, octetLen]
+  omega
+
+theorem equals_spec {N : Usize} (x y : low.posint.PosInt N) (hx : x.used.val ≤ N.val) (hy : y.used.val ≤ N.val) :
     low.posint.PosInt.equals x y ⦃ b =>
       b = decide (wordsNat (lowWords x x.used) = wordsNat (lowWords y y.used)) ⦄ := by
   unfold low.posint.PosInt.equals low.posint.PosInt.as_words
@@ -585,24 +767,70 @@ def PrivateOpResult (key : mid.rsa_priv.RsaPrivateKey) (c : RsaInt) :
         keyRsasp1 key (wordsNat (lowWords c c.used)) ^ key.public.e.val %
           wordsNat (lowWords key.public.n key.public.n.used) ≠ wordsNat (lowWords c c.used))
 
-/-- RSASP1 by the CRT, checked, on x86_64 with BMI2 and ADX for primes of 16
-and 32 words, where neither pyca/verified-garbage's IFMA CRT nor the dual RSAZ
-runs: `private_op` refuses with `WrongLength` a `c` not below `n`, and
-otherwise returns RSASP1 of `c`, `s` with `s^e mod n = c`, or refuses with
-`Fault` where `s^e mod n ≠ c`. A valid key rules that out and a fault does
-not: two primes, dP and dQ inverting e modulo p - 1 and q - 1, and qInv
-inverting q modulo p. `PrivKeyInv` states none of those relations. `new`
-checks all but primality, so a key it accepts with composite factors can
-still refuse some `c`. -/
+/-- `private_op`'s fault check of `m`, RSASP1 of `c` at `n`'s width: `m`, if
+raised to `e` modulo `n` it is `c`, and `Fault` otherwise. -/
+theorem fault_check_spec (key : mid.rsa_priv.RsaPrivateKey) (hinv : PrivKeyInv key)
+    (hPn : MontProducts key.public.n.used.val) (hifma : IfmaCheckReturns) (c : RsaInt) (hcu : c.used.val ≤ 128)
+    (hlt : wordsNat (lowWords c c.used) < wordsNat (lowWords key.public.n key.public.n.used)) (m : RsaInt)
+    (hmu : m.used = key.public.n.used) (hmv : wordsNat (lowWords m m.used) = keyRsasp1 key (wordsNat (lowWords c c.used)))
+    (hmz : wordsNat (m.words.val.drop m.used.val) = 0) :
+    (do
+      let pi ← low.posint.PosInt.Insts.CoreCloneClone.clone m
+      let r ← mid.rsa_pub.RsaPublicKey.public_op key.public pi
+      match r with
+      | core.result.Result.Ok c2 => do
+        let b2 ← low.posint.PosInt.equals c2 c
+        let b3 ← low.ct.into_public b2
+        if b3 then ok (core.result.Result.Ok m) else ok (core.result.Result.Err error.Error.Fault)
+      | core.result.Result.Err _ => ok (core.result.Result.Err error.Error.Fault)) ⦃ r =>
+        PrivateOpResult key c r ⦄ := by
+  have hpub := hinv.1
+  obtain ⟨⟨hnk2, hnk, -⟩, -, -, -, -, -, hp1, hq1, hn, -⟩ := hinv
+  have hS : keyRsasp1 key (wordsNat (lowWords c c.used)) < wordsNat (lowWords key.public.n key.public.n.used) := by
+    rw [hn]; exact rsasp1Crt_lt _ _ _ _ _ _ (by omega) (by omega)
+  step with clone_spec as ⟨pi, hpi⟩
+  subst hpi
+  step with public_op_spec key.public hpub hPn hifma pi (by rw [hmu]; exact hnk) hmz as ⟨r, hr⟩
+  split
+  · rename_i c2
+    obtain ⟨-, hc2u, hc2v⟩ := hr
+    step with equals_spec c2 c (by rw [hc2u]; exact hnk) hcu as ⟨b2, hb2⟩
+    unfold low.ct.into_public
+    simp only [bind_ok]
+    have hc2 : wordsNat (lowWords c2 c2.used) = keyRsasp1 key (wordsNat (lowWords c c.used)) ^
+        key.public.e.val % wordsNat (lowWords key.public.n key.public.n.used) := by
+      rw [hc2u, hc2v, ← hmv, hmu]
+    split
+    · rename_i heq
+      rw [hb2, decide_eq_true_iff, hc2] at heq
+      simp only [WP.spec_ok]
+      exact ⟨hlt, hmu, hmv, heq⟩
+    · rename_i hne
+      rw [hb2, decide_eq_true_iff, hc2] at hne
+      simp only [WP.spec_ok]
+      exact Or.inr ⟨rfl, hlt, hne⟩
+  · exfalso
+    rw [hmv] at hr
+    omega
+
+/-- RSASP1 by the CRT, checked, on x86_64: by pyca/verified-garbage's IFMA
+CRT where `IfmaCrt::new` set it up, and otherwise, `hcrt`, by rind's for
+primes of 16 and 32 words with BMI2 and ADX where the dual RSAZ does not run.
+`private_op` refuses with `WrongLength` a `c` not below `n`, and otherwise
+returns RSASP1 of `c`, `s` with `s^e mod n = c`, or refuses with `Fault` where
+`s^e mod n ≠ c`. A valid key rules that out and a fault does not: two primes,
+dP and dQ inverting e modulo p - 1 and q - 1, and qInv inverting q modulo p.
+`PrivKeyInv` states none of those relations. `new` checks all but primality,
+so a key it accepts with composite factors can still refuse some `c`. -/
 theorem private_op_spec (havx : ∃ t, low.x86_64.cpu.HaveAvx2.check = ok t)
     (t : low.x86_64.cpu.HaveBmi2Adx) (hadx : low.x86_64.cpu.HaveBmi2Adx.check = ok (some t))
     (hifma : IfmaCheckReturns) (key : mid.rsa_priv.RsaPrivateKey) (hinv : PrivKeyInv key)
-    (hP : MontProducts key.p.used.val) (hPn : MontProducts key.public.n.used.val)
-    (hk : key.p.used.val = 16 ∨ key.p.used.val = 32) (hpair : NoRsazPair key.p.used.val)
-    (hw : key.ifma.w = 0#usize) (c : RsaInt) (hcu : c.used.val ≤ 128) :
+    (hPn : MontProducts key.public.n.used.val)
+    (hcrt : key.ifma.w = 0#usize → MontProducts key.p.used.val ∧
+      (key.p.used.val = 16 ∨ key.p.used.val = 32) ∧ NoRsazPair key.p.used.val)
+    (c : RsaInt) (hcu : c.used.val ≤ 128) (hcz : wordsNat (c.words.val.drop c.used.val) = 0) :
     mid.rsa_priv.RsaPrivateKey.private_op key c ⦃ r => PrivateOpResult key c r ⦄ := by
-  have hpub := hinv.1
-  obtain ⟨hnk2, hnk, -⟩ := hpub
+  obtain ⟨hnk2, hnk, -⟩ := hinv.1
   unfold mid.rsa_priv.RsaPrivateKey.private_op
   step with less_than_spec c key.public.n hcu hnk as ⟨b, hb⟩
   split
@@ -610,31 +838,38 @@ theorem private_op_spec (havx : ∃ t, low.x86_64.cpu.HaveAvx2.check = ok t)
     have hlt : wordsNat (lowWords c c.used) < wordsNat (lowWords key.public.n key.public.n.used) := by
       simpa [hb] using hlt
     unfold low.x86_64.rsa_ifma.IfmaCrt.runs
-    simp only [hw, bne_self_eq_false, bind_ok, Bool.false_eq_true, ↓reduceIte]
-    step with crt_spec havx t hadx key hinv hP hk hpair c hcu hlt as ⟨m, hmu, hmv, hmN, hmz⟩
-    step with clone_spec as ⟨pi, hpi⟩
-    subst hpi
-    step with public_op_spec key.public hinv.1 hPn hifma pi (by rw [hmu]; exact hnk) hmz as ⟨r, hr⟩
-    split
-    · rename_i c2
-      obtain ⟨-, hc2u, hc2v⟩ := hr
-      step with equals_spec c2 c (by rw [hc2u]; exact hnk) hcu as ⟨b2, hb2⟩
-      unfold low.ct.into_public
-      simp only [bind_ok]
-      have hc2 : wordsNat (lowWords c2 c2.used) = keyRsasp1 key (wordsNat (lowWords c c.used)) ^
-          key.public.e.val % wordsNat (lowWords key.public.n key.public.n.used) := by
-        rw [hc2u, hc2v, ← hmv, hmu]
-      split
-      · rename_i heq
-        rw [hb2, decide_eq_true_iff, hc2] at heq
-        simp only [WP.spec_ok]
-        exact ⟨hlt, hmu, hmv, heq⟩
-      · rename_i hne
-        rw [hb2, decide_eq_true_iff, hc2] at hne
-        simp only [WP.spec_ok]
-        exact Or.inr ⟨rfl, hlt, hne⟩
-    · exfalso
-      omega
+    by_cases hw : key.ifma.w = 0#usize
+    · simp only [hw, bne_self_eq_false, bind_ok, Bool.false_eq_true, ↓reduceIte]
+      obtain ⟨hP, hk, hpair⟩ := hcrt hw
+      step with crt_spec havx t hadx key hinv hP hk hpair c hcu hlt as ⟨m, hmu, hmv, _, hmz⟩
+      exact fault_check_spec key hinv hPn hifma c hcu hlt m hmu hmv hmz
+    · simp only [bind_ok]
+      rw [ite_eq_left (by simpa [bne_iff_ne] using hw)]
+      step with crt_ifma_spec key hinv hw c hcz hlt as ⟨r, hr⟩
+      cases r with
+      | Err e => exact hr.elim
+      | Ok m =>
+      obtain ⟨hmu, hmv⟩ := hr
+      simp only [core.result.Result.Insts.CoreOpsTry.branch, bind_ok]
+      have hmR : wordsNat m.words.val < 2 ^ (64 * m.used.val) := by
+        rw [hmv, hmu]
+        have := wordsNat_lt' (lowWords key.public.n key.public.n.used)
+        rw [lowWords_length _ hnk] at this
+        refine lt_trans ?_ this
+        obtain ⟨-, -, -, -, -, -, hp1, hq1, hn, -⟩ := hinv
+        rw [hn]
+        exact rsasp1Crt_lt _ _ _ _ _ _ (by omega) (by omega)
+      have hml : wordsNat (lowWords m m.used) = wordsNat m.words.val := by
+        rw [lowWords, wordsNat_take_mod, Nat.mod_eq_of_lt hmR]
+      have hmz : wordsNat (m.words.val.drop m.used.val) = 0 := by
+        have hsplit := wordsNat_take_drop m.words.val m.used.val
+        rw [show wordsNat (List.take m.used.val m.words.val) = wordsNat m.words.val from hml] at hsplit
+        have hpos : 0 < 2 ^ (64 * (List.take m.used.val m.words.val).length) := by positivity
+        rcases Nat.mul_eq_zero.mp (show 2 ^ (64 * (List.take m.used.val m.words.val).length) *
+          wordsNat (List.drop m.used.val m.words.val) = 0 by omega) with h0 | h0
+        · omega
+        · exact h0
+      exact fault_check_spec key hinv hPn hifma c hcu hlt m hmu (hml.trans hmv) hmz
   · rename_i hge
     have hge : wordsNat (lowWords key.public.n key.public.n.used) ≤ wordsNat (lowWords c c.used) := by
       simpa [hb] using hge
@@ -642,16 +877,16 @@ theorem private_op_spec (havx : ∃ t, low.x86_64.cpu.HaveAvx2.check = ok t)
     exact Or.inl ⟨rfl, hge⟩
 
 /-- `private_op_spec` for RSA-2048, primes of 16 words and a modulus of 32,
-with BMI2 and ADX: the Montgomery products at both widths are s2n-bignum's,
-and the dual RSAZ never takes 16 words. -/
+with BMI2 and ADX, by either CRT: the Montgomery products at both widths are
+s2n-bignum's, and the dual RSAZ never takes 16 words. -/
 theorem private_op_rsa2048_spec (havx : ∃ t, low.x86_64.cpu.HaveAvx2.check = ok t)
     (t : low.x86_64.cpu.HaveBmi2Adx) (hadx : low.x86_64.cpu.HaveBmi2Adx.check = ok (some t))
     (hifma : IfmaCheckReturns) (key : mid.rsa_priv.RsaPrivateKey) (hinv : PrivKeyInv key)
-    (hk : key.p.used.val = 16) (hn : key.public.n.used.val = 32) (hw : key.ifma.w = 0#usize)
-    (c : RsaInt) (hcu : c.used.val ≤ 128) :
+    (hk : key.p.used.val = 16) (hn : key.public.n.used.val = 32)
+    (c : RsaInt) (hcu : c.used.val ≤ 128) (hcz : wordsNat (c.words.val.drop c.used.val) = 0) :
     mid.rsa_priv.RsaPrivateKey.private_op key c ⦃ r => PrivateOpResult key c r ⦄ :=
-  private_op_spec havx t hadx hifma key hinv (karatsuba_products (some t) hadx rfl (Or.inl hk))
-    (karatsuba_products (some t) hadx rfl (Or.inr hn)) (Or.inl hk) (Or.inl ⟨by omega, by omega, hifma⟩)
-    hw c hcu
+  private_op_spec havx t hadx hifma key hinv (karatsuba_products (some t) hadx rfl (Or.inr hn))
+    (fun _ => ⟨karatsuba_products (some t) hadx rfl (Or.inl hk), Or.inl hk,
+      Or.inl ⟨by omega, by omega, hifma⟩⟩) c hcu hcz
 
 end rind.x86_64

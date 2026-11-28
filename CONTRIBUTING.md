@@ -16,9 +16,17 @@ revisions it pins, so a plain clone runs every test. `SLOW_TESTS=1` adds
 the large sets, such as CCTV's million ML-KEM vectors, which the nightly
 `build` workflow runs on every CPU tier.
 
-Run performance benchmarks:
+`cargo bench` runs each benchmark once, as a check. The benchmarks are
+[swole](https://github.com/kixel-ai/swole) `#[bench]` functions, and the swole
+that `flake.nix` pins times them. From the dev shell, time a change's
+benchmarks paired with main's, on any host:
 ```shell
-cargo bench
+nix run .#swole -- bench main -- -p rind-bench --bench sha2
+```
+
+On x86_64 Linux with ADX (Broadwell or later), count a change's instructions against main's under Valgrind, as the weekly bench does ([TESTING.md](TESTING.md#scheduled-workflows) says what it counts):
+```shell
+nix develop .#bench --command swole sim main -- -p rind-bench --bench sha2
 ```
 
 [BENCHMARKS.md](BENCHMARKS.md#updating-this-report) says how to refresh the benchmark report.
@@ -32,17 +40,30 @@ A change to rind's private code under `rind/src/low/` skips its dependents, and
 one to `rind/src/{low,mid,high}/` runs only rind's tests for the primitive
 families it touches, by the map in `admin/test-scope.toml`; a test added to
 `rind/tests/`, or a primitive's new file, needs its entry there, which `just
-check` checks. `just ci` runs CI's whole gate over the same diff,
-adding the other targets' builds, the docs, and the cross, MSRV, wasm,
-adapter, and constant-time modules. Both run three modules at a time
-(`sh/dispatch.sh` lists the `CHECK_*` variables that change that); the
+check` checks. `just ci` runs the PR check's gate over the same diff, adding
+the Rust targets' other builds and the docs, the site, the semver marks, the
+mutants pins, and `admin/binary-size`, which reports in the job summary what
+the diff does to rind's bytes in two small programs, passing whatever the
+change. `just ci --all` (`just gate`) runs
+every module over the whole tree, the cross, MSRV, wasm, no-std, adapter-API,
+constant-time, structure, Python, Dart, OpenSSL, and patch modules among
+them, which gate no merge and run nightly; `CHECK_MODULES=cross just ci` runs
+one over the diff. Each runs three modules at a time (`sh/dispatch.sh` lists
+the `CHECK_*` variables that change that); the
 scheduled workflows' tools are in [TESTING.md](TESTING.md#running-the-tools).
 
 Both build their tests under the `test-fast` profile in `Cargo.toml`, a lightly
 optimized dev build with assertions and overflow checks on, since the slowest
-tests run minutes at `opt-level = 0`. For a bare test run, pass it as
-`cargo nextest run --cargo-profile test-fast`; `admin/ctgrind` and the other
-dev builds stay unoptimized.
+tests run minutes at `opt-level = 0`; `rind` itself takes `opt-level = 2`
+there, for its AVX2 field arithmetic. For a bare test run, pass it as
+`cargo nextest run --cargo-profile test-fast`, as `build.yml`'s CPU tiers do;
+`admin/ctgrind` and the other dev builds stay unoptimized.
+
+Run Rust tests with `cargo nextest run`, never plain `cargo test`:
+`.config/nextest.toml` ends a test that runs past its profile's hang bound,
+about twice the slowest healthy test, so a deadlock fails the run instead of
+holding it until the job's timeout. nextest runs no doc tests, so run those as
+`timeout 5m cargo test --doc`.
 
 `cargo vet --locked` fails when the published rind crate's dependencies gain
 a crate or version no audit covers, as [SECURITY.md](SECURITY.md#supply-chain)
@@ -74,17 +95,17 @@ Have at least these sections:
 
 Run `just check` before every push; `pr-check.yml` runs `just ci` on the PR.
 
-The scheduled workflows run as [TESTING.md](TESTING.md#scheduled-workflows) lists, or on demand with `gh workflow run <name> --ref <branch>`, a `bench` or `ctgrind` dispatch naming only what the change reaches. None of them runs on a pull request, where only what gates a merge runs: dispatch the ones your change reaches on your branch before review, and mutate a diff with `admin/mutants --in-diff`. `prove` also runs on each push to main that reaches it, checking the bytes, and the HOL Light and Lean proofs and the cosimulation for inputs main has not passed. Its proofs gate no merge: a failure on main alerts, and a release waits for them (see [Releases](#releases)). `admin/mutants` runs a whole campaign only on GitHub-hosted runners.
+The scheduled workflows run as [TESTING.md](TESTING.md#scheduled-workflows) lists, or on demand with `gh workflow run <name> --ref <branch>`, a `bench` or `ctgrind` dispatch naming only what the change reaches. None of them runs on a pull request, where only the PR check's gate runs: dispatch the ones your change reaches on your branch before review, and mutate a diff with `admin/mutants --in-diff`. `prove` also runs on each push to main that reaches it, checking the bytes, and the HOL Light and Lean proofs and the cosimulation for inputs main has not passed. Its proofs gate no merge: a failure on main alerts, and a release waits for them (see [Releases](#releases)). `admin/mutants` runs a whole campaign only on GitHub-hosted runners.
 PRs land on `main` through GitHub's merge queue, one PR at a time, as squash commits.
 Queue the reviewed head with `quest merge <pr> --land <sha>` (`/quest-merge` does this).
-`pr-check.yml` runs `just ci` over the PR's diff on a GitHub-hosted runner, so a check that the PR's own changes fail shows red here first; it does not rerun when main moves, so the queue can still fail a group it passed. It is advisory, since main's ruleset requires only the queue's build.
+`pr-check.yml` runs `just ci` over the PR's diff on a GitHub-hosted runner, so a check that the PR's own changes fail shows red here first; it does not rerun when main moves, so the queue can still fail a group it passed. It is advisory, since main's ruleset requires only the queue's builds.
 On release-plz's release PR it runs only the site's check, over the whole site, since the queue's `just ci` and `just release-check` still run on it.
 `pr-macos.yml` runs rind's debug tests on a GitHub-hosted Apple-silicon runner when a PR changes `rind/`, the root `Cargo.toml`, or `Cargo.lock`, so a macOS-only break shows on its PR rather than first in the nightly `build`; it is advisory too.
 release-plz's release PR skips it, since the queue's `just ci` and `just release-check` still run on it.
 The required `Queue build / Build` check skips on pull requests; the merge group runs `just ci` against the merge group's base on the self-hosted runner, and that job's own result decides the group.
-Beside it, `Queue build / Build aarch64 macOS` and `Queue build / Build aarch64 Linux` run the group's `rs` module, its tests, natively on aarch64, in two VMs on the maintainer's Mac mini (`admin/mac-mini-runners`), and skip on pull requests the same way; once main's ruleset requires their contexts, each fails the group as `Build` does.
-When the group's diff touches the inputs of `regenerate` or of `prove`, that build also runs `regenerate`, or `prove`'s x86_64 `vg`, beside its other checks (`CHECK_QUEUE` in `sh/dispatch.sh`), so a change cannot land that breaks them on `main`; `vg`'s aarch64 job runs only nightly. When the group's diff reaches x86_64 code, the build also runs the tests under the Intel SDE models `admin/x86-cpu` lists (`admin/x86-cpu all`): in full on one model for each distinct set of dispatch paths, and each other model's assertion of its paths.
-That build lives in `.github/workflows/queue-build.yml`, which the merge group calls from `main`, so a PR's edit to it runs only after the PR lands.
+It runs only the host's Rust checks and the quick repository lints (`CHECK_QUEUE` in `sh/dispatch.sh`), leaving the PR check's slower modules to the PR, and every other check, the Intel SDE models, `regenerate`, and `prove` among them, to its schedule: a break two PRs make only together shows there, on `main`, and is fixed there. It uploads Cargo's build timings as the `cargo-timings` artifact.
+Beside it, `Queue build / Build aarch64 Linux` runs the group's `rs` module, its tests, natively on aarch64, in a VM on the maintainer's Mac mini (`admin/mac-mini-runners`), and skips on pull requests the same way; main's ruleset requires its context too, so it fails the group as `Build` does.
+These builds live in `.github/workflows/queue-build.yml`, which the merge group calls from `main`, so a PR's edit to it runs only after the PR lands.
 A PR the queue drops for a failed build or a conflict gets a Codex fixer, which requeues it or hands it back with a diagnosis.
 The admin bypass of `main`'s ruleset is for emergencies.
 

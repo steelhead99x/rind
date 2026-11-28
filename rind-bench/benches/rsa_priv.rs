@@ -1,13 +1,22 @@
+//! RSA signing, OAEP decryption, and key loading, the private-key side.
+
 #[cfg(target_arch = "xtensa")]
 fn main() {}
 
 #[cfg(not(target_arch = "xtensa"))]
-mod criterion;
+mod common;
+
 #[cfg(not(target_arch = "xtensa"))]
 use std::hint::black_box;
 
 #[cfg(not(target_arch = "xtensa"))]
-use criterion::{Criterion, Throughput, criterion_group, criterion_main};
+use common::{Dit, dit};
+
+#[cfg(not(target_arch = "xtensa"))]
+const PRIVATE_KEY_2048: &[u8] = include_bytes!("../../rind/src/high/rsa/rsa2048.der");
+
+#[cfg(not(target_arch = "xtensa"))]
+const MESSAGE: &[u8] = &[0; 20];
 
 /// libcrux's RSA-PSS key, which holds the modulus and private exponent
 /// alone, so it signs without the CRT.
@@ -56,475 +65,543 @@ fn vg_key(private_key: &[u8]) -> verified_garbage::rsa::PrivateKey {
     .unwrap()
 }
 
+#[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
 #[cfg(not(target_arch = "xtensa"))]
-fn rsa2048_pkcs1_sha256_sign(c: &mut Criterion) {
-    let private_key = include_bytes!("../../rind/src/high/rsa/rsa2048.der");
-    let message =
-        b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00";
-
-    let mut group = c.benchmark_group("rsa2048-pkcs1-sha256-sign");
-    group.throughput(Throughput::Elements(1));
-
-    group.bench_function("ring", |b| {
-        use ring::{rand, rsa, signature};
-
-        let key = rsa::KeyPair::from_der(private_key).unwrap();
-        let rng = rand::SystemRandom::new();
-
-        b.iter(|| {
-            let mut signature = [0u8; 256];
-            black_box(key.sign(&signature::RSA_PKCS1_SHA256, &rng, message, &mut signature))
-                .unwrap();
-        })
-    });
-
-    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
-    group.bench_function("aws-lc-rs", |b| {
-        use aws_lc_rs::{rand, rsa, signature};
-
-        let key = rsa::KeyPair::from_der(private_key).unwrap();
-        let rng = rand::SystemRandom::new();
-
-        b.iter(|| {
-            let mut signature = [0u8; 256];
-            black_box(key.sign(&signature::RSA_PKCS1_SHA256, &rng, message, &mut signature))
-                .unwrap();
-        })
-    });
-
-    group.bench_function("rustcrypto", |b| {
-        use rsa::pkcs1::DecodeRsaPrivateKey;
-        use rsa::signature::Signer;
-        let key = rsa::pkcs1v15::SigningKey::<sha2::Sha256>::new(
-            rsa::PrivateKey::from_pkcs1_der(private_key).unwrap(),
-        );
-
-        b.iter(|| {
-            black_box(key.sign(message));
-        });
-    });
-
-    group.bench_function("rind", |b| {
-        let _dit = criterion::rind_dit();
-        use rind::rsa::{KeyPair, sign};
-        let key = KeyPair::from_pkcs1(private_key).unwrap();
-
-        b.iter(|| {
-            black_box(key.sign(&sign::PKCS1_SHA256, message)).unwrap();
-        })
-    });
-
-    // verified-garbage signs a digest, so its row hashes the message first,
-    // as rind's sign does inside.
-    group.bench_function("verified-garbage", |b| {
-        use rind::rsa::{KeyPair, sign};
-        use verified_garbage::hashes::sha256::Sha256;
-        use verified_garbage::rsa::pkcs1_sig::Hash;
-        let key = vg_key(private_key);
-        let theirs = key
-            .sign_pkcs1v15(&Sha256::digest(message), Hash::Sha256)
-            .unwrap();
-        let ours = KeyPair::from_pkcs1(private_key)
-            .unwrap()
-            .sign(&sign::PKCS1_SHA256, message)
-            .unwrap();
-        assert_eq!(theirs, ours.as_ref());
-
-        b.iter(|| {
-            let digest = Sha256::digest(message);
-            black_box(key.sign_pkcs1v15(&digest, Hash::Sha256)).unwrap();
-        })
-    });
-
-    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-    group.bench_function("graviola", |b| {
-        let key = graviola::signing::rsa::SigningKey::from_pkcs1_der(private_key).unwrap();
-
-        b.iter(|| {
-            let mut signature = [0u8; 256];
-            black_box(key.sign_pkcs1_sha256(&mut signature, message).unwrap());
-        })
-    });
-
-    #[cfg(all(
-        feature = "__bench_openssl",
-        target_family = "unix",
-        not(target_arch = "xtensa")
-    ))]
-    group.bench_function("openssl", |b| {
-        use openssl::hash::MessageDigest;
-        use openssl::pkey::PKey;
-        use openssl::rsa::Rsa;
-        use openssl::sign::Signer;
-        let key = PKey::from_rsa(Rsa::private_key_from_der(private_key).unwrap()).unwrap();
-
-        b.iter(|| {
-            let mut signer = Signer::new(MessageDigest::sha256(), &key).unwrap();
-            black_box(signer.sign_oneshot_to_vec(message).unwrap());
-        })
-    });
+fn openssl_key() -> openssl::pkey::PKey<openssl::pkey::Private> {
+    use openssl::pkey::PKey;
+    use openssl::rsa::Rsa;
+    PKey::from_rsa(Rsa::private_key_from_der(PRIVATE_KEY_2048).unwrap()).unwrap()
 }
 
 #[cfg(not(target_arch = "xtensa"))]
-fn rsa2048_pss_sha256_sign(c: &mut Criterion) {
-    let private_key = include_bytes!("../../rind/src/high/rsa/rsa2048.der");
-    let message =
-        b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00";
+fn ring_key() -> (ring::rsa::KeyPair, ring::rand::SystemRandom) {
+    (
+        ring::rsa::KeyPair::from_der(PRIVATE_KEY_2048).unwrap(),
+        ring::rand::SystemRandom::new(),
+    )
+}
 
-    let mut group = c.benchmark_group("rsa2048-pss-sha256-sign");
-    group.throughput(Throughput::Elements(1));
+#[cfg(not(target_arch = "xtensa"))]
+fn aws_key() -> (aws_lc_rs::rsa::KeyPair, aws_lc_rs::rand::SystemRandom) {
+    (
+        aws_lc_rs::rsa::KeyPair::from_der(PRIVATE_KEY_2048).unwrap(),
+        aws_lc_rs::rand::SystemRandom::new(),
+    )
+}
 
-    group.bench_function("ring", |b| {
-        use ring::{rand, rsa, signature};
+#[cfg(not(target_arch = "xtensa"))]
+fn rind_key() -> Dit<rind::rsa::KeyPair> {
+    Dit::hold(rind::rsa::KeyPair::from_pkcs1(PRIVATE_KEY_2048).unwrap())
+}
 
-        let key = rsa::KeyPair::from_der(private_key).unwrap();
-        let rng = rand::SystemRandom::new();
+#[cfg(graviola)]
+#[cfg(not(target_arch = "xtensa"))]
+fn graviola_key() -> graviola::signing::rsa::SigningKey {
+    graviola::signing::rsa::SigningKey::from_pkcs1_der(PRIVATE_KEY_2048).unwrap()
+}
 
-        b.iter(|| {
-            let mut signature = [0u8; 256];
-            black_box(key.sign(&signature::RSA_PSS_SHA256, &rng, message, &mut signature)).unwrap();
-        })
-    });
+#[cfg(not(target_arch = "xtensa"))]
+mod rsa2048_pkcs1_sha256_sign {
+    use swole::bench;
 
-    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
-    group.bench_function("aws-lc-rs", |b| {
-        use aws_lc_rs::{rand, rsa, signature};
+    use super::*;
 
-        let key = rsa::KeyPair::from_der(private_key).unwrap();
-        let rng = rand::SystemRandom::new();
+    #[bench(setup = ring_key)]
+    fn ring((key, rng): &(ring::rsa::KeyPair, ring::rand::SystemRandom)) -> [u8; 256] {
+        let mut signature = [0u8; 256];
+        key.sign(
+            &ring::signature::RSA_PKCS1_SHA256,
+            rng,
+            MESSAGE,
+            &mut signature,
+        )
+        .unwrap();
+        signature
+    }
 
-        b.iter(|| {
-            let mut signature = [0u8; 256];
-            black_box(key.sign(&signature::RSA_PSS_SHA256, &rng, message, &mut signature)).unwrap();
-        })
-    });
+    #[bench(setup = aws_key)]
+    fn aws_lc_rs(
+        (key, rng): &(aws_lc_rs::rsa::KeyPair, aws_lc_rs::rand::SystemRandom),
+    ) -> [u8; 256] {
+        let mut signature = [0u8; 256];
+        key.sign(
+            &aws_lc_rs::signature::RSA_PKCS1_SHA256,
+            rng,
+            MESSAGE,
+            &mut signature,
+        )
+        .unwrap();
+        signature
+    }
 
-    group.bench_function("rind", |b| {
-        let _dit = criterion::rind_dit();
-        use rind::rsa::{KeyPair, sign};
-        let key = KeyPair::from_pkcs1(private_key).unwrap();
+    fn rustcrypto_key() -> rsa::pkcs1v15::SigningKey<sha2::Sha256> {
+        use rsa::pkcs1::DecodeRsaPrivateKey;
+        rsa::pkcs1v15::SigningKey::new(rsa::PrivateKey::from_pkcs1_der(PRIVATE_KEY_2048).unwrap())
+    }
 
-        b.iter(|| {
-            black_box(key.sign(&sign::PSS_SHA256, message)).unwrap();
-        })
-    });
+    #[bench(setup = rustcrypto_key)]
+    fn rustcrypto(key: &rsa::pkcs1v15::SigningKey<sha2::Sha256>) {
+        use rsa::signature::Signer;
+        black_box(key.sign(MESSAGE));
+    }
 
-    // Hashing the message first, as above.
-    group.bench_function("verified-garbage", |b| {
-        use rind::rsa::{KeyPair, verify};
+    #[bench(setup = rind_key)]
+    fn rind(key: &Dit<rind::rsa::KeyPair>) {
+        black_box(key.sign(&rind::rsa::sign::PKCS1_SHA256, MESSAGE).unwrap());
+    }
+
+    /// verified-garbage's key, after checking it signs as rind does.
+    fn vg_input() -> verified_garbage::rsa::PrivateKey {
+        use verified_garbage::hashes::sha256::Sha256;
+        use verified_garbage::rsa::pkcs1_sig::Hash;
+        let key = vg_key(PRIVATE_KEY_2048);
+        let theirs = key
+            .sign_pkcs1v15(&Sha256::digest(MESSAGE), Hash::Sha256)
+            .unwrap();
+        let ours = rind::rsa::KeyPair::from_pkcs1(PRIVATE_KEY_2048)
+            .unwrap()
+            .sign(&rind::rsa::sign::PKCS1_SHA256, MESSAGE)
+            .unwrap();
+        assert_eq!(theirs, ours.as_ref());
+        key
+    }
+
+    // verified-garbage signs a digest, so its row hashes the message first,
+    // as rind's sign does inside.
+    #[bench(setup = vg_input)]
+    fn verified_garbage(key: &verified_garbage::rsa::PrivateKey) {
+        use verified_garbage::hashes::sha256::Sha256;
+        use verified_garbage::rsa::pkcs1_sig::Hash;
+        let digest = Sha256::digest(MESSAGE);
+        black_box(key.sign_pkcs1v15(&digest, Hash::Sha256).unwrap());
+    }
+
+    #[cfg(graviola)]
+    #[bench(setup = graviola_key)]
+    fn graviola(key: &graviola::signing::rsa::SigningKey) -> [u8; 256] {
+        let mut signature = [0u8; 256];
+        key.sign_pkcs1_sha256(&mut signature, MESSAGE).unwrap();
+        signature
+    }
+
+    #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+    #[bench(setup = openssl_key)]
+    fn openssl(key: &openssl::pkey::PKey<openssl::pkey::Private>) {
+        use openssl::hash::MessageDigest;
+        use openssl::sign::Signer;
+        let mut signer = Signer::new(MessageDigest::sha256(), key).unwrap();
+        black_box(signer.sign_oneshot_to_vec(MESSAGE).unwrap());
+    }
+}
+
+#[cfg(not(target_arch = "xtensa"))]
+mod rsa2048_pss_sha256_sign {
+    use swole::bench;
+
+    use super::*;
+
+    #[bench(setup = ring_key)]
+    fn ring((key, rng): &(ring::rsa::KeyPair, ring::rand::SystemRandom)) -> [u8; 256] {
+        let mut signature = [0u8; 256];
+        key.sign(
+            &ring::signature::RSA_PSS_SHA256,
+            rng,
+            MESSAGE,
+            &mut signature,
+        )
+        .unwrap();
+        signature
+    }
+
+    #[bench(setup = aws_key)]
+    fn aws_lc_rs(
+        (key, rng): &(aws_lc_rs::rsa::KeyPair, aws_lc_rs::rand::SystemRandom),
+    ) -> [u8; 256] {
+        let mut signature = [0u8; 256];
+        key.sign(
+            &aws_lc_rs::signature::RSA_PSS_SHA256,
+            rng,
+            MESSAGE,
+            &mut signature,
+        )
+        .unwrap();
+        signature
+    }
+
+    #[bench(setup = rind_key)]
+    fn rind(key: &Dit<rind::rsa::KeyPair>) {
+        black_box(key.sign(&rind::rsa::sign::PSS_SHA256, MESSAGE).unwrap());
+    }
+
+    fn vg_sign(key: &verified_garbage::rsa::PrivateKey) -> Vec<u8> {
         use verified_garbage::hashes::sha256::Sha256;
         use verified_garbage::rsa::pss::Hash;
-        let key = vg_key(private_key);
-        let sign = || key.sign_pss(&Sha256::digest(message), Hash::Sha256, Hash::Sha256, 32);
-        KeyPair::from_pkcs1(private_key)
+        key.sign_pss(&Sha256::digest(MESSAGE), Hash::Sha256, Hash::Sha256, 32)
+            .unwrap()
+    }
+
+    /// verified-garbage's key, after checking rind verifies what it signs.
+    fn vg_input() -> verified_garbage::rsa::PrivateKey {
+        let key = vg_key(PRIVATE_KEY_2048);
+        rind::rsa::KeyPair::from_pkcs1(PRIVATE_KEY_2048)
             .unwrap()
             .public_key()
-            .verify(&verify::PSS_SHA256, message, &sign().unwrap())
+            .verify(&rind::rsa::verify::PSS_SHA256, MESSAGE, &vg_sign(&key))
             .unwrap();
+        key
+    }
 
-        b.iter(|| black_box(sign()).unwrap())
-    });
+    // Hashing the message first, as above.
+    #[bench(setup = vg_input)]
+    fn verified_garbage(key: &verified_garbage::rsa::PrivateKey) {
+        black_box(vg_sign(key));
+    }
 
-    group.bench_function("rustcrypto", |b| {
-        use getrandom::{SysRng, rand_core::UnwrapErr};
+    fn rustcrypto_key() -> rsa::pss::SigningKey<sha2::Sha256> {
         use rsa::pkcs1::DecodeRsaPrivateKey;
+        rsa::pss::SigningKey::new(rsa::PrivateKey::from_pkcs1_der(PRIVATE_KEY_2048).unwrap())
+    }
+
+    #[bench(setup = rustcrypto_key)]
+    fn rustcrypto(key: &rsa::pss::SigningKey<sha2::Sha256>) {
+        use getrandom::{SysRng, rand_core::UnwrapErr};
         use rsa::signature::RandomizedSigner;
-        let key = rsa::pss::SigningKey::<sha2::Sha256>::new(
-            rsa::PrivateKey::from_pkcs1_der(private_key).unwrap(),
-        );
+        black_box(key.sign_with_rng(&mut UnwrapErr(SysRng), MESSAGE));
+    }
 
-        b.iter(|| {
-            black_box(key.sign_with_rng(&mut UnwrapErr(SysRng), message));
-        });
-    });
+    #[cfg(graviola)]
+    #[bench(setup = graviola_key)]
+    fn graviola(key: &graviola::signing::rsa::SigningKey) -> [u8; 256] {
+        let mut signature = [0u8; 256];
+        key.sign_pss_sha256(&mut signature, MESSAGE).unwrap();
+        signature
+    }
 
-    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-    group.bench_function("graviola", |b| {
-        let key = graviola::signing::rsa::SigningKey::from_pkcs1_der(private_key).unwrap();
+    fn libcrux_input() -> libcrux_rsa::PrivateKey<256> {
+        libcrux_key(PRIVATE_KEY_2048)
+    }
 
-        b.iter(|| {
-            let mut signature = [0u8; 256];
-            black_box(key.sign_pss_sha256(&mut signature, message).unwrap());
-        })
-    });
+    #[bench(setup = libcrux_input)]
+    fn libcrux(key: &libcrux_rsa::PrivateKey<256>) -> [u8; 256] {
+        let mut salt = [0u8; 32];
+        getrandom::fill(&mut salt).unwrap();
+        let mut signature = [0u8; 256];
+        libcrux_rsa::sign_2048(
+            libcrux_rsa::DigestAlgorithm::Sha2_256,
+            key,
+            MESSAGE,
+            &salt,
+            &mut signature,
+        )
+        .unwrap();
+        signature
+    }
 
-    group.bench_function("libcrux", |b| {
-        let key = libcrux_key(private_key);
-
-        b.iter(|| {
-            let mut salt = [0u8; 32];
-            getrandom::fill(&mut salt).unwrap();
-            let mut signature = [0u8; 256];
-            libcrux_rsa::sign_2048(
-                libcrux_rsa::DigestAlgorithm::Sha2_256,
-                &key,
-                message,
-                &salt,
-                &mut signature,
-            )
-            .unwrap();
-            black_box(signature);
-        })
-    });
-
-    #[cfg(all(
-        feature = "__bench_openssl",
-        target_family = "unix",
-        not(target_arch = "xtensa")
-    ))]
-    group.bench_function("openssl", |b| {
+    #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+    #[bench(setup = openssl_key)]
+    fn openssl(key: &openssl::pkey::PKey<openssl::pkey::Private>) {
         use openssl::hash::MessageDigest;
-        use openssl::pkey::PKey;
-        use openssl::rsa::{Padding, Rsa};
+        use openssl::rsa::Padding;
         use openssl::sign::{RsaPssSaltlen, Signer};
-        let key = PKey::from_rsa(Rsa::private_key_from_der(private_key).unwrap()).unwrap();
-
-        b.iter(|| {
-            let mut signer = Signer::new(MessageDigest::sha256(), &key).unwrap();
-            signer.set_rsa_padding(Padding::PKCS1_PSS).unwrap();
-            signer
-                .set_rsa_pss_saltlen(RsaPssSaltlen::DIGEST_LENGTH)
-                .unwrap();
-            black_box(signer.sign_oneshot_to_vec(message).unwrap());
-        })
-    });
+        let mut signer = Signer::new(MessageDigest::sha256(), key).unwrap();
+        signer.set_rsa_padding(Padding::PKCS1_PSS).unwrap();
+        signer
+            .set_rsa_pss_saltlen(RsaPssSaltlen::DIGEST_LENGTH)
+            .unwrap();
+        black_box(signer.sign_oneshot_to_vec(MESSAGE).unwrap());
+    }
 }
 
 /// Signing at the other sizes, whose primes take a different Montgomery
 /// multiplication from RSA-2048's on some CPUs: 2056 bits for primes of an
 /// odd number of words, and 2560 for a multiple of four but not eight.
-#[cfg(not(target_arch = "xtensa"))]
-fn rsa_pkcs1_sha256_sign_sizes(c: &mut Criterion) {
-    let keys: [(u32, &[u8]); 6] = [
-        (
-            2056,
-            include_bytes!("../../rind/src/high/rsa/rsa2056.pkcs8.der"),
-        ),
-        (
-            2560,
-            include_bytes!("../../rind/src/high/rsa/rsa2560.pkcs8.der"),
-        ),
-        (
-            3072,
-            include_bytes!("../../rind/src/high/rsa/rsa3072.pkcs8.der"),
-        ),
-        (
-            4096,
-            include_bytes!("../../rind/src/high/rsa/rsa4096.pkcs8.der"),
-        ),
-        (
-            6144,
-            include_bytes!("../../rind/src/high/rsa/rsa6144.pkcs8.der"),
-        ),
-        (
-            8192,
-            include_bytes!("../../rind/src/high/rsa/rsa8192.pkcs8.der"),
-        ),
-    ];
-    let message = b"hello";
-    for (bits, private_key) in keys {
-        let mut group = c.benchmark_group(format!("rsa{bits}-pkcs1-sha256-sign"));
-        group.throughput(Throughput::Elements(1));
+macro_rules! sign_size {
+    ($name:ident, $pkcs8:literal $(, $ring:ident)?) => {
+        mod $name {
+            use super::*;
+            use swole::bench;
 
-        // ring signs only with primes of a multiple of 512 bits, and
-        // moduli of at most 4096.
-        if matches!(bits, 3072 | 4096) {
-            group.bench_function("ring", |b| {
-                use ring::{rand, rsa, signature};
-                let key = rsa::KeyPair::from_pkcs8(private_key).unwrap();
-                let rng = rand::SystemRandom::new();
-                let mut signature = vec![0u8; key.public().modulus_len()];
-                b.iter(|| {
-                    black_box(key.sign(
-                        &signature::RSA_PKCS1_SHA256,
-                        &rng,
-                        message,
-                        &mut signature,
-                    ))
+            const PRIVATE_KEY: &[u8] = include_bytes!($pkcs8);
+            const MESSAGE: &[u8] = b"hello";
+
+            $(
+                fn ring_key() -> (ring::rsa::KeyPair, ring::rand::SystemRandom, Vec<u8>) {
+                    let key = ring::rsa::KeyPair::from_pkcs8(PRIVATE_KEY).unwrap();
+                    let signature = vec![0u8; key.public().modulus_len()];
+                    (key, ring::rand::SystemRandom::new(), signature)
+                }
+
+                // ring signs only with primes of a multiple of 512 bits, and
+                // moduli of at most 4096.
+                #[bench(setup = ring_key)]
+                fn $ring(
+                    (key, rng, signature): &mut (
+                        ring::rsa::KeyPair,
+                        ring::rand::SystemRandom,
+                        Vec<u8>,
+                    ),
+                ) {
+                    key.sign(&ring::signature::RSA_PKCS1_SHA256, rng, MESSAGE, signature)
+                        .unwrap()
+                }
+            )?
+
+            fn aws_key() -> (aws_lc_rs::rsa::KeyPair, aws_lc_rs::rand::SystemRandom, Vec<u8>) {
+                let key = aws_lc_rs::rsa::KeyPair::from_pkcs8(PRIVATE_KEY).unwrap();
+                let signature = vec![0u8; key.public_modulus_len()];
+                (key, aws_lc_rs::rand::SystemRandom::new(), signature)
+            }
+
+            #[bench(setup = aws_key)]
+            fn aws_lc_rs(
+                (key, rng, signature): &mut (
+                    aws_lc_rs::rsa::KeyPair,
+                    aws_lc_rs::rand::SystemRandom,
+                    Vec<u8>,
+                ),
+            ) {
+                key.sign(&aws_lc_rs::signature::RSA_PKCS1_SHA256, rng, MESSAGE, signature)
+                    .unwrap()
+            }
+
+            fn rind_key() -> Dit<rind::rsa::KeyPair> {
+                Dit::hold(rind::rsa::KeyPair::from_pkcs8(PRIVATE_KEY).unwrap())
+            }
+
+            #[bench(setup = rind_key)]
+            fn rind(key: &Dit<rind::rsa::KeyPair>) {
+                black_box(key.sign(&rind::rsa::sign::PKCS1_SHA256, MESSAGE).unwrap());
+            }
+
+            /// verified-garbage's key, after checking it signs as rind does.
+            fn vg_input() -> verified_garbage::rsa::PrivateKey {
+                use verified_garbage::hashes::sha256::Sha256;
+                use verified_garbage::rsa::pkcs1_sig::Hash;
+                let key = vg_key(PRIVATE_KEY);
+                let ours = rind::rsa::KeyPair::from_pkcs8(PRIVATE_KEY)
+                    .unwrap()
+                    .sign(&rind::rsa::sign::PKCS1_SHA256, MESSAGE)
                     .unwrap();
-                })
-            });
+                let theirs = key
+                    .sign_pkcs1v15(&Sha256::digest(MESSAGE), Hash::Sha256)
+                    .unwrap();
+                assert_eq!(theirs, ours.as_ref());
+                key
+            }
+
+            // Hashing the message first, as above.
+            #[bench(setup = vg_input)]
+            fn verified_garbage(key: &verified_garbage::rsa::PrivateKey) {
+                use verified_garbage::hashes::sha256::Sha256;
+                use verified_garbage::rsa::pkcs1_sig::Hash;
+                let digest = Sha256::digest(MESSAGE);
+                black_box(key.sign_pkcs1v15(&digest, Hash::Sha256).unwrap());
+            }
         }
-        #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
-        group.bench_function("aws-lc-rs", |b| {
-            use aws_lc_rs::{rand, rsa, signature};
-
-            let key = rsa::KeyPair::from_pkcs8(private_key).unwrap();
-            let rng = rand::SystemRandom::new();
-            let mut signature = vec![0u8; key.public_modulus_len()];
-
-            b.iter(|| {
-                black_box(key.sign(&signature::RSA_PKCS1_SHA256, &rng, message, &mut signature))
-                    .unwrap();
-            })
-        });
-
-        group.bench_function("rind", |b| {
-            let _dit = criterion::rind_dit();
-            use rind::rsa::{KeyPair, sign};
-            let key = KeyPair::from_pkcs8(private_key).unwrap();
-
-            b.iter(|| {
-                black_box(key.sign(&sign::PKCS1_SHA256, message)).unwrap();
-            })
-        });
-
-        // Hashing the message first, as above.
-        group.bench_function("verified-garbage", |b| {
-            use rind::rsa::{KeyPair, sign};
-            use verified_garbage::hashes::sha256::Sha256;
-            use verified_garbage::rsa::pkcs1_sig::Hash;
-            let key = vg_key(private_key);
-            let ours = KeyPair::from_pkcs8(private_key)
-                .unwrap()
-                .sign(&sign::PKCS1_SHA256, message)
-                .unwrap();
-            let theirs = key
-                .sign_pkcs1v15(&Sha256::digest(message), Hash::Sha256)
-                .unwrap();
-            assert_eq!(theirs, ours.as_ref());
-
-            b.iter(|| {
-                let digest = Sha256::digest(message);
-                black_box(key.sign_pkcs1v15(&digest, Hash::Sha256)).unwrap();
-            })
-        });
-    }
+    };
 }
 
 #[cfg(not(target_arch = "xtensa"))]
-fn rsa2048_oaep_sha256_decrypt(c: &mut Criterion) {
-    // Encrypted here, since OAEP ciphertexts are randomized.
+sign_size!(
+    rsa2056_pkcs1_sha256_sign,
+    "../../rind/src/high/rsa/rsa2056.pkcs8.der"
+);
+#[cfg(not(target_arch = "xtensa"))]
+sign_size!(
+    rsa2560_pkcs1_sha256_sign,
+    "../../rind/src/high/rsa/rsa2560.pkcs8.der"
+);
+#[cfg(not(target_arch = "xtensa"))]
+sign_size!(
+    rsa3072_pkcs1_sha256_sign,
+    "../../rind/src/high/rsa/rsa3072.pkcs8.der",
+    ring
+);
+#[cfg(not(target_arch = "xtensa"))]
+sign_size!(
+    rsa4096_pkcs1_sha256_sign,
+    "../../rind/src/high/rsa/rsa4096.pkcs8.der",
+    ring
+);
+#[cfg(not(target_arch = "xtensa"))]
+sign_size!(
+    rsa6144_pkcs1_sha256_sign,
+    "../../rind/src/high/rsa/rsa6144.pkcs8.der"
+);
+#[cfg(not(target_arch = "xtensa"))]
+sign_size!(
+    rsa8192_pkcs1_sha256_sign,
+    "../../rind/src/high/rsa/rsa8192.pkcs8.der"
+);
+
+#[cfg(not(target_arch = "xtensa"))]
+mod rsa2048_oaep_sha256_decrypt {
     use rind::rsa::{DecryptingKey, OAEP_SHA256};
-    let private_key = include_bytes!("../../rind/src/high/rsa/rsa2048.der");
-    let message = [0u8; 32];
-    let ciphertext = DecryptingKey::from_pkcs1(&OAEP_SHA256, private_key)
-        .unwrap()
-        .public_key()
-        .encrypt(&message, b"")
-        .unwrap();
-    let ciphertext = ciphertext.as_ref();
+    use swole::bench;
 
-    let mut group = c.benchmark_group("rsa2048-oaep-sha256-decrypt");
-    group.throughput(Throughput::Elements(1));
+    use super::*;
 
-    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
-    group.bench_function("aws-lc-rs", |b| {
-        use aws_lc_rs::rsa::{
-            OAEP_SHA256_MGF1SHA256, OaepPrivateDecryptingKey, PrivateDecryptingKey,
-        };
-        let pkcs8 = DecryptingKey::from_pkcs1(&OAEP_SHA256, private_key)
+    const PLAINTEXT: [u8; 32] = [0; 32];
+
+    fn private_key() -> DecryptingKey {
+        DecryptingKey::from_pkcs1(&OAEP_SHA256, PRIVATE_KEY_2048).unwrap()
+    }
+
+    /// Encrypted here, since OAEP ciphertexts are randomized.
+    fn ciphertext() -> Vec<u8> {
+        private_key()
+            .public_key()
+            .encrypt(&PLAINTEXT, b"")
             .unwrap()
-            .to_pkcs8();
+            .as_ref()
+            .to_vec()
+    }
+
+    fn aws_key() -> (aws_lc_rs::rsa::OaepPrivateDecryptingKey, Vec<u8>) {
+        use aws_lc_rs::rsa::{OaepPrivateDecryptingKey, PrivateDecryptingKey};
+        let pkcs8 = private_key().to_pkcs8();
         let key = OaepPrivateDecryptingKey::new(
             PrivateDecryptingKey::from_pkcs8(pkcs8.as_ref()).unwrap(),
         )
         .unwrap();
+        (key, ciphertext())
+    }
 
-        b.iter(|| {
-            let mut plaintext = [0u8; 256];
-            black_box(key.decrypt(&OAEP_SHA256_MGF1SHA256, ciphertext, &mut plaintext, None))
-                .unwrap();
-        })
-    });
+    #[bench(setup = aws_key)]
+    fn aws_lc_rs(
+        (key, ciphertext): &(aws_lc_rs::rsa::OaepPrivateDecryptingKey, Vec<u8>),
+    ) -> [u8; 256] {
+        let mut plaintext = [0u8; 256];
+        key.decrypt(
+            &aws_lc_rs::rsa::OAEP_SHA256_MGF1SHA256,
+            ciphertext,
+            &mut plaintext,
+            None,
+        )
+        .unwrap();
+        plaintext
+    }
 
-    group.bench_function("rustcrypto", |b| {
+    fn rustcrypto_key() -> (rsa::PrivateKey, Vec<u8>) {
         use rsa::pkcs1::DecodeRsaPrivateKey;
-        let key = rsa::PrivateKey::from_pkcs1_der(private_key).unwrap();
+        (
+            rsa::PrivateKey::from_pkcs1_der(PRIVATE_KEY_2048).unwrap(),
+            ciphertext(),
+        )
+    }
 
-        b.iter(|| {
-            black_box(key.decrypt(rsa::Oaep::<sha2::Sha256>::new(), ciphertext)).unwrap();
-        });
-    });
+    #[bench(setup = rustcrypto_key)]
+    fn rustcrypto((key, ciphertext): &(rsa::PrivateKey, Vec<u8>)) {
+        black_box(
+            key.decrypt(rsa::Oaep::<sha2::Sha256>::new(), ciphertext)
+                .unwrap(),
+        );
+    }
 
-    group.bench_function("rind", |b| {
-        let _dit = criterion::rind_dit();
-        let key = DecryptingKey::from_pkcs1(&OAEP_SHA256, private_key).unwrap();
+    fn rind_key() -> Dit<(DecryptingKey, Vec<u8>)> {
+        Dit::hold((private_key(), ciphertext()))
+    }
 
-        b.iter(|| {
-            black_box(key.decrypt(ciphertext, b"")).unwrap();
-        })
-    });
+    #[bench(setup = rind_key)]
+    fn rind(input: &Dit<(DecryptingKey, Vec<u8>)>) {
+        let (key, ciphertext) = &**input;
+        black_box(key.decrypt(ciphertext, b"").unwrap());
+    }
 
-    group.bench_function("verified-garbage", |b| {
+    fn vg_decrypt(key: &verified_garbage::rsa::PrivateKey, ciphertext: &[u8]) -> Vec<u8> {
         use verified_garbage::rsa::oaep::Hash;
-        let key = vg_key(private_key);
-        let decrypt = || key.decrypt_oaep(ciphertext, Hash::Sha256, Hash::Sha256, b"");
-        assert_eq!(decrypt().unwrap(), message);
+        key.decrypt_oaep(ciphertext, Hash::Sha256, Hash::Sha256, b"")
+            .unwrap()
+    }
 
-        b.iter(|| black_box(decrypt()).unwrap())
-    });
+    /// verified-garbage's key, after checking it decrypts what rind
+    /// encrypted.
+    fn vg_input() -> (verified_garbage::rsa::PrivateKey, Vec<u8>) {
+        let key = vg_key(PRIVATE_KEY_2048);
+        let ciphertext = ciphertext();
+        assert_eq!(vg_decrypt(&key, &ciphertext), PLAINTEXT);
+        (key, ciphertext)
+    }
+
+    #[bench(setup = vg_input)]
+    fn verified_garbage((key, ciphertext): &(verified_garbage::rsa::PrivateKey, Vec<u8>)) {
+        black_box(vg_decrypt(key, ciphertext));
+    }
 }
 
 /// Loading a key checks its components agree, which should stay small next
 /// to a signature at every size.
-#[cfg(not(target_arch = "xtensa"))]
-fn rsa_load(c: &mut Criterion) {
-    let keys: [(u32, &[u8]); 2] = [
-        (2048, include_bytes!("../../rind/src/high/rsa/rsa2048.der")),
-        (8192, include_bytes!("../../rind/src/high/rsa/rsa8192.der")),
-    ];
-    for (bits, private_key) in keys {
-        let mut group = c.benchmark_group(format!("rsa{bits}-load"));
-        group.throughput(Throughput::Elements(1));
+macro_rules! load {
+    ($name:ident, $der:literal) => {
+        mod $name {
+            use swole::bench;
 
-        #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
-        group.bench_function("aws-lc-rs", |b| {
-            use aws_lc_rs::rsa;
+            use super::*;
 
-            b.iter(|| black_box(rsa::KeyPair::from_der(black_box(private_key)).unwrap()))
-        });
+            const PRIVATE_KEY: &[u8] = include_bytes!($der);
 
-        group.bench_function("rind", |b| {
-            let _dit = criterion::rind_dit();
-            use rind::rsa::KeyPair;
+            #[bench]
+            fn aws_lc_rs() {
+                black_box(
+                    aws_lc_rs::rsa::KeyPair::from_der(std::hint::black_box(PRIVATE_KEY)).unwrap(),
+                );
+            }
 
-            b.iter(|| black_box(KeyPair::from_pkcs1(black_box(private_key)).unwrap()))
-        });
+            #[bench(setup = dit)]
+            fn rind(_: &Dit<()>) {
+                black_box(
+                    rind::rsa::KeyPair::from_pkcs1(std::hint::black_box(PRIVATE_KEY)).unwrap(),
+                );
+            }
 
-        // verified-garbage loads the CRT components, parsed from the DER
-        // here, and checks them as BoringSSL's `RSA_check_key` does.
-        group.bench_function("verified-garbage", |b| {
-            use rsa::pkcs1::DecodeRsaPrivateKey;
-            use rsa::traits::{PrivateKeyParts, PublicKeyParts};
-            use verified_garbage::rsa::{BigUint, PrivateKey};
-            let key = rsa::PrivateKey::from_pkcs1_der(private_key).unwrap();
-            let components = [
-                key.n_bytes().to_vec(),
-                key.e_bytes().to_vec(),
-                key.d().to_be_bytes_trimmed_vartime().to_vec(),
-                key.primes()[0].to_be_bytes_trimmed_vartime().to_vec(),
-                key.primes()[1].to_be_bytes_trimmed_vartime().to_vec(),
-                key.dp().unwrap().to_be_bytes_trimmed_vartime().to_vec(),
-                key.dq().unwrap().to_be_bytes_trimmed_vartime().to_vec(),
-                key.crt_coefficient()
-                    .unwrap()
-                    .to_be_bytes_trimmed_vartime()
-                    .to_vec(),
-            ];
-            let [n, e, d, p, q, dp, dq, qinv] =
-                components.each_ref().map(|c| BigUint::from_be_bytes(c));
+            /// The CRT components, parsed from the DER.
+            fn components() -> [Vec<u8>; 8] {
+                use rsa::pkcs1::DecodeRsaPrivateKey;
+                use rsa::traits::{PrivateKeyParts, PublicKeyParts};
+                let key = rsa::PrivateKey::from_pkcs1_der(PRIVATE_KEY).unwrap();
+                [
+                    key.n_bytes().to_vec(),
+                    key.e_bytes().to_vec(),
+                    key.d().to_be_bytes_trimmed_vartime().to_vec(),
+                    key.primes()[0].to_be_bytes_trimmed_vartime().to_vec(),
+                    key.primes()[1].to_be_bytes_trimmed_vartime().to_vec(),
+                    key.dp().unwrap().to_be_bytes_trimmed_vartime().to_vec(),
+                    key.dq().unwrap().to_be_bytes_trimmed_vartime().to_vec(),
+                    key.crt_coefficient()
+                        .unwrap()
+                        .to_be_bytes_trimmed_vartime()
+                        .to_vec(),
+                ]
+            }
 
-            b.iter(|| black_box(PrivateKey::from_crt(n, e, d, p, q, dp, dq, qinv).unwrap()))
-        });
+            // verified-garbage loads the CRT components, parsed from the DER
+            // here, and checks them as BoringSSL's `RSA_check_key` does.
+            #[bench(setup = components)]
+            fn verified_garbage(components: &[Vec<u8>; 8]) {
+                use verified_garbage::rsa::{BigUint, PrivateKey};
+                let [n, e, d, p, q, dp, dq, qinv] =
+                    components.each_ref().map(|c| BigUint::from_be_bytes(c));
+                black_box(PrivateKey::from_crt(n, e, d, p, q, dp, dq, qinv).unwrap());
+            }
 
-        group.bench_function("rind-sign", |b| {
-            let _dit = criterion::rind_dit();
-            use rind::rsa::{KeyPair, sign};
-            let key = KeyPair::from_pkcs1(private_key).unwrap();
-            b.iter(|| black_box(key.sign(&sign::PKCS1_SHA256, b"hello")).unwrap())
-        });
-    }
+            fn rind_key() -> Dit<rind::rsa::KeyPair> {
+                Dit::hold(rind::rsa::KeyPair::from_pkcs1(PRIVATE_KEY).unwrap())
+            }
+
+            #[bench(setup = rind_key)]
+            fn rind_sign(key: &Dit<rind::rsa::KeyPair>) {
+                black_box(key.sign(&rind::rsa::sign::PKCS1_SHA256, b"hello").unwrap());
+            }
+        }
+    };
 }
 
 #[cfg(not(target_arch = "xtensa"))]
-criterion_group!(
-    benches,
-    rsa2048_pkcs1_sha256_sign,
-    rsa2048_pss_sha256_sign,
-    rsa_pkcs1_sha256_sign_sizes,
-    rsa2048_oaep_sha256_decrypt,
-    rsa_load
-);
+load!(rsa2048_load, "../../rind/src/high/rsa/rsa2048.der");
 #[cfg(not(target_arch = "xtensa"))]
-criterion_main!(benches);
+load!(rsa8192_load, "../../rind/src/high/rsa/rsa8192.der");
+
+#[cfg(not(target_arch = "xtensa"))]
+fn main() {
+    swole::main();
+}

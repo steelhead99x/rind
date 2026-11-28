@@ -28,6 +28,9 @@ theorem decodeLittleEndian_toVector {n : Usize} (a : Std.Array U8 n) :
   simp only [curve25519.decodeLittleEndian, Std.Array.toVector, leNat, Vector.toList_mk, List.map_map]
   congr 1
 
+/-- BAIF's number of a byte array, `Array.asNat 8`, is `leNat`'s. -/
+theorem asNat_eq_leNat {n : Usize} (a : Std.Array U8 n) : a.asNat 8 = leNat a.val := rfl
+
 theorem encodeLittleEndian_succ (n x : Nat) :
     (curve25519.encodeLittleEndian (n + 1) x).toList =
       UInt8.ofNat x :: (curve25519.encodeLittleEndian n (x / 256)).toList := by

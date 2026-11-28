@@ -17,12 +17,34 @@ fn main() {
     // SAFETY: every x86_64 CPU has `cpuid`.
     let id = unsafe { __cpuid(0) };
     let intel = (id.ebx, id.edx, id.ecx) == (0x756e_6547, 0x4965_6e69, 0x6c65_746e);
+    // "AuthenticAMD", whose family 19h CPUs with AVX-512 IFMA are Zen 4's:
+    // leaf 1's EAX holds the family, bits 11:8 plus 27:20 where those are 0xf.
+    #[allow(unused_unsafe)]
+    // SAFETY: as above, and the CPU has leaf 1 where leaf 0 reports it.
+    let eax1 = if id.eax >= 1 {
+        unsafe { __cpuid(1) }.eax
+    } else {
+        0
+    };
+    let family = (eax1 >> 8 & 0xf)
+        + if eax1 >> 8 & 0xf == 0xf {
+            eax1 >> 20 & 0xff
+        } else {
+            0
+        };
+    let amd = (id.ebx, id.edx, id.ecx) == (0x6874_7541, 0x6974_6e65, 0x444d_4163);
+    let zen4 = amd && family == 0x19 && is_x86_feature_detected!("avx512ifma");
+    // Family 1Ah is Zen 5's, whose AES-GCM runs verified-garbage's AVX-512
+    // code for long messages.
+    let zen5 = amd && family == 0x1a;
 
     // Every feature `rind/src/low/x86_64/cpu.rs` reads, so the scans show
     // which dispatch paths each CPU selects, plus `sha512`, which rind records
     // and does not dispatch on.
     let cpuid = [
         ("intel", intel),
+        ("zen4", zen4),
+        ("zen5", zen5),
         ("adx", is_x86_feature_detected!("adx")),
         ("aes", is_x86_feature_detected!("aes")),
         ("vaes", is_x86_feature_detected!("vaes")),

@@ -4,7 +4,7 @@
 
 ## Checked before every release
 
-- **A break needs a mark.** `sh/semver.sh`, in `just ci`, runs cargo-semver-checks on each published crate a branch changes, comparing it with the same crate at the branch's merge-base, not with crates.io, since `main` holds every breaking change the next minor release batches. A break in `rind` fails unless the PR title or a commit subject carries `!` (`feat!: ...`); a break in an adapter fails even then, since an adapter's API is its upstream's, unless the change sets its version to its upstream's next breaking release or carries `!` with the adapter's name as the scope (`fix(rind-ring)!: ...`), as a fix that restores parity with its upstream does; that change also sets the adapter's patch version by hand, since release-plz would otherwise propose a breaking version `sh/adapter-versions.sh` refuses, and the gate fails a marked adapter still at its released version. A crate new in the branch has no baseline and is skipped. `pr-check.yml` passes the PR title, so a PR retitled with `!` needs a new push to rerun; the merge queue reads the squash commit.
+- **A break needs a mark.** `sh/semver.sh`, in `just ci` over a PR's diff, runs cargo-semver-checks on each published crate a branch changes, comparing it with the same crate at the branch's merge-base, not with crates.io, since `main` holds every breaking change the next minor release batches. A break in `rind` fails unless the PR title or a commit subject carries `!` (`feat!: ...`); a break in an adapter fails even then, since an adapter's API is its upstream's, unless the change sets its version to its upstream's next breaking release or carries `!` with the adapter's name as the scope (`fix(rind-ring)!: ...`), as a fix that restores parity with its upstream does; that change also sets the adapter's patch version by hand, since release-plz would otherwise propose a breaking version `sh/adapter-versions.sh` refuses, and the gate fails a marked adapter still at its released version. A crate new in the branch has no baseline and is skipped. `pr-check.yml` passes the PR title, so a PR retitled with `!` needs a new push to rerun; the merge queue leaves the check to it, and release-plz still finds a break the gate missed when it proposes the release's version.
 - **Releases.** release-plz runs the same tool when it opens a release PR, and proposes the next breaking version when it finds a break. `sh/adapter-versions.sh` fails an adapter version that drifts from its upstream's, and `admin/adapter-api` fails an adapter whose API differs from its upstream's. [CONTRIBUTING.md](CONTRIBUTING.md#releases) has the rest.
 - **Rust version.** `rind` and each crate that shares its `rust-version` is built and linted on in CI (`msrv`), and it rises only as README.md says. An adapter whose upstream needs a newer Rust declares that version instead, and `msrv` leaves it out.
 
@@ -18,7 +18,7 @@ README.md names three conditions, and each is open work:
 
 1.0 also requires two things README.md does not say:
 
-- **An outside audit.** Someone outside the project audits the Phase 1 scope of [the audit scope quest](quest/m2/trust/third-party-audit-scope.md), and the report is published. README.md says no one outside the project has audited rind; 1.0 does not ship with that sentence. FIPS 140-3 validation is not a requirement.
+- **An outside audit.** Someone outside the project audits the Phase 1 scope of [AUDIT-SCOPE.md](AUDIT-SCOPE.md), and the report is published. README.md says no one outside the project has audited rind; 1.0 does not ship with that sentence. FIPS 140-3 validation is not a requirement.
 - **One full minor release without a break.** `rind` ships one full minor release with no breaking change, such as 0.5 after 0.4, meaning no change marked `!` that `sh/semver.sh` lets through. 1.0 is that line re-tagged.
 
 ## Security backports
@@ -27,7 +27,7 @@ Below 1.0, only the latest release gets a security fix. From 1.0, the last minor
 
 What rind lacks today, which README.md also says:
 
-- An outside audit, which [the audit scope quest](quest/m2/trust/third-party-audit-scope.md) prepares.
+- An outside audit, which [AUDIT-SCOPE.md](AUDIT-SCOPE.md) scopes.
 - FIPS 140-3 validation, which 1.0 does not wait for.
 
 The checks a release already passes are in [TESTING.md](TESTING.md): constant time (ctgrind and the `ct-vartime` scan), fuzzing, nightly coverage, mutation testing, and the proofs a release waits for.

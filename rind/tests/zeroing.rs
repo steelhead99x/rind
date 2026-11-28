@@ -1,5 +1,6 @@
 //! Verification that every value owning a secret (a key, keyed state, or a
-//! shared secret) is zeroed on drop.
+//! shared secret) is zeroed on drop, along with every heap block its drop
+//! frees.
 //!
 //! Some of this is subject to whims of the compiler, and
 //! hand-written drop impls, so we test it here.
@@ -41,11 +42,66 @@
 //!     been zeroised upon drop, even if the value was a `Key::Key128`
 //!     that only initialized half of that space.
 
+use core::cell::Cell;
 use core::mem::size_of;
 use core::ops::Deref;
 use core::pin::Pin;
 use core::ptr;
-use std::alloc::{Layout, dealloc};
+use std::alloc::{GlobalAlloc, Layout, System, dealloc};
+
+/// Counts, for [`check_heap_wiped`], the heap blocks each thread holds, and
+/// those a drop under [`check_span_zeroed_on_drop`] frees without wiping.
+struct HeapCheck;
+
+thread_local! {
+    /// Blocks allocated less blocks freed.
+    static LIVE: Cell<isize> = const { Cell::new(0) };
+    /// Whether a [`check_heap_wiped`] runs.
+    static HEAP: Cell<bool> = const { Cell::new(false) };
+    /// Whether a checked value's drop runs.
+    static DROPPING: Cell<bool> = const { Cell::new(false) };
+    /// How many blocks such a drop freed unwiped, and the last one's size.
+    static UNWIPED: Cell<(usize, usize)> = const { Cell::new((0, 0)) };
+}
+
+// SAFETY: every call goes to `System`, after only reading the block it frees.
+unsafe impl GlobalAlloc for HeapCheck {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        LIVE.set(LIVE.get() + 1);
+        // SAFETY: as the caller promises.
+        unsafe { System.alloc(layout) }
+    }
+
+    unsafe fn dealloc(&self, block: *mut u8, layout: Layout) {
+        LIVE.set(LIVE.get() - 1);
+        // SAFETY: `block` is `layout.size()` readable bytes, as the caller
+        // promises.
+        if HEAP.get()
+            && DROPPING.get()
+            && (0..layout.size()).any(|i| unsafe { block.add(i).read() } != 0)
+        {
+            UNWIPED.set((UNWIPED.get().0 + 1, layout.size()));
+        }
+        // SAFETY: as the caller promises.
+        unsafe { System.dealloc(block, layout) }
+    }
+}
+
+#[global_allocator]
+static ALLOCATOR: HeapCheck = HeapCheck;
+
+/// Runs `f`, which makes a value and checks it with [`check_zeroed_on_drop`],
+/// and checks that the value's drop wiped every heap block it freed and that
+/// `f` frees every block it allocates: a key's state kept on the heap, such as
+/// a context made on first use, is wiped and freed, not leaked, however the
+/// key is held.
+fn check_heap_wiped(f: impl FnOnce()) {
+    let live = LIVE.get();
+    HEAP.set(true);
+    f();
+    HEAP.set(false);
+    assert_eq!(LIVE.get(), live, "the value leaked heap blocks");
+}
 
 #[test]
 fn rsa() {
@@ -128,10 +184,10 @@ fn ml_dsa() {
         check_zeroed_on_drop(Box::pin(KeyPair::<P>::from_seed(seed.as_ref()).unwrap()));
         // Its public key's second verification keeps the expansion, which
         // the drop frees before its wipe.
-        let signature = key.sign(b"message").unwrap();
+        let signature = key.sign(b"", b"message").unwrap();
         for _ in 0..2 {
             key.public_key()
-                .verify(b"message", signature.as_ref())
+                .verify(b"", b"message", signature.as_ref())
                 .unwrap();
         }
         check_zeroed_on_drop(Box::pin(key));
@@ -257,6 +313,35 @@ fn oprf() {
 }
 
 #[test]
+fn opaque() {
+    use rind::opaque::*;
+    // Each suite with its record's length.
+    for (suite, record_len) in [
+        (&RISTRETTO255_SHA512_ARGON2ID, 192),
+        (&P256_SHA256_ARGON2ID, 129),
+    ] {
+        let setup = ServerSetup::generate(suite).unwrap();
+        check_zeroed_on_drop(Box::pin(setup.to_bytes()));
+        let (registration, _) = ClientRegistration::start(suite, b"password").unwrap();
+        check_zeroed_on_drop(Box::pin(registration));
+        // A record whose client key is the server's, so no Argon2id runs.
+        let mut record = setup.public_key().to_vec();
+        record.resize(record_len, 0xa5);
+        let record = RegistrationRecord::new(suite, &record).unwrap();
+        let (client, ke1) = ClientLogin::start(suite, b"password").unwrap();
+        let credential = Credential {
+            identifier: b"user",
+            record: Some(&record),
+        };
+        let (server, _) = setup.login(&ke1, &credential, &Session::default()).unwrap();
+        check_zeroed_on_drop(Box::pin(client));
+        check_zeroed_on_drop(Box::pin(server));
+        check_zeroed_on_drop(Box::pin(record));
+        check_zeroed_on_drop(Box::pin(setup));
+    }
+}
+
+#[test]
 fn frost() {
     use rind::frost::*;
     for suite in [&ED25519_SHA512, &RISTRETTO255_SHA512, &P256_SHA256] {
@@ -324,6 +409,16 @@ fn hpke() {
             check_zeroed_on_drop(Box::pin(
                 Recipient::new(suite, &key, enc.as_ref(), b"info").unwrap(),
             ));
+            // A long message makes the state some CPUs keep for long messages.
+            check_heap_wiped(|| {
+                let (enc, mut sender) = Sender::new(suite, key.public_key(), b"info").unwrap();
+                let mut message = vec![0u8; 16384];
+                sender.seal_in_place_append_tag(b"", &mut message).unwrap();
+                check_zeroed_on_drop(Box::pin(sender));
+                let mut recipient = Recipient::new(suite, &key, enc.as_ref(), b"info").unwrap();
+                recipient.open_in_place(b"", &mut message).unwrap();
+                check_zeroed_on_drop(Box::pin(recipient));
+            });
         }
         for kdf in [&HKDF_SHA256, &HKDF_SHA384, &HKDF_SHA512] {
             let (enc, exporter) = Exporter::sender(kdf, key.public_key(), b"info").unwrap();
@@ -461,12 +556,21 @@ fn argon2() {
 #[test]
 fn aead() {
     use rind::aead::{
-        AES_128_GCM, AES_192_GCM, AES_256_GCM, CHACHA20_POLY1305, Key, RandomizedNonceKey,
+        AES_128_GCM, AES_192_GCM, AES_256_GCM, CHACHA20_POLY1305, Key, Nonce, RandomizedNonceKey,
     };
 
     for algorithm in [&AES_128_GCM, &AES_192_GCM, &AES_256_GCM, &CHACHA20_POLY1305] {
         let key = Key::new(algorithm, &[0xffu8; 32][..algorithm.key_len()]).unwrap();
         check_zeroed_on_drop(Box::pin(key));
+        // A long message makes the state some CPUs keep for long messages,
+        // such as Zen 5's verified-garbage key context.
+        check_heap_wiped(|| {
+            let key = Key::new(algorithm, &[0xffu8; 32][..algorithm.key_len()]).unwrap();
+            let nonce = Nonce::assume_unique_for_key([0; 12]);
+            key.seal_in_place_separate_tag(nonce, b"", &mut [0u8; 16384])
+                .unwrap();
+            check_zeroed_on_drop(Box::pin(key));
+        });
     }
     check_zeroed_on_drop(Box::pin(RandomizedNonceKey::new(&[0xffu8; 32])));
 
@@ -480,6 +584,14 @@ fn aead() {
         let key = &[0xffu8; 32][..len];
         let key = gcm::Key::new(algorithm, key, TagLength::Truncated32).unwrap();
         check_zeroed_on_drop(Box::pin(key));
+        check_heap_wiped(|| {
+            let key = &[0xffu8; 32][..len];
+            let key = gcm::Key::new(algorithm, key, TagLength::Truncated32).unwrap();
+            let iv = gcm::Iv::assume_unique_for_key(&[0; 12]).unwrap();
+            key.seal_in_place_separate_tag(iv, b"", &mut [0u8; 16384])
+                .unwrap();
+            check_zeroed_on_drop(Box::pin(key));
+        });
     }
 
     use rind::aead::quic::{AES_128, AES_256, CHACHA20, HeaderProtectionKey};
@@ -552,9 +664,17 @@ fn check_span_zeroed_on_drop<T: Unpin + Wipes>(value: Pin<Box<T>>, at: usize, le
     let addr = Box::into_raw(unsafe { Pin::into_inner_unchecked(value) });
 
     // SAFETY: We obtained `addr` by unwrapping a valid `Box<T>`, so it is aligned and non-null.
+    DROPPING.set(true);
+    UNWIPED.set((0, 0));
     unsafe {
         ptr::drop_in_place(addr);
     }
+    DROPPING.set(false);
+    let (unwiped, size) = UNWIPED.get();
+    assert_eq!(
+        unwiped, 0,
+        "the drop freed heap blocks it did not wipe, the last {size} bytes"
+    );
     let after_drop = read_into_vec(ptr, len);
     // SAFETY: We obtained `addr` by unwrapping a valid `Box<T>`, so it is allocated and `T-`aligned.
     unsafe {

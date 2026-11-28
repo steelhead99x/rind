@@ -89,15 +89,16 @@ impl PublicKey {
     }
 
     /// Verifies with a key bound to its algorithm: any but RSA's, which
-    /// [`rind_fips_rsa_public_key_verify`] takes with its algorithm.
+    /// [`rind_fips_rsa_public_key_verify`] takes with its algorithm, and
+    /// ML-DSA's, which [`rind_fips_ml_dsa_public_key_verify`] takes with its
+    /// context.
     fn verify(&self, message: &[u8], signature: &[u8]) -> Result<(), Error> {
         match self {
             Self::Ecdsa(key) => key.verify(message, signature),
             Self::Ed25519(key) => key.verify(message, signature),
-            Self::MlDsa44(key) => key.verify(message, signature),
-            Self::MlDsa65(key) => key.verify(message, signature),
-            Self::MlDsa87(key) => key.verify(message, signature),
-            Self::Rsa(_) => Err(Error::Unsupported),
+            Self::MlDsa44(_) | Self::MlDsa65(_) | Self::MlDsa87(_) | Self::Rsa(_) => {
+                Err(Error::Unsupported)
+            }
         }
     }
 
@@ -351,6 +352,40 @@ pub unsafe extern "C" fn rind_fips_public_key_verify(
     let (key, message, signature) =
         unsafe { (&*key, bytes(message, len), bytes(signature, signature_len)) };
     status(key.verify(message, signature))
+}
+
+/// Verifies the `signature_len` bytes at `signature` over the `len` bytes
+/// at `message` and the `context_len` bytes at `context` with ML-DSA key
+/// `key`.
+///
+/// # Safety
+/// As for [`rind_fips_public_key_verify`], and `context` valid for its
+/// length's read.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rind_fips_ml_dsa_public_key_verify(
+    key: *const PublicKey,
+    context: *const u8,
+    context_len: usize,
+    message: *const u8,
+    len: usize,
+    signature: *const u8,
+    signature_len: usize,
+) -> Status {
+    // SAFETY: the caller's contract.
+    let (key, context, message, signature) = unsafe {
+        (
+            &*key,
+            bytes(context, context_len),
+            bytes(message, len),
+            bytes(signature, signature_len),
+        )
+    };
+    status(match key {
+        PublicKey::MlDsa44(key) => key.verify(context, message, signature),
+        PublicKey::MlDsa65(key) => key.verify(context, message, signature),
+        PublicKey::MlDsa87(key) => key.verify(context, message, signature),
+        _ => Err(Error::Unsupported),
+    })
 }
 
 /// Verifies the `signature_len` bytes at `signature` over the message the
@@ -1053,10 +1088,10 @@ impl MlDsa {
     fn pct(&self) -> Result<(), Error> {
         on_ml_dsa!(self, |key| pct_drawing(
             "pct_ml_dsa",
-            || key.sign(PCT_MESSAGE),
+            || key.sign(&[], PCT_MESSAGE),
             |signature| {
                 key.public_key()
-                    .verify(PCT_MESSAGE, signature.as_ref())
+                    .verify(&[], PCT_MESSAGE, signature.as_ref())
                     .is_ok()
             }
         ))
@@ -1198,6 +1233,8 @@ pub unsafe extern "C" fn rind_fips_ml_dsa_public_key(key: *const MlDsa) -> *mut 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rind_fips_ml_dsa_sign(
     key: *const MlDsa,
+    context: *const u8,
+    context_len: usize,
     message: *const u8,
     len: usize,
     out: *mut u8,
@@ -1205,11 +1242,12 @@ pub unsafe extern "C" fn rind_fips_ml_dsa_sign(
     out_len: *mut usize,
 ) -> Status {
     // SAFETY: the caller's contract.
-    let (key, message) = unsafe { (&*key, bytes(message, len)) };
+    let (key, context, message) =
+        unsafe { (&*key, bytes(context, context_len), bytes(message, len)) };
     scrubbed(Depth::Large, || {
         on_ml_dsa!(key, |key| {
             // SAFETY: the caller's contract.
-            unsafe { put_signature(key.sign(message), out, cap, out_len) }
+            unsafe { put_signature(key.sign(context, message), out, cap, out_len) }
         })
     })
 }

@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 
-import subprocess, json, os, re, sys, glob, tarfile, tempfile, threading, time
-import concurrent.futures
+import subprocess, json, os, signal, sys, glob, tarfile
 
 # Run it at the workspace root in `nix develop .#sde`, which has the Intel SDE
 # build x86-cpu.yml runs.
@@ -12,13 +11,10 @@ import concurrent.futures
 #   admin/x86-cpu matrix
 #   admin/x86-cpu archive
 #   admin/x86-cpu test SDE_MODEL [TEST_ARGS...]
-#   admin/x86-cpu all
 #
 # `matrix` prints MODELS as x86-cpu.yml's `check` matrix. `archive` builds the
 # release tests into ARCHIVE, and `test` runs them under `sde SDE_MODEL --`,
-# passing each binary TEST_ARGS, so every model's job runs one build. `all`
-# builds them in place and runs them under every model, many at once, for the
-# merge queue's build (`CHECK_QUEUE` in sh/dispatch.sh) and local runs. Not
+# passing each binary TEST_ARGS, so every model's job runs one build. Not
 # nextest: its process per test starts SDE, and re-instruments the code, for
 # each of the workspace's tests, which made rind's library tests over three
 # times slower under SDE than one process for the binary, as `cargo test` runs
@@ -27,6 +23,11 @@ ARCHIVE = "target/x86-cpu-tests.tar"
 # Each test binary in ARCHIVE, a tab, and its package's directory, which
 # `cargo test` runs it in and where it finds its vector files.
 TESTS = "target/x86-cpu-tests.tsv"
+
+# The hang bound on each binary, since one process runs all of its tests: about
+# four times the slowest healthy run, rind's library tests, 645 s on Cannon
+# Lake and 618 s on Diamond Rapids, which vary with the runner's CPU.
+BINARY_TIMEOUT = 45 * 60
 
 # Every model skips aws-lc-rs's `large_digest` tests, which hash 8 GiB per
 # hash and took 21 to 28 minutes per SHA model under SDE. They check the
@@ -178,7 +179,7 @@ KNOWN_CPUS = [
 def build():
     """Builds the release tests and lists them in TESTS.
 
-    Returns them, the libraries they load, and rind's own unit tests."""
+    Returns them and the libraries they load."""
     # rind-fips is left out: its module refuses CPUs below its baseline, as
     # most of SDE's models are. `cargo test` also runs the doc tests, which
     # this leaves to the native runs: none asserts a CPU path, and each path
@@ -190,14 +191,12 @@ def build():
         check=True,
         encoding="utf-8",
     ).stdout
-    tests, libraries, lib = [], [], None
+    tests, libraries = [], []
     for line in out.splitlines():
         message = json.loads(line)
         if message["reason"] != "compiler-artifact":
             continue
         if message["profile"]["test"]:
-            if message["target"]["name"] == "rind" and "lib" in message["target"]["kind"]:
-                lib = os.path.relpath(message["executable"])
             tests.append(
                 (
                     os.path.relpath(message["executable"]),
@@ -213,7 +212,7 @@ def build():
             libraries += [f for f in message["filenames"] if f.endswith(".so")]
     with open(TESTS, "w") as f:
         f.writelines(f"{exe}\t{package}\n" for exe, package in tests)
-    return tests, libraries, lib
+    return tests, libraries
 
 
 def tests():
@@ -230,16 +229,25 @@ def run(model, exe, package, args, out):
     target = os.environ.get("CARGO_TARGET_DIR", "target")
     os.makedirs(os.path.join(target, "tmp"), exist_ok=True)
     print(f"Running {exe} in {package} on {name}", file=out, flush=True)
-    return (
-        subprocess.run(
-            ["sde", "-" + sde, "--", os.path.abspath(exe)] + SKIP + args,
-            cwd=package,
-            env=env,
-            stdout=out,
-            stderr=subprocess.STDOUT,
-        ).returncode
-        == 0
+    # In a session of its own, so a timeout kills SDE's instrumented child too.
+    proc = subprocess.Popen(
+        ["sde", "-" + sde, "--", os.path.abspath(exe)] + SKIP + args,
+        cwd=package,
+        env=env,
+        stdout=out,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
     )
+    try:
+        return proc.wait(timeout=BINARY_TIMEOUT) == 0
+    except subprocess.TimeoutExpired:
+        print(f"{exe} on {name} ran past {BINARY_TIMEOUT} s", file=out, flush=True)
+        return False
+    finally:
+        # A timeout or an interrupt, such as Ctrl-C, leaves the session running.
+        if proc.poll() is None:
+            os.killpg(proc.pid, signal.SIGKILL)
+            proc.wait()
 
 
 mode = sys.argv[1]
@@ -308,7 +316,7 @@ elif mode == "matrix":
         )
     )
 elif mode == "archive":
-    tests, libraries, _ = build()
+    tests, libraries = build()
     with tarfile.open(ARCHIVE, "w") as tar:
         tar.add(TESTS)
         for path in [exe for exe, _ in tests] + libraries:
@@ -328,93 +336,5 @@ elif mode == "test":
     failed = [exe for exe, package in tests() if not run(model, exe, package, args, sys.stdout)]
     if failed:
         sys.exit("Failed: " + " ".join(failed))
-elif mode == "all":
-    if sys.argv[2:]:
-        sys.exit("usage: admin/x86-cpu all")
-    tests, _, lib = build()
-
-    def dispatch(model):
-        """The dispatch rind's unit tests report under one model."""
-        out = subprocess.run(
-            ["sde", "-" + model[1], "--", os.path.abspath(lib)]
-            + ["reports_dispatch", "--nocapture", "--test-threads", "1"],
-            cwd="rind",
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            encoding="utf-8",
-            check=True,
-        ).stdout
-        report = sorted(re.findall(r"rind dispatch: \w+ \w+", out))
-        if len(report) != 2:
-            sys.exit(f"{model[0]} reported no dispatch:\n{out}")
-        return tuple(report)
-
-    # A model that reports the same dispatch as an earlier one takes every
-    # path that one does, so it runs only rind's assertions of its own paths.
-    # The earlier model lacks instructions it has, such as Alder Lake those of
-    # Arrow Lake's SHA512 and Granite Rapids' AVX10, so its full run is the
-    # stricter. x86-cpu.yml's weekly run runs every model in full.
-    with concurrent.futures.ThreadPoolExecutor(len(MODELS)) as pool:
-        reports = list(pool.map(dispatch, MODELS))
-    first = {}
-    for model, report in zip(MODELS, reports):
-        earlier = first.setdefault(report, model)
-        if earlier is not model:
-            print(f"{model[0]} dispatches as {earlier[0]} does: {'; '.join(report)}")
-
-    # Every model's run of every binary, from one pool, so the box stays
-    # busy until the last one ends rather than idling behind the slowest
-    # model. The largest binaries come first, and within one the newest
-    # models, which run slowest under SDE: on a Zen 3 host, Granite Rapids
-    # took six times Prescott's CPU time, and the differential tests took half
-    # the total. A binary uses about one and a half CPUs under SDE, so half as
-    # many runs as CPUs keep the host busy beside the queue's other checks.
-    jobs = []
-    for exe, package in sorted(tests, key=lambda t: -os.path.getsize(t[0])):
-        for model, report in reversed(list(zip(MODELS, reports))):
-            if first[report] is model:
-                jobs.append((model, exe, package, []))
-            elif exe == lib:
-                jobs.append((model, exe, package, ["detects_the_expected_cpu"]))
-    jobs.reverse()
-    # Under CHECK_FAIL_FAST, as in the merge queue, the first failure starts
-    # no more runs: the group fails either way.
-    fail_fast = bool(os.environ.get("CHECK_FAIL_FAST"))
-    lock = threading.Lock()
-    failed = []
-    seconds = {name: 0.0 for name, _, _ in MODELS}
-
-    def worker():
-        while True:
-            with lock:
-                if not jobs or (fail_fast and failed):
-                    return
-                model, exe, package, only = jobs.pop()
-            start = time.monotonic()
-            try:
-                with tempfile.TemporaryFile("w+") as log:
-                    passed = run(model, exe, package, only, log)
-                    log.seek(0)
-                    with lock:
-                        seconds[model[0]] += time.monotonic() - start
-                        if not passed:
-                            failed.append(f"{exe} on {model[0]}")
-                            print(log.read(), flush=True)
-            except BaseException:
-                # Recorded first, so the other workers stop under fail-fast.
-                with lock:
-                    failed.append(f"{exe} on {model[0]}")
-                raise
-
-    # A worker's exception, such as SDE failing to start, re-raises here, so
-    # no run is left out with the exit status still 0.
-    workers = max(1, os.cpu_count() // 2)
-    with concurrent.futures.ThreadPoolExecutor(workers) as pool:
-        for future in [pool.submit(worker) for _ in range(workers)]:
-            future.result()
-    for name, total in seconds.items():
-        print(f"{name}: {total / 60:.1f} minutes of runs")
-    if failed:
-        sys.exit("Failed: " + "; ".join(failed))
 else:
     sys.exit(f"unknown mode {mode}")

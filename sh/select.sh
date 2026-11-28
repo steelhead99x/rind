@@ -4,9 +4,9 @@
 #
 # Usage: sh/select.sh CHANGED_FILE [ALL] [--lib|--no-dependents-on-low]
 # A change outside any crate's directory (the root manifest, the lockfile,
-# thirdparty/ test vectors, the flake's toolchain) can reach every crate, so it
-# selects --workspace, as does a non-empty ALL. --lib keeps only the crates with
-# a library, which `cargo test --doc` requires. --no-dependents-on-low, for
+# thirdparty/ test vectors, the hang bounds, the flake's toolchain) can reach
+# every crate, so it selects --workspace, as does a non-empty ALL. --lib keeps
+# only the crates with a library, which `cargo test --doc` requires. --no-dependents-on-low, for
 # `just check`, leaves out rind's dependents when the diff changes rind only
 # under rind/src/low/, outside the CPU dispatch every primitive shares: that
 # code is private, so rind's own tests cover it, and `just ci` still runs the
@@ -46,7 +46,7 @@ while IFS= read -r path; do
     done
     if [[ "$path" == */* && -n "${dirs[$dir]:-}" ]]; then
         selected[${dirs[$dir]}]=1
-    elif grep -qE '^(thirdparty/|Cargo\.(toml|lock)$|\.rustfmt(\.unstable)?\.toml$|flake\.(nix|lock)$)' <<<"$path"; then
+    elif grep -qE '^(thirdparty/|Cargo\.(toml|lock)$|\.rustfmt(\.unstable)?\.toml$|\.config/nextest\.toml$|flake\.(nix|lock)$)' <<<"$path"; then
         echo --workspace
         exit
     fi

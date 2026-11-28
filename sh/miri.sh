@@ -71,6 +71,16 @@ slow=(
     high::oaep::tests::every_failure_is_the_same
     high::oaep::tests::round_trip
     high::oaep::tests::stays_secret
+    high::opaque::tests::context_mismatch_fails_both_sides
+    high::opaque::tests::refuses_bad_sessions_and_passwords
+    high::opaque::tests::refuses_other_suites
+    high::opaque::tests::refuses_tampered_messages
+    high::opaque::tests::refuses_wrong_password_and_sessions
+    high::opaque::tests::rfc9807_vectors
+    high::opaque::tests::round_trip
+    high::opaque::tests::setup_encoding
+    high::opaque::tests::stays_secret
+    high::opaque::tests::unknown_account_is_refused
     high::oprf::tests::rfc9497_oprf_vectors
     high::oprf::tests::stays_secret
     high::oprf::voprf::tests::refuses_altered_proofs
@@ -152,6 +162,7 @@ slow=(
     mid::sha2::tests::sha512_all_lengths
     mid::sha3::tests::cavp_shake
     mid::sha3::tests::sha3_256_all_lengths
+    low::portable::aes_nohw::tests::configurations_agree
     mid::sha3::tests::sha3_512_all_lengths
     mid::slhdsa::tests::sign_verify_round_trip
     mid::x25519::tests::rfc7748_3
@@ -180,6 +191,9 @@ args=(-p rind --locked --target "$target" --lib --test cpu --test debug)
 if [[ $(rustc --print cfg --target "$target") == *'target_pointer_width="32"'* ]]; then
     filter="$filter and not (test(/^high::/) and not test(/^high::(asn1|pkcs1|pkcs8|sec1|spki)::/))"
     MIRIFLAGS+=" -Zmiri-address-reuse-rate=1"
+    # i686 enables SSE2, which would take AES off the 32-bit words only this
+    # run checks under Miri.
+    RUSTFLAGS+=' --cfg rind_no_sse2'
 fi
 
 # A slow entry that names no test, such as one a rename left behind, would let

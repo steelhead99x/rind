@@ -23,7 +23,9 @@
 # On the x86_64 backend, it also fails if a function reached from one rind
 # exports, which is all its callers can call, holds an instruction in MCDT
 # that can run outside Intel's MXCSR mitigation, `rind::low::Mcdt`. In a
-# function that calls MITIGATION, it follows the control flow, so an
+# function that calls MITIGATION, it follows the control flow, through
+# every target of a jump table where it dispatches through one whose start
+# every path there loads, and fails at an indirect jump it cannot bound. So an
 # instruction, and whatever a call there reaches, counts as mitigated only
 # where every path from the function's start calls MITIGATION with no call
 # in RELEASE since: the mitigation must dominate it. Nothing in `admin/ct-vartime.toml`
@@ -41,7 +43,8 @@
 # multiply inside the mitigation and three outside it: in a function that
 # never enters it, and before and after the mitigation in one that does.
 # Each outside must be found, so a scan that finds nothing fails, and the
-# one inside must not.
+# one inside must not. It also adds a `match` under the mitigation whose
+# arms multiply, whose jump table the scan must follow, and find nothing.
 #
 # The `+mul16` targets build Poly1305's products from 16-bit halves. build.rs
 # sets that for the Thumb-M triples, for ARMv4T and ARMv5TE (`rind_mul16_top`,
@@ -94,6 +97,7 @@ TARGETS = [
     "thumbv8m.base-none-eabi+mul16",
     "armv5te-unknown-linux-gnueabi+mul16",
     "riscv32i-unknown-none-elf+mul16",
+    "riscv64imac-unknown-none-elf+mul16",
     # The 32-bit RISC-V cores with a multiplier run the same 26-bit limbs on
     # plain products. RISC-V has no cmov, so a select in them could become
     # a branch: this row runs only the secret-branch proof.
@@ -113,7 +117,7 @@ TARGETS = [
 # Each target's VARTIME pattern, by the first part of its triple.
 ARCH = {
     "x86_64": "x86", "i686": "x86", "armv7": "arm", "powerpc64": "powerpc",
-    "powerpc64le": "powerpc", "riscv64gc": "riscv64",
+    "powerpc64le": "powerpc", "riscv64gc": "riscv64", "riscv64imac": "riscv64",
 }
 PORTABLE = '--cfg rind_portable --cfg curve25519_dalek_backend="serial"'
 # The flags of each backend a target's `+` suffix names.
@@ -247,6 +251,22 @@ RELEASE = re.compile(
 BRANCH = re.compile(r"j(?!mp$)[a-z]+|loop\w*")
 END = {"ret", "ud2", "int3", "hlt"}
 TARGET = re.compile(r"^(?:0x)?([0-9a-f]+)(?: <.*>)?$")
+# Each 64-bit x86 register's names for its parts, which write it too.
+ALIASES = {
+    **{"r" + x: {"r" + x, "e" + x, x, x[0] + "l", x[0] + "h"} for x in ("ax", "bx", "cx", "dx")},
+    **{"r" + x: {"r" + x, "e" + x, x, x + "l"} for x in ("si", "di", "bp", "sp")},
+    **{"r%d" % n: {"r%d" % n + s for s in ("", "d", "w", "b")} for n in range(8, 16)},
+}
+REG64 = {name: reg for reg, names in ALIASES.items() for name in names}
+# What a call may write, by the System V ABI.
+CALLER_SAVED = {"rax", "rcx", "rdx", "rsi", "rdi", "r8", "r9", "r10", "r11"}
+# Instructions that may write every register they name, and some they do
+# not: IMPLICIT, as `cpuid` writes rbx, `leave` rbp, and `syscall` r11.
+WRITES_MORE = re.compile(
+    r"xchg|xadd|cmpxchg\w*|mulx|i?mul|i?div|c(qo|dq|wd|bw|dqe|wde)|cpuid|rdtscp?|rdpid|rdpkru"
+    r"|syscall|xgetbv|leave|enter|lahf|loop\w*|pop\w*|(movs|stos|lods|scas|cmps|ins|outs)[bwdq]?"
+)
+IMPLICIT = {"rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "r11"}
 
 # Mnemonics each VARTIME pattern must refuse, then must allow, checked
 # before every scan.
@@ -353,6 +373,10 @@ PLANTED = {
     "rind::low::vartime_planted::planted_mcdt_after": ["x86_64-unknown-linux-gnu"],
 }
 
+# A function `rind/src/low/vartime_planted.rs` plants that switches through
+# a jump table under the mitigation, which the MXCSR scan must follow.
+SWITCHED = "rind::low::vartime_planted::planted_mcdt_switch"
+
 # x86 prefixes, which llvm-objdump prints as their own word before the
 # mnemonic, as it does encoding markers such as `{evex}`.
 PREFIXES = {
@@ -365,7 +389,7 @@ SECTION = re.compile(r"^Disassembly of section (.+):$")
 LABEL = re.compile(r"^([0-9a-f]+) <(.+)>:$")
 INSN = re.compile(r"^\s+([0-9a-f]+):\s+(.*)$")
 RELOCS = re.compile(r"^RELOCATION RECORDS FOR \[(.+)\]:$")
-RELOC = re.compile(r"^([0-9a-f]+) \S+\s+(\S+?)(?:[+-]0x[0-9a-f]+)?$")
+RELOC = re.compile(r"^([0-9a-f]+) (\S+)\s+(\S+?)(?:([+-]0x[0-9a-f]+))?$")
 # ELFv2's local entry offset, as in `0x60`, may follow a symbol's size.
 SYMBOL = re.compile(r"^([0-9a-f]+) (.{7}) (\S+)\t[0-9a-f]+ (?:0x[0-9a-f]+ )?(\.hidden |\.protected |\.internal )?(.+)$")
 # Unwind tables and debug info, which point at every function, call nothing.
@@ -393,6 +417,10 @@ def scan_flags(target):
     # `sh/bare-metal.sh`.
     if "-none" in target.partition("+")[0]:
         flags.append('--cfg getrandom_backend="custom"')
+    if target == "riscv64imac-unknown-none-elf+mul16":
+        # Check build.rs's normal selection for the multiplier-free target.
+        flags.remove("--cfg rind_mul16")
+        flags.append("-C target-feature=-m,-zmmul")
     return flags
 
 
@@ -478,14 +506,19 @@ class Objects:
                 self.defined.setdefault(name, (member, section))
 
         self.relocs = collections.defaultdict(list)
+        # x86's 32-bit PC-relative relocations with their addends, which
+        # `jump_tables` reads.
+        self.pcrel = collections.defaultdict(list)
         section = None
         for line in run([*args, "-r"], **quiet).splitlines():
             if m := MEMBER.match(line):
                 member = m[1].rsplit("/", 1)[-1] + "(" + m[2] + ")"
             elif m := RELOCS.match(line):
                 section = None if METADATA.match(m[1]) else m[1]
-            elif section and (m := RELOC.match(line)) and m[2] != "*ABS*":
-                self.relocs[(member, section)].append((int(m[1], 16), m[2]))
+            elif section and (m := RELOC.match(line)) and m[3] != "*ABS*":
+                self.relocs[(member, section)].append((int(m[1], 16), m[3]))
+                if m[2] == "R_X86_64_PC32":
+                    self.pcrel[(member, section)].append((int(m[1], 16), m[3], int(m[4] or "0", 16)))
 
         # An ELFv1 function's symbol names its descriptor in `.opd`, whose
         # first word points at its code. Each code section takes the name of
@@ -572,18 +605,103 @@ class Objects:
         return defined
 
 
+def jump_tables(objects, node):
+    """The jump tables of x86 section `node`, as {(section, start): its
+    targets}, and which instructions load which table's start, as {index:
+    (section, start)}. In position-independent code, LLVM lowers a `match`
+    to a table of each target's 32-bit offset from the table's start, which
+    `node` loads with a `lea`, and jumps through a register. Each entry is a
+    PC32 relocation into `node` at the target plus the entry's distance from
+    the table's start."""
+    insns = objects.insns[node]
+    offsets = [offset for offset, _, _ in insns]
+    loads = {}
+    for offset, target, addend in objects.pcrel.get(node, ()):
+        i = bisect.bisect_right(offsets, offset) - 1
+        to = objects.resolve(node[0], target)
+        if insns[i][1] == "lea" and to is not None and to != node:
+            # The relocation is the `lea`'s last four bytes, so the address
+            # it loads is four past where its addend points.
+            loads[i] = (to, addend + 4)
+    starts = collections.defaultdict(set)
+    for data, start in loads.values():
+        starts[data].add(start)
+    tables = collections.defaultdict(set)
+    for data, bases in starts.items():
+        bases = sorted(bases)
+        for offset, target, addend in objects.pcrel.get(data, ()):
+            if objects.resolve(data[0], target) != node:
+                continue
+            # The entry belongs to the table that starts last before it.
+            i = bisect.bisect_right(bases, offset) - 1
+            if i < 0:
+                sys.exit("ct-vartime: {:#x} in {} points into {} before any table it loads".format(
+                    offset, data[1], objects.section_name(node)))
+            tables[(data, bases[i])].add(addend - (offset - bases[i]))
+    return tables, {i: key for i, key in loads.items() if key in tables}
+
+
+def written(mnemonic, operands):
+    """The 64-bit registers an x86 instruction may write: its first operand,
+    or for a call, or one that writes others too, more. An `imul` of two or
+    three operands writes only its first."""
+    ops = operands.split(", ")
+    if mnemonic == "call":
+        return CALLER_SAVED
+    more = WRITES_MORE.fullmatch(mnemonic) and not (mnemonic == "imul" and len(ops) > 1)
+    names = ops if more else ops[:1]
+    regs = {REG64[w] for op in names if "[" not in op for w in re.findall(r"\w+", op) if w in REG64}
+    return regs | IMPLICIT if more else regs
+
+
 def mitigated(objects, node):
     """Which instructions of x86 section `node` run with the mitigation held
     on every path from the start of its function, which a relocation's
-    offset in the instruction finds: `covered(offset)`."""
+    offset in the instruction finds: `covered(offset)`, and the functions
+    whose jump tables it followed."""
     insns = objects.insns[node]
     offsets = [offset for offset, _, _ in insns]
     index = {offset: i for i, offset in enumerate(offsets)}
+    tables, loads = jump_tables(objects, node)
+    for targets in tables.values():
+        for target in targets:
+            if target not in index:
+                sys.exit("ct-vartime: a jump table in {} points at {:#x}, outside an instruction".format(
+                    objects.section_name(node), target))
+    switched = set()
+
+    def dispatch(i):
+        """The register holding the table's start if the `jmp` at `i` adds
+        a table's entry to it, as LLVM dispatches, else None. LLVM may
+        schedule other instructions among the three, so the walk back passes
+        any that neither names their registers nor branches."""
+        to = insns[i][2]
+        add = earlier(i, to)
+        if add is None or insns[add][1] != "add" or not insns[add][2].startswith(to + ", "):
+            return None
+        table = insns[add][2][len(to) + 2:]
+        load = earlier(add, to, table)
+        if earlier(i, to, table) != add or load is None or insns[load][1] != "movsxd":
+            return None
+        m = re.fullmatch(r"(r\w+), dword ptr \[(r\w+) \+ 4\*r\w+\]", insns[load][2])
+        return table if m and m[1] == to and m[2] == table else None
+
+    def earlier(i, *registers):
+        """The last instruction before `i` in its block naming `registers`."""
+        names = set().union(*(ALIASES.get(r, {r}) for r in registers))
+        for j in range(i - 1, -1, -1):
+            _, mnemonic, operands = insns[j]
+            if mnemonic == "call" or mnemonic in END or mnemonic == "jmp" or BRANCH.fullmatch(mnemonic):
+                return None
+            if names & set(re.findall(r"\w+", operands)):
+                return j
+        return None
+
     named = collections.defaultdict(list)
     for offset, target in objects.relocs.get(node, ()):
         named[bisect.bisect_right(offsets, offset) - 1].append(objects.target_name(node[0], target))
 
-    def successors(i):
+    def successors(i, regs):
         _, mnemonic, operands = insns[i]
         names = named.get(i, ())
         if mnemonic in END:
@@ -595,6 +713,12 @@ def mitigated(objects, node):
         # A jump with a relocation leaves the section, as a tail call.
         jump = mnemonic == "jmp" or BRANCH.fullmatch(mnemonic)
         to = TARGET.match(operands) if jump and not names else None
+        # A table dispatch goes to every target of each table its base
+        # register may hold, which every path there loads.
+        table = mnemonic == "jmp" and not names and not to and dispatch(i)
+        if table and regs.get(table):
+            switched.add(objects.function(node, offsets[i]))
+            return sorted({index[t] for key in regs[table] for t in tables[key]})
         if jump and not names and not to:
             sys.exit("ct-vartime: {} at {:#x} jumps indirectly in {}, which the MXCSR scan cannot follow".format(
                 mnemonic, offsets[i], objects.section_name(node)))
@@ -607,16 +731,18 @@ def mitigated(objects, node):
         return [s for s in out if s < len(insns)]
 
     # A forward must-analysis: held into an instruction only if held out of
-    # every one that leads to it. Each function starts unmitigated.
+    # every one that leads to it. Each function starts unmitigated. Beside
+    # it, which tables' starts each register may hold, known only where
+    # every path there loads one, so a dispatch's targets are bounded.
     held = [None] * len(insns)
     queue = collections.deque()
     for start, _ in objects.labels.get(node, [(offsets[0], None)]):
         if start in index:
-            held[index[start]] = False
+            held[index[start]] = (False, {})
             queue.append(index[start])
     while queue:
         i = queue.popleft()
-        state = held[i]
+        state, regs = held[i]
         # Only a call to `enter` returns here holding the mitigation; any
         # other reference to it, such as a conditional tail call, does not.
         for name in named.get(i, ()):
@@ -624,27 +750,39 @@ def mitigated(objects, node):
                 state = True
             elif RELEASE.fullmatch(name):
                 state = False
-        for s in successors(i):
-            new = state if held[s] is None else held[s] and state
+        after = dict(regs)
+        for reg in written(insns[i][1], insns[i][2]):
+            after.pop(reg, None)
+        if i in loads:
+            after[REG64[insns[i][2].split(", ")[0]]] = frozenset([loads[i]])
+        # A full-width copy between registers carries the tables with it.
+        copy = insns[i][1] == "mov" and insns[i][2].split(", ")
+        if copy and len(copy) == 2 and copy[0] in ALIASES and copy[1] in regs:
+            after[copy[0]] = regs[copy[1]]
+        for s in successors(i, regs):
+            if held[s] is None:
+                new = (state, after)
+            else:
+                new = (held[s][0] and state, {r: t | after[r] for r, t in held[s][1].items() if r in after})
             if new != held[s]:
                 held[s] = new
                 queue.append(s)
     # Code no path reaches, such as a landing pad, counts as unmitigated.
-    covered = {offsets[i] for i, h in enumerate(held) if h}
+    covered = {offsets[i] for i, h in enumerate(held) if h and h[0]}
 
     def at(offset):
         return offsets[bisect.bisect_right(offsets, offset) - 1] in covered
 
-    return at
+    return at, switched
 
 
 def scan(objects, starts, pattern, helpers=None, barrier=None):
     """Every instruction matching `pattern` reached from `starts`, and every
     call to a routine in `helpers`, as {function: Counter(what)}, with a path
-    from a start to each, how many sections were reached, and how many it
-    followed for the mitigation. In a section
-    that calls `barrier`, what runs while it is held, by `mitigated`, is
-    neither searched nor left."""
+    from a start to each, how many sections were reached, how many it
+    followed for the mitigation, and the functions among them whose jump
+    tables it followed. In a section that calls `barrier`, what runs while
+    it is held, by `mitigated`, is neither searched nor left."""
     parent = {}
     queue = collections.deque()
     for node in starts:
@@ -654,12 +792,14 @@ def scan(objects, starts, pattern, helpers=None, barrier=None):
     findings = collections.defaultdict(collections.Counter)
     paths = {}
     followed = 0
+    switched = set()
     while queue:
         node = queue.popleft()
         relocs = objects.relocs.get(node, ())
         covered = None
         if barrier and any(objects.target_name(node[0], target) == barrier for _, target in relocs):
-            covered = mitigated(objects, node)
+            covered, tables = mitigated(objects, node)
+            switched |= tables
             followed += 1
         for offset, mnemonic, _ in objects.insns.get(node, ()):
             if pattern.fullmatch(mnemonic) and not (covered and covered(offset)):
@@ -688,7 +828,7 @@ def scan(objects, starts, pattern, helpers=None, barrier=None):
             node = parent[node]
         return names[1:]
 
-    return findings, {f: path(n) for f, n in paths.items()}, len(parent), followed
+    return findings, {f: path(n) for f, n in paths.items()}, len(parent), followed, switched
 
 
 def describe(counts):
@@ -1361,7 +1501,7 @@ def find_bodies(objects, function):
 
 
 def check_secret_branches(objects):
-    """The RV32I secret-branch proof over `blocks` and `finish`, and its
+    """The RISC-V secret-branch proof over `blocks` and `finish`, and its
     planted branch: its report's lines, and whether it failed."""
     lines = []
     failed = False
@@ -1514,15 +1654,18 @@ def check(tool, target, rind, others, public):
         node for node in objects.insns
         if node[0] in roots and any("rind::" in objects.name(l) for _, l in objects.labels[node])
     ]
-    findings, paths, reached, _ = scan(objects, starts, VARTIME[arch], helpers=HELPERS)
+    findings, paths, reached, _, _ = scan(objects, starts, VARTIME[arch], helpers=HELPERS)
     lines = ["{}: reached {} sections".format(target, reached)]
     failed = False
 
     if target == "x86_64-unknown-linux-gnu":
         exported = sorted(node for node in objects.exported if node[0] in roots)
-        mcdt, mcdt_paths, mcdt_reached, followed = scan(objects, exported, MCDT, barrier=MITIGATION)
-        lines.append("{}: reached {} sections from {} exported outside the MXCSR mitigation, following {} that enter it".format(
-            target, mcdt_reached, len(exported), followed))
+        mcdt, mcdt_paths, mcdt_reached, followed, switched = scan(objects, exported, MCDT, barrier=MITIGATION)
+        lines.append("{}: reached {} sections from {} exported outside the MXCSR mitigation, following {} that enter it, {} through jump tables".format(
+            target, mcdt_reached, len(exported), followed, len(switched)))
+        if SWITCHED not in switched:
+            lines.append("FAIL {}: followed no jump table".format(SWITCHED))
+            failed = True
         for function, counts in sorted(mcdt.items()):
             if function in PLANTED:
                 findings[function].update(counts)

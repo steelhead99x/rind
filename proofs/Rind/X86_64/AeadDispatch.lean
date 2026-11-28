@@ -439,6 +439,8 @@ def aead.Key.open_in_place (self : aead.Key) (nonce : aead.Nonce) (aad in_out : 
       aead.Key.open_in_place_separate_tag self nonce aad
         ⟨Std.Array.from (in_out.val.drop (in_out.length - 16)) h⟩ body
     else fail .panic
+
+-- BEGIN xchacha (not armv7's, whose translation does not reach XChaCha20-Poly1305)
 /-- `RandomizedNonceKey`. -/
 structure aead.RandomizedNonceKey where
   key : mid.xchacha20poly1305.XChaCha20Poly1305
@@ -489,5 +491,6 @@ def aead.RandomizedNonceKey.open_in_place (self : aead.RandomizedNonceKey) (nonc
       | .Ok () => ok (.Ok body, body)
       | .Err e => ok (.Err e, body)
     else fail .panic
+-- END xchacha
 
 end rind.x86_64

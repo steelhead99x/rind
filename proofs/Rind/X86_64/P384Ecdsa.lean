@@ -273,13 +273,24 @@ theorem double_spec (_hr : Runs) (pt : mid.p384.JacobianMontPoint) (P : nist.Poi
   step*
   exact a_post P h
 
-theorem add_affine_ne_spec (_hr : Runs) (pt : mid.p384.JacobianMontPoint) (p : mid.p384.AffineMontPoint)
-    (P1 P2 : nist.Point) (h1 : jrep P1 pt) (h2 : p384Represents2 P2 (pairNat6 p.xy.val)) (hne : P1 ≠ P2) :
-    mid.p384.JacobianMontPoint.add_affine pt p ⦃ r => jrep (p384Add P1 P2) r ⦄ := by
+/-- `p384_montjmixadd` adds unequal points, and leaves z zero for equal or
+opposite ones. -/
+theorem add_affine_full_spec (_hr : Runs) (pt : mid.p384.JacobianMontPoint) (p : mid.p384.AffineMontPoint)
+    (P1 P2 : nist.Point) (h1 : jrep P1 pt) (h2 : p384Represents2 P2 (pairNat6 p.xy.val)) :
+    mid.p384.JacobianMontPoint.add_affine pt p ⦃ r =>
+      (P1 ≠ P2 → jrep (p384Add P1 P2) r) ∧
+      (P1 = P2 ∨ P1 = p384Neg P2 → (tripleNat6 r.xyz.val).2.2 = 0) ⦄ := by
   unfold mid.p384.JacobianMontPoint.add_affine
   step as ⟨inf, hinf⟩
   step as ⟨a, ha⟩
-  exact ha P1 P2 h1 h2 hne
+  exact ha P1 P2 h1 h2
+
+theorem add_affine_ne_spec (_hr : Runs) (pt : mid.p384.JacobianMontPoint) (p : mid.p384.AffineMontPoint)
+    (P1 P2 : nist.Point) (h1 : jrep P1 pt) (h2 : p384Represents2 P2 (pairNat6 p.xy.val)) (hne : P1 ≠ P2) :
+    mid.p384.JacobianMontPoint.add_affine pt p ⦃ r => jrep (p384Add P1 P2) r ⦄ := by
+  apply WP.spec_mono (add_affine_full_spec _hr pt p P1 P2 h1 h2)
+  intro r hr
+  exact hr.1 hne
 
 @[step]
 theorem jac_add_spec (_hr : Runs) (pt q : mid.p384.JacobianMontPoint) (P1 P2 : nist.Point) (h1 : jrep P1 pt)
@@ -289,36 +300,31 @@ theorem jac_add_spec (_hr : Runs) (pt q : mid.p384.JacobianMontPoint) (P1 P2 : n
   step*
   exact a_post P1 P2 h1 h2 hne
 
-theorem onCurve_zmod (x y : Nat) (h : p384OnCurve (some (x, y))) :
-    (y : ZMod p384) ^ 2 = (x : ZMod p384) ^ 3 + ((p384 - 3 : Nat) : ZMod p384) * x + (b384 : ZMod p384) := by
-  obtain ⟨-, -, h⟩ := h
-  have := (ZMod.natCast_eq_natCast_iff' _ _ _).mpr h
-  push_cast at this
-  exact this
+/-- Two points of the curve that sum to infinity are opposite. -/
+theorem eq_neg_of_add_none (P Q : nist.Point) (hP : p384OnCurve P) (hQ : p384OnCurve Q)
+    (h : p384Add P Q = none) : Q = p384Neg P := by
+  have hN := p384Neg_onCurve P hP
+  calc Q = p384Add (p384Add (p384Neg P) P) Q := by
+        rw [p384Laws.mul_comm _ _ hN hP, p384Laws.mul_neg P hP, p384Laws.mul_none Q hQ]
+    _ = p384Neg P := by
+        rw [p384Laws.mul_assoc _ _ _ hN hP hQ, h, p384Laws.mul_comm (p384Neg P) none hN trivial, p384Laws.mul_none _ hN]
 
-/-- Two points of the curve with the same x and different y are opposite. -/
-theorem neg_of_same_x (x y1 y2 : Nat) (h1 : p384OnCurve (some (x, y1))) (h2 : p384OnCurve (some (x, y2)))
-    (hne : y1 ≠ y2) : some (x, y2) = p384Neg (some (x, y1)) := by
-  have e1 := onCurve_zmod x y1 h1
-  have e2 := onCurve_zmod x y2 h2
-  have hne' : (y2 : ZMod p384) - y1 ≠ 0 := by
-    rw [sub_ne_zero]
-    intro h
-    rw [ZMod.natCast_eq_natCast_iff', Nat.mod_eq_of_lt h2.2.1, Nat.mod_eq_of_lt h1.2.1] at h
-    exact hne h.symm
-  have hsum : (y2 : ZMod p384) + y1 = 0 := by
-    have : ((y2 : ZMod p384) - y1) * ((y2 : ZMod p384) + y1) = 0 := by linear_combination e2 - e1
-    exact (mul_eq_zero.mp this).resolve_left hne'
-  simp only [p384Neg, nist.neg, Option.some.injEq, Prod.mk.injEq, true_and]
-  have hlt : (p384 - y1 % p384) % p384 < p384 := Nat.mod_lt _ p384_pos
-  rw [← Nat.mod_eq_of_lt h2.2.1, ← Nat.mod_eq_of_lt hlt, ← ZMod.natCast_eq_natCast_iff', nist.natCast_neg_mod]
-  linear_combination hsum
+/-- `public_is_infinity` tests z alone, whatever point the coordinates hold. -/
+theorem is_infinity_z_spec (pt : mid.p384.JacobianMontPoint) :
+    mid.p384.JacobianMontPoint.public_is_infinity pt ⦃ b => b ↔ (tripleNat6 pt.xyz.val).2.2 = 0 ⦄ := by
+  unfold mid.p384.JacobianMontPoint.public_is_infinity mid.p384.FieldElement.Insts.CoreDefaultDefault.default
+    core.default.DefaultArray.default
+  step as ⟨fz, hfz⟩
+  step as ⟨b, hb⟩
+  have h0 : feNat (Array.repeat 6#usize core.default.DefaultU64.default) = 0 := by
+    simp [feNat, wordsNat, Array.repeat, Nat.ofDigits, core.default.DefaultU64.default]
+  rw [hb, h0, hfz]
 
 theorem val_inj (a b : ZMod p384) : a.val = b.val ↔ a = b := ⟨fun h => ZMod.val_injective _ h, fun h => h ▸ rfl⟩
 
-/-- `public_add_affine`: the sum, for any points, which settles points
-sharing x, equal or opposite, before `p384_montjmixadd`, whose contract
-excludes only equal points. -/
+/-- `public_add_affine`: the sum, for any points. `p384_montjmixadd` adds
+first, and a zero z, which equal or opposite points leave, sends it to the
+check that tells them apart. -/
 @[step]
 theorem add_affine_spec (_hr : Runs) (pt : mid.p384.JacobianMontPoint) (p : mid.p384.AffineMontPoint)
     (P1 P2 : nist.Point) (hc1 : p384OnCurve P1) (hc2 : p384OnCurve P2) (h1 : jrep P1 pt)
@@ -332,68 +338,67 @@ theorem add_affine_spec (_hr : Runs) (pt : mid.p384.JacobianMontPoint) (p : mid.
     step with from_affine_jrep_spec p P2 h2 as ⟨r, hr⟩
     rw [p384Laws.mul_none P2 hc2]; exact hr
   · rename_i hbf
-    have hP1 : P1 ≠ none := fun h => hbf (hb.mpr h)
-    obtain ⟨hpx, hpy, hP2⟩ := rep2_dec P2 _ h2
-    obtain ⟨hX, hY, hZ, hP1eq⟩ := h1
-    rw [ofJacobian_dec] at hP1eq
-    set X := (tripleNat6 pt.xyz.val).1
-    set Y := (tripleNat6 pt.xyz.val).2.1
-    set Z := (tripleNat6 pt.xyz.val).2.2
-    have hZ0 : dec Z ≠ 0 := fun h => hP1 (by rw [← hP1eq, ite_eq_left h])
-    rw [ite_eq_right hZ0] at hP1eq
-    set px := (pairNat6 p.xy.val).1
-    set py := (pairNat6 p.xy.val).2
-    have hlt : ∀ x, x % p384 < p384 := fun x => Nat.mod_lt _ p384_pos
-    step as ⟨fz, hfzZ⟩
-    step with mont_sqr_spec _hr fz (by rw [hfzZ]; exact hZ) as ⟨z2, hz2⟩
-    step as ⟨fe1, hfe1x⟩
-    step with mont_mul_spec _hr fe1 z2 (by rw [hfe1x]; exact hpx) (by rw [hz2]; exact hlt _) as ⟨fe2, hfe2⟩
-    step as ⟨fe3, hfe3X⟩
-    step as ⟨b1, hb1⟩
-    have hxeq : b1 ↔ (dec px).val = (dec X * (dec Z ^ 2)⁻¹).val := by
-      rw [hb1, hfe3X, eq_of_dec _ _ (by rw [hfe2]; exact hlt _) hX, hfe2, dec_mont_mul, hz2,
-        dec_mont_sqr, hfzZ, hfe1x, val_inj, eq_mul_inv_iff_mul_eq₀ (pow_ne_zero 2 hZ0)]
+    step with add_affine_full_spec _hr pt p P1 P2 h1 h2 as ⟨s, hsum, hsame⟩
+    step with is_infinity_z_spec s as ⟨b1, hb1⟩
     split
     · rename_i hb1t
-      have hxe := hxeq.mp hb1t
+      -- The sum's z is zero, so the points are equal or their sum is at infinity.
+      have hinf : P1 ≠ P2 → p384Add P1 P2 = none := fun hne => by
+        obtain ⟨-, -, -, hQ⟩ := hsum hne
+        rw [ofJacobian_dec, hb1.mp hb1t] at hQ
+        simpa using hQ.symm
+      have hP1 : P1 ≠ none := fun h => hbf (hb.mpr h)
+      obtain ⟨hpx, hpy, hP2⟩ := rep2_dec P2 _ h2
+      obtain ⟨hX, hY, hZ, hP1eq⟩ := id h1
+      rw [ofJacobian_dec] at hP1eq
+      set X := (tripleNat6 pt.xyz.val).1
+      set Y := (tripleNat6 pt.xyz.val).2.1
+      set Z := (tripleNat6 pt.xyz.val).2.2
+      have hZ0 : dec Z ≠ 0 := fun h => hP1 (by rw [← hP1eq, ite_eq_left h])
+      rw [ite_eq_right hZ0] at hP1eq
+      set px := (pairNat6 p.xy.val).1
+      set py := (pairNat6 p.xy.val).2
+      have hlt : ∀ x, x % p384 < p384 := fun x => Nat.mod_lt _ p384_pos
+      -- Equal or opposite, the points share x.
+      have hxe : (dec px).val = (dec X * (dec Z ^ 2)⁻¹).val := by
+        by_cases hne : P1 = P2
+        · rw [← hP1eq, hP2] at hne
+          simp only [Option.some.injEq, Prod.mk.injEq] at hne
+          exact hne.1.symm
+        · have hneg := eq_neg_of_add_none P1 P2 hc1 hc2 (hinf hne)
+          rw [← hP1eq, hP2] at hneg
+          simp only [p384Neg, nist.neg, Option.some.injEq, Prod.mk.injEq] at hneg
+          exact hneg.1
+      step as ⟨fz, hfzZ⟩
+      step with mont_sqr_spec _hr fz (by rw [hfzZ]; exact hZ) as ⟨z2, hz2⟩
+      step with mont_mul_spec _hr z2 fz (by rw [hz2]; exact hlt _) (by rw [hfzZ]; exact hZ) as ⟨z3, hz3⟩
       step as ⟨fe4, hfe4y⟩
-      step with mont_mul_spec _hr z2 fz (by rw [hz2]; exact hlt _) (by rw [hfzZ]; exact hZ) as ⟨fe5, hfe5⟩
-      step with mont_mul_spec _hr fe4 fe5 (by rw [hfe4y]; exact hpy) (by rw [hfe5]; exact hlt _) as ⟨fe6, hfe6⟩
+      step with mont_mul_spec _hr fe4 z3 (by rw [hfe4y]; exact hpy) (by rw [hz3]; exact hlt _) as ⟨fe6, hfe6⟩
       step as ⟨fe7, hfe7Y⟩
       step as ⟨b2, hb2⟩
       have hyeq : b2 ↔ (dec py).val = (dec Y * (dec Z ^ 3)⁻¹).val := by
-        rw [hb2, hfe7Y, eq_of_dec _ _ (by rw [hfe6]; exact hlt _) hY, hfe6, dec_mont_mul, hfe5,
+        rw [hb2, hfe7Y, eq_of_dec _ _ (by rw [hfe6]; exact hlt _) hY, hfe6, dec_mont_mul, hz3,
           dec_mont_mul, hz2, dec_mont_sqr, hfzZ, hfe4y, val_inj,
           eq_mul_inv_iff_mul_eq₀ (pow_ne_zero 3 hZ0)]
         constructor <;> intro h <;> linear_combination h
-      have hP1' : jrep P1 pt := ⟨hX, hY, hZ, by rw [ofJacobian_dec, ite_eq_right hZ0, hP1eq]⟩
       split
       · rename_i hb2t
         have heq : P1 = P2 := by rw [← hP1eq, hP2, hxe, hyeq.mp hb2t]
-        step with double_spec _hr pt P1 hP1' as ⟨r, hr⟩
+        step with double_spec _hr pt P1 h1 as ⟨r, hr⟩
         rw [← heq]; exact hr
       · rename_i hb2f
-        have hneg : P2 = p384Neg P1 := by
-          have hc1' := hc1
-          have hc2' := hc2
-          rw [← hP1eq, ← hxe] at hc1'
-          rw [hP2] at hc2'
-          rw [← hP1eq, hP2, ← hxe]
-          refine neg_of_same_x _ _ _ hc1' hc2' ?_
-          intro h; exact hb2f (hyeq.mpr h.symm)
+        have hne : P1 ≠ P2 := by
+          rw [← hP1eq, hP2]
+          intro h
+          simp only [Option.some.injEq, Prod.mk.injEq] at h
+          exact hb2f (hyeq.mpr h.2.symm)
         step as ⟨r, hr⟩
-        rw [hneg, p384Laws.mul_neg P1 hc1]; exact hr
+        rw [hinf hne]; exact hr
     · rename_i hb1f
-      have hne : P1 ≠ P2 := by
-        rw [← hP1eq, hP2]
-        intro h
-        simp only [Option.some.injEq, Prod.mk.injEq] at h
-        exact hb1f (hxeq.mpr h.1.symm)
-      step with add_affine_ne_spec _hr pt p P1 P2 ⟨hX, hY, hZ, by rw [ofJacobian_dec, ite_eq_right hZ0, hP1eq]⟩ h2 hne
-        as ⟨r, hr⟩
-      exact hr
+      simp only [WP.spec_ok]
+      exact hsum (fun h => hb1f (hb1.mpr (hsame (Or.inl h))))
 
-/-! ## Non-adjacent form, `mid::util::public_naf`, which `Rind.X86_64.Naf` proves -/
+/-! ## Non-adjacent form, `low::generic::naf::public_naf`, which `Rind.X86_64.Naf` proves -/
 
 @[step]
 theorem scalar_naf_spec (W : U32) (hW : W.val = 5 ∨ W.val = 6) (s : mid.p384.Scalar) :
@@ -402,7 +407,7 @@ theorem scalar_naf_spec (W : U32) (hW : W.val = 5 ∨ W.val = 6) (s : mid.p384.S
   unfold mid.p384.Scalar.public_naf
   step as ⟨sl, hsl⟩
   step as ⟨s1, back, hs1, hback⟩
-  step with naf_spec W hW sl 384 (by rw [hsl]; simp) (by norm_num) (by rw [hsl]; simp) s1
+  step with naf_spec W (hW.imp_right Or.inl) sl 384 (by rw [hsl]; simp) (by norm_num) (by rw [hsl]; simp) s1
       (by rw [Slice.length, hs1]; exact (Array.repeat 385#usize 0#i8).property) as
     ⟨s2, hl2, hv2, hd2⟩
   have hv : (back s2).val = s2.val := by
@@ -1184,7 +1189,7 @@ theorem more_odd_spec (_hr : Runs) (Q : nist.Point) (hQ : p384OnCurve Q) (hQo : 
     step as ⟨inf, hinf⟩
     step as ⟨a, ha⟩
     intro k hk1 hk15 hrep
-    have := ha _ _ hp161 hrep (p384Laws.zpow_ne Q hQ hQo _ _ (by omega) (by omega))
+    have := (ha _ _ hp161 hrep).1 (p384Laws.zpow_ne Q hQ hQo _ _ (by omega) (by omega))
     rw [p384Laws.mul_zpow Q hQ] at this
     exact this
   step with P256.map_spec

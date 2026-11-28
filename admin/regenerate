@@ -37,10 +37,13 @@ if ! diff -u --label "$fork/RIND.md" --label "changed from upstream" <(echo "$li
 fi
 
 # Deleted first, so a file nothing regenerates shows as deleted.
-find rind/src/low/*/aws_lc rind/src/low/*/boringssl rind/src/low/*/openssl rind/src/low/*/hacl rind/src/low/*/vg rind/src/low/aarch64/mlkem_native -type f -delete
+find rind/src/low/*/aws_lc rind/src/low/*/boringssl rind/src/low/*/openssl rind/src/low/*/hacl rind/src/low/*/vg rind/src/low/aarch64/mlkem_native rind/src/low/x86_64/chacha20poly1305 -type f -delete
 grep -rlxZ '// generated source. do not edit.' rind/src | xargs -0 rm --
 
 admin/import-aws-lc "$upstream/aws-lc"
+# rind's structured copy of aws-lc's x86_64 AVX2 ChaCha20-Poly1305 seal and its
+# Lean program, from the text the importer just wrote.
+admin/chacha20poly1305-x86/generate
 admin/import-boringssl "$upstream/boringssl"
 admin/import-openssl "$upstream/openssl"
 admin/import-hacl "$upstream/hacl-star"
@@ -51,9 +54,10 @@ admin/p256-precomp
 admin/p384-precomp
 admin/p521-precomp
 
-if [[ -n "$(git status --porcelain -- rind/src)" ]]; then
-    git status --short -- rind/src >&2
-    git --no-pager diff -- rind/src >&2
+generated=(rind/src proofs/verified-garbage/RindIsa/X86_64/ChaCha20Poly1305.lean)
+if [[ -n "$(git status --porcelain -- "${generated[@]}")" ]]; then
+    git status --short -- "${generated[@]}" >&2
+    git --no-pager diff -- "${generated[@]}" >&2
     echo "admin/regenerate: the generated code differs from the committed code" >&2
     exit 1
 fi

@@ -2,91 +2,77 @@
 fn main() {}
 
 #[cfg(not(target_arch = "xtensa"))]
-mod criterion;
-#[cfg(not(target_arch = "xtensa"))]
-use std::hint::black_box;
+mod common;
 
 #[cfg(not(target_arch = "xtensa"))]
-use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-#[cfg(not(target_arch = "xtensa"))]
-use sha1::Digest;
+use common::{Dit, HASH_SIZES, Size};
 
 #[cfg(not(target_arch = "xtensa"))]
-fn test_ring_sha1(data: &[u8]) {
-    let mut ctx = ring::digest::Context::new(&ring::digest::SHA1_FOR_LEGACY_USE_ONLY);
-    ctx.update(data);
-    black_box(ctx.finish());
-}
-
-#[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
-#[cfg(not(target_arch = "xtensa"))]
-fn test_aws_sha1(data: &[u8]) {
-    let mut ctx = aws_lc_rs::digest::Context::new(&aws_lc_rs::digest::SHA1_FOR_LEGACY_USE_ONLY);
-    ctx.update(data);
-    black_box(ctx.finish());
+fn input(size: Size) -> Vec<u8> {
+    size.zeros()
 }
 
 #[cfg(not(target_arch = "xtensa"))]
-fn test_rc_sha1(data: &[u8]) {
-    let mut ctx = sha1::Sha1::new();
-    ctx.update(data);
-    black_box(ctx.finalize());
+fn rind_input(size: Size) -> Dit<Vec<u8>> {
+    Dit::hold(size.zeros())
 }
 
+// A module named after the crate, so the crate is `::sha1` inside it.
 #[cfg(not(target_arch = "xtensa"))]
-fn test_rind_sha1(data: &[u8]) {
-    let mut ctx = rind::digest::Context::new(&rind::digest::legacy::SHA1);
-    ctx.update(data);
-    black_box(ctx.finish());
-}
+mod sha1 {
+    use swole::bench;
 
-#[cfg(not(target_arch = "xtensa"))]
-fn test_vg_sha1(data: &[u8]) {
-    let mut ctx = verified_garbage::hashes::sha1::Sha1::new();
-    ctx.update(data);
-    black_box(ctx.finalize());
-}
+    use super::*;
 
-#[cfg(not(target_arch = "xtensa"))]
-fn sha1(c: &mut Criterion) {
-    let mut group = c.benchmark_group("sha1");
-    for (size, size_name) in criterion::HASH_SIZES {
-        let input = vec![0u8; size];
-        group.throughput(Throughput::Bytes(size as u64));
+    #[bench(args = HASH_SIZES, setup = input)]
+    fn ring(input: &[u8]) -> ring::digest::Digest {
+        let mut ctx = ring::digest::Context::new(&ring::digest::SHA1_FOR_LEGACY_USE_ONLY);
+        ctx.update(input);
+        ctx.finish()
+    }
 
-        group.bench_with_input(BenchmarkId::new("ring", size_name), &input, |b, input| {
-            b.iter(|| test_ring_sha1(input))
-        });
-        #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
-        group.bench_with_input(
-            BenchmarkId::new("aws-lc-rs", size_name),
-            &input,
-            |b, input| b.iter(|| test_aws_sha1(input)),
-        );
-        group.bench_with_input(
-            BenchmarkId::new("rustcrypto", size_name),
-            &input,
-            |b, input| b.iter(|| test_rc_sha1(input)),
-        );
-        group.bench_with_input(BenchmarkId::new("rind", size_name), &input, |b, input| {
-            let _dit = criterion::rind_dit();
-            b.iter(|| test_rind_sha1(input))
-        });
-        let mut ctx = verified_garbage::hashes::sha1::Sha1::new();
-        ctx.update(&input);
+    #[bench(args = HASH_SIZES, setup = input)]
+    fn aws_lc_rs(input: &[u8]) -> aws_lc_rs::digest::Digest {
+        let mut ctx = aws_lc_rs::digest::Context::new(&aws_lc_rs::digest::SHA1_FOR_LEGACY_USE_ONLY);
+        ctx.update(input);
+        ctx.finish()
+    }
+
+    #[bench(args = HASH_SIZES, setup = input)]
+    fn rustcrypto(input: &[u8]) -> impl Sized + use<> {
+        use ::sha1::Digest;
+        let mut ctx = ::sha1::Sha1::new();
+        ctx.update(input);
+        ctx.finalize()
+    }
+
+    #[bench(args = HASH_SIZES, setup = rind_input)]
+    fn rind(input: &Dit<Vec<u8>>) -> rind::digest::Digest {
+        let mut ctx = rind::digest::Context::new(&rind::digest::legacy::SHA1);
+        ctx.update(input);
+        ctx.finish()
+    }
+
+    /// The message, after checking verified-garbage's digest of it matches
+    /// rind's.
+    fn vg_input(size: Size) -> Vec<u8> {
+        let input = size.zeros();
         assert_eq!(
-            ctx.finalize(),
+            verified_garbage(&input).as_ref(),
             rind::digest::digest(&rind::digest::legacy::SHA1, &input).as_ref()
         );
-        group.bench_with_input(
-            BenchmarkId::new("verified-garbage", size_name),
-            &input,
-            |b, input| b.iter(|| test_vg_sha1(input)),
-        );
+        input
+    }
+
+    #[bench(args = HASH_SIZES, setup = vg_input)]
+    fn verified_garbage(input: &[u8]) -> impl AsRef<[u8]> + use<> {
+        let mut ctx = verified_garbage::hashes::sha1::Sha1::new();
+        ctx.update(input);
+        ctx.finalize()
     }
 }
 
 #[cfg(not(target_arch = "xtensa"))]
-criterion_group!(benches, sha1);
-#[cfg(not(target_arch = "xtensa"))]
-criterion_main!(benches);
+fn main() {
+    swole::main();
+}

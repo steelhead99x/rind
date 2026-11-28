@@ -76,8 +76,8 @@ The modules:
   scalar.
 - `ed25519`: Ed25519 key pairs, from a seed or PKCS#8, and public keys,
   which refuse a point of small order.
-- `ml_dsa`: ML-DSA-44, ML-DSA-65, and ML-DSA-87 (pure, with the empty
-  context), whose parameter set is a type, so a key of one set fails to
+- `ml_dsa`: ML-DSA-44, ML-DSA-65, and ML-DSA-87 (pure, under a
+  context string), whose parameter set is a type, so a key of one set fails to
   compile where another's is expected and a signature is a fixed-size
   array.
 - `slh_dsa`: SLH-DSA's twelve parameter sets (FIPS 205, pure, with the empty
@@ -95,6 +95,10 @@ The modules:
 - `argon2`: Argon2id, deriving or verifying a key from a password at a memory and time cost.
 - `spake2plus`: SPAKE2+ on P-256 (RFC 9383, and Matter PASE's draft-01
   schedule), a password-authenticated key exchange whose suite is a type.
+- `opaque`: RFC 9807's OPAQUE-3DH over ristretto255 and P-256, each with
+  RFC 9807's Argon2id: a server's setup that registers clients and answers
+  their logins, an unknown account's with a fake record, and each side's
+  state as a type its next step consumes.
 - `encoding`: the PKCS#8, SEC1, and `SubjectPublicKeyInfo` encodings key
   types export.
 - `constant_time`: comparing secrets such as MACs without a timing leak.

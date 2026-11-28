@@ -2,7 +2,7 @@
 
 # Usage: admin/test-scope args CHANGED_FILE MERGE_BASE
 #        admin/test-scope units CARGO_ARGS...
-#        admin/test-scope check
+#        admin/test-scope check [--timings]
 #
 # Scopes `just check`'s rind tests to the primitive families a diff touches,
 # by the map in admin/test-scope.toml.
@@ -27,7 +27,10 @@
 # names a file, and, for each set of families a file under rind/src/{low,mid,
 # high}/ belongs to, `cargo nextest list` with that set's arguments selects
 # exactly the tests the map gives it. Build it as `just check` builds rind's
-# tests, under the same profile and wrapper, so the two share their build.
+# tests, under the same profile and wrapper, so the two share their build;
+# `--timings`, which CI passes, goes to its first listing, the one that
+# builds the tests. It takes no other Cargo argument, since one such as
+# `--features` would change the test set the later listings compare with.
 
 import json, pathlib, re, subprocess, sys, tomllib
 
@@ -244,13 +247,13 @@ SIGNATURES = [
 ]
 
 
-def check_command():
+def check_command(cargo_args):
     families, units, tests = load()
     errors = []
     for text, want in SIGNATURES:
         if signature_lines(text) != want:
             errors.append(f"signature_lines finds {sorted(signature_lines(text))}, not {sorted(want)}, in {text!r}")
-    every = listing(["--tests"])
+    every = listing(["--tests", *cargo_args])
     lib = {name for binary, name in every if binary == "rind"}
 
     listed = {binary for binary, _ in every if binary != "rind"}
@@ -310,10 +313,10 @@ def main():
             args_command(changed_file, merge_base)
         case ["units", *cargo_args] if cargo_args:
             units_command(cargo_args)
-        case ["check"]:
-            check_command()
+        case ["check", *cargo_args] if cargo_args in ([], ["--timings"]):
+            check_command(cargo_args)
         case _:
-            sys.exit("usage: admin/test-scope args CHANGED_FILE MERGE_BASE | units CARGO_ARGS... | check")
+            sys.exit("usage: admin/test-scope args CHANGED_FILE MERGE_BASE | units CARGO_ARGS... | check [--timings]")
 
 
 if __name__ == "__main__":

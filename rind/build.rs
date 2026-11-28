@@ -28,6 +28,12 @@
 //! call. `--cfg rind_limb="32"` forces 32-bit limbs on a 64-bit target, so
 //! CI checks both widths on x86_64; like `rind_portable`, it is for testing.
 //!
+//! It sets `rind_sha256_iram` on ESP-IDF Xtensa, whose portable backend runs
+//! SHA-256 from internal RAM (`low/portable/sha256_iram.rs`). `admin/prove`
+//! forces it on a 32-bit host target, whose Charon build then translates the
+//! same selection, with the module's Rust in place of its Xtensa `asm!`; it
+//! is for proofs, not for shipping.
+//!
 //! And it sets `rind_std` where the target has an operating system and
 //! `std`, the only places rind may use `std`: every target but those for
 //! bare metal (`target_os = "none"`), UEFI, and Linux without a libc, such
@@ -48,8 +54,8 @@
 //! cannot find (it looks in `RUST_TARGET_PATH` and the package directory and
 //! its parents) takes the top-bit path, as the safe choice. On 32-bit RISC-V with no multiply instruction,
 //! `rind_mul16_soft` builds each half with a shift and an add. Zmmul has
-//! `mul` and `mulhu`, so it does not. A 64-bit RISC-V target with neither
-//! keeps 64-bit limbs; those products call `__multi3`, and the build warns.
+//! `mul` and `mulhu`, so it does not. Multiplier-free 64-bit RISC-V
+//! also uses these halves, selecting 26-bit limbs only for Poly1305.
 //! `--cfg rind_mul16` forces the halves,
 //! so CI checks them on other targets; it is for testing. The top and soft
 //! cfgs follow the target even then. Only Poly1305's limb products use this.
@@ -76,6 +82,7 @@ fn main() {
     println!("cargo::rustc-check-cfg=cfg(rind_mul16_soft)");
     println!("cargo::rustc-check-cfg=cfg(rind_reg_asm)");
     println!("cargo::rerun-if-env-changed=RUST_TARGET_PATH");
+    println!("cargo::rustc-check-cfg=cfg(rind_sha256_iram)");
 
     let os = env::var("CARGO_CFG_TARGET_OS").expect("cargo sets the target os");
     let libc = env::var("CARGO_CFG_TARGET_ENV").is_ok_and(|e| !e.is_empty());
@@ -99,6 +106,18 @@ fn main() {
         _ => "portable",
     };
     println!(r#"cargo::rustc-cfg=rind_backend="{backend}""#);
+
+    // `rind_sse2`: an x86 or x86_64 target that enables SSE2 at compile time,
+    // where the bitsliced AES in `low/generic/aes_nohw.rs` takes eight blocks
+    // a pass in SSE2 words whatever the backend. `--cfg rind_no_sse2` keeps
+    // the integer words instead, so the forced-portable CI jobs on x86_64
+    // check what the other portable architectures ship; it is for testing.
+    println!("cargo::rustc-check-cfg=cfg(rind_sse2)");
+    println!("cargo::rustc-check-cfg=cfg(rind_no_sse2)");
+    let no_sse2 = env::var_os("CARGO_CFG_RIND_NO_SSE2").is_some();
+    if matches!(arch.as_str(), "x86" | "x86_64") && enabled("sse2") && !no_sse2 {
+        println!("cargo::rustc-cfg=rind_sse2");
+    }
 
     // `rind_dit`: an aarch64 target with an OS, where `rind::cpu::Dit`
     // counts guards per thread and a debug build checks PSTATE.DIT under
@@ -131,6 +150,10 @@ fn main() {
         println!("cargo::rustc-cfg=rind_reg_asm");
     }
 
+    if arch == "xtensa" && os == "espidf" {
+        println!("cargo::rustc-cfg=rind_sha256_iram");
+    }
+
     let wide = env::var("CARGO_CFG_TARGET_POINTER_WIDTH").is_ok_and(|w| w == "64")
         || (arch == "wasm32"
             && env::var("CARGO_CFG_TARGET_FEATURE")
@@ -160,16 +183,6 @@ fn main() {
     if mode == Some(Half::Soft) && env::var_os("CARGO_CFG_RIND_MUL16_SOFT").is_none() {
         println!("cargo::rustc-cfg=rind_mul16_soft");
     }
-
-    // `rind_mul16` is the 32-bit half product. A 64-bit target keeps
-    // `generic::poly1305`, so the cfg would not cover these calls.
-    if riscv64_without_multiply() {
-        println!(
-            "cargo::warning=riscv64 without the M extension or Zmmul keeps 64-bit \
-             Poly1305 limbs, so each 64x64->128 product calls __multi3 on the secret. \
-             rind_mul16 does not cover that width (PLATFORMS.md)"
-        );
-    }
 }
 
 /// How Poly1305 multiplies one 16-bit half, where it must not use a
@@ -195,11 +208,13 @@ enum Half {
 /// `mul` early on a 16-bit half too, so the top bit stays set.
 /// `arm-linux-androideabi` is ARMv5TE; `armv7-linux-androideabi` is not.
 /// Rust's unversioned `arm-unknown-linux-*` triples are ARMv6, which does
-/// not end early. 32-bit RISC-V without M and without Zmmul has no multiply
-/// instruction. 64-bit RISC-V in that state is not a half product: Poly1305
-/// stays on 64-bit limbs.
+/// not end early. RISC-V without M or Zmmul has no multiply instruction.
 fn poly1305_half_mul() -> Option<Half> {
-    if riscv32_without_multiply() {
+    if matches!(
+        env::var("CARGO_CFG_TARGET_ARCH").as_deref(),
+        Ok("riscv32" | "riscv64")
+    ) && !riscv_has_multiply()
+    {
         return Some(Half::Soft);
     }
     if arm_early_mul() {
@@ -209,17 +224,6 @@ fn poly1305_half_mul() -> Option<Half> {
         return Some(Half::Halves);
     }
     None
-}
-
-/// Whether this 32-bit RISC-V target has no multiply instruction.
-fn riscv32_without_multiply() -> bool {
-    env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default() == "riscv32" && !riscv_has_multiply()
-}
-
-/// Whether this 64-bit RISC-V target has no multiply instruction. Poly1305
-/// then calls `__multi3`. `rind_mul16` does not run on 64-bit limbs.
-fn riscv64_without_multiply() -> bool {
-    env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default() == "riscv64" && !riscv_has_multiply()
 }
 
 /// Whether the RISC-V target has `mul` and `mulhu`: the M extension, or

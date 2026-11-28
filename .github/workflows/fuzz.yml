@@ -56,7 +56,7 @@ jobs:
           - arch: portable
             os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            rustflags: --cfg rind_portable --cfg curve25519_dalek_backend="serial"
+            rustflags: --cfg rind_portable --cfg rind_no_sse2 --cfg curve25519_dalek_backend="serial"
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     outputs:

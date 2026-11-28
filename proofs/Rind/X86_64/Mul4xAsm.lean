@@ -7,15 +7,6 @@ set_option linter.unusedSimpArgs false
 
 namespace rind.x86_64.mul4x
 
-/-- What a block leaves unchanged: the general registers but `gs`, and the rest of the state but memory and
-the flags. -/
-structure Frame (s s' : S) (gs : List Reg) : Prop where
-  gpr : ∀ r, r ∉ gs → s'.vg.gpr r = s.vg.gpr r
-  others : others s'.vg = others s.vg
-  wr : s'.vg.wr = s.vg.wr
-  xmm : s'.vg.xmm = s.vg.xmm
-  lo : s'.lo = s.lo
-
 /-- The address of word `i` of the array at `p`. -/
 abbrev wa (p : Addr) (i : Nat) : Addr := p + BitVec.ofNat 64 i * 8#64
 

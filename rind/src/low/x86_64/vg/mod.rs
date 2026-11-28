@@ -12,6 +12,22 @@
 pub struct Table<const N: usize>(pub [u8; N]);
 
 #[rustfmt::skip]
+pub(crate) mod vg_aes_ctr32_vaes;
+#[rustfmt::skip]
+pub(crate) mod vg_aes_gcm_decrypt_blocks_prepared_vaes_vpclmul_avx512;
+#[rustfmt::skip]
+pub(crate) mod vg_aes_gcm_decrypt_blocks_vaes_vpclmul_avx512;
+#[rustfmt::skip]
+pub(crate) mod vg_aes_gcm_encrypt_blocks_prepared_vaes_vpclmul_avx512;
+#[rustfmt::skip]
+pub(crate) mod vg_aes_gcm_encrypt_blocks_vaes_vpclmul_avx512;
+#[rustfmt::skip]
+pub(crate) mod vg_aes_gcm_open_prepared_vaes_vpclmul_avx512;
+#[rustfmt::skip]
+pub(crate) mod vg_aes_gcm_prepare_vpclmul_avx512;
+#[rustfmt::skip]
+pub(crate) mod vg_aes_gcm_seal_prepared_vaes_vpclmul_avx512;
+#[rustfmt::skip]
 pub(crate) mod vg_chacha20_apply_avx2;
 #[rustfmt::skip]
 pub(crate) mod vg_chacha20_apply_avx512vl;
@@ -82,7 +98,11 @@ pub(crate) mod vg_ed25519_verify_base;
 #[rustfmt::skip]
 pub(crate) mod vg_ed25519_verify_equation_ifma;
 #[rustfmt::skip]
+pub(crate) mod vg_gcm_consts;
+#[rustfmt::skip]
 pub(crate) mod vg_gf25519_r64_invert;
+#[rustfmt::skip]
+pub(crate) mod vg_ghash_vpclmul;
 #[rustfmt::skip]
 pub(crate) mod vg_keccak_absorb_scratch;
 #[rustfmt::skip]

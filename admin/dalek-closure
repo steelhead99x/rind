@@ -6,16 +6,18 @@ Usage: admin/dalek-closure <want dir> <got dir> <configuration> <root>...
 Each directory holds a translation's `Types.lean` and `Funs.lean`. From each
 root, a name in the first translation, this follows every name of the first
 translation's definitions that a reached definition's text names, and fails
-unless the second translation defines each reached name with the same text.
-A definition's text leaves out its doc comment, which cites the Rust's source
-lines. A multi-target translation suffixes what differs between its targets
-with the target's name, `«32bit-tables»` and the like, so this follows only
-`configuration`'s: a name that holds another target's, or the other word
-size's backend, is not followed.
+unless the second translation defines each reached name with the same text,
+or with the pair of texts `REVIEWED` pins for it. A definition's text leaves
+out its doc comment, which cites the Rust's source lines. A multi-target
+translation suffixes what differs between its targets with the target's
+name, `«32bit-tables»` and the like, so this follows only `configuration`'s:
+a name that holds another target's, or the other word size's backend, is not
+followed.
 
 `admin/prove dalek` runs it with BAIF's translation first and rind's second.
 """
 
+import hashlib
 import re
 import sys
 
@@ -53,6 +55,25 @@ def definitions(directory):
     return out
 
 
+# Definitions whose two texts were read and found to be one function, each
+# pinned by the SHA-256 of BAIF's texts and the release's, each joined by a
+# blank line. The fork's `vartime_double_base` binds each NAF digit through
+# its `add_naf_digit!` macro where release 5.0.0 reads `a_naf[i]` twice, so
+# Aeneas names the loop body's locals `digit`, `digit1`, and `i1` in BAIF's
+# translation and `i1` to `i4` in the release's; every other token is the
+# same. A change to either text fails the check until someone reads it again.
+REVIEWED = {
+    "backend.serial.scalar_mul.vartime_double_base.mul.«32bit-tables_loop1».body": (
+        "eda67fd46a53801dec2bd120c101742e4b78ddc29f4880c15beebaad75426adb",
+        "db463135a7866d7060dfaf614c8e7f3d212c04392a56c8f259255368577b39c5",
+    ),
+}
+
+
+def digest(texts):
+    return hashlib.sha256("\n\n".join(texts).encode()).hexdigest()
+
+
 def main():
     if len(sys.argv) < 5:
         sys.exit(__doc__.split("\n\n")[1])
@@ -85,11 +106,22 @@ def main():
                     if prefix not in reached and follow(prefix):
                         todo.append(prefix)
 
-    differ = sorted(n for n in reached if want[n] != got.get(n))
+    def same(name):
+        if name not in got:
+            return False
+        return want[name] == got[name] or REVIEWED.get(name) == (digest(want[name]), digest(got[name]))
+
+    differ = sorted(n for n in reached if not same(n))
     for name in differ:
         print(f"admin/dalek-closure: {name} is not the definition BAIF's proofs are about", file=sys.stderr)
+    # A pin the check no longer needs would accept that pair of texts again
+    # if they came back unread.
+    stale = sorted(n for n in REVIEWED if n not in reached or want[n] == got.get(n))
+    for name in stale:
+        print(f"admin/dalek-closure: REVIEWED pins {name}, which no longer differs or is reached; remove it",
+              file=sys.stderr)
     print(f"admin/dalek-closure: {len(reached)} definitions reached, {len(differ)} differ", file=sys.stderr)
-    sys.exit(1 if differ else 0)
+    sys.exit(1 if differ or stale else 0)
 
 
 main()

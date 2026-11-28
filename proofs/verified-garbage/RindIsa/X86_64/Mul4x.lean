@@ -14,9 +14,9 @@ stack pointer, with `q` the word that zeroes its low word, and shifts it down
 a word; the last subtracts `np` from `t` into `rp`, and selects `t` or the
 difference by the borrow, zeroing `t`.
 
-`admin/prove lean` checks that `function prog` is the function's bytes as
-rind's Linux release build emits it, from aws-lc's text, which the blocks
-below follow line for line.
+`admin/prove lean` checks that `function prog repRet` is the function's
+bytes as rind's Linux release build emits it, from aws-lc's text, which the
+blocks below follow line for line.
 -/
 
 namespace Rind.X86_64.Mul4x

@@ -5,10 +5,10 @@
 //!
 //! The assembly is aws-lc's, imported by `admin/import-aws-lc`. It builds the
 //! 128-bit product from NEON's 8-bit polynomial multiplies, so its timing is
-//! independent of the key and data. It is not formally verified: its
-//! correctness rests on its use and testing in OpenSSL, BoringSSL, and aws-lc,
-//! and on rind's tests of it against the portable code, Wycheproof, and
-//! aws-lc-rs.
+//! independent of the key and data. `proofs/hol-light/armv7/gcm_init_neon.ml`
+//! and `gcm_ghash_neon.ml` prove, on s2n-bignum's AArch32 model, that the code
+//! rind links computes SP 800-38D's GHASH; no theorem yet covers its constant
+//! time.
 
 use super::cpu::HaveNeon;
 use crate::low;

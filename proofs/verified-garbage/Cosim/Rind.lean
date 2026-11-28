@@ -10,7 +10,8 @@ words `admin/prove lean` checks rind's build emits, run in the model from
 random states and on the CPU from the same ones, as `Cosim/AArch64.lean`
 runs VG's: VG's own instructions through its cases, the others through
 `extCase`, which also compares `x29`. `adrSym`'s `adrp` and `add`, which the
-linker fills, are not cosimulated, as VG's are not.
+linker fills, and `align`'s NOPs, which `layout` places, are not cosimulated,
+as VG's are not.
 -/
 
 namespace Cosim.Rind
@@ -18,8 +19,8 @@ namespace Cosim.Rind
 open VG VG.AArch64 Cosim.AArch64 Rind.AArch64
 
 /-- The straight-line instructions and branch conditions of `c`. -/
-def parts : VG.Code Rind.AArch64.Instr VG.AArch64.Cond →
-    List Rind.AArch64.Instr × List VG.AArch64.Cond
+def parts : VG.Code Rind.AArch64.Instr Rind.AArch64.Cond →
+    List Rind.AArch64.Instr × List Rind.AArch64.Cond
   | .block is => (is, [])
   | .seq a b | .icall _ _ a b =>
     let (i, c) := parts a
@@ -47,11 +48,29 @@ def extCase (i : Rind.AArch64.Instr) : Gen (Option (Img × Img)) := do
       img := { img with sp := BitVec.ofNat 64 (← spIn (windowBase + 16) (windowBase + windowLen)) }
     | .ldrFp =>
       img := { img with sp := BitVec.ofNat 64 (← spIn windowBase (windowBase + windowLen - 8)) }
+    | .ld4r _ n _ | .ldpPost _ _ n _ =>
+      img := img.setReg n (windowBase + (← below (windowLen - 16 + 1)))
+    | .strbPostInc _ n => img := img.setReg n (windowBase + (← below windowLen))
+    | .ldrbPreDec _ n => img := img.setReg n (windowBase + 1 + (← below windowLen))
+    | .ldrbReg _ n m =>
+      let a := windowBase + (← below windowLen)
+      img := img.setReg n (((a : Int) - (img.gpr[m.index]!).toNat) % 2 ^ 64).toNat
+    | .stpDPre _ _ imm =>
+      img := { img with sp := BitVec.ofNat 64 (← spIn (windowBase + imm) (windowBase + windowLen)) }
+    | .stpD _ _ off | .ldpD _ _ off =>
+      img := { img with sp := BitVec.ofNat 64 (← spIn (windowBase - off) (windowBase + windowLen - 16 - off)) }
+    | .ldpDPost .. =>
+      img := { img with sp := BitVec.ofNat 64 (← spIn windowBase (windowBase + windowLen - 16)) }
     | _ => pure ()
     if let some s' := Rind.AArch64.exec i ⟨img.state, img.gpr[29]!⟩ then
       let out := ofState img s'.vg
       return some (img, { out with gpr := out.gpr.set! 29 s'.x29 })
   return none
+
+/-- A case of a branch on `c`, as `branchCase` makes VG's. -/
+def condCase : Rind.AArch64.Cond → Gen (Option (Img × Bool))
+  | .vg c => branchCase c
+  | .flags c => do let img ← randomImg; return some (img, c.holds img.state)
 
 /-- The machine code of `i`. -/
 def code (i : Rind.AArch64.Instr) : Option ByteArray :=
@@ -64,6 +83,7 @@ def blocks (n : Nat) : Gen (Except String (List (Block × List String))) := do
   let mut out := []
   for i in is.eraseDups do
     if let .vg (.adrSym ..) := i then continue
+    if let .vg (.align _) := i then continue
     let text := reprStr i
     let some bytes := code i | return .error s!"{text}: does not encode"
     let mut cases := #[]
@@ -77,11 +97,12 @@ def blocks (n : Nat) : Gen (Except String (List (Block × List String))) := do
         cases := cases.push (caseBytes img o false)
     out := out ++ [({ text, kind := .insn, code := bytes, cases }, i.requires)]
   for c in cs.eraseDups do
+    let some w := branchWord c ((targetAddr - insnAddr) / 4) | return .error s!"{reprStr c}: does not encode"
     let mut cases := #[]
     for _ in [0:n] do
-      let some (img, taken) ← branchCase c | return .error s!"{reprStr c}: the model's condition is undefined"
+      let some (img, taken) ← condCase c | return .error s!"{reprStr c}: the model's condition is undefined"
       cases := cases.push (caseBytes img img taken)
-    out := out ++ [({ text := reprStr c, kind := .branch, code := cb c, cases }, [])]
+    out := out ++ [({ text := reprStr c, kind := .branch, code := word w, cases }, [])]
   return .ok out
 
 end Cosim.Rind

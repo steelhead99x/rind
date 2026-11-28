@@ -5,10 +5,14 @@
 //! for SHA-1 and SHA-256 where the CPU has it, else NEON where it has that,
 //! and integer code otherwise.
 //!
-//! The assembly is aws-lc's, imported by `admin/import-aws-lc`. It is not
-//! formally verified: its correctness rests on its use and testing in OpenSSL,
-//! BoringSSL, and aws-lc, and on rind's tests of it against the portable code,
-//! CAVP, and aws-lc-rs.
+//! The assembly is aws-lc's, imported by `admin/import-aws-lc`.
+//! `proofs/hol-light/armv7/sha256_armv4.ml` and `sha512_armv4.ml` prove, on
+//! s2n-bignum's AArch32 model, that the code rind links for SHA-256 with the
+//! crypto extension, and for SHA-512 with NEON, computes FIPS 180-4's
+//! compression. The other routines are not formally verified: their
+//! correctness rests on their use and testing in OpenSSL, BoringSSL, and
+//! aws-lc, and on rind's tests of them against the portable code, CAVP, and
+//! aws-lc-rs.
 
 use super::cpu::{HaveCryptoExt, HaveNeon};
 
@@ -140,17 +144,37 @@ pub(crate) fn sha512_compress_blocks(state: &mut [u64; 8], blocks: &[u8]) {
     if blocks.is_empty() {
         return;
     }
-    let (data, num) = (blocks.as_ptr(), blocks.len() / 128);
     match HaveNeon::check() {
-        // SAFETY: `blocks` is `num` readable blocks, and the token proves the
-        // CPU has NEON.
-        Some(_) => unsafe {
-            asm_call!(unsafe extern "C" sha512_block_data_order_neon(state, data, num))
-        },
-        // SAFETY: `blocks` is `num` readable blocks.
-        None => unsafe {
-            asm_call!(unsafe extern "C" sha512_block_data_order_nohw(state, data, num))
-        },
+        // SAFETY: `blocks` is a whole number of blocks, and not empty.
+        Some(token) => unsafe { compress_neon(token, state, blocks) },
+        // SAFETY: as above.
+        None => unsafe { compress_nohw(state, blocks) },
+    }
+}
+
+/// Compresses `blocks`, a whole number of them, into `state` with the NEON
+/// routine.
+///
+/// # Safety
+///
+/// `blocks` must be a whole number of blocks, at least one.
+unsafe fn compress_neon(_: HaveNeon, state: &mut [u64; 8], blocks: &[u8]) {
+    // SAFETY: `blocks` is `len / 128` readable blocks, at least one, and the
+    // token proves the CPU has NEON.
+    unsafe {
+        asm_call!(unsafe extern "C" sha512_block_data_order_neon(state, blocks.as_ptr(), blocks.len() / 128))
+    }
+}
+
+/// As [`compress_neon`], with the integer routine.
+///
+/// # Safety
+///
+/// `blocks` must be a whole number of blocks, at least one.
+unsafe fn compress_nohw(state: &mut [u64; 8], blocks: &[u8]) {
+    // SAFETY: `blocks` is `len / 128` readable blocks, at least one.
+    unsafe {
+        asm_call!(unsafe extern "C" sha512_block_data_order_nohw(state, blocks.as_ptr(), blocks.len() / 128))
     }
 }
 

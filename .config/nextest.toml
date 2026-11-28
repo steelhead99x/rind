@@ -1,0 +1,37 @@
+# Every Rust test run in rind goes through nextest, whose slow-timeout is the
+# hang bound: a test still running after `period` times `terminate-after` is
+# killed and fails. Each bound is about twice the slowest healthy test its
+# profile's runs measured, so a slow runner passes and a deadlock ends.
+# NEXTEST_PROFILE picks the profile. Doc tests, which nextest does not run,
+# are bounded at 5 minutes where they run, against 28 s at their slowest
+# (macos-15-intel), which leaves room for rebuilding the libraries.
+
+# Native runs: `just check` and `just ci` (test-fast), build.yml's debug and
+# release rows, and the sanitizers. The slowest measured: SLH-DSA's ACVP
+# signing in windows-latest's debug build, 326 s.
+[profile.default]
+slow-timeout = { period = "60s", terminate-after = 15 }
+
+# RSA-8192 key generation, whose prime search takes a random time, ran past
+# 36 minutes in i686-windows's debug build of the portable backend; and
+# rind-acvp's offline answers, which with SLOW_TESTS hash 15 GiB on every CPU
+# path, 631 s on ubuntu-24.04. Every profile takes this override.
+[[profile.default.overrides]]
+filter = 'test(/rsa8192_/) | test(=rsa::key_generation_8192) | test(=every_cpu_path_answers_every_set)'
+slow-timeout = { period = "120s", terminate-after = 60 }
+
+# qemu-user, wasmtime, and Intel SDE: sh/armv7.sh, sh/qemu.sh, sh/wasm.sh,
+# and x86-cpu.yml's ACVP check. The slowest measured besides RSA-8192: qemu's
+# riscv64 SLH-DSA ACVP signing, 358 s.
+[profile.emulated]
+slow-timeout = { period = "120s", terminate-after = 10 }
+
+# valgrind, through admin/ctgrind. The slowest measured: Wycheproof's RSA-OAEP
+# decryption in the portable backend's 64-bit debug build, 2222 s.
+[profile.ctgrind]
+slow-timeout = { period = "300s", terminate-after = 18 }
+
+# Miri, nextest's profile under `cargo miri nextest` (sh/miri.sh). The slowest
+# measured: the VOPRF round trip on x86_64, 6332 s.
+[profile.default-miri]
+slow-timeout = { period = "600s", terminate-after = 24 }
