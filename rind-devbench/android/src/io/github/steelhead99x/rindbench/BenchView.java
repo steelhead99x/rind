@@ -91,6 +91,8 @@ final class BenchView extends LinearLayout {
     private List<String> launchLibs, launchSecs;
     /** The pending launch left out `host`, so its autostart probes the collector afresh (a blank one keeps it). */
     private boolean launchNoHost;
+    /** The pending launch's preset as it arrived: Full only when it asked for `full`. */
+    private boolean launchFull;
     /** Whether the Bench tab is the one shown, as MainActivity's tab selection sets it. */
     private boolean tabShown = true;
     /** Set once the list of tests has loaded, so a launch before then waits for it. */
@@ -550,11 +552,12 @@ final class BenchView extends LinearLayout {
             notStarted("the Bench tab isn't shown");
             return;
         }
-        // The launch's whole selection as of now, its defaults resolved from the picker its launch just set:
-        // a later intent that only preselects (preset, libraries, sections) can't change the queued run.
-        final List<String> libs = launchLibs != null && !launchLibs.isEmpty() ? launchLibs : checked(libSw);
-        final List<String> secs = launchSecs != null && !launchSecs.isEmpty() ? launchSecs : checked(secSw);
-        final boolean full = fullPreset;
+        // The launch's own selection, kept as it arrived, with what it left out taken from the catalog's
+        // defaults rather than the picker: a later intent that only preselects (preset, libraries,
+        // sections), even one that came while the list loaded, can't change the queued run.
+        final List<String> libs = launchLibs != null && !launchLibs.isEmpty() ? launchLibs : defaultLibraries();
+        final List<String> secs = launchSecs != null && !launchSecs.isEmpty() ? launchSecs : defaultSections();
+        final boolean full = launchFull;
         final boolean noHost = launchNoHost;
         autostart = new Runnable() {
             private boolean probed;
@@ -796,12 +799,38 @@ final class BenchView extends LinearLayout {
     /** Keeps a runner launch's `libraries` and `sections` extras for its autostart, as named. */
     private void setLaunchNames(Intent it) {
         launchNoHost = !it.hasExtra("host");
+        launchFull = "full".equals(it.getStringExtra("preset"));
         launchLibs = it.hasExtra("libraries") ? new ArrayList<>(csv(it.getStringExtra("libraries"))) : null;
         launchSecs = it.hasExtra("sections") ? new ArrayList<>(csv(it.getStringExtra("sections"))) : null;
     }
 
     private void startTapped() {
         start(null, null, null);
+    }
+
+    /** Every library the catalog lists: a launch's default, as the picker's first load has it. */
+    private List<String> defaultLibraries() {
+        List<String> out = new ArrayList<>();
+        JSONArray a = catalog == null ? null : catalog.optJSONArray("libraries");
+        for (int i = 0; a != null && i < a.length(); i++) out.add(a.optString(i));
+        return out;
+    }
+
+    /** Every group the catalog has rows for but the More ones: a launch's default, as the picker's first load has it. */
+    private List<String> defaultSections() {
+        java.util.Set<String> withRows = new java.util.HashSet<>();
+        JSONArray rows = catalog == null ? null : catalog.optJSONArray("rows");
+        for (int i = 0; rows != null && i < rows.length(); i++) {
+            JSONObject r = rows.optJSONObject(i);
+            if (r != null) withRows.add(r.optString("section"));
+        }
+        List<String> out = new ArrayList<>();
+        JSONArray a = catalog == null ? null : catalog.optJSONArray("sections");
+        for (int i = 0; a != null && i < a.length(); i++) {
+            String sec = a.optString(i);
+            if (withRows.contains(sec) && !sec.startsWith("More: ")) out.add(sec);
+        }
+        return out;
     }
 
     /** The names whose switches are on, in the picker's order. */

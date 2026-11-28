@@ -702,11 +702,13 @@ pub fn start(config_json: &str) -> Result<(), String> {
     // from an earlier one's.
     // A fresh starting status, not the last run's with this number on it: an app's first poll, while the
     // thread still connects to a slow collector, must not see the last run's results as this start's.
+    // The last run's status is kept aside, to put back if the thread can't be made.
     let rounds = cfg.rounds.unwrap_or(3).max(1);
-    set_status(|s| {
-        *s = json!({"running": true, "current": "starting", "done": 0, "total": 0, "round": 0, "rounds": rounds,
-            "acked_start": start_no})
-    });
+    let previous = {
+        let mut st = STATUS.lock().unwrap_or_else(|e| e.into_inner());
+        st.replace(json!({"running": true, "current": "starting", "done": 0, "total": 0, "round": 0, "rounds": rounds,
+            "acked_start": start_no}))
+    };
     std::thread::Builder::new()
         .name("devbench".into())
         .stack_size(64 << 20)
@@ -762,6 +764,8 @@ pub fn start(config_json: &str) -> Result<(), String> {
         })
         .map_err(|e| {
             let _listing = catalogs(); // the environment goes back with listings kept out
+            // The last run's status back before the slot is released, so its results still show.
+            *STATUS.lock().unwrap_or_else(|e| e.into_inner()) = previous;
             refuse(e.to_string())
         })?;
     Ok(())
