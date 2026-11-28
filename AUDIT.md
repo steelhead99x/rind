@@ -366,7 +366,6 @@ counts out, since nearly every change to `low` moves them:
 | `rind/src/fips_rng.rs` | the FIPS build's DRBG handle and its test's `fork` | `SAFETY:` comments |
 | `rind/src/test.rs` | a test helper | `SAFETY:` comments |
 | `rind-aws-lc-rs/src` | `Send` and `Sync` for the KEM keys, bounded as aws-lc-rs bounds them | `SAFETY:` comments, and a compile-time check that what the keys hold is `Send` and `Sync` |
-| `rind-devbench` | setting the build's CPU-deny environment variables before any thread starts | `SAFETY:` comments; `catalog` and `start` refuse a build that denies features when it was not called |
 | `rind-dart` | the C ABI Dart's FFI calls | `SAFETY:` comments, `dart test`, and ctgrind over its exports |
 | `rind-python` | Python's buffer protocol | `SAFETY:` comments |
 | `rind-openssl` | the C ABI OpenSSL's core calls, and the `OSSL_PARAM` arrays it passes | `SAFETY:` comments, `fuzz::openssl`, and OpenSSL's own tests with it loaded |

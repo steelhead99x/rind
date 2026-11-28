@@ -208,11 +208,6 @@ UNSAFE = [
         "`Send` and `Sync` for the KEM keys, bounded as aws-lc-rs bounds them",
         "`SAFETY:` comments, and a compile-time check that what the keys hold is `Send` and `Sync`",
     ),
-    (
-        "rind-devbench/",
-        "setting the build's CPU-deny environment variables before any thread starts",
-        "`SAFETY:` comments; `catalog` and `start` refuse a build that denies features when it was not called",
-    ),
     ("rind-dart/", "the C ABI Dart's FFI calls", "`SAFETY:` comments, `dart test`, and ctgrind over its exports"),
     ("rind-python/", "Python's buffer protocol", "`SAFETY:` comments"),
     (
@@ -225,7 +220,7 @@ UNSAFE = [
 
 # Test code and tooling, which the table leaves out: integration tests, and
 # the crates nothing ships.
-TOOLING = ("admin/", "fuzz/", "rind-acvp/", "rind-bench/", "rind-cpuid/", "rind-timing/")
+TOOLING = ("admin/", "fuzz/", "rind-acvp/", "rind-bench/", "rind-cpuid/", "rind-devbench/", "rind-timing/")
 
 
 def unsafe_counts():
