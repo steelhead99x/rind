@@ -32,6 +32,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import tomllib
 
 ADMIN = os.path.dirname(os.path.abspath(__file__))
 with open(os.path.join(ADMIN, "import-vg")) as f:
@@ -275,10 +276,10 @@ def main():
             rev = batteries_rev(f.read(), rel)
         if rev != vg_batteries:
             sys.exit(f"admin/import-vg-models: {rel} pins Batteries at {rev}, not VG's {vg_batteries}")
-    with open(os.path.join(DEST, "lakefile.toml")) as f:
-        m = re.search(r'^\[\[require\]\]\nname = "batteries"\n(?:[^\[\n][^\n]*\n)*?rev = "([0-9a-f]{40})"$', f.read(), re.M)
-    if not m or m.group(1) != vg_batteries:
-        sys.exit(f"admin/import-vg-models: proofs/verified-garbage/lakefile.toml requires Batteries at {m and m.group(1)}, not VG's {vg_batteries}")
+    with open(os.path.join(DEST, "lakefile.toml"), "rb") as f:
+        revs = [r.get("rev") for r in tomllib.load(f).get("require", []) if r.get("name") == "batteries"]
+    if revs != [vg_batteries]:
+        sys.exit(f"admin/import-vg-models: proofs/verified-garbage/lakefile.toml requires Batteries at {revs}, not VG's {vg_batteries}")
 
     if missing := sorted(set(TABLES) - set(want)):
         sys.exit(f"admin/import-vg-models: no root imports {', '.join(missing)}: drop it from TABLES")
