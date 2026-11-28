@@ -538,7 +538,15 @@ final class BenchView extends LinearLayout {
             return;
         }
         autostart = new Runnable() {
+            private boolean cleared;
+
             @Override public void run() {
+                // A finished run's results are cleared once, as the Clear button does, so Start can run;
+                // Clear probes the collector again.
+                if (!cleared && onScreen && tabShown && !running) {
+                    cleared = true;
+                    if (!nativeStatus().optString("run_id", "").isEmpty()) clearTapped();
+                }
                 // Until the collector probe answers, the run's collector isn't known: wait for it, still queued.
                 if (probing) { ui.postDelayed(this, 250); return; }
                 autostart = null;
@@ -546,8 +554,6 @@ final class BenchView extends LinearLayout {
                     notStarted(running ? "a run is going" : "the app or the Bench tab was left");
                     return;
                 }
-                // A finished run's results are cleared as the Clear button does, so Start can run.
-                if (!nativeStatus().optString("run_id", "").isEmpty()) clearTapped();
                 agree.setChecked(true);
                 startTapped();
             }

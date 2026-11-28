@@ -683,18 +683,23 @@ pub fn start(config_json: &str) -> Result<(), String> {
                     // `refused_start` numbers it, so an app reports it once, even across a recreated view.
                     // Its reason is `refused_reason`, apart from `start_error`, which a later start refused before
                     // acknowledgement (as "already running") writes without touching it.
-                    set_status(|s| *s = json!({"running": false, "error": why, "refused_reason": why, "refused_start": start_no}));
-                    return;
+                    // Written below, with the slot's release.
+                    return Some(json!({"running": false, "error": why, "refused_reason": why, "refused_start": start_no}));
                 }
-                run(cfg, cat)
+                run(cfg, cat);
+                None
             }));
             // The final status and the run slot's release in one step under the status lock, which status()
             // reads both under: a poll sees either the run going or its final status, never a mix.
             let mut st = STATUS.lock().unwrap_or_else(|e| e.into_inner());
-            if r.is_err() {
-                let v = st.get_or_insert_with(|| json!({}));
-                v["running"] = json!(false);
-                v["error"] = json!("runner panicked");
+            match r {
+                Ok(Some(refusal)) => *st = Some(refusal),
+                Ok(None) => {}
+                Err(_) => {
+                    let v = st.get_or_insert_with(|| json!({}));
+                    v["running"] = json!(false);
+                    v["error"] = json!("runner panicked");
+                }
             }
             RUNNING.store(false, Ordering::SeqCst);
         })
