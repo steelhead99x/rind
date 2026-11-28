@@ -75,6 +75,8 @@ static NSSet<NSString *> *ArgList(NSString *k) {
 #define C_TEXT RGB(231, 236, 242)
 #define C_ACCENT RGB(161, 199, 2)
 #define C_ON_ACCENT RGB(25, 36, 0)
+#define C_SELECTED RGB(43, 54, 19)
+#define C_ON_SELECTED RGB(218, 238, 154)
 #define C_READOUT RGB(255, 176, 32)
 #define C_BAD RGB(255, 180, 171)
 
@@ -153,22 +155,27 @@ static NSString *const kConsent = @"The run keeps the CPU busy (minutes on Quick
 // Buttons are drawn from a UIButtonConfiguration (contentEdgeInsets and the
 // titleLabel/tint setters are deprecated or ignored once one is set). The app
 // paints every state itself, so automatic state updates are off.
-static UIButtonConfiguration *ButtonConfig(NSString *title, UIFont *font, NSDirectionalEdgeInsets insets, CGFloat radius) {
+static UIButtonConfiguration *ButtonConfig(NSString *title, NSDirectionalEdgeInsets insets, CGFloat radius) {
   UIButtonConfiguration *c = [UIButtonConfiguration plainButtonConfiguration];
   c.title = title;
   c.contentInsets = insets;
   c.titleLineBreakMode = NSLineBreakByTruncatingTail;
-  c.titleTextAttributesTransformer = ^NSDictionary<NSAttributedStringKey, id> *(NSDictionary<NSAttributedStringKey, id> *in) {
-    NSMutableDictionary *out = [in mutableCopy]; out[NSFontAttributeName] = font; return out;
-  };
   c.background.cornerRadius = radius;
   c.cornerStyle = UIButtonConfigurationCornerStyleFixed;
   return c;
 }
+static void SetButtonTitleStyle(UIButtonConfiguration *c, UIFont *font, UIColor *color) {
+  c.baseForegroundColor = color;
+  c.titleTextAttributesTransformer = ^NSDictionary<NSAttributedStringKey, id> *(NSDictionary<NSAttributedStringKey, id> *in) {
+    NSMutableDictionary *out = [in mutableCopy];
+    out[NSFontAttributeName] = font;
+    out[NSForegroundColorAttributeName] = color;
+    return out;
+  };
+}
 - (UIButton *)chip:(NSString *)title on:(BOOL)on enabled:(BOOL)en {
   BOOL small = [self compact];
   UIButtonConfiguration *c = ButtonConfig(title,
-      [UIFont systemFontOfSize:small ? 13 : 14 weight:UIFontWeightSemibold],
       small ? NSDirectionalEdgeInsetsMake(5, 10, 5, 10) : NSDirectionalEdgeInsetsMake(7, 12, 7, 12),
       small ? 13 : 15);
   c.background.strokeWidth = 1;
@@ -181,17 +188,17 @@ static UIButtonConfiguration *ButtonConfig(NSString *title, UIFont *font, NSDire
 - (void)paintChip:(UIButton *)b {
   BOOL on = b.selected;
   UIButtonConfiguration *c = b.configuration;
-  c.background.backgroundColor = on ? C_ACCENT : C_CHIP;
-  c.background.strokeColor = on ? C_ACCENT : C_LINE;
-  c.baseForegroundColor = !b.enabled ? C_MUTED : (on ? C_ON_ACCENT : C_TEXT);
+  c.background.backgroundColor = on ? C_SELECTED : C_CHIP;
+  c.background.strokeColor = on ? C_SELECTED : C_LINE;
+  UIFont *font = [UIFont systemFontOfSize:[self compact] ? 13 : 14 weight:UIFontWeightSemibold];
+  SetButtonTitleStyle(c, font, !b.enabled ? C_MUTED : (on ? C_ON_SELECTED : C_TEXT));
   b.configuration = c;
   b.alpha = b.enabled ? 1 : 0.45;
 }
 - (UIButton *)button:(NSString *)t action:(SEL)a primary:(BOOL)primary {
-  UIButtonConfiguration *c = ButtonConfig(t, [UIFont systemFontOfSize:17 weight:UIFontWeightBold],
-      NSDirectionalEdgeInsetsMake(11, 22, 11, 22), 12);
+  UIButtonConfiguration *c = ButtonConfig(t, NSDirectionalEdgeInsetsMake(11, 22, 11, 22), 12);
   c.background.backgroundColor = primary ? C_ACCENT : C_CHIP;
-  c.baseForegroundColor = primary ? C_ON_ACCENT : C_TEXT;
+  SetButtonTitleStyle(c, [UIFont systemFontOfSize:17 weight:UIFontWeightBold], primary ? C_ON_ACCENT : C_TEXT);
   UIButton *b = [UIButton buttonWithConfiguration:c primaryAction:nil];
   b.automaticallyUpdatesConfiguration = NO;
   [b addTarget:self action:a forControlEvents:UIControlEventTouchUpInside]; return b;
