@@ -430,6 +430,13 @@ fn covers(cfg: &Config, rows: &[Value]) -> bool {
     cfg.libraries.iter().all(|v| has("library", v)) && cfg.sections.iter().all(|v| has("section", v))
 }
 
+/// Whether a catalog that failed in part can decide a run without listing again: only a run by ids that
+/// names none it lacks. A library or group it has rows for may still be missing rows from the files that
+/// failed to list (TLS beside AEADs in "rind setting DIT around each call"), which a relist would add.
+fn partial_decides(cfg: &Config, rows: &[Value]) -> bool {
+    !cfg.ids.is_empty() && covers(cfg, rows)
+}
+
 /// The catalog a run uses after its thread listed again: the relisted one, unless it selects nothing where
 /// the one start() checked selects rows, so a relist that failed outright can't leave the run with nothing.
 fn after_relist(cfg: &Config, checked: Arc<Value>, relisted: Arc<Value>) -> Arc<Value> {
@@ -680,9 +687,9 @@ pub fn start(config_json: &str) -> Result<(), String> {
             }
             false
         }
-        // A catalog that failed in part is listed again, before the run, when it doesn't cover what the run
-        // names (an id, library or group with no row in it), so a row that lists now is not left out.
-        Some(c) => select(&cfg, rows_of(c)).is_empty() || !covers(&cfg, rows_of(c)),
+        // A catalog that failed in part decides only for a run by ids it has every one of; any other run
+        // is listed again before it starts, so rows that list now are not left out.
+        Some(c) => !partial_decides(&cfg, rows_of(c)),
         // These settings were never listed.
         None => true,
     };
@@ -693,7 +700,13 @@ pub fn start(config_json: &str) -> Result<(), String> {
     // thread released the slot and a later start wrote its own; every status the thread writes carries it
     // too. An app reads it once start() returns, to tell this start's status (`run_start`, `refused_start`)
     // from an earlier one's.
-    set_status(|s| s["acked_start"] = json!(start_no));
+    // A fresh starting status, not the last run's with this number on it: an app's first poll, while the
+    // thread still connects to a slow collector, must not see the last run's results as this start's.
+    let rounds = cfg.rounds.unwrap_or(3).max(1);
+    set_status(|s| {
+        *s = json!({"running": true, "current": "starting", "done": 0, "total": 0, "round": 0, "rounds": rounds,
+            "acked_start": start_no})
+    });
     std::thread::Builder::new()
         .name("devbench".into())
         .stack_size(64 << 20)
@@ -873,6 +886,17 @@ mod tests {
         assert!(!covers(&cfg(json!({"sections": ["AEADs", "TLS"]})), &rows()));
         // Ids alone decide what runs, so a group with no row doesn't matter beside listed ids.
         assert!(covers(&cfg(json!({"ids": ["a"], "sections": ["TLS"]})), &rows()));
+    }
+
+    #[test]
+    fn a_partial_catalog_decides_only_a_run_by_ids_it_covers() {
+        // Its AEAD rows are there, but a failed file may hold more rows of the same group or library.
+        assert!(!partial_decides(&cfg(json!({"libraries": ["rind"], "sections": ["AEADs"]})), &rows()));
+        assert!(!partial_decides(&cfg(json!({"sections": ["AEADs"]})), &rows()));
+        assert!(!partial_decides(&cfg(json!({})), &rows()));
+        // Ids name exactly what runs: all present decides, one missing lists again.
+        assert!(partial_decides(&cfg(json!({"ids": ["a", "b"]})), &rows()));
+        assert!(!partial_decides(&cfg(json!({"ids": ["a", "tls"]})), &rows()));
     }
 
     #[test]

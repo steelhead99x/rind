@@ -550,7 +550,11 @@ final class BenchView extends LinearLayout {
             notStarted("the Bench tab isn't shown");
             return;
         }
-        final List<String> libs = launchLibs, secs = launchSecs;
+        // The launch's whole selection as of now, its defaults resolved from the picker its launch just set:
+        // a later intent that only preselects (preset, libraries, sections) can't change the queued run.
+        final List<String> libs = launchLibs != null && !launchLibs.isEmpty() ? launchLibs : checked(libSw);
+        final List<String> secs = launchSecs != null && !launchSecs.isEmpty() ? launchSecs : checked(secSw);
+        final boolean full = fullPreset;
         final boolean noHost = launchNoHost;
         autostart = new Runnable() {
             private boolean probed;
@@ -574,7 +578,7 @@ final class BenchView extends LinearLayout {
                 // while it waited leaves them shown; the collector was just probed, so no new probe.
                 if (!nativeStatus().optString("run_id", "").isEmpty()) clearResults(false);
                 agree.setChecked(true);
-                start(libs, secs);
+                start(libs, secs, full);
             }
         };
         ui.postDelayed(autostart, 3000);
@@ -797,15 +801,23 @@ final class BenchView extends LinearLayout {
     }
 
     private void startTapped() {
-        start(null, null);
+        start(null, null, null);
+    }
+
+    /** The names whose switches are on, in the picker's order. */
+    private static List<String> checked(Map<String, CompoundButton> sw) {
+        List<String> on = new ArrayList<>();
+        for (Map.Entry<String, CompoundButton> e : sw.entrySet()) if (e.getValue().isChecked()) on.add(e.getKey());
+        return on;
     }
 
     /**
-     * Starts a run of the picker's selection; an autostart passes the names its launch gave in
-     * {@code wantLibs} and {@code wantSecs} (null where it gave none), which go to the native start as
-     * given, in place of the picker's, so the library judges names the picker doesn't list.
+     * Starts a run of the picker's selection; an autostart passes its launch's selection, fixed when it
+     * was queued, in {@code wantLibs}, {@code wantSecs} and {@code wantFull}, which go to the native start
+     * as given, in place of the picker's and the preset buttons', so the library judges names the picker
+     * doesn't list. A run by hand passes nulls.
      */
-    private void start(List<String> wantLibs, List<String> wantSecs) {
+    private void start(List<String> wantLibs, List<String> wantSecs, Boolean wantFull) {
         // Any start, the person's or the runner's own, takes the place of a queued autostart. The
         // autostart's own start clears it first, so one still queued here is replaced by hand: say so.
         if (autostart != null) notStarted("a start by hand took its place");
@@ -815,11 +827,8 @@ final class BenchView extends LinearLayout {
             notStarted(!catalogReady ? "the list of tests hasn't loaded" : "consent isn't given");
             return;
         }
-        List<String> libs = new ArrayList<>(), secs = new ArrayList<>();
-        for (Map.Entry<String, CompoundButton> e : libSw.entrySet()) if (e.getValue().isChecked()) libs.add(e.getKey());
-        for (Map.Entry<String, CompoundButton> e : secSw.entrySet()) if (e.getValue().isChecked()) secs.add(e.getKey());
-        if (wantLibs != null && !wantLibs.isEmpty()) libs = wantLibs;
-        if (wantSecs != null && !wantSecs.isEmpty()) secs = wantSecs;
+        List<String> libs = wantLibs != null ? wantLibs : checked(libSw);
+        List<String> secs = wantSecs != null ? wantSecs : checked(secSw);
         if (libs.isEmpty() || secs.isEmpty()) {
             setStatus("Nothing picked", Status.NEUTRAL);
             setBody("Turn on at least one library and group.");
@@ -828,7 +837,7 @@ final class BenchView extends LinearLayout {
             return;
         }
         try {
-            boolean full = fullPreset;
+            boolean full = wantFull != null ? wantFull : fullPreset;
             JSONObject cfg = new JSONObject();
             cfg.put("libraries", new JSONArray(libs));
             cfg.put("sections", new JSONArray(secs));
