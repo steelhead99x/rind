@@ -8,7 +8,7 @@
 
 - Runs: dalek's field arithmetic over four lanes of 25.5-bit limbs and its extended-coordinate formulas, as [the Ed25519 AVX2 proof](/quest/m4/verified/ed25519-avx2-verify.md) models them, then the table of `P ..= 8P`, a branch-free `select` over `cmpeq` and `blendv` masks with a masked negation, and sixteen times the sum so far plus the digit's entry, from the top digit down. `Scalar::signed_radix_16` supplies the digits.
 - Reuse that quest's field and point lemmas and the `Rind/X86_64/Simd.lean` intrinsic models; the new lemmas are the table's `(i + 1) P` entries, `select` returning `[digit]P` for `-8 <= digit <= 8`, and the loop's invariant that the accumulator is `[sum of the digits so far]P`.
-- Constant time is checked by `admin/ctgrind` (`mid::edwards25519::mul_paths_agree`, which calls this path even where ADX would route `Point::mul` to s2n-bignum), `admin/ct-sde` (`low::x86_64::edwards25519_msm_avx2::ct_sde_mul`), and `admin/ct-vartime`; proving it means the model shows no branch or index reads a digit.
+- Constant time is checked by `admin/ctgrind` (`mid::edwards25519::tests::mul_paths_agree`, which calls this path even where ADX would route `Point::mul` to s2n-bignum), `admin/ct-sde` (`low::x86_64::edwards25519_msm_avx2::tests::ct_sde_mul`), and `admin/ct-vartime`; proving it means the model shows no branch or index reads a digit.
 
 ## Required
 
