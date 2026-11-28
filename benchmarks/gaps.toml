@@ -51,7 +51,7 @@ reason = "Decided in [kixel-ai/rind#812](https://github.com/kixel-ai/rind/pull/8
 [[gap]]
 operations = ["oprf-ristretto255-blind", "oprf-ristretto255-evaluate", "oprf-ristretto255-blind/*", "oprf-ristretto255-evaluate/*"]
 on = ["nixos", "ovh-iad", "ovh-sea", "x86_64"]
-quest = "/quest/m2/speed/ristretto255-avx2.md"
+reason = "Without ADX, as on `ovh-iad`'s and `ovh-sea`'s Haswell, rind's constant-time multiplication now runs curve25519-dalek's AVX2 formulas ([steelhead99x/rind#256](https://github.com/steelhead99x/rind/pull/256)), which measured 18 and 24% faster than s2n-bignum's on a Zen 4 with ADX denied, with 20 and 24% fewer instructions; this data predates it, so the next refresh rechecks those hosts. With ADX, as on `nixos`'s Zen 3 and the `x86_64` tier, s2n-bignum's path stays: AVX2 measured slower there on Arrow Lake and Zen 4, and the owner decided on 2026-11-25 to leave that tier's gap open rather than chase it."
 
 [[gap]]
 operations = ["aes*-gcm*"]
