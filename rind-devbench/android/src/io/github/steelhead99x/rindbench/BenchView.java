@@ -70,8 +70,6 @@ final class BenchView extends LinearLayout {
     private static String sharedKeysDir;
     /** The native run whose results the person cleared, so a recreated view doesn't bring them back. */
     private static String clearedRun = "";
-    /** The late refusal Clear dismissed, so a recreated view doesn't bring it back. */
-    private static long clearedRefusal;
     /** The collector a device-runner build was given by intent; a failed probe never forgets it. */
     private String runnerHost;
     private int runnerPort = Collector.PORT;
@@ -476,9 +474,6 @@ final class BenchView extends LinearLayout {
         String run = st.optString("run_id", "");
         if (!run.isEmpty()) {
             if (!run.equals(clearedRun)) showFinished(st, false);
-        } else if (lateRefusal(st) && st.optLong("refused_start") != clearedRefusal) {
-            // Refused while no view polled, as across a recreation: show it (RunReporter logs it).
-            showLateRefusal(st);
         } else {
             reportLayout("ready");
         }
@@ -592,21 +587,6 @@ final class BenchView extends LinearLayout {
         try {
             android.util.Log.w("RindBench", "RINDBENCH_RUN " + new JSONObject().put("started", false).put("reason", reason));
         } catch (Exception ignored) {}
-    }
-
-    /** Whether a finished status is a start the library refused after acknowledging it (on the run's thread). */
-    private static boolean lateRefusal(JSONObject s) {
-        return s.optString("run_id", "").isEmpty() && s.optLong("refused_start") > 0;
-    }
-
-    /** Shows a late refusal as a refused start, not as a finished run. */
-    private void showLateRefusal(JSONObject s) {
-        String why = s.optString("refused_reason");
-        showFinished(s, false);
-        progress.setVisibility(GONE);
-        setStatus("Could not start", Status.ERROR);
-        setBody(why);
-        // RunReporter logs it for a device runner, once, whether or not a view sees it.
     }
 
     private void cancelAutostart() {
@@ -833,6 +813,11 @@ final class BenchView extends LinearLayout {
         return out;
     }
 
+    private static JSONArray array(JSONObject s, String key) {
+        JSONArray a = s.optJSONArray(key);
+        return a != null ? a : new JSONArray();
+    }
+
     /** The names whose switches are on, in the picker's order. */
     private static List<String> checked(Map<String, CompoundButton> sw) {
         List<String> on = new ArrayList<>();
@@ -883,8 +868,6 @@ final class BenchView extends LinearLayout {
             JSONObject env = new JSONObject();
             env.put("RIND_BENCH_KEYS_DIR", keysDir);
             cfg.put("env", env);
-            // The last start's line, if its status hasn't been read yet, before this start replaces that status.
-            RunReporter.flush();
             if (Native.start(cfg.toString()) != 0) {
                 String why = new JSONObject(Native.status()).optString("start_error");
                 notStarted("the native start refused it: " + why);
@@ -892,21 +875,22 @@ final class BenchView extends LinearLayout {
                 setBody(why);
                 return;
             }
-            // What the run takes, for a device runner checking a launch's selection without a person:
-            //   RINDBENCH_RUN {"started":true,"start":N,"preset":"quick","libraries":[...],"sections":[...],"host":...,"port":...}
-            // logged as the start is accepted, with the libraries and groups asked for; RunReporter then logs
-            // the groups that run, or a refusal once listed, under the same start number N.
-            long startNo = nativeStatus().optLong("acked_start", 0);
+            // What the run takes, for a device runner checking a launch's selection without a person, from the
+            // rows the library picked as it accepted the start:
+            //   RINDBENCH_RUN {"started":true,"start":N,"preset":"quick","libraries":[...],"libraries_missing":[...],
+            //                  "sections":[...],"sections_missing":[...],"host":...,"port":...}
+            JSONObject st = nativeStatus();
             JSONObject run = new JSONObject();
             run.put("started", true);
-            run.put("start", startNo);
+            run.put("start", st.optLong("acked_start", 0));
             run.put("preset", full ? "full" : "quick");
-            run.put("libraries", cfg.get("libraries"));
-            run.put("sections", cfg.get("sections"));
+            run.put("libraries", array(st, "libraries_run"));
+            run.put("libraries_missing", array(st, "libraries_missing"));
+            run.put("sections", array(st, "sections_run"));
+            run.put("sections_missing", array(st, "sections_missing"));
             run.put("host", colHost);
             run.put("port", colPort);
             android.util.Log.i("RindBench", "RINDBENCH_RUN " + run);
-            if (startNo > 0) RunReporter.watch(startNo);
         } catch (Exception e) {
             setStatus("Could not start", Status.ERROR);
             setBody(String.valueOf(e));
@@ -956,7 +940,6 @@ final class BenchView extends LinearLayout {
         if (running) return;
         JSONObject cleared = nativeStatus();
         clearedRun = cleared.optString("run_id", "");
-        clearedRefusal = cleared.optLong("refused_start");
         agree.setChecked(false);
         setAgreeEnabled(true);
         resultsTeaser.setText("");
@@ -1038,9 +1021,6 @@ final class BenchView extends LinearLayout {
                 String cur = s.optString("current", "");
                 String warm = isWarm() ? " (warm)" : "";
                 setBody(done + " of " + total + (cur.isEmpty() ? "" : " · " + cur) + warm);
-            } else if (lateRefusal(s)) {
-                showLateRefusal(s);
-                return;
             } else {
                 showFinished(s, true);
                 return;

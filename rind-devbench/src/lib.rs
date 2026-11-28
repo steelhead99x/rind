@@ -41,7 +41,7 @@ static RUNNING: AtomicBool = AtomicBool::new(false);
 /// Held while the run slot is taken and its STOP cleared, and by stop(), so a stop() of a run that shows as
 /// running is never cleared by that run's start.
 static RUN_SLOT: Mutex<()> = Mutex::new(());
-/// Counts acknowledged starts, so an app can tell one start's refusal on the run's thread from another's.
+/// Counts acknowledged starts, so an app can tell one start's status (`acked_start`, `run_start`) from another's.
 static STARTS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 static STATUS: Mutex<Option<Value>> = Mutex::new(None);
 /// The environment a catalog was listed with that decides its rows: rind-bench's rustls rows read
@@ -409,42 +409,9 @@ fn restore_env(before: &[(String, Option<std::ffi::OsString>)]) {
     }
 }
 
-/// [`restore_env`], taking the catalog lock.
-fn restore_env_listed(before: &[(String, Option<std::ffi::OsString>)]) {
-    let _listing = catalogs();
-    restore_env(before);
-}
-
 /// A catalog's rows, borrowed.
 fn rows_of(c: &Value) -> &[Value] {
     c["rows"].as_array().map_or(&[][..], |r| r.as_slice())
-}
-
-/// Whether `rows` has a row for every name `cfg` selects by: its ids when it names ids, as [`select`] goes
-/// by them alone, otherwise its libraries and groups.
-fn covers(cfg: &Config, rows: &[Value]) -> bool {
-    let has = |field: &str, v: &str| rows.iter().any(|r| r[field] == v);
-    if !cfg.ids.is_empty() {
-        return cfg.ids.iter().all(|v| has("id", v));
-    }
-    cfg.libraries.iter().all(|v| has("library", v)) && cfg.sections.iter().all(|v| has("section", v))
-}
-
-/// Whether a catalog that failed in part can decide a run without listing again: only a run by ids that
-/// names none it lacks. A library or group it has rows for may still be missing rows from the files that
-/// failed to list (TLS beside AEADs in "rind setting DIT around each call"), which a relist would add.
-fn partial_decides(cfg: &Config, rows: &[Value]) -> bool {
-    !cfg.ids.is_empty() && covers(cfg, rows)
-}
-
-/// The catalog a run uses after its thread listed again: the relisted one, unless it selects nothing where
-/// the one start() checked selects rows, so a relist that failed outright can't leave the run with nothing.
-fn after_relist(cfg: &Config, checked: Arc<Value>, relisted: Arc<Value>) -> Arc<Value> {
-    if select(cfg, rows_of(&relisted)).is_empty() && !select(cfg, rows_of(&checked)).is_empty() {
-        checked
-    } else {
-        relisted
-    }
 }
 
 /// The values of `field` (`"section"` or `"library"`) that `selected` takes rows from, in catalog order, and
@@ -473,8 +440,8 @@ fn libraries_run(cfg: &Config, rows: &[Value], selected: &[(String, String)]) ->
     taken(cfg, rows, selected, "library", &cfg.libraries)
 }
 
-/// `cat` is the catalog `start()` checked the selection against, or the one the run's thread listed again
-/// when that one failed in part (see [`after_relist`]). `start_no` is the start's number, as `acked_start`.
+/// `cat` is the catalog `start()` checked the selection against. `start_no` is the start's number, as
+/// `acked_start`.
 fn run(cfg: Config, cat: Arc<Value>, start_no: u64) {
     let selected = select(&cfg, cat["rows"].as_array().unwrap());
     let (sections_run, sections_missing) = groups_run(&cfg, rows_of(&cat), &selected);
@@ -674,85 +641,52 @@ pub fn start(config_json: &str) -> Result<(), String> {
         // does not read it concurrently, and the catalog lock keeps listings out.
         unsafe { std::env::set_var(k, v) };
     }
-    // start() runs on the apps' UI thread, so it never lists: it decides from the catalog cached for these
-    // settings, and leaves any listing to the run's thread.
-    let cached = cache.iter().find(|(k, _)| *k == listing_env()).map(|(_, c)| c.clone());
-    let list_on_thread = match &cached {
-        // A complete catalog decides: a selection that matches no row would run nothing yet end "done",
-        // with status "ok", so it is refused before the start is acknowledged. Each library and group can
-        // be valid alone and still select nothing together, as ring with ML-KEM does.
-        Some(c) if listing_failure(c).is_none() => {
-            if select(&cfg, rows_of(c)).is_empty() {
-                return Err(refuse("no test matches the libraries and groups picked".into()));
-            }
-            false
-        }
-        // A catalog that failed in part decides only for a run by ids it has every one of; any other run
-        // is listed again before it starts, so rows that list now are not left out.
-        Some(c) => !partial_decides(&cfg, rows_of(c)),
-        // These settings were never listed.
-        None => true,
+    // start() runs on the apps' UI thread, so it never lists: it decides on the spot from the catalog the host
+    // listed for these settings (`catalog()`, which the apps call off their UI thread before Start is
+    // enabled, and which lists a catalog that failed in part again). A selection that matches no row would
+    // run nothing yet end "done", with status "ok", so it is refused here. Each library and group can be
+    // valid alone and still select nothing together, as ring with ML-KEM does.
+    let Some(cat) = cache.iter().find(|(k, _)| *k == listing_env()).map(|(_, c)| c.clone()) else {
+        return Err(refuse("the list of tests for these settings hasn't been loaded".into()));
     };
+    let selected = select(&cfg, rows_of(&cat));
+    if selected.is_empty() {
+        return Err(refuse(match listing_failure(&cat) {
+            Some(f) => format!("no test matches the libraries and groups picked ({f})"),
+            None => "no test matches the libraries and groups picked".into(),
+        }));
+    }
     drop(cache);
-    let before_run = before.clone();
     let start_no = STARTS.fetch_add(1, Ordering::SeqCst) + 1;
     // The start's number, under the status lock and before its thread exists, so it can't land after the
     // thread released the slot and a later start wrote its own; every status the thread writes carries it
-    // too. An app reads it once start() returns, to tell this start's status (`run_start`, `refused_start`)
-    // from an earlier one's.
+    // too. An app reads it once start() returns, to tell this start's status (`run_start`) from an earlier
+    // one's.
     // A fresh starting status, not the last run's with this number on it: an app's first poll, while the
     // thread still connects to a slow collector, must not see the last run's results as this start's.
     // The last run's status is kept aside, to put back if the thread can't be made.
+    // It already names what the run takes, so an app can report the selection as the start is accepted.
     let rounds = cfg.rounds.unwrap_or(3).max(1);
+    let (sections_run, sections_missing) = groups_run(&cfg, rows_of(&cat), &selected);
+    let (libraries_run, libraries_missing) = libraries_run(&cfg, rows_of(&cat), &selected);
     let previous = {
         let mut st = STATUS.lock().unwrap_or_else(|e| e.into_inner());
         st.replace(json!({"running": true, "current": "starting", "done": 0, "total": 0, "round": 0, "rounds": rounds,
-            "acked_start": start_no}))
+            "acked_start": start_no, "sections_run": sections_run, "sections_missing": sections_missing,
+            "libraries_run": libraries_run, "libraries_missing": libraries_missing}))
     };
     std::thread::Builder::new()
         .name("devbench".into())
         .stack_size(64 << 20)
         .spawn(move || {
-            let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let cat = if list_on_thread {
-                    // Polls see this run listing, not the last run's results.
-                    let rounds = cfg.rounds.unwrap_or(3).max(1);
-                    set_status(|s| {
-                        *s = json!({"running": true, "current": "listing tests", "done": 0, "total": 0,
-                            "round": 0, "rounds": rounds, "acked_start": start_no})
-                    });
-                    let relisted = catalog_in(&mut catalogs(), true);
-                    match cached {
-                        Some(checked) => after_relist(&cfg, checked, relisted),
-                        None => relisted,
-                    }
-                } else {
-                    cached.expect("a start without a cached catalog lists on its thread")
-                };
-                if select(&cfg, rows_of(&cat)).is_empty() {
-                    // Refused once listed: no run, the environment put back, and the reason in the status.
-                    let why = match listing_failure(&cat) {
-                        Some(f) => format!("no test matches the libraries and groups picked ({f})"),
-                        None => "no test matches the libraries and groups picked".into(),
-                    };
-                    restore_env_listed(&before_run);
-                    // `refused_start` numbers it, so an app reports it once, even across a recreated view.
-                    // Its reason is `refused_reason`, apart from `start_error`, which a later start refused before
-                    // acknowledgement (as "already running") writes without touching it.
-                    // Written below, with the slot's release.
-                    return Some(json!({"running": false, "error": why, "refused_reason": why, "refused_start": start_no, "acked_start": start_no}));
-                }
-                run(cfg, cat, start_no);
-                None
-            }));
+            let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(cfg, cat, start_no)));
             // The final status and the run slot's release in one step under the status lock, which status()
             // reads both under: a poll sees either the run going or its final status, never a mix.
             let mut st = STATUS.lock().unwrap_or_else(|e| e.into_inner());
             match r {
-                Ok(Some(refusal)) => *st = Some(refusal),
-                Ok(None) => {}
+                Ok(()) => {}
                 // A panic once run() wrote this start's status keeps its partial results; one before then
-                // replaces the status, so an earlier start's refusal can't stand in for it.
+                // replaces the status, so the last run's results can't stand in for it.
                 Err(_) if st.as_ref().is_some_and(|v| v["run_start"] == start_no) => {
                     let v = st.as_mut().expect("checked above");
                     v["running"] = json!(false);
@@ -780,8 +714,7 @@ pub fn status() -> Value {
     v
 }
 
-/// A start refused before it was acknowledged: its reason in `start_error`, leaving an acknowledged start's
-/// late refusal (`refused_start`, `refused_reason`) as it is.
+/// A refused start: its reason in `start_error`, leaving the last run's status as it is.
 fn refused_now(e: &str) {
     set_status(|st| st["start_error"] = json!(e));
 }
@@ -881,43 +814,6 @@ mod tests {
     }
 
     #[test]
-    fn a_catalog_covers_a_run_only_when_it_has_a_row_for_each_name() {
-        assert!(covers(&cfg(json!({"libraries": ["ring"], "sections": ["AEADs"]})), &rows()));
-        assert!(covers(&cfg(json!({"ids": ["a", "b"]})), &rows()));
-        // A row the listing left out, as rustls's when its keys were missing.
-        assert!(!covers(&cfg(json!({"ids": ["a", "tls"]})), &rows()));
-        assert!(!covers(&cfg(json!({"libraries": ["rind", "rustls"]})), &rows()));
-        assert!(!covers(&cfg(json!({"sections": ["AEADs", "TLS"]})), &rows()));
-        // Ids alone decide what runs, so a group with no row doesn't matter beside listed ids.
-        assert!(covers(&cfg(json!({"ids": ["a"], "sections": ["TLS"]})), &rows()));
-    }
-
-    #[test]
-    fn a_partial_catalog_decides_only_a_run_by_ids_it_covers() {
-        // Its AEAD rows are there, but a failed file may hold more rows of the same group or library.
-        assert!(!partial_decides(&cfg(json!({"libraries": ["rind"], "sections": ["AEADs"]})), &rows()));
-        assert!(!partial_decides(&cfg(json!({"sections": ["AEADs"]})), &rows()));
-        assert!(!partial_decides(&cfg(json!({})), &rows()));
-        // Ids name exactly what runs: all present decides, one missing lists again.
-        assert!(partial_decides(&cfg(json!({"ids": ["a", "b"]})), &rows()));
-        assert!(!partial_decides(&cfg(json!({"ids": ["a", "tls"]})), &rows()));
-    }
-
-    #[test]
-    fn a_relist_that_selects_nothing_keeps_the_checked_catalog() {
-        let checked = Arc::new(json!({"rows": rows(), "files_failed_to_list": ["rustls"]}));
-        let c = cfg(json!({"ids": ["a", "tls"]}));
-        // The relist failed outright, as when its thread can't spawn: the run keeps the rows it was started on.
-        let failed = Arc::new(json!({"error": "listing panicked", "rows": []}));
-        assert!(Arc::ptr_eq(&after_relist(&c, checked.clone(), failed), &checked));
-        // The relist found more rows: the run takes them.
-        let mut more = rows();
-        more.push(json!({"id": "tls", "file": "rustls", "library": "rind", "section": "TLS", "extra": false}));
-        let relisted = Arc::new(json!({"rows": more, "files_failed_to_list": []}));
-        assert!(Arc::ptr_eq(&after_relist(&c, checked, relisted.clone()), &relisted));
-    }
-
-    #[test]
     fn a_library_and_group_valid_alone_can_select_nothing_together() {
         // ring has AEADs and ML-KEM is rind's: each is a valid pick, together they match no row.
         assert!(select(&cfg(json!({"libraries": ["ring"], "sections": ["ML-KEM"]})), &rows()).is_empty());
@@ -955,60 +851,50 @@ mod tests {
     }
 
     #[test]
-    fn a_start_that_would_run_nothing_is_refused() {
+    fn a_start_that_would_run_nothing_is_refused_on_the_spot() {
         if denies_missing() {
             return; // start() refuses every run of such a build first
         }
         let keys_before = std::env::var_os("RIND_BENCH_KEYS_DIR");
         let low_before = std::env::var_os("RIND_BENCH_LOW_MEMORY");
         let none = r#""libraries": ["no-such-library"], "sections": ["no-such-group"]"#;
-        // A start whose settings have a complete cached catalog is refused before it is acknowledged.
-        if listing_failure(&catalog()).is_none() {
-            let e = start(&format!("{{{none}}}")).unwrap_err();
-            assert_eq!(e, "no test matches the libraries and groups picked");
-            assert!(!RUNNING.load(Ordering::SeqCst));
-        }
-        // A start whose settings were never listed, or listed in part, is acknowledged without listing (the
-        // apps call start() on their UI thread); its thread lists, then refuses in the status.
-        let refused_on_thread = |env: &str| -> String {
-            start(&format!(r#"{{{none}, "env": {env}}}"#)).unwrap();
-            let t = Instant::now();
-            while RUNNING.load(Ordering::SeqCst) {
-                assert!(t.elapsed().as_secs() < 300, "the start's thread never finished");
-                std::thread::sleep(std::time::Duration::from_millis(50));
-            }
-            let st = status();
-            assert_eq!(st["running"], false);
-            assert!(st.get("run_id").is_none(), "{st}");
-            assert!(st["refused_start"].as_u64().is_some_and(|n| n > 0), "{st}");
-            // A start refused before acknowledgement, as a second view's would be, leaves the late refusal.
-            refused_now("already running");
-            let after = status();
-            assert_eq!(after["refused_start"], st["refused_start"]);
-            assert_eq!(after["refused_reason"], st["refused_reason"]);
-            st["refused_reason"].as_str().unwrap().to_string()
-        };
         // An empty keys directory, as before the app copies its certificates in: rustls can't list.
         let dir = std::env::temp_dir().join(format!("rind-devbench-test-keys-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let keys = dir.to_str().unwrap();
         let env = format!(r#"{{"RIND_BENCH_KEYS_DIR": "{keys}", "RIND_BENCH_LOW_MEMORY": "1"}}"#);
-        let e = refused_on_thread(&env);
-        assert!(e.contains("no test matches") && e.contains("rustls failed to list"), "{e}");
-        // The refused start put the environment back as it found it.
-        assert_eq!(std::env::var_os("RIND_BENCH_KEYS_DIR"), keys_before);
-        assert_eq!(std::env::var_os("RIND_BENCH_LOW_MEMORY"), low_before);
-        let set = |env: &ListingEnv, k: &str, v: &str| env.iter().any(|(ek, ev)| ek == k && ev == v);
-        let cached = || {
-            catalogs().iter().find(|(k, _)| set(k, "RIND_BENCH_KEYS_DIR", keys) && set(k, "RIND_BENCH_LOW_MEMORY", "1"))
-                .map(|(_, c)| c.clone())
+        let refused = |env: &str| -> String {
+            let e = start(&format!(r#"{{{none}, "env": {env}}}"#)).unwrap_err();
+            assert!(!RUNNING.load(Ordering::SeqCst));
+            // The refused start put the environment back as it found it.
+            assert_eq!(std::env::var_os("RIND_BENCH_KEYS_DIR"), keys_before);
+            assert_eq!(std::env::var_os("RIND_BENCH_LOW_MEMORY"), low_before);
+            e
         };
-        // Its partial listing is kept, for a start with the same settings that its rows cover.
-        let partial = cached().unwrap();
+        // Settings never listed: start() never lists (the apps call it on their UI thread), so it refuses.
+        assert_eq!(refused(&env), "the list of tests for these settings hasn't been loaded");
+        // The host lists with those settings, as an app's background load does before Start is enabled.
+        let listed = |k: &str, low: &str| -> Arc<Value> {
+            let _l = catalogs();
+            // SAFETY: tests that touch the environment run here only, with the catalog lock held.
+            unsafe { std::env::set_var("RIND_BENCH_KEYS_DIR", k); std::env::set_var("RIND_BENCH_LOW_MEMORY", low) };
+            drop(_l);
+            let c = catalog();
+            let _l = catalogs();
+            for (key, v) in [("RIND_BENCH_KEYS_DIR", &keys_before), ("RIND_BENCH_LOW_MEMORY", &low_before)] {
+                // SAFETY: as above.
+                match v { Some(v) => unsafe { std::env::set_var(key, v) }, None => unsafe { std::env::remove_var(key) } }
+            }
+            c
+        };
+        let partial = listed(keys, "1");
         assert!(listing_failure(&partial).is_some());
-        // Once the certificates are in the same directory, a start that the partial listing can't cover
-        // lists again on its thread, and finds the rustls rows.
+        // A catalog that failed in part decides on the spot, naming what failed.
+        let e = refused(&env);
+        assert!(e.contains("no test matches") && e.contains("rustls failed to list"), "{e}");
+        // Once the certificates are in the same directory, the next background load lists again and finds the
+        // rustls rows, and the start is refused for its selection alone.
         let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../rind-rustls/tests/keys");
         for d in std::fs::read_dir(&src).unwrap() {
             let d = d.unwrap();
@@ -1018,10 +904,10 @@ mod tests {
                 std::fs::copy(f.path(), dir.join(d.file_name()).join(f.file_name())).unwrap();
             }
         }
-        assert_eq!(refused_on_thread(&env), "no test matches the libraries and groups picked");
-        let relisted = cached().unwrap();
+        let relisted = listed(keys, "1");
         assert!(!Arc::ptr_eq(&partial, &relisted));
         assert_eq!(listing_failure(&relisted), None);
+        assert_eq!(refused(&env), "no test matches the libraries and groups picked");
         let _ = std::fs::remove_dir_all(&dir);
         for bad in [r#"{"": "1"}"#, r#"{"A=B": "1"}"#, r#"{"A": "x\u0000"}"#] {
             let e = start(&format!(r#"{{"env": {bad}}}"#)).unwrap_err();
