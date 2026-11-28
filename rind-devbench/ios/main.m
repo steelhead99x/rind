@@ -179,16 +179,16 @@ static void SetButtonTitleStyle(UIButtonConfiguration *c, NSString *title, UIFon
   b.automaticallyUpdatesConfiguration = NO;
   b.selected = on; b.enabled = en;
   [b addTarget:self action:@selector(chipTapped:) forControlEvents:UIControlEventTouchUpInside];
-  [self paintChip:b]; return b;
+  [self paintChip:b title:title]; return b;
 }
-- (void)paintChip:(UIButton *)b {
+- (void)paintChip:(UIButton *)b title:(NSString *)title {
   BOOL on = b.selected;
   UIButtonConfiguration *c = b.configuration;
   c.background.backgroundColor = on ? C_SELECTED : C_CHIP;
   c.background.strokeColor = on ? C_SELECTED : C_LINE;
   UIFont *font = [UIFont systemFontOfSize:[self compact] ? 13 : 14 weight:UIFontWeightSemibold];
   UIColor *color = !b.enabled ? C_MUTED : (on ? C_ON_SELECTED : C_TEXT);
-  SetButtonTitleStyle(c, c.attributedTitle.string ?: c.title, font, color);
+  SetButtonTitleStyle(c, title, font, color);
   b.tintColor = color;
   b.configuration = c;
   b.alpha = b.enabled ? 1 : 0.45;
@@ -474,7 +474,8 @@ static UIImageView *BrandMark(NSString *name, CGFloat size) {
 
 - (void)chipTapped:(UIButton *)b {
   if (running) return;
-  b.selected = !b.selected; [self paintChip:b];
+  NSString *title = b.configuration.attributedTitle.string;
+  b.selected = !b.selected; [self paintChip:b title:title];
 }
 
 - (void)showConsent {
