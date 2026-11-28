@@ -1015,7 +1015,10 @@ final class BenchView extends LinearLayout {
             progress.setProgress(still ? done : (done > 0 ? total : 0));
             progress.setContentDescription("Run progress, " + (still ? done : (done > 0 ? total : 0)) + " of " + total);
             updateCollectorFromSink(s.optString("sink"));
-            if (still) {
+            if (still && !s.has("run_start")) {
+                // Accepted, still reaching the collector: no counters yet, so it stays "Starting".
+                setStatus("Starting", Status.OK);
+            } else if (still) {
                 setStatus("Running " + s.optInt("round") + " of " + s.optInt("rounds"), Status.OK);
                 String cur = s.optString("current", "");
                 String warm = isWarm() ? " (warm)" : "";
