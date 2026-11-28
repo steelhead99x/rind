@@ -186,6 +186,7 @@ final class BenchView extends LinearLayout {
         } else if (isRunnerLaunch(intent)) {
             Launch l = new Launch(intent, null, Collector.PORT);
             if (l.setsCollector) useCollector(l.host, l.port);
+            showLaunch(l);
             pending = l;
         } else {
             preselect(intent);
@@ -579,6 +580,7 @@ final class BenchView extends LinearLayout {
             // Its collector applies now, for the screen and for runs by hand; its own run takes it as resolved here.
             Launch l = new Launch(it, runnerHost, runnerPort);
             if (l.setsCollector) useCollector(l.host, l.port);
+            showLaunch(l);
             pending = l;
             if (loadedOnce) scheduleAutostart();
             return;
@@ -587,6 +589,21 @@ final class BenchView extends LinearLayout {
         if (!it.hasExtra("libraries") && !it.hasExtra("sections")) return;
         if (!loadedOnce) preselect(it);
         else if (!running) applySelection(it);
+    }
+
+    /**
+     * Shows a runner launch on the picker and preset as it arrives, so a later intent that preselects can
+     * still change them for runs by hand; the launch's own run keeps the launch as it was.
+     */
+    private void showLaunch(Launch l) {
+        fullPreset = l.full;
+        if (loadedOnce) {
+            showSelection(l.libs, l.secs, true, true);
+            presetChanged();
+        } else {
+            pickLibs = l.libs == null ? null : String.join(",", l.libs);
+            pickSecs = l.secs == null ? null : String.join(",", l.secs);
+        }
     }
 
     /** Keeps a launch's `libraries` and `sections` for the list's first load, each only if it gives it. */
@@ -637,9 +654,6 @@ final class BenchView extends LinearLayout {
             return;
         }
         final Launch l = pending;
-        showSelection(l.libs, l.secs, true, true);
-        fullPreset = l.full;
-        presetChanged();
         final List<String> libs = l.libs != null && !l.libs.isEmpty() ? l.libs : defaultLibraries();
         final List<String> secs = l.secs != null && !l.secs.isEmpty() ? l.secs : defaultSections();
         // Its own collector, probed now on its own: nothing that arrives later, nor another probe, decides
@@ -800,13 +814,22 @@ final class BenchView extends LinearLayout {
     /** Counts probes, so a slow one that finishes after a newer one started can't overwrite its answer. */
     private int probeGen;
 
+    /** The screen's latest collector probe is still out; a run by hand tapped meanwhile waits for it. */
+    private boolean discovering, startWhenFound;
+
     private void findCollector() {
         // The targets as of now: an intent or Retry since may have changed them.
         final int gen = ++probeGen;
+        discovering = true;
         final List<String[]> targets = candidates();
         new Thread(() -> {
             final String[] h = probe(targets);
-            ui.post(() -> { if (gen == probeGen) applyCollector(h); });
+            ui.post(() -> {
+                if (gen != probeGen) return;
+                discovering = false;
+                applyCollector(h);
+                if (startWhenFound) { startWhenFound = false; startTapped(); }
+            });
         }, "collector-probe").start();
     }
 
@@ -871,6 +894,15 @@ final class BenchView extends LinearLayout {
     }
 
     private void startTapped() {
+        // A run by hand goes where the screen's collector is: until its probe answers, that isn't known. The
+        // tap takes the place of a launch still waiting at once.
+        if (discovering) {
+            dropLaunch("a start by hand took its place");
+            startWhenFound = true;
+            setStatus("Finding the collector", Status.NEUTRAL);
+            setBody("Starts once it answers or times out.");
+            return;
+        }
         start(null, null, null, null);
     }
 
