@@ -59,11 +59,17 @@ impl PublicKey {
 pub(crate) struct VerifyingKey {
     point: AffineMontPoint,
     /// P, 3P, ..., 15P.
-    odd_multiples: low::ReuseCache<[AffineMontPoint; 8]>,
+    odd_multiples: VerificationTable,
     /// 17P, 19P, ..., 31P, which widen P's digits but pay for building
     /// only once a key is reused.
-    more_odd_multiples: low::ReuseCache<[AffineMontPoint; 8]>,
+    #[cfg(not(rind_no_cas_cache))]
+    more_odd_multiples: VerificationTable,
 }
+
+#[cfg(not(rind_no_cas_cache))]
+type VerificationTable = low::ReuseCache<[AffineMontPoint; 8]>;
+#[cfg(rind_no_cas_cache)]
+type VerificationTable = low::VerificationTable<12>;
 
 impl VerifyingKey {
     /// Create a [`VerifyingKey`] as [`PublicKey::from_x962_uncompressed`] does.
@@ -72,8 +78,9 @@ impl VerifyingKey {
         let PublicKey { point } = PublicKey::from_x962_uncompressed(bytes)?;
         Ok(Self {
             point,
-            odd_multiples: low::ReuseCache::new(),
-            more_odd_multiples: low::ReuseCache::new(),
+            odd_multiples: VerificationTable::new(),
+            #[cfg(not(rind_no_cas_cache))]
+            more_odd_multiples: VerificationTable::new(),
         })
     }
 
@@ -88,7 +95,15 @@ impl VerifyingKey {
         if let Some(vg) = low::p384_vg::Verify::check() {
             // On aarch64, only while the multiples are not ready:
             // `get_or_build` returns `None` on a key's first verification and
-            // while another thread builds them.
+            // while another thread builds them. `rind_no_cas_cache` is only
+            // ever set on a target without compare-and-swap, and the vg
+            // backend runs only on x86_64 and aarch64, which have it, so the
+            // two never meet in a real build; were the cfg forced onto a vg
+            // build, every verification would take vg's routine, and the
+            // cached table below would go unused.
+            #[cfg(rind_no_cas_cache)]
+            return self.vg_ecdsa_verify(vg, r, s, e);
+            #[cfg(not(rind_no_cas_cache))]
             if cfg!(rind_backend = "x86_64")
                 || self
                     .odd_multiples
@@ -112,12 +127,26 @@ impl VerifyingKey {
 
         // 5. Compute: R = (xR, yR) = u1 G + u2 QU
         //  If R = O, output "invalid" and stop.
+        #[cfg(not(rind_no_cas_cache))]
         let odd_multiples = self
             .odd_multiples
             .get_or_build_now(|| self.point.public_odd_multiples());
+        #[cfg(rind_no_cas_cache)]
+        let odd_multiples = {
+            let mut table = [AffineMontPoint::default(); 8];
+            self.odd_multiples.fill(
+                &mut table,
+                |point| &mut point.xy,
+                || self.point.public_odd_multiples(),
+            );
+            table
+        };
+        #[cfg(not(rind_no_cas_cache))]
         let more = self
             .more_odd_multiples
             .get_or_build(|| AffineMontPoint::public_more_odd_multiples(&odd_multiples));
+        #[cfg(rind_no_cas_cache)]
+        let more = None;
         let point = JacobianMontPoint::public_twin_multiply(&u1, &u2, &odd_multiples, more);
 
         if point.public_is_infinity() {
@@ -590,6 +619,7 @@ impl AffineMontPoint {
     ///
     /// Each is 16P = 15P + P plus one of those, so no sum adds equal points,
     /// as `p384_montjmixadd` requires, and none is at infinity.
+    #[cfg(any(not(rind_no_cas_cache), test))]
     fn public_more_odd_multiples(odd_multiples: &[Self; 8]) -> [Self; 8] {
         let p16 = JacobianMontPoint::from_affine(&odd_multiples[7]).add_affine(&odd_multiples[0]);
         let multiples = odd_multiples.map(|multiple| p16.add_affine(&multiple));

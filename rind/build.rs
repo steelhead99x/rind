@@ -81,8 +81,24 @@ fn main() {
     println!("cargo::rustc-check-cfg=cfg(rind_mul16_top)");
     println!("cargo::rustc-check-cfg=cfg(rind_mul16_soft)");
     println!("cargo::rustc-check-cfg=cfg(rind_reg_asm)");
+    println!("cargo::rustc-check-cfg=cfg(rind_no_cas_cache)");
     println!("cargo::rerun-if-env-changed=RUST_TARGET_PATH");
     println!("cargo::rustc-check-cfg=cfg(rind_sha256_iram)");
+    // The cache costs every ECDSA public key's memory whether or not the key
+    // is reused, so the program opts in with `no-cas-ecdsa-cache`. It takes
+    // effect on every target without compare-and-swap whose 32-bit atomic
+    // loads and stores, which the table is built of, are confirmed; a target
+    // with compare-and-swap always caches through `low::ReuseCache` instead.
+    if env::var_os("CARGO_FEATURE_NO_CAS_ECDSA_CACHE").is_some() {
+        if !target_has_cas() && target_has_atomic_u32() {
+            println!("cargo::rustc-cfg=rind_no_cas_cache");
+        } else if !target_has_cas() {
+            println!(
+                "cargo::warning=no-cas-ecdsa-cache has no effect on {}, which has no confirmed 32-bit atomic loads and stores",
+                env::var("TARGET").unwrap_or_default()
+            );
+        }
+    }
 
     let os = env::var("CARGO_CFG_TARGET_OS").expect("cargo sets the target os");
     let libc = env::var("CARGO_CFG_TARGET_ENV").is_ok_and(|e| !e.is_empty());
@@ -439,6 +455,64 @@ fn rustflag_feature_lists(encoded: &str) -> Vec<&str> {
         }
     }
     lists
+}
+
+/// Whether the target has compare-and-swap, which `low::ReuseCache` keys on
+/// as `target_has_atomic = "8"`.
+fn target_has_cas() -> bool {
+    env::var("CARGO_CFG_TARGET_HAS_ATOMIC").is_ok_and(|widths| widths.split(',').any(|w| w == "8"))
+}
+
+/// Whether the target Cargo builds for is confirmed to have 8- and 32-bit
+/// atomics (`AtomicBool` and `AtomicU32`), which the table is built of.
+///
+/// Stable Cargo passes no `target_has_atomic_load_store` cfg (it is
+/// unstable). From Rust 1.97, rustc reports
+/// `target_has_atomic_primitive_alignment` for a width only when the target
+/// has atomics of that width at their primitive's alignment, read from the
+/// specification it actually compiles for, built-in or custom; that cfg
+/// decides, and its absence means the target has none. An older rustc
+/// reports no such cfg, so a built-in target is taken from the list of those
+/// rustc 1.100 reports widths 8 and 32 for without compare-and-swap, and a
+/// custom specification is unconfirmed. Either way this fails closed: an
+/// unconfirmed target keeps the uncached path, and the build warns.
+fn target_has_atomic_u32() -> bool {
+    if rustc_minor().is_some_and(|minor| minor >= 97) {
+        return env::var("CARGO_CFG_TARGET_HAS_ATOMIC_PRIMITIVE_ALIGNMENT").is_ok_and(|widths| {
+            let widths: Vec<&str> = widths.split(',').collect();
+            widths.contains(&"8") && widths.contains(&"32")
+        });
+    }
+    let confirmed = [
+        "thumbv6m-none-eabi",
+        "riscv32e-unknown-none-elf",
+        "riscv32em-unknown-none-elf",
+        "riscv32emc-unknown-none-elf",
+        "riscv32i-unknown-none-elf",
+        "riscv32im-unknown-none-elf",
+        "riscv32imc-unknown-none-elf",
+        "riscv32imfc-unknown-none-elf",
+        "xtensa-esp32s2-none-elf",
+    ];
+    target_json_text().is_none()
+        && !custom_target_unlocated()
+        && env::var("TARGET").is_ok_and(|target| confirmed.contains(&target.as_str()))
+}
+
+/// The minor version of the rustc Cargo builds with, from `rustc --version`.
+fn rustc_minor() -> Option<u32> {
+    let rustc = env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
+    let out = std::process::Command::new(rustc)
+        .arg("--version")
+        .output()
+        .ok()?;
+    let text = String::from_utf8(out.stdout).ok()?;
+    text.split_whitespace()
+        .nth(1)?
+        .split('.')
+        .nth(1)?
+        .parse()
+        .ok()
 }
 
 fn target_json_text() -> Option<String> {
