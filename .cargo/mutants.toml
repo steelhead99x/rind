@@ -405,6 +405,25 @@ exclude_re = [
   'rind-aws-lc-rs/src/rsa\.rs:\d+:\d+: replace \|\| with && in PublicKeyComponents<B>::rind$',
   # 0x02 has no low bit, so `|` and `^` with the parity bit agree.
   'rind-aws-lc-rs/src/agreement\.rs:\d+:\d+: replace \| with \^ in compress$',
+  # evp's field arithmetic on public values, for curves rind cannot back.
+  # `num` is only given built-in parameters and field-length coordinates,
+  # 66 bytes at most, so its bound of 72 is never met or passed. A borrow
+  # out of `a - b` and one out of subtracting the incoming borrow cannot
+  # both occur, nor two such carries, so their OR is their XOR.
+  'rind-aws-lc-rs/src/evp\.rs:\d+:\d+: replace > with (==|>=) in num$',
+  'rind-aws-lc-rs/src/evp\.rs:\d+:\d+: replace \| with \^ in (sub|Field::add)$',
+  # `Field::mul`'s accumulator never fills its top limbs: every built-in
+  # prime is below 2^522, so t + a b_i stays below 2^587 and each step's
+  # result below 2p, under 2^523. `t[LIMBS + 1]` and the carry into
+  # `t[LIMBS]` are always zero, whatever combines or shifts them, and
+  # `LIMBS * 2` limbs only add limbs nothing reads. Columns 31, 34, 37, and
+  # 42 are those lines'; the same mutations elsewhere in it are caught.
+  'rind-aws-lc-rs/src/evp\.rs:\d+:(34|37): replace \+ with \* in Field::mul$',
+  'rind-aws-lc-rs/src/evp\.rs:\d+:37: replace \+ with - in Field::mul$',
+  'rind-aws-lc-rs/src/evp\.rs:\d+:(31|42): replace >> with << in Field::mul$',
+  # `has_x` reads (p - 1) / 2 as p - 1 shifted right once, which drops the
+  # bit the decrement clears: p is odd, so p >> 1 is the same exponent.
+  'rind-aws-lc-rs/src/evp\.rs:\d+:\d+: replace -= with /= in Field::has_x$',
   # Compiled only with the `dev-tests-only` and `unstable` features, which
   # campaigns, like aws-lc-rs's default build, leave off.
   'rind-aws-lc-rs/src/rand\.rs:\d+:\d+: replace <impl SecureRandom for T>::mut_fill -> Result<\(\), error::Unspecified> with Ok\(\(\)\)$',

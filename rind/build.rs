@@ -54,8 +54,8 @@
 //! cannot find (it looks in `RUST_TARGET_PATH` and the package directory and
 //! its parents) takes the top-bit path, as the safe choice. On 32-bit RISC-V with no multiply instruction,
 //! `rind_mul16_soft` builds each half with a shift and an add. Zmmul has
-//! `mul` and `mulhu`, so it does not. A 64-bit RISC-V target with neither
-//! keeps 64-bit limbs; those products call `__multi3`, and the build warns.
+//! `mul` and `mulhu`, so it does not. Multiplier-free 64-bit RISC-V
+//! also uses these halves, selecting 26-bit limbs only for Poly1305.
 //! `--cfg rind_mul16` forces the halves,
 //! so CI checks them on other targets; it is for testing. The top and soft
 //! cfgs follow the target even then. Only Poly1305's limb products use this.
@@ -171,16 +171,6 @@ fn main() {
     if mode == Some(Half::Soft) && env::var_os("CARGO_CFG_RIND_MUL16_SOFT").is_none() {
         println!("cargo::rustc-cfg=rind_mul16_soft");
     }
-
-    // `rind_mul16` is the 32-bit half product. A 64-bit target keeps
-    // `generic::poly1305`, so the cfg would not cover these calls.
-    if riscv64_without_multiply() {
-        println!(
-            "cargo::warning=riscv64 without the M extension or Zmmul keeps 64-bit \
-             Poly1305 limbs, so each 64x64->128 product calls __multi3 on the secret. \
-             rind_mul16 does not cover that width (PLATFORMS.md)"
-        );
-    }
 }
 
 /// How Poly1305 multiplies one 16-bit half, where it must not use a
@@ -206,11 +196,13 @@ enum Half {
 /// `mul` early on a 16-bit half too, so the top bit stays set.
 /// `arm-linux-androideabi` is ARMv5TE; `armv7-linux-androideabi` is not.
 /// Rust's unversioned `arm-unknown-linux-*` triples are ARMv6, which does
-/// not end early. 32-bit RISC-V without M and without Zmmul has no multiply
-/// instruction. 64-bit RISC-V in that state is not a half product: Poly1305
-/// stays on 64-bit limbs.
+/// not end early. RISC-V without M or Zmmul has no multiply instruction.
 fn poly1305_half_mul() -> Option<Half> {
-    if riscv32_without_multiply() {
+    if matches!(
+        env::var("CARGO_CFG_TARGET_ARCH").as_deref(),
+        Ok("riscv32" | "riscv64")
+    ) && !riscv_has_multiply()
+    {
         return Some(Half::Soft);
     }
     if arm_early_mul() {
@@ -220,17 +212,6 @@ fn poly1305_half_mul() -> Option<Half> {
         return Some(Half::Halves);
     }
     None
-}
-
-/// Whether this 32-bit RISC-V target has no multiply instruction.
-fn riscv32_without_multiply() -> bool {
-    env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default() == "riscv32" && !riscv_has_multiply()
-}
-
-/// Whether this 64-bit RISC-V target has no multiply instruction. Poly1305
-/// then calls `__multi3`. `rind_mul16` does not run on 64-bit limbs.
-fn riscv64_without_multiply() -> bool {
-    env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default() == "riscv64" && !riscv_has_multiply()
 }
 
 /// Whether the RISC-V target has `mul` and `mulhu`: the M extension, or

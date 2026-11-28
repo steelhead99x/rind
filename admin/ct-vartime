@@ -97,6 +97,7 @@ TARGETS = [
     "thumbv8m.base-none-eabi+mul16",
     "armv5te-unknown-linux-gnueabi+mul16",
     "riscv32i-unknown-none-elf+mul16",
+    "riscv64imac-unknown-none-elf+mul16",
     # The 32-bit RISC-V cores with a multiplier run the same 26-bit limbs on
     # plain products. RISC-V has no cmov, so a select in them could become
     # a branch: this row runs only the secret-branch proof.
@@ -116,7 +117,7 @@ TARGETS = [
 # Each target's VARTIME pattern, by the first part of its triple.
 ARCH = {
     "x86_64": "x86", "i686": "x86", "armv7": "arm", "powerpc64": "powerpc",
-    "powerpc64le": "powerpc", "riscv64gc": "riscv64",
+    "powerpc64le": "powerpc", "riscv64gc": "riscv64", "riscv64imac": "riscv64",
 }
 PORTABLE = '--cfg rind_portable --cfg curve25519_dalek_backend="serial"'
 # The flags of each backend a target's `+` suffix names.
@@ -416,6 +417,10 @@ def scan_flags(target):
     # `sh/bare-metal.sh`.
     if "-none" in target.partition("+")[0]:
         flags.append('--cfg getrandom_backend="custom"')
+    if target == "riscv64imac-unknown-none-elf+mul16":
+        # Check build.rs's normal selection for the multiplier-free target.
+        flags.remove("--cfg rind_mul16")
+        flags.append("-C target-feature=-m,-zmmul")
     return flags
 
 
@@ -1496,7 +1501,7 @@ def find_bodies(objects, function):
 
 
 def check_secret_branches(objects):
-    """The RV32I secret-branch proof over `blocks` and `finish`, and its
+    """The RISC-V secret-branch proof over `blocks` and `finish`, and its
     planted branch: its report's lines, and whether it failed."""
     lines = []
     failed = False

@@ -320,11 +320,11 @@ fn pqdsa_leaks(doc: &[u8], needle: &[u8], expected: Result<(), &str>) -> usize {
 const EC_PUBLIC_KEY: [u8; 9] = [0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01];
 
 /// The "another algorithm" checks in `PqdsaKeyPair::from_pkcs8` that copy a
-/// private key: EC keys on a curve rind cannot back, consistent and not; RSA
-/// keys below 2048 bits, consistent and not; and the PKCS#8 documents the
-/// adapter rebuilds, for a P-256 key with explicit parameters, a hybrid
-/// public key, or a short scalar, and for an ML-DSA seed followed by stray
-/// bytes. Every heap copy of the scalar, the RSA primes, or the seed is
+/// private key: EC keys on a curve rind cannot back, with their own public
+/// key and another point's; RSA keys below 2048 bits, consistent and not;
+/// and the PKCS#8 documents the adapter rebuilds, for a P-256 key with
+/// explicit parameters, a hybrid public key, or a short scalar, and for an
+/// ML-DSA seed followed by stray bytes. Every heap copy of the scalar, the RSA primes, or the seed is
 /// wiped before it is freed, on refusal and on success.
 #[test]
 fn key_type_checks() {
@@ -351,7 +351,8 @@ fn key_type_checks() {
         .concat(),
     );
     assert_eq!(
-        pqdsa_leaks(&pkcs8(&k1, &mismatched), &scalar, Err("InvalidEncoding")),
+        // aws-lc-rs says `InvalidEncoding`: the difference the README lists.
+        pqdsa_leaks(&pkcs8(&k1, &mismatched), &scalar, Err("WrongAlgorithm")),
         0
     );
 

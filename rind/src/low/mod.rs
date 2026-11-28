@@ -145,7 +145,7 @@ mod generic {
     #[cfg(any(
         all(
             rind_backend = "portable",
-            any(target_pointer_width = "32", rind_limb = "32")
+            any(target_pointer_width = "32", rind_limb = "32", rind_mul16)
         ),
         test
     ))]
@@ -157,7 +157,7 @@ mod generic {
         all(
             any(rind_mul16, rind_mul16_top, rind_mul16_soft),
             rind_backend = "portable",
-            any(target_pointer_width = "32", rind_limb = "32")
+            any(target_pointer_width = "32", rind_limb = "32", rind_mul16)
         ),
         test
     ))]
@@ -177,17 +177,17 @@ mod generic {
         all(
             rind_backend = "portable",
             target_pointer_width = "64",
-            not(rind_limb = "32")
+            not(any(rind_limb = "32", rind_mul16))
         ),
         test
     ))]
     pub(crate) mod poly1305;
     // The portable backend's Poly1305 on 32-bit targets, in 26-bit limbs,
-    // and on 64-bit ones forced to 32-bit limbs, so CI checks it on x86_64.
+    // and on 64-bit ones without a widening multiply or forced for tests.
     #[cfg(any(
         all(
             rind_backend = "portable",
-            any(target_pointer_width = "32", rind_limb = "32")
+            any(target_pointer_width = "32", rind_limb = "32", rind_mul16)
         ),
         test
     ))]
