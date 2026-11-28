@@ -3,6 +3,9 @@ target/
 .tmp/
 admin/build-cost-fixtures/*/Cargo.lock
 proofs/.lake/
+# What admin/import-vg-models --tables writes.
+proofs/verified-garbage/VerifiedGarbage/Impl/P256/CombTable7.lean
+proofs/verified-garbage/VerifiedGarbage/Impl/P256/GTable9.lean
 # What admin/prove writes.
 proofs/Rind/*/Types.lean
 proofs/Rind/*/Funs.lean

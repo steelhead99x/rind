@@ -280,14 +280,20 @@ pyca/verified-garbage <https://github.com/pyca/verified-garbage>
   Copyright (c) Individual contributors.
   License: Apache-2.0 OR BSD-3-Clause, which the files keep.
 
-  What: the Lean ISA models, the ML-KEM, SHA-3, SHA-512, X25519, Poly1305, and
-  ChaCha20-Poly1305 specs, and the RSA, ChaCha20, Ed25519, P-256, P-384, and
-  PBKDF2 specs and contracts rind's proofs import or restate, with the MD5, SHA-1,
-  SHA-2, and HMAC specs PBKDF2's import,
-  under proofs/verified-garbage/VerifiedGarbage, which admin/import-vg-models
-  copies byte for byte from verified-garbage
-  at the same commit, so they carry no SPDX comment; this entry names
-  their license.
+  What: the Lean ISA models, printers, and encoders; the specs and
+  contracts rind's proofs import or restate (ML-KEM, SHA-3, SHA-512,
+  X25519, Ed25519, Poly1305, ChaCha20, ChaCha20-Poly1305, RSA, PBKDF2 with
+  the MD5, SHA-1, SHA-2, and HMAC specs it imports, and the Weierstrass
+  curves P-192, P-224, P-256, P-384, P-521, secp256k1, and Brainpool
+  P256r1, P384r1, and P512r1 with their ECDH, ECDSA, and key specs); the
+  code under Impl that the cosimulation's programs import (bignum,
+  ChaCha20, ChaCha20-Poly1305, Poly1305, ECDH, ECDSA, Montgomery, P-256,
+  RSA, scrub, stack-scratch, Weierstrass, and X25519). admin/import-vg-models copies them byte for
+  byte from verified-garbage at the same commit into
+  proofs/verified-garbage/VerifiedGarbage, but for P-256's CombTable7 and
+  GTable9, which admin/import-vg-models --tables writes, byte for byte as
+  verified-garbage's, from verified-garbage text that script holds. So
+  they carry no SPDX comment; this entry names their license.
   Copyright (c) Individual contributors.
   License: Apache-2.0 OR BSD-3-Clause, taken under Apache-2.0.
   verified-garbage has no NOTICE file.

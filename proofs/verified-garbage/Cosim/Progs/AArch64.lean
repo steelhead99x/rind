@@ -3,13 +3,14 @@ import VerifiedGarbage.Impl.StackScratch.AArch64
 import VerifiedGarbage.TCB.AArch64.Target
 
 /-!
-# The code of VG's routines that rind states leakage axioms about
+# The code of VG's aarch64 routines that rind states leakage axioms about
 
 Each is the `Prog` pyca/verified-garbage's (VG's) registration builds the
-function from, written as its `Artifacts/<Routine>/<Arch>.lean` writes it, so
-that `proofs/Rind/<Arch>/Vg<Routine>Ct.lean`'s axioms are about it, and
-`vg-print` prints it, for `admin/vg-bytes` to check against VG's assembly
-text and rind's machine code.
+function from, written as its `Artifacts/<Routine>/AArch64.lean` writes it, so
+that `proofs/Rind/Aarch64/Vg<Routine>Ct.lean`'s axioms are about it, and
+`vg-print aarch64` prints it, for `admin/vg-bytes` to check against VG's
+assembly text and rind's machine code. It imports no x86_64 code, so the
+aarch64 axioms build without it.
 -/
 
 namespace Cosim.Progs
