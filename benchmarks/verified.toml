@@ -377,17 +377,6 @@ cpu = ["avx", "avx2", "avx512f", "avx512vl", "avx512ifma", "!zen4"]
 proof = "rind's Lean proof, through Aeneas and a hand model of the function-pointer dispatch Aeneas cannot translate, of its AEAD API's ChaCha20-Poly1305 and XChaCha20-Poly1305 key setup, seal, and open against RFC 8439 and draft-irtf-cfrg-xchacha-03, for every AAD and message length it takes, HChaCha20 over HACL*'s rounds included, down to pyca/verified-garbage's vg_chacha20_poly1305_seal_ifma and vg_chacha20_poly1305_open_ifma, which rind runs at every length on CPUs with AVX-512 IFMA, composed with pyca/verified-garbage's Lean proofs of those routines against its model of its own machine code, which rind vendors, whose instructions rind cosimulates against its ISA models, and rind's Lean proof that that project's RFC 8439 spec is its own"
 link = "https://github.com/kixel-ai/rind/blob/main/proofs/Rind/X86_64/ChaCha20Poly1305.lean"
 
-# On Intel without AVX-512, as Arrow Lake, rind runs pyca/verified-garbage's
-# AVX2 pair from 1024 bytes and aws-lc's unproven one pass below, so only the
-# sizes from 1024 bytes earn the ✓.
-[[verified]]
-library = "rind"
-operations = ["chacha20poly1305/1350B", "chacha20poly1305/16KB", "xchacha20poly1305/1350B", "xchacha20poly1305/16KB"]
-arch = "x86_64"
-cpu = ["intel", "avx", "avx2", "!avx512f"]
-proof = "rind's Lean proof, through Aeneas and a hand model of the function-pointer dispatch Aeneas cannot translate, of its AEAD API's ChaCha20-Poly1305 and XChaCha20-Poly1305 key setup, seal, and open against RFC 8439 and draft-irtf-cfrg-xchacha-03, for every AAD and message length it takes, HChaCha20 over HACL*'s rounds included, down to pyca/verified-garbage's vg_chacha20_poly1305_seal_avx2 and vg_chacha20_poly1305_open_avx2, which rind runs on Intel CPUs without AVX-512 for seals and opens of 1024 bytes or more, composed with pyca/verified-garbage's Lean proofs of those routines against its model of its own machine code, which rind vendors, whose instructions rind cosimulates against its ISA models, and rind's Lean proof that that project's RFC 8439 spec is its own"
-link = "https://github.com/kixel-ai/rind/blob/main/proofs/Rind/X86_64/ChaCha20Poly1305.lean"
-
 # On Zen 4, the unproven one pass, rind's copy of aws-lc's AVX2 seal and
 # aws-lc's open, seals fewer than 800 bytes and opens fewer than 512, so only
 # the sizes from 800 bytes earn the ✓.

@@ -14,4 +14,4 @@ Found by `desktop`'s first run on two reserved cores ([kixel-ai/rind#1103](https
 
 ## Hosts
 
-- linux - `desktop` is the only Intel host without AVX-512
+- linux - `desktop` is the only Arrow Lake host; `ovh-iad` and `ovh-sea` are Intel Haswell without AVX-512, so a switch measured on Arrow Lake gates on its model, not on the vendor

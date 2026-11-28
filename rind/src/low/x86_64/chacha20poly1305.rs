@@ -4,8 +4,8 @@
 //! routines, imported by `admin/import-vg`, where the CPU has AVX512_IFMA,
 //! at every length, since they matched or beat aws-lc's at every size
 //! measured on Zen 5 and Granite Rapids; on Zen 4, only from 800 bytes
-//! sealing and 512 opening, below which aws-lc's were faster. On Intel's
-//! CPUs with AVX2 but no AVX-512, such as Arrow Lake, VG's AVX2 routines,
+//! sealing and 512 opening, below which aws-lc's were faster. On Arrow Lake,
+//! Intel's one measured core with AVX2 but no AVX-512, VG's AVX2 routines,
 //! from the lengths `cpu::INTEL_AVX2_SEAL_FROM` and `INTEL_AVX2_OPEN_FROM`
 //! name (see `HaveVgChaCha20Poly1305::check_seal`). Otherwise aws-lc's
 //! `chacha20_poly1305_x86_64`, which interleaves ChaCha20 with Poly1305,
@@ -488,8 +488,8 @@ mod tests {
         assert_eq!(crate::low::mcdt::mxcsr(), before);
     }
 
-    // The dispatch picks a path by length on Zen 4 and on Intel's CPUs
-    // without AVX-512, so every length around where it switches takes it, as
+    // The dispatch picks a path by length on Zen 4 and on Arrow Lake, so
+    // every length around where it switches takes it, as
     // well as the paths above.
     #[test]
     fn dispatch_matches() {
