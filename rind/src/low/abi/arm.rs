@@ -65,6 +65,14 @@ impl State {
     }
 }
 
+/// What a routine leaves in `r0`.
+pub(super) type Returned = Word;
+
+/// `r0`, the register a routine returns a word in.
+pub(super) fn return_register(r: Returned) -> Word {
+    r
+}
+
 pub(super) type Trampoline = unsafe extern "C" fn(Word, *const Word, Word) -> Word;
 
 pub(super) fn trampoline(_: Convention) -> Trampoline {

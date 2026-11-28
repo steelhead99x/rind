@@ -1,5 +1,6 @@
 import Rind.Portable.Blockwise
 import Rind.Sha2Lemmas
+import Rind.Sha2Rounds
 open Aeneas Aeneas.Std Result rind.spec
 
 /-!
@@ -13,27 +14,7 @@ passes of sixteen.
 -/
 
 namespace rind.portable.sha512_blocks
-
-open rind.spec.fips512 in
-/-- FIPS 180-4 section 6.4.2's round `t` of the working variables `s`, over
-the schedule `W`: the step `fips512.compress` folds. -/
-def sha512Round (W s : List (BitVec 64)) (t : Nat) : List (BitVec 64) :=
-  let T1 := s[7]! + bigSigma1 s[4]! + ch s[4]! s[5]! s[6]! + K[t]! + W[t]!
-  let T2 := bigSigma0 s[0]! + maj s[0]! s[1]! s[2]!
-  [T1 + T2, s[0]!, s[1]!, s[2]!, s[3]! + T1, s[4]!, s[5]!, s[6]!]
-
-theorem bv_rotate_right64 (x : U64) (k : U32) :
-    (core.num.U64.rotate_right x k).bv = x.bv.rotateRight k.val := rfl
-
-theorem ch_eq (e f g : BitVec 64) : ((f ^^^ g) &&& e) ^^^ g = fips512.ch e f g := by
-  unfold fips512.ch; ext i hi
-  simp only [BitVec.getElem_xor, BitVec.getElem_and, BitVec.getElem_not]
-  cases e[i] <;> cases f[i] <;> cases g[i] <;> rfl
-
-theorem maj_eq (a b c : BitVec 64) : ((a ^^^ b) &&& (b ^^^ c)) ^^^ b = fips512.maj a b c := by
-  unfold fips512.maj; ext i hi
-  simp only [BitVec.getElem_xor, BitVec.getElem_and]
-  cases a[i] <;> cases b[i] <;> cases c[i] <;> rfl
+open rind.sha512_rounds
 
 /-- One round, given the working variables after rounds `0` to `t - 1`. -/
 theorem round_spec (W H : List (BitVec 64)) (t t' : Nat) (ht : t' = t + 1) (w k a b c d e f g h : U64)
@@ -50,59 +31,6 @@ theorem round_spec (W H : List (BitVec 64)) (t t' : Nat) (ht : t' = t + 1) (w k 
   simp only [List.getElem!_cons_succ, List.getElem!_cons_zero, List.cons.injEq, and_true]
   constructor <;> ac_rfl
 
-
-/-! The message schedule. -/
-
-/-- FIPS 180-4's schedule after `n` of its extension steps. -/
-def sched (M : List (BitVec 64)) (n : Nat) : List (BitVec 64) :=
-  (List.range n).foldl (fun W t => W ++ [fips512.smallSigma1 W[t + 14]! + W[t + 9]! +
-    fips512.smallSigma0 W[t + 1]! + W[t]!]) M
-
-theorem sched_succ (M : List (BitVec 64)) (n : Nat) :
-    sched M (n + 1) = sched M n ++ [fips512.smallSigma1 (sched M n)[n + 14]! + (sched M n)[n + 9]! +
-      fips512.smallSigma0 (sched M n)[n + 1]! + (sched M n)[n]!] := by
-  simp only [sched, List.range_succ, List.foldl_append, List.foldl_cons, List.foldl_nil]
-
-theorem sched_length (M : List (BitVec 64)) (n : Nat) : (sched M n).length = M.length + n := by
-  induction n with
-  | zero => simp [sched]
-  | succ n ih => rw [sched_succ]; simp [ih]; omega
-
-/-- Later steps keep the words earlier ones wrote. -/
-theorem sched_get (M : List (BitVec 64)) (n m t : Nat) (ht : t < M.length + n) :
-    (sched M (n + m))[t]! = (sched M n)[t]! := by
-  induction m with
-  | zero => rfl
-  | succ m ih =>
-    rw [← Nat.add_assoc, sched_succ, ← ih]
-    rw [getElem!_pos _ t (by simp [sched_length]; omega),
-      getElem!_pos _ t (by simp [sched_length]; omega)]
-    rw [List.getElem_append_left (by simp [sched_length]; omega)]
-
-/-- Word `t + 16` of the schedule, FIPS 180-4 section 6.4.2 step 1. -/
-theorem schedule_succ (M : List (BitVec 64)) (hM : M.length = 16) (t : Nat) (ht : t < 64) :
-    (fips512.schedule M)[t + 16]! = fips512.smallSigma1 (fips512.schedule M)[t + 14]! +
-      (fips512.schedule M)[t + 9]! + fips512.smallSigma0 (fips512.schedule M)[t + 1]! +
-      (fips512.schedule M)[t]! := by
-  have hs : fips512.schedule M = sched M (t + 1 + (63 - t)) := by
-    rw [show t + 1 + (63 - t) = 64 by omega]; rfl
-  have hr : ∀ u, u < t + 16 → (fips512.schedule M)[u]! = (sched M t)[u]! := by
-    intro u hu
-    rw [hs, sched_get M (t + 1) _ u (by omega), sched_succ,
-      getElem!_pos _ u (by simp [sched_length]; omega),
-      getElem!_pos _ u (by simp [sched_length]; omega),
-      List.getElem_append_left (by simp [sched_length]; omega)]
-  rw [hr (t + 14) (by omega), hr (t + 9) (by omega), hr (t + 1) (by omega), hr t (by omega),
-    hs, sched_get M (t + 1) _ _ (by omega), sched_succ,
-    getElem!_pos _ (t + 16) (by simp [sched_length]; omega),
-    List.getElem_append_right (by simp [sched_length]; omega)]
-  simp [sched_length, hM]
-
-/-- The schedule's first sixteen words are the block's. -/
-theorem schedule_lt (M : List (BitVec 64)) (hM : M.length = 16) (t : Nat) (ht : t < 16) :
-    (fips512.schedule M)[t]! = M[t]! := by
-  have := sched_get M 0 64 t (by omega)
-  exact this
 
 /-- The window `x` of the schedule `W` while the pass that writes words `i`
 to `i + 15` is at slot `j`: slots before `j` hold this pass's words, the rest
@@ -314,24 +242,6 @@ theorem first_word (M : List (BitVec 64)) (hM : M.length = 16) (x : Std.Array U6
   rw [schedule_lt M hM _ hj, ← hx _ hj, hw, getElem!_pos]
 
 
-theorem cast_setWidth {w n : Nat} (x : BitVec w) (h : w = n) : x.cast h = x.setWidth n := by
-  subst h; simp
-
-/-- Eight bytes from `k`. -/
-theorem drop_take8 (l : List U8) (k : Nat) (h : k + 8 ≤ l.length) :
-    (l.drop k).take 8 = [l[k]!, l[k + 1]!, l[k + 2]!, l[k + 3]!, l[k + 4]!, l[k + 5]!, l[k + 6]!,
-      l[k + 7]!] := by
-  apply List.ext_getElem (by simp; omega)
-  intro n h1 h2
-  simp only [List.length_cons, List.length_nil] at h2
-  rw [List.getElem_take, List.getElem_drop]
-  rcases n with _|_|_|_|_|_|_|_|n
-  all_goals first
-    | omega
-    | (simp only [List.getElem_cons_succ, List.getElem_cons_zero]
-       rw [getElem!_pos l _ (by simp at h1; omega)]
-       try rfl)
-
 /-- Loads the block's words `iter.start` to 15 into `x`, which holds the earlier ones. -/
 theorem load_spec (block : Slice U8) (hb : block.length = 128) (iter : core.ops.range.Range Usize)
     (x : Std.Array U64 16#usize) (hs : iter.start.val ≤ 16) (he : iter.end.val = 16)
@@ -378,13 +288,6 @@ theorem load_spec (block : Slice U8) (hb : block.length = 128) (iter : core.ops.
       simp only [WP.spec_ok]
       intro m hm; exact hy m (by omega)
   · exact ⟨hs, he, hx⟩
-
-/-- FIPS 180-4's compression of one block, as `sha512Round` folds it. -/
-theorem compressBlock_eq (H M : List (BitVec 64)) :
-    fips512.compressBlock H M = List.zipWith (· + ·)
-      ((List.range 80).foldl (sha512Round (fips512.schedule M)) H) H := rfl
-
-theorem blockWords_length (b : List U8) : (blockWords b).length = 16 := by simp [blockWords]
 
 set_option maxHeartbeats 1000000 in
 /-- One block at `off`, given the blocks before it compressed into `state`. -/
@@ -512,17 +415,10 @@ theorem block_spec (H0 : List U64) (blocks : Slice U8) (hb : blocks.length % 128
   rw [ha6, List.map_map, compressBlock_eq, show [a, b, c, d, e, f, g, h].map (·.bv) = H by rfl,
     ← hr]
   simp [H, BitVec.add_comm]
-theorem arr8 (st : Std.Array U64 8#usize) :
-    ∃ s0 s1 s2 s3 s4 s5 s6 s7, st.val = [s0, s1, s2, s3, s4, s5, s6, s7] := by
-  have h8 : st.val.length = 8 := by simp
-  generalize st.val = l at h8 ⊢
-  rcases l with _|⟨s0,_|⟨s1,_|⟨s2,_|⟨s3,_|⟨s4,_|⟨s5,_|⟨s6,_|⟨s7,_|⟨s8,l⟩⟩⟩⟩⟩⟩⟩⟩⟩ <;>
-    first | exact ⟨_, _, _, _, _, _, _, _, rfl⟩ | simp at h8
-
 end rind.portable.sha512_blocks
 
 namespace rind.portable
-open sha512_blocks
+open sha512_blocks rind.sha512_rounds
 
 /-- `generic::sha512`'s block function computes FIPS 180-4's compression of
 each whole block in turn. -/

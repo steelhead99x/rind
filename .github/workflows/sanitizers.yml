@@ -54,18 +54,22 @@ jobs:
         with:
           toolchain: nightly
 
+      - uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
+        with:
+          tool: cargo-nextest@0.9.149
+
       # The explicit target keeps the -Zsanitizer setting out of build
       # scripts and proc macros. It also keeps build scripts' library
       # directories off doctests' search path (rust-lang/cargo#8531), so
       # rind-fips's doctests could not load its module: the doctests, usage
       # examples whose code the other tests run, are left out.
       - name: Tests
-        run: cargo test "$FIPS205" --release --target="$(rustc --print host-tuple)" --workspace --tests
+        run: cargo nextest run "$FIPS205" --release --target="$(rustc --print host-tuple)" --workspace --tests
 
       # The fallback paths each slower CPU runs, the Rust ones among them
       # instrumented. rind-fips's module refuses a CPU below its baseline.
       - name: Tests on each denied CPU tier
-        run: sh/cpu-tiers.sh cargo test "$FIPS205" --release --target="$(rustc --print host-tuple)" -p rind --lib
+        run: sh/cpu-tiers.sh cargo nextest run "$FIPS205" --release --target="$(rustc --print host-tuple)" -p rind --lib
 
   # ThreadSanitizer: data races between threads, which needs the standard
   # library built with it. Miri checks the portable backend's races; this
@@ -93,8 +97,12 @@ jobs:
           toolchain: nightly
           components: rust-src
 
+      - uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
+        with:
+          tool: cargo-nextest@0.9.149
+
       - name: Tests
         run: |
           target=$(rustc --print host-tuple)
-          cargo test --release --target="$target" -p rind --lib
-          cargo test --release --target="$target" -p rind-fips --tests -- --skip a_child_forked --skip a_raw_fork
+          cargo nextest run --release --target="$target" -p rind --lib
+          cargo nextest run --release --target="$target" -p rind-fips --tests -- --skip a_child_forked --skip a_raw_fork

@@ -106,7 +106,7 @@ Each upstream rind changes, with where its fork is vendored and where the list o
 
 - **Breaks:** valgrind (through 3.27) decodes no AVX-512, VAES, VPCLMULQDQ, or SHA instruction and hides them from `cpuid`, so ctgrind never reaches the code that uses them.
 - **Reproduce:** on a Zen 5 (Ryzen 7 255) with valgrind 3.26.0, `cpuid` leaf 7 reports AVX-512F, DQ, IFMA, BW, VL, VBMI, and VBMI2, VAES, VPCLMULQDQ, and SHA natively and none of them under valgrind, and `xgetbv` drops XCR0's AVX-512 state bits (`0x2e7` natively, `0x7` under valgrind). `low::x86_64::cpu::tests::detects_the_expected_cpu` passes with `RIND_TEST_X86_AVX512_AES_GCM`, `RIND_TEST_X86_AVX512_ML_KEM`, `RIND_TEST_X86_AVX512_RSA`, `RIND_TEST_X86_VAES_AES_GCM`, and `RIND_TEST_X86_SHA` set to 1 natively and to 0 under valgrind, so ctgrind on an AVX-512 host checks the AVX2 paths, as on one without AVX-512.
-- **Workaround:** `admin/ct-sde` compares Intel SDE traces of those paths for two secrets, through the `ct_sde` tests (`rind/src/low/x86_64/ct_sde.rs`), in `ctgrind.yml`'s `x86_64-sde` job, all but AVX-512 ML-KEM, which samples only the public matrix. Unlike ctgrind it sees only addresses, not variable-time instructions.
+- **Workaround:** `admin/ct-sde` compares Intel SDE traces of those paths for two secrets, through the `ct_sde` tests (`rind/src/low/x86_64/ct_sde.rs`), in `ctgrind.yml`'s `x86_64-sde` job, all but Graviola's AVX-512 ML-KEM sampler, which reads only the public matrix, and verified-garbage's ML-KEM-768, whose leakage is its proven contract and whose Rust `admin/ct-binsec` checks with its routines stubbed. Unlike ctgrind it sees only addresses, not variable-time instructions.
 - **Reported:** no.
 - **Goes when:** valgrind decodes them and reports them in `cpuid`, and ctgrind runs on a host that has them; `admin/ct-sde` then duplicates ctgrind.
 
@@ -266,6 +266,14 @@ Each upstream rind changes, with where its fork is vendored and where the list o
 - **Workaround:** `admin/prove` restores Mathlib and Aeneas from Lake's artifact cache with `lake build --no-build --no-cache` and falls back to Mathlib's cache and Aeneas's archive only when that misses, then puts both in Lake's cache for the next checkout.
 - **Reported:** no.
 - **Goes when:** Mathlib's cache and Lake's release archives unpack through Lake's artifact cache, or Reservoir serves Mathlib's outputs.
+
+### Lean's `.olean` differs between builds of the same inputs
+
+- **Breaks:** two builds of a module whose inputs Lake hashes the same can write `.olean` files that differ, and Lake hashes an importer's inputs over its imports' `.olean` files. So a host that built a module itself matches none of the importers another host's Lake outputs hold for it, and builds them again.
+- **Reproduce:** build `proofs/` at one commit on two Linux hosts, each without the other's outputs: the same input hash's `outputs/rind/<hash>.json` in each Lake cache names the same `.ilean`, `.c`, and `.ir`, but another `.olean`.
+- **Workaround:** `admin/prove`'s `lake_get` drops this host's mappings for a shared entry's inputs before unstaging it, and the checkout's build, so both take that entry's outputs over their own.
+- **Reported:** no.
+- **Goes when:** Lean writes the same `.olean` for the same inputs, or Lake hashes an importer over its imports' inputs.
 
 ## Mutation testing
 

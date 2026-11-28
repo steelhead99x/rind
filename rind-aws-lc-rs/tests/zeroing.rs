@@ -149,6 +149,23 @@ fn kem() {
     assert_eq!(leaks(&secret, || drop((sent, received))), 0);
 }
 
+/// A decapsulation key's saved bytes, and the key loaded from them.
+#[test]
+fn kem_key_bytes() {
+    let bytes = kem::DecapsulationKey::generate(&kem::ML_KEM_768)
+        .unwrap()
+        .key_bytes()
+        .unwrap();
+    let secret: [u8; NEEDLE_LEN] = bytes.as_ref()[..NEEDLE_LEN].try_into().unwrap();
+    let leaked = leaks(&secret, || {
+        let key = kem::DecapsulationKey::new(&kem::ML_KEM_768, bytes.as_ref()).unwrap();
+        let saved = key.key_bytes().unwrap();
+        assert_eq!(saved.as_ref(), bytes.as_ref());
+        drop((key, saved, bytes));
+    });
+    assert_eq!(leaked, 0);
+}
+
 /// A smaller set's decapsulation key leaves no stale stack bytes on the heap:
 /// held inline in space sized for ML-KEM-1024, its slack would carry what the
 /// stack last held, such as another key's seed, past the key's own wipe.

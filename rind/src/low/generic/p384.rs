@@ -134,8 +134,9 @@ pub(crate) fn p384_montjadd(p3: &mut [u64; 18], p1: &[u64; 18], p2: &[u64; 18]) 
 /// p3 := p1 + p2, for a Jacobian p1 and an affine p2 (whose z is
 /// implicitly one), over p_384 with Montgomery coordinates.
 ///
-/// A p1 with a zero z is the point at infinity; p2 cannot be.  The result
-/// is unspecified when p1 and p2 are the same point.
+/// A p1 with a zero z is the point at infinity; p2 cannot be.  When p1 and
+/// p2 are equal or opposite finite points, the result's z is zero, as
+/// `public_add_affine` relies on, and its x and y unspecified.
 pub(crate) fn p384_montjmixadd(p3: &mut [u64; 18], p1: &[u64; 18], p2: &[u64; 12]) {
     let [x1, y1, z1] = coords(p1);
     let (xy2, _) = p2.as_chunks::<6>();

@@ -22,7 +22,7 @@ fn main() {
     let out = |c: &mut Command| c.output().ok().filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
     let mut commit = out(Command::new("git").args(["-C", "..", "rev-parse", "HEAD"])).unwrap_or_else(|| "unknown".into());
     // rind or the bench files changed from the commit: say so.
-    if Command::new("git").args(["-C", "..", "diff", "--quiet", "HEAD", "--", "rind", "rind-bench", "rind-rustls", "rind-jsonwebtoken"]).status().map(|s| !s.success()).unwrap_or(true) {
+    if Command::new("git").args(["-C", "..", "diff", "--quiet", "HEAD", "--", "rind", "rind-bench", "rind-devbench/criterion-benches", "rind-rustls", "rind-jsonwebtoken"]).status().map(|s| !s.success()).unwrap_or(true) {
         commit.push_str("-dirty");
     }
     println!("cargo:rustc-env=DEVBENCH_RIND_COMMIT={commit}");
@@ -54,5 +54,7 @@ fn main() {
     println!("cargo:rustc-env=DEVBENCH_CRATE_VERSIONS={j}");
     println!("cargo:rerun-if-changed=Cargo.lock");
     println!("cargo:rerun-if-changed=../.git/HEAD");
+    // The app compiles these bench sources, so an edit to one rebuilds it and marks its commit dirty.
+    println!("cargo:rerun-if-changed=criterion-benches");
     let _ = (OPERATIONS, LIBRARIES, REQUIRED, deny_ids);
 }

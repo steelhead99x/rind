@@ -24,7 +24,7 @@
 use core::arch::x86_64::*;
 
 use super::cpu::HaveAvx2;
-use crate::low::generic::edwards25519_msm::non_adjacent_form;
+use crate::low::generic::edwards25519_msm::{non_adjacent_forms, top};
 
 /// Computes `res := [base]B + [scalars[0]]points[0] + [scalars[1]]points[1]`
 /// as `low::generic::edwards25519_msm` does.
@@ -56,17 +56,11 @@ fn msm(base: &[u64; 4], scalars: &[[u64; 4]; 2], points: &[[[u64; 4]; 4]; 2]) ->
     // to Intel's MXCSR mitigation alike. `target_feature` keeps this from
     // inlining into its caller, so the mitigation covers only the vector work.
     let _mcdt = crate::low::Mcdt::enter();
-    let nafs = [
-        non_adjacent_form(&[base[0], base[1], 0, 0], 8),
-        non_adjacent_form(&[base[2], base[3], 0, 0], 8),
-        non_adjacent_form(&scalars[0], 5),
-        non_adjacent_form(&scalars[1], 5),
-    ];
+    let nafs = non_adjacent_forms(base, scalars);
     let tables = [odd_multiples(&points[0]), odd_multiples(&points[1])];
 
-    let top = (0..256).rev().find(|&i| nafs.iter().any(|naf| naf[i] != 0));
     let mut q = Extended(Fe4(EXTENDED_IDENTITY));
-    for i in (0..=top.unwrap_or(0)).rev() {
+    for i in (0..top(&nafs)).rev() {
         q = q.double();
         for (j, naf) in nafs.iter().enumerate() {
             let entry = |d: i8| match j {

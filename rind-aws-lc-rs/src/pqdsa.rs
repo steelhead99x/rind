@@ -152,9 +152,9 @@ impl private::Verify for PqdsaVerificationAlgorithm {
         // A key of another parameter set, or another algorithm, verifies
         // nothing here.
         match (self.id, key) {
-            (AlgorithmID::ML_DSA_44, ParsedKey::MlDsa44(key)) => key.verify(msg, signature),
-            (AlgorithmID::ML_DSA_65, ParsedKey::MlDsa65(key)) => key.verify(msg, signature),
-            (AlgorithmID::ML_DSA_87, ParsedKey::MlDsa87(key)) => key.verify(msg, signature),
+            (AlgorithmID::ML_DSA_44, ParsedKey::MlDsa44(key)) => key.verify(&[], msg, signature),
+            (AlgorithmID::ML_DSA_65, ParsedKey::MlDsa65(key)) => key.verify(&[], msg, signature),
+            (AlgorithmID::ML_DSA_87, ParsedKey::MlDsa87(key)) => key.verify(&[], msg, signature),
             _ => return Err(Unspecified),
         }
         .map_err(unspecified)
@@ -352,7 +352,7 @@ impl PqdsaKeyPair {
         let len = self.algorithm.signature_len();
         let out = signature.get_mut(..len).ok_or(Unspecified)?;
         with_key!(&self.key, k => {
-            out.copy_from_slice(k.sign(msg).map_err(unspecified)?.as_ref());
+            out.copy_from_slice(k.sign(&[], msg).map_err(unspecified)?.as_ref());
         });
         Ok(len)
     }

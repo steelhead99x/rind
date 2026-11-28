@@ -59,8 +59,14 @@ lines, and whether it is generated, tab-separated, for an auditor's own
 spreadsheet. "Generated" is code an importer or `admin/parse-asm` writes, or
 an imported `.s` file; `admin/regenerate` fails if it differs from what the
 importer writes at its pin, so a reviewer reads the importer and its pin
-([AUDIT.md's Provenance](AUDIT.md#provenance)), not the output. Hand-written
-lines include each file's inline unit tests. Tests under `rind/tests` and
+([AUDIT.md's Provenance](AUDIT.md#provenance)), not the output. rind's
+structured copy of aws-lc's aarch64 ChaCha20-Poly1305
+(`rind/src/low/aarch64/chacha20poly1305/`) is hand-written: no importer
+writes it. rind's structured copy of aws-lc's x86_64 AVX2 seal
+(`rind/src/low/x86_64/chacha20poly1305/`) is generated, by
+`admin/chacha20poly1305-x86/generate`, which a reviewer reads with the Lean
+program it also writes, and which fails if the aws-lc text it copies
+changes. Hand-written lines include each file's inline unit tests. Tests under `rind/tests` and
 `rind/src/test`, vectors, fuzz targets, and tooling are not counted, since
 they are not what ships. The Lean split is by file name, from
 [`proofs/README.md`'s layout](proofs/README.md#layout), and is a reading aid:
@@ -161,15 +167,15 @@ says how to run them. The ones an auditor will want:
 
 | What | Command | Notes |
 |---|---|---|
-| Unit tests, vectors, differential tests | `nix develop --command cargo test --workspace` | Wycheproof, CAVP, ACVP, CCTV, and RFC vectors, and aws-lc-rs as a differential oracle. `SLOW_TESTS=1` adds the large sets. |
+| Unit tests, vectors, differential tests | `nix develop --command cargo nextest run --workspace` | Wycheproof, CAVP, ACVP, CCTV, and RFC vectors, and aws-lc-rs as a differential oracle. `SLOW_TESTS=1` adds the large sets. |
 | CI's whole gate | `nix develop --command just gate` | CI's gate over every crate, with the lints, structure, license, adapter-API, and constant-time scans among them. `just ci` and `just check` pick checks from the branch's diff, so on a clean checkout of a tag they can skip the ones a source change would trigger. |
 | Constant time under valgrind | `nix develop .#ctgrind --command admin/ctgrind` | Weekly in CI. Sees only the paths the tests take. |
 | Constant time, symbolically | `nix develop .#binsec --command admin/ct-binsec` | Checks each `ct_binsec_...` region for every secret. |
 | Constant time under SDE and qemu | `nix develop .#sde --command admin/ct-sde`; `nix develop .#ct-qemu --command admin/ct-qemu` | The AVX-512, VAES, SHA extension, and armv7 crypto paths valgrind cannot run. |
 | Variable-time instructions | `nix develop .#ct-vartime --command admin/ct-vartime` | Scans release builds for divisions and floating point. |
-| HOL Light and Lean proofs | `nix develop .#prove --command admin/prove` | Also `admin/prove bytes`, which checks the release build holds the bytes each proof is about. |
+| HOL Light and Lean proofs | `nix develop .#prove --command admin/prove`, on x86_64 Linux with AVX2 (aarch64 macOS runs only `admin/prove lean`, per [TESTING.md](TESTING.md)) | Also `admin/prove bytes`, which checks the release build holds the bytes each proof is about. |
 | Imported code matches its pin | `nix develop .#regenerate --command admin/regenerate` | Reruns every importer; fails on a difference. |
-| Zeroing and heap scratch | `nix develop --command cargo test -p rind --test zeroing --test heap_scratch` | |
+| Zeroing and heap scratch | `nix develop --command cargo nextest run -p rind --test zeroing --test heap_scratch` | |
 
 The audit should name a commit, ideally a release tag, and the auditor should
 report the commit each finding was made at, since the proofs and `regenerate`
@@ -220,13 +226,20 @@ restated as a work list:
 
 1. rind's own hand-written arithmetic with no proof, the ⚡ and "rind" cells of
    ALGORITHMS.md, such as parts of P-384 and P-521, x86_64 SHA-256, the
-   portable RSA multiplication, and armv7 Ed25519.
+   portable RSA multiplication (its Montgomery products on 64-bit limbs too,
+   whose proof is parked until
+   quest/m4/verified/rsa-verify-portable-four-product.md), and armv7 Ed25519.
 2. Code ported by hand from C or from another Rust backend: aws-lc's
-   constant-time SSE2 AES and integer GHASH, aws-lc's C SHA-2 for the portable
-   backend, and curve25519-dalek's AVX2 backend, ported to intrinsics.
+   constant-time SSE2 AES and integer GHASH, and curve25519-dalek's AVX2
+   backend, ported to intrinsics.
 3. Imported assembly that runs without a proof: aws-lc's ChaCha20-Poly1305 on
-   x86_64 and aarch64, RSAZ, Montgomery multiplication without ADX, the AVX2
-   SHA-2, VAES AES-GCM, and all of armv7's.
+   x86_64, RSAZ, Montgomery multiplication without ADX, the AVX2 SHA-2, VAES
+   AES-GCM, and all of armv7's but its NEON GHASH, its SHA-256 with the
+   crypto extension, and its NEON SHA-384/512; rind's structured copy of
+   aws-lc's aarch64 ChaCha20-Poly1305, read in its four `.s` files rather
+   than through the importer; and its copy of aws-lc's x86_64 AVX2 seal, read
+   through `admin/chacha20poly1305-x86/generate`. Lean proves both copies
+   constant-time but not that they compute the AEAD.
 4. The Lean trust base: for each restated axiom, that it is the upstream
    theorem at the pinned revision with the preconditions rind's call sites
    meet; for each hand model, that it is what the Rust it quotes does; for

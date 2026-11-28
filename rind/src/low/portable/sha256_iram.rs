@@ -23,7 +23,8 @@
 //! probe of the same tree reported a 4,256-byte block and 4,357 bytes of
 //! IRAM sections; that probe is not the firmware image. HMAC and HKDF
 //! were not in that pass. Host tests take the Rust fallbacks below, not
-//! this asm.
+//! this asm, and so does the Lean proof, `proofs/Rind/Mcu/Sha256Iram.lean`,
+//! which trusts each asm block to compute what its fallback does.
 //!
 //! LLVM's Xtensa backend expands `rotate_right` into a shift pair and an
 //! `or`. `ssai` plus `src` is the two-instruction rotate, and each rotate
@@ -154,19 +155,50 @@ fn round(
     (new_a, a, b, c, new_e, e, f, g)
 }
 
-// `K` at a fixed offset from `kp`. `I` is a literal, so the load is a
+// `K` through a raw pointer, read at a literal offset, so the load is a
 // constant displacement and not a bounds check. A safe `K[base + I]` with
 // a runtime `base` keeps a panic path, and at opt-level s/z that path is a
-// call into flash. Copying this body three times would make every index a
-// constant and drop the check, and would also triple the schedule. One
-// body and a pointer keep the size and leave the block with no call.
-#[inline(always)]
-fn round_constant<const I: usize>(kp: *const u32) -> u32 {
-    // SAFETY: callers pass `I` in `0..16` and a `kp` at `K[0]`, `K[16]`,
-    // `K[32]`, or `K[48]`, so `kp.add(I)` stays inside `K`. `K` is aligned
-    // for `u32`, and `I` is a constant. The load does not depend on the
-    // message or the state.
-    unsafe { kp.add(I).read() }
+// call into flash. Copying the schedule body three times would make every
+// index a constant and drop the check, and would also triple the schedule.
+// One body and a pointer keep the size and leave the block with no call.
+// Aeneas cannot read through a raw pointer, so `admin/prove` leaves these
+// methods opaque and `proofs/Rind/Mcu/Sha256IramModel.lean` models them.
+#[derive(Clone, Copy)]
+struct RoundConstants(*const u32);
+
+impl RoundConstants {
+    /// The first sixteen words of `k`, which is always `K`: a parameter so
+    /// that the translation passes its own `K` to the model.
+    #[inline(always)]
+    fn first(k: &'static [u32; 64]) -> Self {
+        Self(k.as_ptr())
+    }
+
+    /// Word `I` of the sixteen from `self`.
+    ///
+    /// # Safety
+    ///
+    /// `self` is at `k[0]`, `k[16]`, `k[32]`, or `k[48]` of the table it
+    /// started at, and `I < 16`.
+    #[inline(always)]
+    unsafe fn get<const I: usize>(self) -> u32 {
+        // SAFETY: `self.0.add(I)` stays inside `K`, as the caller promises.
+        // `K` is aligned for `u32`, and `I` is a constant. The load does
+        // not depend on the message or the state.
+        unsafe { self.0.add(I).read() }
+    }
+
+    /// The next sixteen words.
+    ///
+    /// # Safety
+    ///
+    /// `self` is at `K[0]`, `K[16]`, `K[32]`, or `K[48]`. The result may be
+    /// one past the end of `K`, which is not read.
+    #[inline(always)]
+    unsafe fn next(self) -> Self {
+        // SAFETY: the caller's start plus 16 is at most 64, `K`'s length.
+        Self(unsafe { self.0.add(16) })
+    }
 }
 
 // Big-endian word `BYTE / 4` of the block. `BYTE` is a literal offset.
@@ -220,22 +252,54 @@ fn message_word<const BYTE: usize>(block: &[u8; 64]) -> u32 {
     u32::from_be_bytes(words[BYTE / 4])
 }
 
+// The message schedule, a 16-word window. The first 16 words are the
+// block; each later word replaces the one sixteen rounds behind it. Left
+// uninitialized: a `[0; 16]` is a `memset`, and at opt-level s/z that is a
+// call. Rounds 0..16 write every word before a later round reads it.
+// Aeneas cannot translate `MaybeUninit`, so `admin/prove` leaves these
+// methods opaque and `proofs/Rind/Mcu/Sha256IramModel.lean` models them,
+// with a slot that fails to read until written.
+struct Window([core::mem::MaybeUninit<u32>; 16]);
+
+impl Window {
+    #[inline(always)]
+    fn new() -> Self {
+        Self([const { core::mem::MaybeUninit::uninit() }; 16])
+    }
+
+    #[inline(always)]
+    fn set(&mut self, slot: usize, w: u32) {
+        self.0[slot].write(w);
+    }
+
+    /// The word in `slot`.
+    ///
+    /// # Safety
+    ///
+    /// `slot` has been written.
+    #[inline(always)]
+    unsafe fn get(&self, slot: usize) -> u32 {
+        // SAFETY: the caller's promise.
+        unsafe { self.0[slot].assume_init() }
+    }
+}
+
 // `W[t] = σ1(W[t-2]) + W[t-7] + σ0(W[t-15]) + W[t-16]`, `SLOT = t mod 16`.
 // The slot is the round number, not the message.
 #[inline(always)]
-fn schedule<const SLOT: usize>(w: &mut [core::mem::MaybeUninit<u32>; 16]) -> u32 {
+fn schedule<const SLOT: usize>(w: &mut Window) -> u32 {
     // SAFETY: the message rounds write every slot before the first call.
     // `SLOT` is `0..16`. A slot already written in this group is the new
     // schedule word the formula reads (`W[t-15]` when `SLOT` is 15); every
     // other read still holds the previous window. The write of this slot
     // happens after those reads. The indexes are constant.
     let w_t = unsafe {
-        ssig1(w[(SLOT + 14) & 15].assume_init())
-            .wrapping_add(w[(SLOT + 9) & 15].assume_init())
-            .wrapping_add(ssig0(w[(SLOT + 1) & 15].assume_init()))
-            .wrapping_add(w[SLOT].assume_init())
+        ssig1(w.get((SLOT + 14) & 15))
+            .wrapping_add(w.get((SLOT + 9) & 15))
+            .wrapping_add(ssig0(w.get((SLOT + 1) & 15)))
+            .wrapping_add(w.get(SLOT))
     };
-    w[SLOT].write(w_t);
+    w.set(SLOT, w_t);
     w_t
 }
 
@@ -244,9 +308,10 @@ macro_rules! message_rounds {
     ($w:ident, $block:ident, $kp:ident, $a:ident, $b:ident, $c:ident, $d:ident, $e:ident, $f:ident, $g:ident, $h:ident, $($i:literal),*) => {
         $(
             {
-                let kk = round_constant::<$i>($kp);
+                // SAFETY: `$kp` is at `K[0]`.
+                let kk = unsafe { $kp.get::<$i>() };
                 let ww = message_word::<{ $i * 4 }>($block);
-                $w[$i].write(ww);
+                $w.set($i, ww);
                 ($a, $b, $c, $d, $e, $f, $g, $h) =
                     round(ww, kk, $a, $b, $c, $d, $e, $f, $g, $h);
             }
@@ -258,7 +323,8 @@ macro_rules! schedule_rounds {
     ($w:ident, $kp:ident, $a:ident, $b:ident, $c:ident, $d:ident, $e:ident, $f:ident, $g:ident, $h:ident, $($i:literal),*) => {
         $(
             {
-                let kk = round_constant::<$i>($kp);
+                // SAFETY: `$kp` is at `K[16]`, `K[32]`, or `K[48]`.
+                let kk = unsafe { $kp.get::<$i>() };
                 let ww = schedule::<$i>(&mut $w);
                 ($a, $b, $c, $d, $e, $f, $g, $h) =
                     round(ww, kk, $a, $b, $c, $d, $e, $f, $g, $h);
@@ -282,18 +348,13 @@ fn sha256_compress_block(state: &mut [u32; 8], block: &[u8; 64]) {
     let mut g = state[6];
     let mut h = state[7];
 
-    // The message schedule, a 16-word window. The first 16 words are the
-    // block; each later word replaces the one sixteen rounds behind it.
-    // Left uninitialized: a `[0; 16]` is a `memset`, and at opt-level s/z
-    // that is a call. Rounds 0..16 write every word before a later round
-    // reads it.
-    let mut w = [const { core::mem::MaybeUninit::<u32>::uninit() }; 16];
-    let kp = K.as_ptr();
+    let mut w = Window::new();
+    let kp = RoundConstants::first(&K);
     message_rounds!(
         w, block, kp, a, b, c, d, e, f, g, h, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
     );
-    // SAFETY: `K` has 64 words. The next group starts at word 16.
-    let mut kp = unsafe { kp.add(16) };
+    // SAFETY: `kp` is at `K[0]`; the next group starts at `K[16]`.
+    let mut kp = unsafe { kp.next() };
     // Three trips, a public count. Not a `for`: a range iterator is one of
     // the core helpers opt-level s/z outlines into flash.
     let mut n = 0u32;
@@ -301,10 +362,9 @@ fn sha256_compress_block(state: &mut [u32; 8], block: &[u8; 64]) {
         schedule_rounds!(
             w, kp, a, b, c, d, e, f, g, h, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
         );
-        // SAFETY: the next start is word 32, 48, or 64. The pointer at 64
-        // is one past the end of `K` and is not dereferenced; the loop
-        // ends first.
-        kp = unsafe { kp.add(16) };
+        // SAFETY: `kp` is at `K[16]`, `K[32]`, or `K[48]`. The next start,
+        // `K[64]`, is one past the end and is not read: the loop ends first.
+        kp = unsafe { kp.next() };
         n += 1;
     }
 
@@ -320,6 +380,52 @@ fn sha256_compress_block(state: &mut [u32; 8], block: &[u8; 64]) {
     state[7] = state[7].wrapping_add(h);
 }
 
+// The whole blocks of a slice, through a raw pointer: `split_first_chunk`
+// and `chunks` are core iterators, and opt-level s/z can outline them into
+// flash. A counter and a pointer step leave the block call as the only
+// call. `proofs/Rind/Mcu/Sha256IramModel.lean` models these methods, which
+// Aeneas cannot translate, as an offset into the slice.
+struct Blocks<'a> {
+    ptr: *const u8,
+    _blocks: core::marker::PhantomData<&'a [u8]>,
+}
+
+impl<'a> Blocks<'a> {
+    #[inline(always)]
+    fn new(blocks: &'a [u8]) -> Self {
+        Self {
+            ptr: blocks.as_ptr(),
+            _blocks: core::marker::PhantomData,
+        }
+    }
+
+    /// The block at `self`.
+    ///
+    /// # Safety
+    ///
+    /// The 64 bytes at `self` are inside the slice.
+    #[inline(always)]
+    unsafe fn block(&self) -> &'a [u8; 64] {
+        // SAFETY: the caller's promise. The block may be unaligned. On
+        // Xtensa, `message_word` loads it with `l32i`, which these cores
+        // perform unaligned in hardware; other targets read it as bytes.
+        // The slice is borrowed for `'a` and not mutated through this.
+        unsafe { &*self.ptr.cast::<[u8; 64]>() }
+    }
+
+    /// Steps to the next block.
+    ///
+    /// # Safety
+    ///
+    /// The 64 bytes at `self` are inside the slice, so the next block
+    /// starts inside it or exactly one past its end.
+    #[inline(always)]
+    unsafe fn next(&mut self) {
+        // SAFETY: the caller's promise.
+        self.ptr = unsafe { self.ptr.add(64) };
+    }
+}
+
 /// Whole-block SHA-256 compression, in IRAM on ESP-IDF Xtensa.
 ///
 /// A short tail, which the caller does not pass, is left unchanged.
@@ -329,24 +435,16 @@ fn sha256_compress_block(state: &mut [u32; 8], block: &[u8; 64]) {
     unsafe(link_section = ".iram1.rind_sha256_nblocks")
 )]
 pub(super) fn sha256_update_nblocks(st: &mut [u32; 8], blocks: &[u8]) {
-    // The length is public. `split_first_chunk` and `chunks` are core
-    // iterators, and opt-level s/z can outline them into flash. A counter
-    // and a pointer step leave the block call as the only call.
-    let mut ptr = blocks.as_ptr();
+    // The length is public.
+    let mut cursor = Blocks::new(blocks);
     let mut n = 0usize;
     let whole = blocks.len() / 64;
     while n < whole {
-        // SAFETY: `n < blocks.len() / 64`, so the 64 bytes at `ptr` are
-        // inside `blocks`. The block may be unaligned. On Xtensa,
-        // `message_word` loads it with `l32i`, which these cores perform
-        // unaligned in hardware; other targets read it as bytes. The
-        // reference does not outlive this call, and `blocks` is not
-        // mutated through it.
-        let block = unsafe { &*ptr.cast::<[u8; 64]>() };
+        // SAFETY: `n < blocks.len() / 64`, and the cursor is `n` blocks in.
+        let block = unsafe { cursor.block() };
         sha256_compress_block(st, block);
-        // SAFETY: the next step is 64 bytes later, still inside `blocks`
-        // or exactly one past the last whole block.
-        ptr = unsafe { ptr.add(64) };
+        // SAFETY: as above.
+        unsafe { cursor.next() };
         n += 1;
     }
 }

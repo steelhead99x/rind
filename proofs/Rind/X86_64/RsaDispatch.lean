@@ -490,6 +490,7 @@ theorem rsa_pss_sha256_verify_spec (h : Runs) (hb : Sha256Blocks) (pk : high.sig
     signature message hm
   simpa [pssSaltLen] using this
 
+-- BEGIN x86_64
 /-- A 2048-bit modulus fills 32 words, whose Montgomery products rind runs
 on s2n-bignum's proven routines on a CPU with BMI2 and ADX. -/
 theorem rsa2048_mont_products (o : Option low.x86_64.cpu.HaveBmi2Adx)
@@ -497,5 +498,6 @@ theorem rsa2048_mont_products (o : Option low.x86_64.cpu.HaveBmi2Adx)
     MontProducts ((N.size + 63) / 64) := by
   rw [hN]
   exact karatsuba_products o hcheck hsome (Or.inr rfl)
+-- END x86_64
 
 end rind.x86_64

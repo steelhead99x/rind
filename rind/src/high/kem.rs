@@ -218,8 +218,8 @@ impl<A: Algorithm> fmt::Debug for EncapsulationKey<A> {
 }
 
 // Moving a key calls `memcpy`, which from 8 KiB is glibc's `rep movsb` on
-// AVX2 CPUs without FSRM. CodSpeed's simulator charges that per byte, which
-// would swamp real changes in the ML-KEM benchmarks.
+// AVX2 CPUs without FSRM. Valgrind counts that per byte, which would swamp
+// real changes in the ML-KEM benchmarks.
 const _: () = {
     macro_rules! small {
         ($($a:ty),*) => {$(

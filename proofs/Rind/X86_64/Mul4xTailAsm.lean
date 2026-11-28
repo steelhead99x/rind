@@ -196,19 +196,6 @@ theorem subTail_ok (s : S) (j : Nat) (ap bp np n0p tp rp x0 x1 x2 x3 : BitVec 64
 
 /-! ## The copy -/
 
-theorem readW_writeW_disj (m : Mem) (a b : Addr) {w : Nat} (v : BitVec w) (w' : Nat)
-    (h : w / 8 ≤ (b - a).toNat ∧ w' / 8 ≤ (a - b).toNat) : (m.writeW a v).readW b w' = m.readW b w' := by
-  simp only [Mem.readW, Mem.writeW]
-  congr 1
-  apply read_congr
-  intro k hk
-  apply write_other
-  obtain ⟨h1, h2⟩ := h
-  have : (b + BitVec.ofNat 64 k - a).toNat = (b - a).toNat + k := by
-    have : (BitVec.ofNat 64 k).toNat = k := by simp; omega
-    bv_omega
-  omega
-
 section
 variable (s : VG.X86_64.State)
 theorem load128_of {a : Addr} (h : InRegions (s.rd ++ s.wr) a 16) : s.load128 a = some (s.mem.readW a 128) := by

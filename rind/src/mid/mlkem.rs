@@ -1841,60 +1841,55 @@ mod tests {
         ct_qemu::traced(|| ek.encaps_internal(m()));
     }
 
-    // Valgrind runs no AVX-512, so `admin/ctgrind` never reaches
+    // Valgrind and BINSEC run no AVX-512, so neither reaches
     // pyca/verified-garbage's ML-KEM-768 key generation and decapsulation,
-    // nor its AVX-512 encapsulation; `admin/ct-sde` traces them here, under
-    // Sapphire Rapids, as `ct_qemu_mlkem` traces aarch64's. Encapsulating a
-    // secret message to a fixed key, with the key's hash and without, then
-    // decapsulating the ciphertext and a tampered copy. A second key then
-    // takes its implicit-rejection secret `z` from the seed, as its
-    // generation is traced: `𝜌` comes from the rest, so it stays fixed.
-    // Fixing `d` also fixes the secret vectors it derives, and key generation
-    // cannot vary them without varying `𝜌`, so the last key decapsulates
-    // with the fixed key's `ek` but the `dkPKE` of a key generated from a
-    // seeded `d`. VG's contract asks for a whole key its key generation
-    // wrote, and none varies `dkPKE` with `𝜌` fixed; each field here is one
-    // VG's key generation wrote, so every coefficient is in range.
+    // nor its AVX-512 encapsulation. Each routine's leakage is VG's proven
+    // contract, which `Rind.X86_64.VgMlKem768Ct` imports; these check the
+    // Rust around them, as it runs where the CPU has AVX-512: the tests
+    // force the routines' CPU check, and `admin/ct-binsec` stubs each
+    // routine by its contract (`CONTRACTS`), so that its outputs are fresh
+    // secrets and a secret `ρ` it is given fails. The region generates a key
+    // from a secret seed, encapsulates a secret message to its public key,
+    // with the key's hash, and to the same key parsed, without it, and
+    // decapsulates the ciphertext. A VG routine fails only at a `SampleNTT`
+    // bound reached on `ρ`, which is public, so the stubs succeed; with
+    // `fallback`, encapsulation and decapsulation then discard what they
+    // returned, and run rind's arithmetic on the key VG generated.
+    #[cfg(rind_backend = "x86_64")]
+    fn mlkem768_vg(fallback: bool) {
+        use low::ct::into_secret;
+
+        low::force_avx512_for_vg_mlkem();
+        let parsed = EncapKey::<MlKem768>::from_bytes(
+            DecapKey::<MlKem768>::keygen_internal(&[1; 64])
+                .encapsulation_key()
+                .as_bytes(),
+        )
+        .unwrap();
+        low::ct_binsec::checked(|| {
+            let dk = DecapKey::<MlKem768>::keygen_internal(&into_secret([1; 64]));
+            assert!(dk.ek_pke.decoded.is_none(), "VG's key generation ran");
+            FORCE_FALLBACK.set(fallback);
+            let m = || Message(into_secret([2; 32]));
+            let (_, c) = dk.encapsulation_key().encaps_internal(m());
+            core::hint::black_box(parsed.encaps_internal(m()));
+            let k = dk.decaps(&c);
+            FORCE_FALLBACK.set(false);
+            k
+        });
+    }
+
     #[cfg(rind_backend = "x86_64")]
     #[test]
-    #[ignore = "admin/ct-sde runs it under Intel SDE"]
-    fn ct_sde_mlkem768() {
-        use crate::low::ct_sde;
+    #[ignore = "admin/ct-binsec runs it under BINSEC"]
+    fn ct_binsec_mlkem768_vg() {
+        mlkem768_vg(false);
+    }
 
-        assert!(vg_key_pair::<MlKem768>().is_some(), "AVX-512 F, BW, and VL");
-        let seed = ct_sde::seed().to_le_bytes();
-        let m = || Message(core::array::from_fn(|i| seed[i % seed.len()]));
-        let dk = DecapKey::<MlKem768>::keygen_internal(&[0x5a; 64]);
-        let ek = dk.encapsulation_key();
-        let (_, c) = ct_sde::traced(|| ek.encaps_internal(m()));
-        let ek = EncapKey::<MlKem768>::from_bytes(ek.as_bytes()).unwrap();
-        ct_sde::traced(|| ek.encaps_internal(m()));
-        ct_sde::traced(|| dk.decaps(&c));
-        let mut c = c.0;
-        c[0] ^= 1;
-        ct_sde::traced(|| dk.decaps(&Ciphertext(c)));
-
-        let dk = ct_sde::traced(|| {
-            DecapKey::<MlKem768>::keygen_internal(&core::array::from_fn(|i| match i {
-                ..32 => 0x5a,
-                _ => seed[i % seed.len()],
-            }))
-        });
-        let (_, c) = dk.encapsulation_key().encaps_internal(Message([0xa5; 32]));
-        ct_sde::traced(|| dk.decaps(&c));
-        let mut c = c.0;
-        c[0] ^= 1;
-        ct_sde::traced(|| dk.decaps(&Ciphertext(c)));
-
-        let fixed = DecapKey::<MlKem768>::keygen_internal(&[0x5a; 64]).encode();
-        let seeded = DecapKey::<MlKem768>::keygen_internal(&core::array::from_fn(|i| {
-            seed[i % seed.len()] ^ i as u8
-        }))
-        .encode();
-        let mut spliced = fixed;
-        spliced[..3 * 384].copy_from_slice(&seeded[..3 * 384]);
-        let dk = DecapKey::<MlKem768>::decode(&spliced, false);
-        let (_, c) = dk.encapsulation_key().encaps_internal(Message([0xa5; 32]));
-        ct_sde::traced(|| dk.decaps(&c));
+    #[cfg(rind_backend = "x86_64")]
+    #[test]
+    #[ignore = "admin/ct-binsec runs it under BINSEC"]
+    fn ct_binsec_mlkem768_vg_fallback() {
+        mlkem768_vg(true);
     }
 }

@@ -2,125 +2,134 @@
 fn main() {}
 
 #[cfg(not(target_arch = "xtensa"))]
-#[macro_use]
-mod criterion;
-#[cfg(not(target_arch = "xtensa"))]
-use std::hint::black_box;
+mod common;
 
 #[cfg(not(target_arch = "xtensa"))]
-use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+use common::{Dit, HASH_SIZES, Size};
 
 #[cfg(not(target_arch = "xtensa"))]
-fn bench<R: sha3::Digest, V: verified_garbage::hashes::HashFunction>(
-    c: &mut Criterion,
-    name: &str,
-    aws: &'static aws!(digest::Algorithm),
-    libcrux: fn(&[u8]),
-    ours: &'static rind::digest::Algorithm,
-) {
-    #[cfg(any(target_arch = "xtensa", target_os = "none"))]
-    let _ = &aws;
-    let mut group = c.benchmark_group(name);
-    for (size, size_name) in criterion::HASH_SIZES {
-        let input = vec![0u8; size];
-        group.throughput(Throughput::Bytes(size as u64));
-
-        #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
-        group.bench_with_input(
-            BenchmarkId::new("aws-lc-rs", size_name),
-            &input,
-            |b, input| {
-                b.iter(|| {
-                    let mut ctx = aws_lc_rs::digest::Context::new(aws);
-                    ctx.update(input);
-                    black_box(ctx.finish())
-                })
-            },
-        );
-        group.bench_with_input(
-            BenchmarkId::new("rustcrypto", size_name),
-            &input,
-            |b, input| {
-                b.iter(|| {
-                    let mut ctx = R::new();
-                    ctx.update(input);
-                    black_box(ctx.finalize())
-                })
-            },
-        );
-        group.bench_with_input(
-            BenchmarkId::new("libcrux", size_name),
-            &input,
-            |b, input| b.iter(|| libcrux(input)),
-        );
-        group.bench_with_input(BenchmarkId::new("rind", size_name), &input, |b, input| {
-            let _dit = criterion::rind_dit();
-            b.iter(|| {
-                let mut ctx = rind::digest::Context::new(ours);
-                ctx.update(input);
-                black_box(ctx.finish())
-            })
-        });
-        let mut ctx = V::new();
-        ctx.update(&input);
-        assert_eq!(
-            ctx.finalize().as_ref(),
-            rind::digest::digest(ours, &input).as_ref()
-        );
-        group.bench_with_input(
-            BenchmarkId::new("verified-garbage", size_name),
-            &input,
-            |b, input| {
-                b.iter(|| {
-                    let mut ctx = V::new();
-                    ctx.update(input);
-                    black_box(ctx.finalize())
-                })
-            },
-        );
-    }
+fn input(size: Size) -> Vec<u8> {
+    size.zeros()
 }
 
 #[cfg(not(target_arch = "xtensa"))]
-fn sha3_256(c: &mut Criterion) {
-    bench::<sha3::Sha3_256, verified_garbage::hashes::sha3::Sha3_256>(
-        c,
-        "sha3-256",
-        &aws!(digest::SHA3_256),
-        |data| {
-            black_box(libcrux_sha3::sha256(data));
-        },
-        &rind::digest::SHA3_256,
+fn rind_input(size: Size) -> Dit<Vec<u8>> {
+    Dit::hold(size.zeros())
+}
+
+/// Each SHA-3 hash's rows.
+macro_rules! rows {
+    ($alg:ident, $rustcrypto:ty, $libcrux:path, $openssl:ident, $vg:ty) => {
+        #[bench(args = HASH_SIZES, setup = input)]
+        fn aws_lc_rs(input: &[u8]) -> aws_lc_rs::digest::Digest {
+            let mut ctx = aws_lc_rs::digest::Context::new(&aws_lc_rs::digest::$alg);
+            ctx.update(input);
+            ctx.finish()
+        }
+
+        #[bench(args = HASH_SIZES, setup = input)]
+        fn rustcrypto(input: &[u8]) -> impl Sized + use<> {
+            use sha3::Digest;
+            let mut ctx = <$rustcrypto>::new();
+            ctx.update(input);
+            ctx.finalize()
+        }
+
+        #[bench(args = HASH_SIZES, setup = input)]
+        fn libcrux(input: &[u8]) -> impl Sized + use<> {
+            $libcrux(input)
+        }
+
+        #[bench(args = HASH_SIZES, setup = rind_input)]
+        fn rind(input: &Dit<Vec<u8>>) -> rind::digest::Digest {
+            let mut ctx = rind::digest::Context::new(&rind::digest::$alg);
+            ctx.update(input);
+            ctx.finish()
+        }
+
+        /// The message, after checking OpenSSL's digest of it matches rind's.
+        #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+        fn openssl_input(size: Size) -> Vec<u8> {
+            let input = size.zeros();
+            assert_eq!(
+                openssl(&input).as_ref(),
+                rind::digest::digest(&rind::digest::$alg, &input).as_ref()
+            );
+            input
+        }
+
+        #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+        #[bench(args = HASH_SIZES, setup = openssl_input)]
+        fn openssl(input: &[u8]) -> openssl::hash::DigestBytes {
+            openssl::hash::hash(openssl::hash::MessageDigest::$openssl(), input).unwrap()
+        }
+
+        /// The message, after checking verified-garbage's digest of it
+        /// matches rind's.
+        fn vg_input(size: Size) -> Vec<u8> {
+            let input = size.zeros();
+            assert_eq!(
+                verified_garbage(&input).as_ref(),
+                rind::digest::digest(&rind::digest::$alg, &input).as_ref()
+            );
+            input
+        }
+
+        #[bench(args = HASH_SIZES, setup = vg_input)]
+        fn verified_garbage(input: &[u8]) -> impl AsRef<[u8]> + use<> {
+            let mut ctx = <$vg>::new();
+            ctx.update(input);
+            ctx.finalize()
+        }
+    };
+}
+
+#[cfg(not(target_arch = "xtensa"))]
+mod sha3_256 {
+    use swole::bench;
+
+    use super::*;
+
+    rows!(
+        SHA3_256,
+        sha3::Sha3_256,
+        libcrux_sha3::sha256,
+        sha3_256,
+        verified_garbage::hashes::sha3::Sha3_256
     );
 }
 
 #[cfg(not(target_arch = "xtensa"))]
-fn sha3_384(c: &mut Criterion) {
-    bench::<sha3::Sha3_384, verified_garbage::hashes::sha3::Sha3_384>(
-        c,
-        "sha3-384",
-        &aws!(digest::SHA3_384),
-        |data| {
-            black_box(libcrux_sha3::sha384(data));
-        },
-        &rind::digest::SHA3_384,
+mod sha3_384 {
+    use swole::bench;
+
+    use super::*;
+
+    rows!(
+        SHA3_384,
+        sha3::Sha3_384,
+        libcrux_sha3::sha384,
+        sha3_384,
+        verified_garbage::hashes::sha3::Sha3_384
     );
 }
 
 #[cfg(not(target_arch = "xtensa"))]
-fn sha3_512(c: &mut Criterion) {
-    bench::<sha3::Sha3_512, verified_garbage::hashes::sha3::Sha3_512>(
-        c,
-        "sha3-512",
-        &aws!(digest::SHA3_512),
-        |data| {
-            black_box(libcrux_sha3::sha512(data));
-        },
-        &rind::digest::SHA3_512,
+mod sha3_512 {
+    use swole::bench;
+
+    use super::*;
+
+    rows!(
+        SHA3_512,
+        sha3::Sha3_512,
+        libcrux_sha3::sha512,
+        sha3_512,
+        verified_garbage::hashes::sha3::Sha3_512
     );
 }
 
 #[cfg(not(target_arch = "xtensa"))]
-criterion_group!(benches, sha3_256, sha3_384, sha3_512);
-#[cfg(not(target_arch = "xtensa"))]
-criterion_main!(benches);
+fn main() {
+    swole::main();
+}

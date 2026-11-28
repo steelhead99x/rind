@@ -148,7 +148,7 @@ section table
 variable (x m : Slice U64) (n0 : U64) (C : Nat)
 
 theorem mont_exp_by_loop0_spec (k w : Usize) (hP : MontProducts m.length) (hk : k.val = m.length)
-    (hw : w.val = k.val) (hk2 : 2 ≤ k.val) (hk32 : k.val < 2 ^ 32) (hodd : wordsNat m.val % 2 = 1)
+    (hw : w.val = k.val) (hk2 : 2 ≤ k.val) (hk29 : k.val < 2 ^ 29) (hodd : wordsNat m.val % 2 = 1)
     (hn0 : (wordsNat m.val * n0.val + 1) % 2 ^ 64 = 0) (hxl : x.length = k.val)
     (hx : MontPow (wordsNat m.val) (2 ^ (64 * k.val)) C 1 x.val)
     (iter : core.ops.range.Range Usize) (powers : Slice U64)
@@ -305,7 +305,7 @@ variable (e m : Slice U64) (n0 : U64) (C : Nat)
 /-- `mont_exp_by`'s five squarings: after `s` of them the value is `C^(t·2^s)`, and the
 remaining `5 - s` reach `C^(32t)`. -/
 theorem mont_exp_by_loop2_loop0_spec (hP : MontProducts m.length) (hk2 : 2 ≤ m.length)
-    (hk32 : m.length < 2 ^ 32)
+    (hk29 : m.length < 2 ^ 29)
     (hodd : wordsNat m.val % 2 = 1) (hn0 : (wordsNat m.val * n0.val + 1) % 2 ^ 64 = 0) (t : Nat)
     (iter : core.ops.range.Range Usize) (z spare : Slice U64) (hs : iter.start.val ≤ 5)
     (he : iter.end.val = 5) (hz : z.length = m.length) (hsp : spare.length = m.length)
@@ -327,7 +327,7 @@ theorem mont_exp_by_loop2_loop0_spec (hP : MontProducts m.length) (hk2 : 2 ≤ m
       subst ho'
       simp only
       have hzl : z.val.length = m.val.length := hz
-      have hargs : MontArgs z.val z.val m.val n0 := ⟨hzl, hzl, hk2, hk32, hodd, hn0, hpow.1, hpow.1⟩
+      have hargs : MontArgs z.val z.val m.val n0 := ⟨hzl, hzl, hk2, hk29, hodd, hn0, hpow.1, hpow.1⟩
       step with hP.2 sp z m n0 rfl hsp hargs as ⟨s3, hs3⟩
       obtain ⟨hs3l, hs3N, hs3v⟩ := hs3
       step as ⟨z1, hz1⟩
@@ -348,7 +348,7 @@ squares five times and multiplies by its window's power, gathered from the
 table, until `lsb` reaches zero, leaving `C^e`. -/
 theorem mont_exp_by_loop2_spec (havx : ∃ t, low.x86_64.cpu.HaveAvx2.check = ok t)
     (hP : MontProducts m.length) (k : Usize) (hk : k.val = m.length) (hk2 : 2 ≤ k.val)
-    (hk4 : k.val % 4 = 0) (hkb : k.val < 2 ^ 32)
+    (hk4 : k.val % 4 = 0) (hkb : k.val < 2 ^ 29)
     (hodd : wordsNat m.val % 2 = 1) (hn0 : (wordsNat m.val * n0.val + 1) % 2 ^ 64 = 0)
     (powers : Slice U64) (hpl : powers.length = 32 * k.val)
     (hrows : ∀ j < 32, MontPow (wordsNat m.val) (2 ^ (64 * k.val)) C j (rowOf powers.val k.val j))

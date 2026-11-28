@@ -14,10 +14,9 @@
 # The ML-KEM and ML-DSA data runs less each stanza that asks for what rind
 # refuses, which are counted: ML-KEM encapsulation from given randomness
 # (`Entropy`, OpenSSL's `ikme`); ML-DSA signing that is deterministic, from
-# given randomness, or from an external mu, or over a raw message encoding or
-# a non-empty context string; and a private key that fails to load, which
-# rind loads as refused and fails at each use instead, so that OpenSSL never
-# runs it on the default provider. An ML-DSA key generated from its seed
+# given randomness, or from an external mu, or over a raw message encoding;
+# and a private key that fails to load, which rind loads as refused and fails
+# at each use instead, so that OpenSSL never runs it on the default provider. An ML-DSA key generated from its seed
 # keeps the stanza's check of its public key, not of its expanded private
 # key, which rind does not keep.
 set -euo pipefail
@@ -60,7 +59,7 @@ for file in "$OPENSSL_EVP_TEST"/share/evp_test/evppkey_ml_*.txt; do
     awk '
     BEGIN { RS = ""; ORS = "\n\n" }
     /(^|\n)Entropy = / { next }
-    /Ctrl = (mu:1|message-encoding:0|hexcontext-string:[0-9A-Fa-f])/ { next }
+    /Ctrl = (mu:1|message-encoding:0)/ { next }
     /Sign-Message = / && /Ctrl = (deterministic:1|hextest-entropy:)/ { next }
     /KeyGen = ML-DSA/ { gsub(/\nCtrlOut = hexpriv:[0-9A-Fa-f]*/, "") }
     /Result = TEST_PARSE_PRIVATE_KEY_ERROR/ { next }

@@ -8,8 +8,7 @@ open Aeneas Aeneas.Std Result
 
 Models of the standard-library items rind's translation and theorems use that
 Aeneas's library lacks, each following the Rust standard library, and opaque
-declarations for the random source, whose draw the functional spec leaves out,
-and for `core::array::from_fn`, which only AES's header protection calls.
+declarations for the random source, whose draw the functional spec leaves out.
 `Rind.X86_64.Simd` models the x86_64 intrinsics.
 -/
 
@@ -140,6 +139,10 @@ def core.num.I16.wrapping_neg (x : Std.I16) : Result Std.I16 :=
 def core.num.I32.wrapping_neg (x : Std.I32) : Result Std.I32 :=
   Std.Result.ok ⟨-x.bv⟩
 
+/-- `u64::wrapping_neg`: the negation modulo 2^64. -/
+def core.num.U64.wrapping_neg (x : Std.U64) : Result Std.U64 :=
+  Std.Result.ok ⟨-x.bv⟩
+
 /-- `i8::unsigned_abs`. -/
 def core.num.I8.unsigned_abs (x : Std.I8) : Result Std.U8 :=
   Std.Result.ok ⟨BitVec.ofNat 8 x.val.natAbs⟩
@@ -268,6 +271,10 @@ def Shared0U64.Insts.CoreOpsBitShrUsizeU64.shr (x : Std.U64) (y : Std.Usize) : R
 def Shared0U8.Insts.CoreOpsBitBitAndU8U8.bitand (x y : Std.U8) : Result Std.U8 :=
   Std.Result.ok (x &&& y)
 
+/-- `<&u64 as BitAnd<u64>>::bitand`. -/
+def Shared0U64.Insts.CoreOpsBitBitAndU64U64.bitand (x y : Std.U64) : Result Std.U64 :=
+  Std.Result.ok (x &&& y)
+
 /-- `<Vec<T> as AsMut<[T]>>::as_mut`: the whole vector, which writes back to it. -/
 def alloc.vec.Vec.Insts.CoreConvertAsMutSlice.as_mut {T : Type _} (_A : Type _) (v : alloc.vec.Vec T) :
     Result ((Slice T) × (Slice T → alloc.vec.Vec T)) :=
@@ -338,9 +345,13 @@ opaque getrandom.error.Error : Type
 opaque getrandom.fill :
   Slice Std.U8 → Result ((core.result.Result Unit getrandom.error.Error) × (Slice Std.U8))
 
-/-- `core::array::from_fn`. -/
-opaque core.array.from_fn {T F : Type _} (N : Std.Usize)
-    (_ : core.ops.function.FnMut F Std.Usize T) : F → Result (Array T N)
+/-- `core::array::from_fn`: `f` called on each index in order. -/
+def core.array.from_fn {T F : Type _} (N : Std.Usize)
+    (inst : core.ops.function.FnMut F Std.Usize T) (f : F) : Result (Array T N) := do
+  let (l, _) ← (List.range N.val).attach.foldlM (fun (acc, f) ⟨i, hi⟩ => do
+    let (y, f) ← inst.call_mut f (UScalar.ofNatCore i (Nat.lt_trans (List.mem_range.mp hi) N.hBounds))
+    ok (acc ++ [y], f)) ([], f)
+  if h : l.length = N.val then ok (Array.from l h) else fail .panic
 
 /-- `u32::swap_bytes`: the four bytes in the other order. -/
 def core.num.U32.swap_bytes (x : Std.U32) : Result Std.U32 :=

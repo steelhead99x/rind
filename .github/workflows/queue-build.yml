@@ -1,9 +1,9 @@
 name: Queue build
 
 # The merge queue's build of a group, on the host's self-hosted runner, and
-# rind's tests on aarch64 macOS and Linux, on the Mac mini's two runners (VMs
+# rind's tests on aarch64 Linux, on the Mac mini's runner (a VM
 # admin/mac-mini-runners sets up). Only queue.yml calls it. Once queue.yml
-# calls it at main and the rind-queue runner group, which holds all three,
+# calls it at main and the rind-queue runner group, which holds both runners,
 # admits only this workflow at refs/heads/main, no other workflow can
 # reach the runners, an approved fork run's included; a PR's edit to this file
 # then runs only after it lands. For the same reason it uses no local action:
@@ -16,7 +16,7 @@ permissions:
   contents: read
 
 jobs:
-  # Its context, `Queue build / Build`, is the one main's ruleset requires, so
+  # Its context, `Queue build / Build`, is one main's ruleset requires, so
   # the group's result is this job's own: a failed, cancelled, or timed-out
   # build fails the group with no job after it waiting on a hosted runner.
   build:
@@ -33,10 +33,9 @@ jobs:
       BASE: ${{ github.event.merge_group.base_sha }}
       # A failure ejects the group whatever else fails, so stop at the first.
       CHECK_FAIL_FAST: 1
-      # Also `regenerate`, `prove`'s x86_64 `vg`, and the Intel SDE models
-      # when the group touches their paths, beside the other modules. They
-      # run here rather than on GitHub-hosted runners, whose queue waits (46
-      # minutes at p90 in November 2026) would run into this job's timeout.
+      # Only the host's Rust checks and the quick lints, leaving the PR
+      # check's slower modules to it and check.yml's nightly run, since every
+      # group waits on this build.
       CHECK_QUEUE: 1
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -49,31 +48,25 @@ jobs:
         env:
           QUEST_GATE_PRIORITY: 1
         run: nix develop --command quest gate just ci "$BASE"
-
-  # The x86_64 build above runs the tests only on x86_64, so these run them
-  # natively on aarch64, where rind runs its own assembly and dispatch, which
-  # two PRs can break together. They run only the `rs` module, whose result
-  # depends on the host; the lints and other targets' builds do not. Each
-  # reports its own context, as `Build` does, so main's ruleset can require it.
-  macos-aarch64:
-    name: Build aarch64 macOS
-    if: github.event_name == 'merge_group'
-    runs-on: [self-hosted, rind-queue-macos]
-    timeout-minutes: 60
-    env:
-      BASE: ${{ github.event.merge_group.base_sha }}
-      CHECK_FAIL_FAST: 1
-      CHECK_MODULES: rs
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Cargo's per-crate timings of the group's build, so a compile-time
+      # regression shows without profiling by hand. A diagnostic, so a failed
+      # upload never fails the group.
+      - name: Upload build timings
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          persist-credentials: false
-          fetch-depth: 0
-      - name: Test the merge group
-        env:
-          QUEST_GATE_PRIORITY: 1
-        run: nix develop --command quest gate just ci "$BASE"
+          name: cargo-timings
+          path: target/cargo-timings/cargo-timing-*.html
+          if-no-files-found: ignore
+          retention-days: 14
 
+  # The x86_64 build above runs the tests only on x86_64, so this runs them
+  # natively on aarch64, where rind runs its own assembly and dispatch, which
+  # two PRs can break together. It runs only the `rs` module, whose result
+  # depends on the host; the lints and other targets' builds do not. It reports
+  # its own context, which main's ruleset requires, as it does `Build`'s. A
+  # macOS-only break two PRs make together shows first in the nightly `build`.
   linux-aarch64:
     name: Build aarch64 Linux
     if: github.event_name == 'merge_group'

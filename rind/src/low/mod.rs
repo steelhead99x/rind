@@ -35,13 +35,7 @@ macro_rules! asm_call {
 /// sixteen and the eight working variables rotated one place from the round
 /// before, so they rename instead of moving. The portable SHA-256 and
 /// SHA-512 bodies use it.
-#[cfg(any(
-    test,
-    all(
-        rind_backend = "portable",
-        not(all(target_arch = "xtensa", target_os = "espidf"))
-    )
-))]
+#[cfg(any(test, all(rind_backend = "portable", not(rind_sha256_iram))))]
 macro_rules! sixteen {
     ($round:ident, $a:ident, $b:ident, $c:ident, $d:ident, $e:ident, $f:ident, $g:ident, $h:ident) => {
         $round!(0, $a, $b, $c, $d, $e, $f, $g, $h);
@@ -118,6 +112,7 @@ mod generic {
     pub(crate) use limb64 as limbs;
     // Every target's MD5: no CPU has instructions for it.
     pub(super) mod md5;
+    pub(super) mod naf;
     // ML-DSA arithmetic for the portable backend and x86_64 CPUs without
     // AVX2, and what s2n-bignum has no Neon routine for. aarch64 runs the
     // rest only in tests, to check its routines against.
@@ -211,10 +206,7 @@ mod generic {
     ))]
     pub(super) mod sha1;
     #[cfg(any(
-        all(
-            rind_backend = "portable",
-            not(all(target_arch = "xtensa", target_os = "espidf"))
-        ),
+        all(rind_backend = "portable", not(rind_sha256_iram)),
         all(test, any(rind_backend = "arm", rind_backend = "x86_64"))
     ))]
     pub(super) mod sha256;
@@ -328,6 +320,7 @@ pub(crate) use generic::ct_equal::ct_equal;
 #[cfg(all(test, any(rind_backend = "arm", rind_backend = "portable")))]
 pub(crate) use generic::ghash::gcm_model;
 pub(crate) use generic::md5::md5_compress_blocks;
+pub(crate) use generic::naf::public_naf;
 #[cfg(any(rind_backend = "x86_64", all(rind_backend = "aarch64", test)))]
 pub(crate) use generic::poly1305;
 #[cfg(target_has_atomic = "8")]
@@ -446,6 +439,8 @@ cfg_if::cfg_if! {
         pub(crate) use x86_64::aes_gcm;
         #[cfg(test)]
         pub(crate) use x86_64::ct_sde;
+        #[cfg(test)]
+        pub(crate) use x86_64::cpu::force_avx512_for_vg_mlkem;
         #[cfg(all(test, feature = "ml-dsa"))]
         pub(crate) use x86_64::cpu::HaveAvx512Vl;
         pub(crate) use x86_64::bignum_add::bignum_add;

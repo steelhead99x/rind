@@ -332,15 +332,48 @@ class Render(unittest.TestCase):
         self.assertIn("| Operation | rind | aws-lc-rs | ring | OpenSSL |", md)
         self.assertIn("| X25519 | 30.00 µs ✓ | - | 33.00 µs ✓ | 300.00 µs |", md)
 
+    def test_build_cost_names_each_program_binary_size_measures(self):
+        sizes = {
+            "url": "https://github.com/kixel-ai/rind/actions/runs/1",
+            "date": "2026-11-28T12:23:00Z",
+            "commit": "0" * 40,
+            "rustc": "rustc 1.98.1",
+            "target": "x86_64-unknown-linux-gnu",
+            "bytes": {"rind": 893481, "rustls": 3836722},
+        }
+        md = br.report(hosts(), None, VERIFIED, [], sizes)[br.REPORT]
+        self.assertIn("| rind | 893,481 |\n| rustls + rind-rustls | 3,836,722 |", md)
+
+    def test_reads_a_benchmark_name_as_its_report_row(self):
+        for name, id in [
+            ("rind-bench/benches/sha2.rs::sha256::rind[64B]", "sha256/rind/64B"),
+            ("rind-bench/benches/aes_gcm.rs::aes128_gcm::ring::key", "aes128-gcm/ring/key"),
+            ("rind-bench/benches/rustls.rs::rustls_records[aes128-gcm/rind/64B]", "rustls-records/aes128-gcm/rind/64B"),
+            ("rind-bench/benches/argon2.rs::argon2id_16MiB_t1_p1::rustcrypto", "argon2id-16MiB-t1-p1/rustcrypto"),
+        ]:
+            self.assertEqual(br.bench_id(name), id)
+        for name in ["sha256::rind[64B]", "rind-bench/benches/sha2.rs::sha-256::rind", "rind-bench/benches/sha2.rs::sha256[]"]:
+            with self.assertRaises(SystemExit, msg=name):
+                br.bench_id(name)
+        self.assertEqual(br.operation_of("p256-ecdh/p256-rustcrypto"), ("p256-ecdh/{lib}", "p256-rustcrypto"))
+        for row in ["x25519-ecdh/rind/extra", "slhdsa-sha2-128s-sign/fips205"]:
+            self.assertIsNone(br.operation_of(row), row)
+
+    def test_reads_a_swole_bench_run_by_benchmark_id(self):
+        out = {
+            "samples": [
+                {"commit": "0" * 40, "metrics": {"a.rs::x25519_ecdh::rind": {"time (x86_64-1)": {"value": 9.0}}}},
+                {"metrics": {"a.rs::x25519_ecdh::rind": {"time (x86_64-1)": {"value": 7.5}}}},
+            ],
+            "units": {"time (x86_64-1)": "ns"},
+        }
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "out.json")
+            with open(path, "w") as f:
+                json.dump(out, f)
+            self.assertEqual(br.swole_times(path), [{"id": "x25519-ecdh/rind", "ns": 7.5}])
+
     def test_leaves_out_a_library_the_cpu_lacks_features_for(self):
-        regex = re.compile(br.operation_regex({"graviola": ["adx"]}))
-        for row in ["x25519-ecdh/rind", "p256-ecdh/p256-rustcrypto", "aes128-gcm/openssl/32B"]:
-            self.assertTrue(regex.match(row), row)
-        for row in ["x25519-ecdh/graviola", "aes128-gcm/graviola/32B", "x25519-ecdh/rind/extra", "slhdsa-sha2-128s-sign/fips205"]:
-            self.assertFalse(regex.match(row), row)
-        self.assertTrue(re.match(br.operation_regex(), "slhdsa-sha2-128s-sign/rustcrypto"))
-        self.assertFalse(re.match(br.operation_regex(), "slhdsa-sha2-128s-sign/fips205"))
-        self.assertIsNone(br.operation_of("slhdsa-sha2-128s-sign/fips205"))
         everyone = hosts()
         everyone["desktop"]["refused"] = {"graviola": ["bmi1", "adx"]}
         md = br.report(everyone, None, VERIFIED, [])[br.REPORT]
@@ -349,17 +382,15 @@ class Render(unittest.TestCase):
     def test_reports_md5_and_sha1(self):
         # rind-bench times these on every device; a report that drops them
         # hides rows that ran (the Fire TV run lost them this way).
-        regex = re.compile(br.operation_regex())
         for hash_name, label in [("sha1", "SHA-1"), ("md5", "MD5")]:
             for size, size_label in [("64B", "64 B"), ("1350B", "1350 B"), ("16KB", "16 KB")]:
                 row = f"{hash_name}/rind/{size}"
-                self.assertTrue(regex.match(row), row)
-                self.assertTrue(regex.match(f"{hash_name}/rustcrypto/{size}"), row)
                 self.assertEqual(br.operation_of(row), (f"{hash_name}/{{lib}}/{size}", "rind"))
+                self.assertTrue(br.operation_of(f"{hash_name}/rustcrypto/{size}"), row)
                 self.assertEqual(br.label(f"{hash_name}/{size}"), f"{label}, {size_label}")
         # Only the sizes the report names.
-        self.assertFalse(regex.match("sha1/rind/32B"))
-        self.assertFalse(regex.match("md5/rind"))
+        self.assertFalse(br.operation_of("sha1/rind/32B"))
+        self.assertFalse(br.operation_of("md5/rind"))
         algorithms = {}
         for op in br.OPERATIONS:
             name = br.row_name(op)
@@ -404,82 +435,14 @@ class Render(unittest.TestCase):
 
 
 class PinnedCpus(unittest.TestCase):
-    def sample_ids(self):
-        libs = list(br.LIBRARIES)
-        ids = [op.replace("{lib}", lib) for op in br.OPERATIONS for lib in libs]
-        ids.extend(
-            [
-                "rustls-full-handshake-group/x25519/rind/extra",
-                "rustls-full-handshake-threads/x25519",
-                "not-a-bench/rind",
-            ]
-        )
-        return ids
-
-    def test_threaded_groups_are_exactly_the_two_rustls_thread_rows(self):
-        self.assertEqual(
-            br.threaded_pass_operations(),
-            [
-                "rustls-full-handshake-threads/x25519/{lib}",
-                "rustls-resumed-handshake-threads/x25519/{lib}",
-            ],
-        )
-        self.assertEqual(
-            len(br.pinned_pass_operations()) + len(br.threaded_pass_operations()),
-            len(br.OPERATIONS),
-        )
-        self.assertEqual(
-            sorted(br.pinned_pass_operations() + br.threaded_pass_operations()),
-            sorted(br.OPERATIONS),
-        )
-
-    def test_exclusion_skips_only_the_threaded_rustls_groups(self):
-        pinned = re.compile(br.operation_regex(operations=br.pinned_pass_operations()))
-        threaded = re.compile(br.operation_regex(operations=br.threaded_pass_operations()))
-        full = re.compile(br.operation_regex())
-        # Near names stay in the pinned pass, not the threaded one.
-        for row in [
-            "rustls-full-handshake-group/x25519/rind",
-            "rustls-full-handshake-group/x25519mlkem768/aws-lc-rs",
-            "rustls-full-handshake-key/ed25519/openssl",
-            "rustls-resumed-handshake/x25519/rind",
-            "rustls-bulk/aes128-gcm/rind",
-        ]:
-            self.assertTrue(pinned.match(row), row)
-            self.assertFalse(threaded.match(row), row)
-            self.assertTrue(full.match(row), row)
-        for row in [
-            "rustls-full-handshake-threads/x25519/rind",
-            "rustls-resumed-handshake-threads/x25519/aws-lc-rs",
-        ]:
-            self.assertFalse(pinned.match(row), row)
-            self.assertTrue(threaded.match(row), row)
-            self.assertTrue(full.match(row), row)
-        self.assertFalse(pinned.match("rustls-full-handshake-threads/x25519/rind/extra"))
-        self.assertFalse(threaded.match("rustls-full-handshake-group/x25519/rind"))
-
-    def test_two_pass_filters_cover_the_same_rows_as_a_single_pass(self):
-        ids = self.sample_ids()
-        full = re.compile(br.operation_regex())
-        pinned = re.compile(br.operation_regex(operations=br.pinned_pass_operations()))
-        threaded = re.compile(br.operation_regex(operations=br.threaded_pass_operations()))
-        matched_full = [i for i in ids if full.match(i)]
-        matched_pinned = [i for i in ids if pinned.match(i)]
-        matched_threaded = [i for i in ids if threaded.match(i)]
-        self.assertEqual(set(matched_pinned) & set(matched_threaded), set())
-        self.assertEqual(sorted(matched_pinned + matched_threaded), sorted(matched_full))
-        # One ID per operation per library.
-        self.assertEqual(len(matched_full), len(br.OPERATIONS) * len(br.LIBRARIES))
-        self.assertEqual(len(matched_threaded), 2 * len(br.LIBRARIES))
-
-    def test_refused_libraries_apply_to_both_passes(self):
-        refused = {"graviola": ["adx"]}
-        pinned = re.compile(br.operation_regex(refused, br.pinned_pass_operations()))
-        threaded = re.compile(br.operation_regex(refused, br.threaded_pass_operations()))
-        self.assertTrue(pinned.match("rustls-resumed-handshake/x25519/rind"))
-        self.assertFalse(pinned.match("rustls-resumed-handshake/x25519/graviola"))
-        self.assertTrue(threaded.match("rustls-full-handshake-threads/x25519/rind"))
-        self.assertFalse(threaded.match("rustls-full-handshake-threads/x25519/graviola"))
+    # Swole's names for a few report rows, the every-CPU rows among them.
+    NAMES = [
+        "rind-bench/benches/rustls.rs::rustls_full_handshake_group::x25519::rind",
+        "rind-bench/benches/rustls.rs::rustls_full_handshake_threads::x25519::rind",
+        "rind-bench/benches/rustls.rs::rustls_resumed_handshake::x25519::aws_lc_rs",
+        "rind-bench/benches/rustls.rs::rustls_resumed_handshake_threads::x25519::aws_lc_rs",
+        "rind-bench/benches/sha2.rs::sha256::rind[32B]",
+    ]
 
     def test_pinned_cpus_only_on_linux_when_the_env_is_set(self):
         self.assertEqual(br.pinned_cpus_on("linux", "0"), "0")
@@ -490,26 +453,33 @@ class PinnedCpus(unittest.TestCase):
         self.assertIsNone(br.pinned_cpus_on("darwin", "0"))
         self.assertIsNone(br.pinned_cpus_on("darwin", "2,3"))
 
-    def test_a_pin_splits_into_taskset_then_unpinned_thread_pass(self):
-        one = br.bench_passes({}, None)
-        self.assertEqual(len(one), 1)
-        self.assertIsNone(one[0][0])
-        self.assertEqual(one[0][1], br.CRITERION_ARGS + [br.operation_regex()])
+    def test_no_pin_is_one_pass_of_every_benchmark(self):
+        self.assertEqual(br.bench_passes(self.NAMES, None), [(None, self.NAMES)])
 
-        two = br.bench_passes({}, "0")
-        self.assertEqual(len(two), 2)
-        self.assertEqual(two[0][0], "0")
+    def test_a_pin_splits_into_taskset_then_unpinned_every_cpu_pass(self):
+        (pinned, pinned_names), (unpinned, every) = br.bench_passes(self.NAMES, "0")
+        self.assertEqual(pinned, "0")
+        self.assertIsNone(unpinned)
+        # Near names, such as the group rows, stay in the pinned pass.
         self.assertEqual(
-            two[0][1],
-            br.CRITERION_ARGS + [br.operation_regex(operations=br.pinned_pass_operations())],
+            [br.bench_id(n) for n in pinned_names],
+            ["rustls-full-handshake-group/x25519/rind", "rustls-resumed-handshake/x25519/aws-lc-rs", "sha256/rind/32B"],
         )
-        self.assertIsNone(two[1][0])
         self.assertEqual(
-            two[1][1],
-            br.CRITERION_ARGS + [br.operation_regex(operations=br.threaded_pass_operations())],
+            [br.bench_id(n) for n in every],
+            ["rustls-full-handshake-threads/x25519/rind", "rustls-resumed-handshake-threads/x25519/aws-lc-rs"],
         )
-        # A no-pin run is still a single cargo bench, including on Linux.
-        self.assertEqual(br.bench_passes({"graviola": ["adx"]}, None)[0][0], None)
+
+    def test_a_pass_with_nothing_to_time_is_left_out(self):
+        self.assertEqual(br.bench_passes(self.NAMES[4:], "2,3"), [("2,3", self.NAMES[4:])])
+        self.assertEqual(br.bench_passes(self.NAMES[1:2], "2,3"), [(None, self.NAMES[1:2])])
+
+    def test_swole_pmu_cpus(self):
+        # A hybrid Intel host, as `swole fingerprint bench` reports it, then one with no perf counters.
+        pinned = "perf: tier L2, counting user space\nPMU: cpu_atom on CPUs 8-23, 8 general-purpose counters\n"
+        self.assertEqual(br.swole_pmu_cpus(pinned), list(range(8, 24)))
+        self.assertEqual(br.swole_pmu_cpus("PMU: cpu on CPUs 0-3,6\n"), [0, 1, 2, 3, 6])
+        self.assertIsNone(br.swole_pmu_cpus("CPUs: 4\nkernel.perf_event_paranoid: 4\n"))
 
 
 class Verified(unittest.TestCase):
@@ -558,6 +528,19 @@ class Verified(unittest.TestCase):
 
     def test_checked_in_table_loads(self):
         br.load_verified()
+
+    def test_zen4_earns_the_chacha20poly1305_tick_only_from_800_bytes(self):
+        ifma = {"avx": 1, "avx2": 1, "avx512f": 1, "avx512vl": 1, "avx512ifma": 1}
+        table = br.load_verified()
+        for zen4, rows in [
+            (0, ["chacha20poly1305/32B", "chacha20poly1305/1350B", "xchacha20poly1305/16KB"]),
+            (1, ["chacha20poly1305/1350B", "chacha20poly1305/16KB", "xchacha20poly1305/1350B"]),
+        ]:
+            h = {"cpu": {"arch": "x86_64"}, "os": "Linux", "rind_cpu": {"cpuid": ifma | {"zen4": zen4}}}
+            for row in rows:
+                self.assertIsNotNone(br.proof_for(table, "rind", row, h), (zen4, row))
+        h = {"cpu": {"arch": "x86_64"}, "os": "Linux", "rind_cpu": {"cpuid": ifma | {"zen4": 1}}}
+        self.assertIsNone(br.proof_for(table, "rind", "chacha20poly1305/32B", h))
 
 
 class Gaps(unittest.TestCase):
@@ -2916,6 +2899,22 @@ class AnyHostGaps(unittest.TestCase):
                 {"operations": '["sha256/*/64B"]', "on": '["x86_64"]', "reason": '"r"'},
                 {"operations": '["x25519-ecdh"]', "on": f'["{RYZEN}"]', "reason": '"r"'},
             )
+class Reserve(unittest.TestCase):
+    @staticmethod
+    def smt(cores):
+        """A host's core siblings with two threads a core, numbered as Linux
+        numbers them: each core's second thread `cores` after its first."""
+        return lambda cpu: sorted({cpu % cores, cpu % cores + cores})
+
+    def test_takes_both_threads_of_the_last_two_cores(self):
+        self.assertEqual(br.reserved_cpus(list(range(32)), self.smt(16)), [14, 15, 30, 31])
+
+    def test_takes_the_last_performance_cores_of_a_hybrid_cpu(self):
+        self.assertEqual(br.reserved_cpus(list(range(8)), lambda cpu: [cpu]), [6, 7])
+
+    def test_refuses_too_few_cores(self):
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+            br.reserved_cpus([0, 1], self.smt(1))
 
 
 class Comparison(unittest.TestCase):

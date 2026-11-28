@@ -1475,13 +1475,14 @@ theorem by8_spec {T : Type} (inst : low.generic.ctr.Ctr8 T) (key : T) (nonce : S
       getElem!_ctrXor _ _ _ _ (by rw [bvs, List.length_map, (bk s1).property]; simp; omega),
       bvs_getElem! _ _ (by rw [(bk s1).property]; simp; omega), h2]
 
-/-- `low::aarch64::aes_ctr::apply` is SP 800-38A's CTR mode with the nonce
-and counter as the first counter block, counting in its last four bytes. -/
-theorem aes_ctr_apply_spec (alg : Algorithm) (key : List (BitVec 8)) (k : low.aarch64.aes.AesKey)
-    (hk : ModeKeyIs alg key k) (nonce : Std.Array U8 12#usize) (counter : U32) (inout : Slice U8) :
-    low.aarch64.aes_ctr.apply k nonce counter inout ⦃ r =>
+/-- `low::aarch64::aes_ctr::apply` on a crypto-extension key is SP 800-38A's
+CTR mode with the nonce and counter as the first counter block, counting in
+its last four bytes. -/
+theorem aes_ctr_apply_hw_spec (alg : Algorithm) (key : List (BitVec 8)) (hwk : low.aarch64.aes.HwKey)
+    (hwk_is : HwKeyIs alg (seqNat8ToSeqNat32LE key) hwk) (nonce : Std.Array U8 12#usize) (counter : U32)
+    (inout : Slice U8) :
+    low.aarch64.aes_ctr.apply (.Hw hwk) nonce counter inout ⦃ r =>
       bvs r.val = aesCtr alg key 32 (bvs nonce.val ++ be32 counter.val) (bvs inout.val) ⦄ := by
-  obtain ⟨-, hwk, rfl, hwk_is⟩ := hk
   have hc : counter.val < 2 ^ 32 := by scalar_tac
   have hn : (bvs nonce.val).length = 12 := by simp
   simp only [low.aarch64.aes_ctr.apply]
@@ -1498,5 +1499,14 @@ theorem aes_ctr_apply_spec (alg : Algorithm) (key : List (BitVec 8)) (k : low.aa
       omega
     rw [hout]
     simp only [ctrXor, ctr_block_eq _ hn _ _ hc, Nat.zero_add, hj]
+
+/-- `low::aarch64::aes_ctr::apply` is SP 800-38A's CTR mode with the nonce
+and counter as the first counter block, counting in its last four bytes. -/
+theorem aes_ctr_apply_spec (alg : Algorithm) (key : List (BitVec 8)) (k : low.aarch64.aes.AesKey)
+    (hk : ModeKeyIs alg key k) (nonce : Std.Array U8 12#usize) (counter : U32) (inout : Slice U8) :
+    low.aarch64.aes_ctr.apply k nonce counter inout ⦃ r =>
+      bvs r.val = aesCtr alg key 32 (bvs nonce.val ++ be32 counter.val) (bvs inout.val) ⦄ := by
+  obtain ⟨-, hwk, rfl, hwk_is⟩ := hk
+  exact aes_ctr_apply_hw_spec alg key hwk hwk_is nonce counter inout
 
 end rind.aarch64

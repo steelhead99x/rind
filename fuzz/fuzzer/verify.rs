@@ -100,9 +100,15 @@ impl Ours {
                 }
             }
             Self::Ed25519 => ed25519::PublicKey::new(key)?.verify(message, signature),
-            Self::MlDsa44 => ml_dsa::PublicKey::<MlDsa44>::new(key)?.verify(message, signature),
-            Self::MlDsa65 => ml_dsa::PublicKey::<MlDsa65>::new(key)?.verify(message, signature),
-            Self::MlDsa87 => ml_dsa::PublicKey::<MlDsa87>::new(key)?.verify(message, signature),
+            Self::MlDsa44 => {
+                ml_dsa::PublicKey::<MlDsa44>::new(key)?.verify(&[], message, signature)
+            }
+            Self::MlDsa65 => {
+                ml_dsa::PublicKey::<MlDsa65>::new(key)?.verify(&[], message, signature)
+            }
+            Self::MlDsa87 => {
+                ml_dsa::PublicKey::<MlDsa87>::new(key)?.verify(&[], message, signature)
+            }
             Self::SlhDsa(verify) => return verify(key, message, signature),
         };
         Ok(verified.is_ok())

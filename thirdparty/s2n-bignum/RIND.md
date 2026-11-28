@@ -199,7 +199,9 @@ extension's among them though the assembly spells them as `.byte` or
 An AES round, a SHA-256 step, and a 64-bit polynomial multiply are the
 aarch64 model's definitions, since AArch32's pseudocode is the same, and the
 SHA-1 steps `sha1.ml`'s. The step conversion unfolds a lane operation to an
-operation on each lane's subword of its registers. An odd Q register, the
+operation on each lane's subword of its registers, but a `VTBL` lane, which
+stays `aarch32_tbl` until its index is a numeral, as a variable index would
+leave a conditional per lane. An odd Q register, the
 encodings the manual makes UNPREDICTABLE, such as `VTRN` or `VSWP` of a
 register with itself or `VLDM` of a list past D31, and every other Advanced
 SIMD, VFP, or crypto encoding are refused.

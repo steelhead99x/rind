@@ -56,6 +56,12 @@ draft's `poc` at the revision `admin/sync-vectors` pins: the Ed25519,
 ristretto255, and P-256 suites, without Ed448 and secp256k1, which rind does
 not offer. They are IETF contributions, under [BCP 78].
 
+`rfc9807/vectors.json` holds [RFC 9807]'s OPAQUE vectors, its Appendix C,
+from the CFRG draft's `poc/vectors` at the revision `admin/sync-vectors`
+pins: the ristretto255 and P-256 configurations, real and fake, without
+curve25519's, which rind does not offer. They are IETF contributions, under
+[BCP 78].
+
 [aws-lc]: https://github.com/aws/aws-lc
 [Wycheproof]: https://github.com/C2SP/wycheproof
 [CAVP]: https://csrc.nist.gov/projects/cryptographic-algorithm-validation-program
@@ -69,5 +75,6 @@ not offer. They are IETF contributions, under [BCP 78].
 [RFC 9474]: https://www.rfc-editor.org/rfc/rfc9474.html
 [RFC 9497]: https://www.rfc-editor.org/rfc/rfc9497.html
 [RFC 9591]: https://www.rfc-editor.org/rfc/rfc9591.html
+[RFC 9807]: https://www.rfc-editor.org/rfc/rfc9807.html
 [blind-rsa-signatures]: https://github.com/jedisct1/rust-blind-rsa-signatures
 [BCP 78]: https://www.rfc-editor.org/info/bcp78

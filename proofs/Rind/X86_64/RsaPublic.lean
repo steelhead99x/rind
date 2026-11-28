@@ -94,7 +94,7 @@ theorem lowWords_length {N : Usize} (p : low.posint.PosInt N) {k : Nat} (hk : k 
 
 /-- A Montgomery product's arguments, from their values. -/
 theorem mont_args_of {N : Usize} (x y n : low.posint.PosInt N) (n0 : U64) (hk : n.used.val ≤ N.val)
-    (hk2 : 2 ≤ n.used.val) (hk32 : n.used.val < 2 ^ 32)
+    (hk2 : 2 ≤ n.used.val) (hk29 : n.used.val < 2 ^ 29)
     (hodd : wordsNat (lowWords n n.used) % 2 = 1)
     (hn0 : (wordsNat (lowWords n n.used) * n0.val + 1) % 2 ^ 64 = 0)
     (hx : wordsNat (lowWords x n.used) < wordsNat (lowWords n n.used))
@@ -284,7 +284,7 @@ theorem public_op_loop_spec (n : RsaInt) (e n0 : U64) (c cm : RsaInt)
 
 /-! ## `public_op` -/
 
-theorem less_than_spec (x y : RsaInt) (hx : x.used.val ≤ 128) (hy : y.used.val ≤ 128) :
+theorem less_than_spec {N : Usize} (x y : low.posint.PosInt N) (hx : x.used.val ≤ N.val) (hy : y.used.val ≤ N.val) :
     low.posint.PosInt.less_than x y ⦃ b =>
       b = decide (wordsNat (lowWords x x.used) < wordsNat (lowWords y y.used)) ⦄ := by
   unfold low.posint.PosInt.less_than low.posint.PosInt.as_words

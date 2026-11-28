@@ -80,7 +80,7 @@ exclude_re = [
   'rind/src/low/x86_64/chacha20poly1305\.rs:\d+:\d+: replace \| with \^$',
   # Pinned to its line: a `const` has no name to match, and only `AES`'s
   # `1 << 0` survives.
-  'rind/src/low/x86_64/cpu\.rs:446:\d+: replace << with >>$',
+  'rind/src/low/x86_64/cpu\.rs:539:\d+: replace << with >>$',
   'rind/src/low/x86_64/cpu\.rs:\d+:\d+: replace \| with \^$',
   'rind/src/low/x86_64/cpu\.rs:\d+:\d+: replace \| with \^ in (HaveAdxForVg::check|HaveAesHardware::check|HaveAvx::check|HaveAvx512ForVgMlKem::check|HaveAvxMovbeForAesGcm::check|HaveBmi2Adx::check|HaveIfmaForCurve25519::check|HaveIfmaForVgChaCha20Poly1305::check|HaveIfmaForVgP256::check|HaveSha1::check|HaveSha256::check|HaveSse41::check|HaveVaesAvx2ForAesGcm::check|detect|detect_once)$',
   'rind/src/low/x86_64/edwards25519_msm_avx2\.rs:\d+:\d+: replace \| with \^$',
@@ -114,7 +114,7 @@ exclude_re = [
   # `sign`'s scratch bound, not its SEQUENCE length at column 15, which is caught.
   'rind-openmls/src/provider\.rs:\d+:32: replace \+ with \* in <impl OpenMlsCrypto for RustCrypto>::sign$',
   # Pinned to its line: the next line's `+`, at the same column, is caught.
-  'rind/src/low/generic/mont\.rs:172:\d+: replace \+ with \* in mont_mul$',
+  'rind/src/low/generic/mont\.rs:179:\d+: replace \+ with \* in mont_mul$',
   'rind/src/low/x86_64/mlkem_sample_poly_ntt_8x\.rs:\d+:\d+: replace \+ with \* in _squeeze_rate_and_reject$',
   'rind/src/mid/rsa_priv\.rs:\d+:78: replace / with \*$',
   'rind/src/mid/rsa_priv\.rs:\d+:44: replace \+ with \*$',
@@ -123,13 +123,9 @@ exclude_re = [
   # Equivalent: a comparison whose two forms differ only where both branches
   # give the same result, or a step that computes the same value another way,
   # such as squaring rather than multiplying to the same power.
-  # Ed25519's non-adjacent forms: no digit is zero where its sign is tested,
-  # past 64 bits a window's extra bits are masked off, and a borrow never
-  # carries past bit 255 of a scalar below 2^255. With equal remainders,
-  # either of `split`'s rows may lead.
-  'rind/src/low/generic/edwards25519_msm\.rs:\d+:\d+: replace > with >= in edwards25519_msm$',
-  'rind/src/low/generic/edwards25519_msm\.rs:\d+:(18|21): replace < with <= in non_adjacent_form$',
-  'rind/src/low/generic/edwards25519_msm\.rs:\d+:(16|20): replace (> with >=|\+ with \*) in non_adjacent_form$',
+  # Ed25519's multiplication tests no zero digit's sign. With equal
+  # remainders, either of `split`'s rows may lead.
+  'rind/src/low/generic/edwards25519_msm\.rs:\d+:\d+: replace > with >= in add_digit$',
   'rind/src/mid/half_size\.rs:\d+:18: replace < with <= in split$',
   # ChaCha20's chunk length: with a whole chunk left, both branches give it.
   # The loop guard's `<`, at column 16, is caught.
@@ -153,7 +149,7 @@ exclude_re = [
   # `(t - 16) % 16` and `(t + 16) % 16` are the same window slot. The line is
   # the subtraction: a use above it moves the pin, and pinning the `(t - 7)`
   # line instead would skip a mutant the tests can kill.
-  'rind/src/low/generic/sha512_rolled\.rs:85:\d+: replace - with \+ in sha512_compress_block$',
+  'rind/src/low/generic/sha512_rolled\.rs:69:\d+: replace - with \+ in schedule$',
   'rind/src/low/posint\.rs:\d+:\d+: delete match arm 0 in PosInt<N>::mont_exp$',
   'rind/src/low/posint\.rs:\d+:21: replace % with / in PosInt<N>::mont_exp$',
   'rind/src/low/posint\.rs:\d+:21: replace % with \+ in PosInt<N>::mont_exp$',
@@ -177,7 +173,7 @@ exclude_re = [
   'rind/src/low/generic/p521\.rs:\d+:\d+: replace < with <= in p521_public_twin_multiply$',
   'rind/src/mid/p521\.rs:\d+:\d+: replace < with <= in JacobianPoint::public_twin_multiply_naf$',
   'rind/src/mid/rsa_priv/exponents\.rs:\d+:\d+: replace < with <= in (divide_exact_e|shift_right_secret)$',
-  'rind/src/mid/util\.rs:\d+:\d+: replace < with <= in public_naf$',
+  'rind/src/low/generic/naf\.rs:\d+:\d+: replace < with <= in public_naf$',
   # Equivalent: a constant no result depends on. `(q - 1) / n` truncates to
   # `q / n` and `(q + 1) / n`; decompose's `r0` never lies at `(q + 1) / 2`;
   # vpmuldq reads only the even lanes of ML-DSA's x86_64 `QDATA`; ExpandA's
@@ -198,7 +194,7 @@ exclude_re = [
   # Speed only: where Ed25519 verification's multiplication starts, as
   # doubling the identity leaves it; and which of two valid half-size rows
   # `split` returns, both odd and below 2^128.
-  'rind/src/low/generic/edwards25519_msm\.rs:\d+:\d+: replace != with == in edwards25519_msm$',
+  'rind/src/low/generic/edwards25519_msm\.rs:\d+:\d+: replace != with == in top$',
   'rind/src/mid/half_size\.rs:\d+:(29|51): replace (match guard .* with (true|false)|< with (==|>|<=)) in split$',
   # Speed only: which of several implementations runs, or how far ahead it
   # prefetches. Each implementation is tested on its own against the others.
@@ -313,7 +309,7 @@ exclude_re = [
   'rind/src/low/x86_64/cpu\.rs:\d+:45: replace \| with &$',
   'rind/src/low/x86_64/cpu\.rs:\d+:52: replace \| with &$',
   # Pinned to its line: `AVX2_KERNELS`'s `|` at the same column is caught.
-  'rind/src/low/x86_64/cpu\.rs:475:31: replace \| with &$',
+  'rind/src/low/x86_64/cpu\.rs:572:31: replace \| with &$',
   'rind/src/low/x86_64/cpu\.rs:\d+:72: replace \| with &$',
   'rind/src/low/x86_64/cpu\.rs:\d+:17: replace \| with & in HaveAvxMovbeForAesGcm::check$',
   'rind/src/low/x86_64/cpu\.rs:\d+:17: replace \| with & in HaveAesHardware::check$',
@@ -322,7 +318,7 @@ exclude_re = [
   # Pinned to its line: the `cpu_denied` of a release build or one without
   # an OS, which tests never are. The debug build's, under the same name, is
   # caught.
-  'rind/src/low/mod\.rs:287:\d+: replace cpu_denied -> bool with true$',
+  'rind/src/low/mod\.rs:279:\d+: replace cpu_denied -> bool with true$',
   # The FIPS module's `SystemRandom`, compiled only under `--cfg rind_fips`,
   # which no mutation run sets; `fips_rng`'s tests cover what it calls.
   # Pinned to its line: the other `fill`, under the same name, is caught.
@@ -436,4 +432,15 @@ exclude_re = [
   # Refusing VG's ChaCha20-Poly1305 runs aws-lc's, which computes the same
   # result, as `paths_match` checks; only the time differs.
   'rind/src/low/x86_64/cpu\.rs:\d+:\d+: replace HaveIfmaForVgChaCha20Poly1305::check -> Option<Self> with None$',
+  # Refusing VG's AES-GCM, or running it below its length, runs BoringSSL's
+  # kernel or rind's by-16 path, which compute the same result, as
+  # `paths_match` checks; only the time differs.
+  'rind/src/low/x86_64/cpu\.rs:\d+:\d+: replace HaveAvx512ForAesGcm::vg -> Option<HaveAvx512ForVgAesGcm> with None$',
+  'rind/src/low/x86_64/aes_gcm\.rs:\d+:\d+: replace >= with < in vg$',
+  # Wipe and free VG's AES-GCM context, which only Zen 5 makes through the
+  # API, where rind/tests/zeroing.rs checks every key that holds one leaks
+  # no block and frees none unwiped; the hosted runners are not Zen 5.
+  'rind/src/aead\.rs:\d+:\d+: replace (Key::release|Inner::release|<impl Cipher for AesGcm>::release) with \(\)$',
+  'rind/src/mid/aes_gcm\.rs:\d+:\d+: replace AesGcm::release with \(\)$',
+  'rind/src/low/x86_64/ghash\.rs:\d+:\d+: replace GhashTable::release with \(\)$',
 ]

@@ -3,8 +3,8 @@ name: quality lints
 # aarch64 clippy over every target, which needs an arm64 runner, and clippy
 # over every combination of Cargo features, with the flake's pinned tools so a
 # new stable release can't fail them. `just ci`
-# already runs x86_64 clippy, both rustfmt checks, `admin/structure`, and the
-# MSRV check on every merge.
+# already runs x86_64 clippy and both rustfmt checks on every merge, and
+# `admin/structure` and the MSRV check nightly (`just ci --all`).
 on:
   schedule:
     - cron: "0 18 * * *"
