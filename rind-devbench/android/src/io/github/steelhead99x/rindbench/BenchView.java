@@ -581,8 +581,9 @@ final class BenchView extends LinearLayout {
             // Its collector applies now, for the screen and for runs by hand; its own run takes it as resolved here.
             Launch l = new Launch(it, runnerHost, runnerPort);
             if (l.setsCollector) useCollector(l.host, l.port);
-            // A launch that a run going will turn away leaves the picker as it is.
-            if (!running) showLaunch(l);
+            // A launch that a run going will turn away leaves the picker as it is; before the list loads, the
+            // view doesn't know of a run that outlived its activity yet, so the library is asked.
+            if (!running && !nativeStatus().optBoolean("running")) showLaunch(l);
             pending = l;
             if (loadedOnce) scheduleAutostart();
             return;
@@ -1133,7 +1134,12 @@ final class BenchView extends LinearLayout {
         if (deferredLibs == null) return;
         deferredLibs = null;
         deferredSecs = null;
-        if (!running && resultsText.isEmpty()) {
+        if (running) return;
+        // Back to what the screen showed before the tap: the finished run, or Ready.
+        JSONObject st = nativeStatus();
+        String run = st.optString("run_id", "");
+        if (!run.isEmpty() && !run.equals(clearedRun)) showFinished(st, false);
+        else {
             setStatus("Ready", Status.OK);
             setBody("");
         }
