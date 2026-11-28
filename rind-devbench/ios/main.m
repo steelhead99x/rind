@@ -164,14 +164,10 @@ static UIButtonConfiguration *ButtonConfig(NSString *title, NSDirectionalEdgeIns
   c.cornerStyle = UIButtonConfigurationCornerStyleFixed;
   return c;
 }
-static void SetButtonTitleStyle(UIButtonConfiguration *c, UIFont *font, UIColor *color) {
+static void SetButtonTitleStyle(UIButtonConfiguration *c, NSString *title, UIFont *font, UIColor *color) {
   c.baseForegroundColor = color;
-  c.titleTextAttributesTransformer = ^NSDictionary<NSAttributedStringKey, id> *(NSDictionary<NSAttributedStringKey, id> *in) {
-    NSMutableDictionary *out = [in mutableCopy];
-    out[NSFontAttributeName] = font;
-    out[NSForegroundColorAttributeName] = color;
-    return out;
-  };
+  c.attributedTitle = [[NSAttributedString alloc] initWithString:title attributes:@{
+    NSFontAttributeName: font, NSForegroundColorAttributeName: color}];
 }
 - (UIButton *)chip:(NSString *)title on:(BOOL)on enabled:(BOOL)en {
   BOOL small = [self compact];
@@ -191,21 +187,28 @@ static void SetButtonTitleStyle(UIButtonConfiguration *c, UIFont *font, UIColor 
   c.background.backgroundColor = on ? C_SELECTED : C_CHIP;
   c.background.strokeColor = on ? C_SELECTED : C_LINE;
   UIFont *font = [UIFont systemFontOfSize:[self compact] ? 13 : 14 weight:UIFontWeightSemibold];
-  SetButtonTitleStyle(c, font, !b.enabled ? C_MUTED : (on ? C_ON_SELECTED : C_TEXT));
+  UIColor *color = !b.enabled ? C_MUTED : (on ? C_ON_SELECTED : C_TEXT);
+  SetButtonTitleStyle(c, c.attributedTitle.string ?: c.title, font, color);
+  b.tintColor = color;
   b.configuration = c;
   b.alpha = b.enabled ? 1 : 0.45;
 }
 - (UIButton *)button:(NSString *)t action:(SEL)a primary:(BOOL)primary {
   UIButtonConfiguration *c = ButtonConfig(t, NSDirectionalEdgeInsetsMake(11, 22, 11, 22), 12);
   c.background.backgroundColor = primary ? C_ACCENT : C_CHIP;
-  SetButtonTitleStyle(c, [UIFont systemFontOfSize:17 weight:UIFontWeightBold], primary ? C_ON_ACCENT : C_TEXT);
+  UIColor *color = primary ? C_ON_ACCENT : C_TEXT;
+  SetButtonTitleStyle(c, t, [UIFont systemFontOfSize:17 weight:UIFontWeightBold], color);
   UIButton *b = [UIButton buttonWithConfiguration:c primaryAction:nil];
+  b.tintColor = color;
   b.automaticallyUpdatesConfiguration = NO;
   [b addTarget:self action:a forControlEvents:UIControlEventTouchUpInside]; return b;
 }
 // A configured button's title lives in its configuration.
 static void SetTitle(UIButton *b, NSString *t) {
-  UIButtonConfiguration *c = b.configuration; c.title = t; b.configuration = c;
+  UIButtonConfiguration *c = b.configuration;
+  NSDictionary *attributes = [c.attributedTitle attributesAtIndex:0 effectiveRange:nil];
+  c.attributedTitle = [[NSAttributedString alloc] initWithString:t attributes:attributes];
+  b.configuration = c;
 }
 
 #pragma mark - layout
