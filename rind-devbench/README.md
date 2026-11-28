@@ -41,7 +41,12 @@ CAPTURE --out DIR` splits a collector capture into one JSON per run.
 - iOS (Mac, Xcode, rustup 1.98.1 + aarch64-apple-ios): `ios/build-ipa.sh PORT [HOST]`
   (e.g. 9101 for one iPad, 9102 for another; HOST is the collector's LAN address, left out = results stay on the iPad)
   → `ios/out/RindBenchAll-v15.0-<port>.ipa`, **unsigned**.
-  Bundle id `ai.kixel.rindbench`, the same as the Android package. It replaced `io.github.steelhead99x.rindbench(.all)`, so a build from before the kixel.ai rebrand installs beside it, not under it: delete the old app.
+  Bundle ID `ai.kixel.rindbench`, the same as the Android package. Earlier builds
+  use separate app IDs and can stay installed beside the new one. Before
+  uninstalling an old build, use Files on iOS to copy its saved `.json` and
+  `.jsonl` reports out of the app's folder. On Android, copy the old package's
+  reports from `/sdcard/Android/data/io.github.steelhead99x.rindbench/files/` with
+  `adb pull`. The new app starts with its own results directory.
   OpenSSL is vendored (built from source) by default; `CARGO_FEATURES= ios/build-ipa.sh` leaves it out.
 - Android (Linux, SDK build-tools 35 + platform 35 + NDK, JDK 17+, rustup aarch64-linux-android):
   `JAVA_HOME=… CARGO_FEATURES="--features __bench_openssl" [COLLECTOR_HOST=<LAN address>] android/build-apk.sh` →
