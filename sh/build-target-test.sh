@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Usage: sh/build-target-test.sh
 #
-# Runs rind/build.rs, compiled on its own, as Cargo would for 32-bit ARM
-# targets, and checks the backend and Poly1305 multiply cfgs it prints. A
+# Runs rind/build.rs, compiled on its own, with Cargo's target variables,
+# and checks the backend and Poly1305 multiply cfgs it prints. A
 # custom target specification is classified by its `llvm-target`, never by
 # its file name: the same ARMv5TE specification keeps `rind_mul16_top` under
 # any name, and one with no `llvm-target` fails closed to it. Needs `rustc`.
@@ -34,12 +34,14 @@ status=0
 check() {
     local name=$1 target=$2 os=$3 out
     shift 3
-    out=$(env -u CARGO_ENCODED_RUSTFLAGS -u CARGO_CFG_RIND_MUL16 -u CARGO_CFG_RIND_MUL16_TOP \
+    out=$(env -u CARGO_CFG_RIND_MUL16 -u CARGO_CFG_RIND_MUL16_TOP \
         -u CARGO_CFG_RIND_MUL16_SOFT -u CARGO_CFG_RIND_PORTABLE -u CARGO_CFG_RIND_LIMB \
         TARGET="$target" RUST_TARGET_PATH="$tmp/specs" CARGO_MANIFEST_DIR="$tmp/pkg" \
-        CARGO_CFG_TARGET_OS="$os" CARGO_CFG_TARGET_ENV="" CARGO_CFG_TARGET_ARCH=arm \
-        CARGO_CFG_TARGET_ENDIAN=little CARGO_CFG_TARGET_POINTER_WIDTH=32 \
-        CARGO_CFG_TARGET_FEATURE="" "$tmp/build")
+        CARGO_CFG_TARGET_OS="$os" CARGO_CFG_TARGET_ENV="" \
+        CARGO_CFG_TARGET_ARCH="${test_arch:-arm}" \
+        CARGO_CFG_TARGET_ENDIAN=little CARGO_CFG_TARGET_POINTER_WIDTH="${test_width:-32}" \
+        CARGO_CFG_TARGET_FEATURE="${test_features:-}" \
+        CARGO_ENCODED_RUSTFLAGS="${test_flags:-}" "$tmp/build")
     local want
     for want in "$@"; do
         if [[ $want == '!'* ]]; then
@@ -71,5 +73,16 @@ check "thumbv7m spec armv7a-mcu.json" armv7a-mcu none rind_mul16 '!rind_mul16_to
 # No `llvm-target`: the core is unknown, so the top bit stays set.
 spec armv7-nollvm ""
 check "spec without llvm-target" armv7-nollvm none rind_mul16 rind_mul16_top 'rind_backend="portable"'
+
+# Poly1305 switches limbs when the 64-bit target has no multiply instruction;
+# other arithmetic keeps its native limbs. Zmmul is often absent from
+# CARGO_CFG_TARGET_FEATURE, so test it through rustflags.
+test_arch=riscv64 test_width=64 test_features=m test_flags=$'-C\x1ftarget-feature=-m' \
+    check "RV64 with M disabled" riscv64imac-unknown-none-elf none \
+    rind_mul16 rind_mul16_soft '!rind_limb="32"' 'rind_limb="64"'
+test_arch=riscv64 test_width=64 test_features=m \
+    check "RV64 with M" riscv64imac-unknown-none-elf none '!rind_mul16' '!rind_mul16_soft'
+test_arch=riscv64 test_width=64 test_flags=$'-C\x1ftarget-feature=-m,+zmmul' \
+    check "RV64 with Zmmul" riscv64imac-unknown-none-elf none '!rind_mul16' '!rind_mul16_soft'
 
 exit "$status"

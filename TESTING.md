@@ -436,14 +436,15 @@ public division. Set `CARGO_PROFILE_RELEASE_LTO=fat` and
 `opt-level = "z"`, where LLVM divides by a constant with `div`, which only
 BINSEC's division checks tell apart from a public division.
 `admin/ct-vartime` also scans `thumbv6m-none-eabi`, `thumbv7m-none-eabi`, and
-`thumbv8m.base-none-eabi`, plus `armv5te-unknown-linux-gnueabi` and
-`riscv32i-unknown-none-elf`, the cores whose `build.rs` sets `rind_mul16`,
+`thumbv8m.base-none-eabi`, plus `armv5te-unknown-linux-gnueabi`,
+`riscv32i-unknown-none-elf`, and `riscv64imac-unknown-none-elf` built with
+M and Zmmul off, the cores whose `build.rs` sets `rind_mul16`,
 and armv7's portable build with that cfg forced, and fails on a
 variable-time multiply in Poly1305's `blocks` and `finish`, which build
 each product from 16-bit halves there. On ARMv5TE it also fails unless every
 `mul` and `mla` in those functions takes both operands from `orr #0x80000000`,
-and on RV32I it fails on a conditional branch there whose condition is a
-masked bit. `armv4t`, `thumbv4t`, `thumbv5te`,
+and on RISC-V without M it fails on a conditional branch there whose
+condition is a masked bit. `armv4t`, `thumbv4t`, `thumbv5te`,
 and `riscv32e` take the same cfgs and have no prebuilt standard library in
 this toolchain, so they are not separate rows. ctgrind runs
 `poly1305_32`'s tests on the widening multiply; it does not pass

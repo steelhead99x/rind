@@ -47,10 +47,10 @@ fn planted_multiply_by_five(secret: u32) -> u32 {
     core::hint::black_box(secret).wrapping_mul(factor)
 }
 
-/// The branch RV32I can emit for a select on a secret bit. The RV32I scan
+/// The branch base RISC-V can emit for a select on a secret bit. The scan
 /// must reject it. The instructions are written out so the compiler cannot
 /// turn them back into a shift.
-#[cfg(target_arch = "riscv32")]
+#[cfg(any(target_arch = "riscv32", target_arch = "riscv64"))]
 #[inline(never)]
 fn planted_secret_branch(mut secret: u32, addend: u32) -> u32 {
     let mut bit = 0u32;
@@ -85,7 +85,7 @@ static LONG_MULTIPLY: fn(u32, u32) -> u64 = planted_long_multiply;
 static RAW_HALF_MULTIPLY: fn(u32, u32) -> u32 = planted_raw_half_multiply;
 #[used]
 static MULTIPLY_BY_FIVE: fn(u32) -> u32 = planted_multiply_by_five;
-#[cfg(target_arch = "riscv32")]
+#[cfg(any(target_arch = "riscv32", target_arch = "riscv64"))]
 #[used]
 static SECRET_BRANCH: fn(u32, u32) -> u32 = planted_secret_branch;
 

@@ -498,7 +498,9 @@ fn load_mldsa_pkcs8(id: &AlgorithmID, pkcs8: &[u8]) -> Result<Key, rind::Error> 
 /// successful parse is `WrongAlgorithm`, as `parse_rfc5208_private_key` does
 /// (aws-lc-rs 1.19.0 `aws-lc-rs/src/evp_pkey.rs`). `EVP_parse_private_key`
 /// reads one value (`crypto/evp_extra/evp_asn1.c`), so bytes after the
-/// document are ignored.
+/// document are ignored. README.md lists where this still differs from
+/// aws-lc, such as an EC key whose public point is not its scalar's on a
+/// curve rind cannot back.
 fn parses_as_other_private_key(pkcs8: &[u8]) -> bool {
     let Some(oid) = der::pkcs8_algorithm(pkcs8) else {
         return false;

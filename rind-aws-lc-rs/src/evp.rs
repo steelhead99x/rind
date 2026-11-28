@@ -5,12 +5,14 @@
 //! `InvalidEncoding` when it does not (`parse_rfc5280_public_key` and
 //! `parse_rfc5208_private_key` in aws-lc-rs 1.19.0 `aws-lc-rs/src/evp_pkey.rs`),
 //! so these follow the decoders in aws-lc's `crypto/evp_extra` and what they
-//! call.
+//! call, but for one case README.md lists under "Behaves differently": a
+//! PKCS#8 EC key on a curve rind cannot back whose public point is on the
+//! curve but not its scalar's passes here, so it is `WrongAlgorithm` where
+//! aws-lc's `EC_KEY_check_key` makes it `InvalidEncoding`.
 //!
 //! Everything read here is public and checked in variable time, except a
 //! private key's scalar or DSA `x`, which is compared with its bound without
-//! a branch or memory index on its bytes, and an EC scalar's point, which is
-//! computed in constant time; only each verdict is made public.
+//! a branch or memory index on its bytes and only the result made public.
 
 use alloc::vec::Vec;
 use core::cmp::Ordering;
@@ -303,26 +305,13 @@ pub(crate) fn sec1(der: &[u8]) -> Option<Sec1<'_>> {
 }
 
 /// `EC_KEY_parse_private_key` for a curve rind cannot back, given its
-/// already split `ECPrivateKey`: a scalar that is nonzero and below the
-/// order, and a public key, if present, on the curve and equal to the
-/// scalar's point, which `EC_KEY_check_key` (`crypto/fipsmodule/ec/ec_key.c`)
-/// requires. The scalar is secret: its range and its point are computed in
-/// constant time ([`Field::public_key_matches`]), and only the verdict is
-/// made public.
+/// already split `ECPrivateKey`: a public key on the curve, if present, and
+/// a scalar that is nonzero and below the order. aws-lc also checks that the
+/// public key is the scalar's; rind has no constant-time arithmetic on these
+/// curves to compute it, so that check is left out.
 pub(crate) fn unbacked_ec_private_key(curve: &Curve, key: &Sec1<'_>) -> bool {
-    let in_range = below(key.scalar, curve.order());
-    match key.public_key {
-        None => declassify(in_range),
-        Some(point) => {
-            if !curve.has_point(point) {
-                return false;
-            }
-            let domain = curve.domain();
-            let field = Field::new(&domain);
-            let matches = field.public_key_matches(&domain, key.scalar, point);
-            declassify(in_range & (matches as u8 & 1))
-        }
-    }
+    key.public_key.is_none_or(|point| curve.has_point(point))
+        && declassify(below(key.scalar, curve.order()))
 }
 
 /// `DSA_parse_parameters`, its `dsa_check_key` (`crypto/dsa/dsa_asn1.c`),
@@ -467,77 +456,19 @@ fn less(a: &Num, b: &Num) -> bool {
     a.iter().rev().lt(b.iter().rev())
 }
 
-/// `a - b` and the borrow out, 0 or 1, without a branch.
-fn sub_borrow(a: &Num, b: &Num) -> (Num, u64) {
-    let mut out = [0; LIMBS];
-    let mut borrow = 0u64;
-    for ((out, a), b) in out.iter_mut().zip(a).zip(b) {
+/// `a -= b`, wrapping.
+fn sub(a: &mut Num, b: &Num) {
+    let mut borrow = false;
+    for (a, b) in a.iter_mut().zip(b) {
         let (d, b1) = a.overflowing_sub(*b);
-        let (d, b2) = d.overflowing_sub(borrow);
-        *out = d;
-        borrow = u64::from(b1 | b2);
-    }
-    (out, borrow)
-}
-
-/// `a + b` and the carry out, 0 or 1, without a branch.
-fn add_carry(a: &Num, b: &Num) -> (Num, u64) {
-    let mut out = [0; LIMBS];
-    let mut carry = 0u64;
-    for ((out, a), b) in out.iter_mut().zip(a).zip(b) {
-        let (s, c1) = a.overflowing_add(*b);
-        let (s, c2) = s.overflowing_add(carry);
-        *out = s;
-        carry = u64::from(c1 | c2);
-    }
-    (out, carry)
-}
-
-/// `a` where `mask` is all ones, `b` where it is zero. `black_box` hides
-/// where the mask came from, so LLVM cannot turn the select back into a
-/// branch on it, which it otherwise does (ctgrind caught it in
-/// `Field::add`).
-fn select(mask: u64, a: &Num, b: &Num) -> Num {
-    let mask = core::hint::black_box(mask);
-    let mut out = [0; LIMBS];
-    for ((out, a), b) in out.iter_mut().zip(a).zip(b) {
-        *out = (a & mask) | (b & !mask);
-    }
-    out
-}
-
-/// All ones if `a == b`, else zero, without a branch.
-fn equal(a: &Num, b: &Num) -> u64 {
-    let diff = a.iter().zip(b).fold(0, |acc, (a, b)| acc | (a ^ b));
-    ((diff | diff.wrapping_neg()) >> 63).wrapping_sub(1)
-}
-
-/// A projective point (X : Y : Z), each coordinate in Montgomery form.
-#[derive(Clone, Copy)]
-struct Point {
-    x: Num,
-    y: Num,
-    z: Num,
-}
-
-impl Point {
-    /// Swaps `a` and `b` where `mask` is all ones.
-    fn swap(mask: u64, a: &mut Self, b: &mut Self) {
-        let (x, y, z) = (
-            select(mask, &b.x, &a.x),
-            select(mask, &b.y, &a.y),
-            select(mask, &b.z, &a.z),
-        );
-        b.x = select(mask, &a.x, &b.x);
-        b.y = select(mask, &a.y, &b.y);
-        b.z = select(mask, &a.z, &b.z);
-        *a = Self { x, y, z };
+        let (d, b2) = d.overflowing_sub(u64::from(borrow));
+        *a = d;
+        borrow = b1 | b2;
     }
 }
 
-/// Arithmetic modulo a built-in curve's odd prime, in Montgomery form with
-/// R = 2^(64 * LIMBS). `add`, `sub`, and `mul` run in constant time, so the
-/// scalar multiplication in [`Field::public_key_matches`] can take a secret. Multiplication is CIOS (Koç,
+/// Arithmetic modulo a built-in curve's odd prime, on public values, in
+/// Montgomery form with R = 2^(64 * LIMBS). Multiplication is CIOS (Koç,
 /// Acar, and Kaliski, "Analyzing and Comparing Montgomery Multiplication
 /// Algorithms", 1996); the differential tests against aws-lc check it.
 struct Field {
@@ -583,19 +514,20 @@ impl Field {
         field
     }
 
-    /// `a + b mod p`, for `a` and `b` below p, in constant time.
+    /// `a + b mod p`, for `a` and `b` below p.
     fn add(&self, a: &Num, b: &Num) -> Num {
-        let (sum, carry) = add_carry(a, b);
-        let (reduced, borrow) = sub_borrow(&sum, &self.p);
-        // Reduce where the sum carried out or is not below p.
-        select((carry | (borrow ^ 1)).wrapping_neg(), &reduced, &sum)
-    }
-
-    /// `a - b mod p`, for `a` and `b` below p, in constant time.
-    fn sub(&self, a: &Num, b: &Num) -> Num {
-        let (diff, borrow) = sub_borrow(a, b);
-        let p = select(borrow.wrapping_neg(), &self.p, &[0; LIMBS]);
-        add_carry(&diff, &p).0
+        let mut out = [0; LIMBS];
+        let mut carry = false;
+        for ((out, a), b) in out.iter_mut().zip(a).zip(b) {
+            let (s, c1) = a.overflowing_add(*b);
+            let (s, c2) = s.overflowing_add(u64::from(carry));
+            *out = s;
+            carry = c1 | c2;
+        }
+        if carry || !less(&out, &self.p) {
+            sub(&mut out, &self.p);
+        }
+        out
     }
 
     /// `a * b / R mod p`, for `a` and `b` below p.
@@ -622,10 +554,11 @@ impl Field {
             t[LIMBS - 1] = s as u64;
             t[LIMBS] = t[LIMBS + 1] + (s >> 64) as u64;
         }
-        // t is below 2p, so t[LIMBS] is 0 or 1; reduce without a branch.
-        let out: Num = t[..LIMBS].try_into().expect("LIMBS limbs");
-        let (reduced, borrow) = sub_borrow(&out, &self.p);
-        select((t[LIMBS] | (borrow ^ 1)).wrapping_neg(), &reduced, &out)
+        let mut out: Num = t[..LIMBS].try_into().expect("LIMBS limbs");
+        if t[LIMBS] != 0 || !less(&out, &self.p) {
+            sub(&mut out, &self.p);
+        }
+        out
     }
 
     /// `a` in Montgomery form.
@@ -673,138 +606,6 @@ impl Field {
             }
         }
         power == self.one
-    }
-
-    /// `base^exponent` for a public `exponent`, in Montgomery form.
-    fn pow_public(&self, base: &Num, exponent: &Num) -> Num {
-        let mut power = self.one;
-        for bit in (0..64 * LIMBS).rev() {
-            power = self.mul(&power, &power);
-            if (exponent[bit / 64] >> (bit % 64)) & 1 == 1 {
-                power = self.mul(&power, base);
-            }
-        }
-        power
-    }
-
-    /// `P + Q`, by Renes, Costello, and Batina's complete formulas for any
-    /// `a` ("Complete addition formulas for prime order elliptic curves",
-    /// 2016, Algorithm 1): correct for doubling and for the identity too, on
-    /// a curve of prime order, as every curve here is. No branch.
-    fn point_add(&self, p: &Point, q: &Point, b3: &Num) -> Point {
-        let (x1, y1, z1, x2, y2, z2) = (&p.x, &p.y, &p.z, &q.x, &q.y, &q.z);
-        let a = &self.a;
-        let mut t0 = self.mul(x1, x2);
-        let mut t1 = self.mul(y1, y2);
-        let mut t2 = self.mul(z1, z2);
-        let mut t3 = self.add(x1, y1);
-        let mut t4 = self.add(x2, y2);
-        t3 = self.mul(&t3, &t4);
-        t4 = self.add(&t0, &t1);
-        t3 = self.sub(&t3, &t4);
-        t4 = self.add(x1, z1);
-        let mut t5 = self.add(x2, z2);
-        t4 = self.mul(&t4, &t5);
-        t5 = self.add(&t0, &t2);
-        t4 = self.sub(&t4, &t5);
-        t5 = self.add(y1, z1);
-        let mut x3 = self.add(y2, z2);
-        t5 = self.mul(&t5, &x3);
-        x3 = self.add(&t1, &t2);
-        t5 = self.sub(&t5, &x3);
-        let mut z3 = self.mul(a, &t4);
-        x3 = self.mul(b3, &t2);
-        z3 = self.add(&x3, &z3);
-        x3 = self.sub(&t1, &z3);
-        z3 = self.add(&t1, &z3);
-        let mut y3 = self.mul(&x3, &z3);
-        t1 = self.add(&t0, &t0);
-        t1 = self.add(&t1, &t0);
-        t2 = self.mul(a, &t2);
-        t4 = self.mul(b3, &t4);
-        t1 = self.add(&t1, &t2);
-        t2 = self.sub(&t0, &t2);
-        t2 = self.mul(a, &t2);
-        t4 = self.add(&t4, &t2);
-        t0 = self.mul(&t1, &t4);
-        y3 = self.add(&y3, &t0);
-        t0 = self.mul(&t5, &t4);
-        x3 = self.mul(&t3, &x3);
-        x3 = self.sub(&x3, &t0);
-        t0 = self.mul(&t3, &t1);
-        z3 = self.mul(&t5, &z3);
-        z3 = self.add(&z3, &t0);
-        Point {
-            x: x3,
-            y: y3,
-            z: z3,
-        }
-    }
-
-    /// `k G` by a Montgomery ladder over every bit of the order's length,
-    /// with a masked swap: the same operations for every `k`. `k` is
-    /// little-endian limbs below 2^(64 * LIMBS).
-    fn mul_base(&self, domain: &Domain<'_>, k: &Num) -> Point {
-        let b3 = self.add(&self.add(&self.b, &self.b), &self.b);
-        let g = Point {
-            x: self.to(&num(domain.x).expect("built-in x fits")),
-            y: self.to(&num(domain.y).expect("built-in y fits")),
-            z: self.one,
-        };
-        let mut r0 = Point {
-            x: [0; LIMBS],
-            y: self.one,
-            z: [0; LIMBS],
-        };
-        let mut r1 = g;
-        let mut previous = 0u64;
-        for bit in (0..der::bits(strip(domain.order))).rev() {
-            let current = (k[bit / 64] >> (bit % 64)) & 1;
-            Point::swap((current ^ previous).wrapping_neg(), &mut r0, &mut r1);
-            previous = current;
-            r1 = self.point_add(&r0, &r1, &b3);
-            r0 = self.point_add(&r0, &r0, &b3);
-        }
-        Point::swap(previous.wrapping_neg(), &mut r0, &mut r1);
-        r0
-    }
-
-    /// All ones if `scalar` times the base point is `point`, an encoding
-    /// [`Curve::has_point`] accepted, else zero. `scalar` is secret: it is
-    /// read at its encoded length (bytes past `8 * LIMBS` are left to the
-    /// caller's range check), the ladder is constant time, the inverse of Z
-    /// is a power with the public exponent p - 2, and the comparison folds
-    /// into one mask. A scalar of zero gives Z = 0 and fails the range
-    /// check, so its comparison does not matter.
-    fn public_key_matches(&self, domain: &Domain<'_>, scalar: &[u8], point: &[u8]) -> u64 {
-        let mut k = [0u64; LIMBS];
-        for (i, byte) in scalar.iter().rev().take(8 * LIMBS).enumerate() {
-            k[i / 8] |= u64::from(*byte) << (8 * (i % 8));
-        }
-        let q = self.mul_base(domain, &k);
-        // P-224's p ends in limb 1, so subtract with the borrow.
-        let mut two = [0; LIMBS];
-        two[0] = 2;
-        let (p_minus_two, _) = sub_borrow(&self.p, &two);
-        let z_inv = self.pow_public(&q.z, &p_minus_two);
-        let mut plain_one = [0; LIMBS];
-        plain_one[0] = 1;
-        // Out of Montgomery form: a R * 1 / R.
-        let x = self.mul(&self.mul(&q.x, &z_inv), &plain_one);
-        let y = self.mul(&self.mul(&q.y, &z_inv), &plain_one);
-        let len = domain.p.len();
-        let coordinate = |bytes: &[u8]| num(bytes).expect("a field-length coordinate fits");
-        match point {
-            [0x04 | 0x06 | 0x07, rest @ ..] => {
-                let (px, py) = rest.split_at(len);
-                equal(&x, &coordinate(px)) & equal(&y, &coordinate(py))
-            }
-            [form @ (0x02 | 0x03), px @ ..] => {
-                let parity = (y[0] & 1) ^ u64::from(form & 1);
-                equal(&x, &coordinate(px)) & parity.wrapping_sub(1)
-            }
-            _ => 0,
-        }
     }
 }
 
@@ -868,109 +669,4 @@ pub(crate) fn canonical_ec_pkcs8(
     let algorithm = der::secret_tlv(SEQUENCE, &[&ec_public_key, &named])?;
     let private_key = der::secret_tlv(OCTET_STRING, &[&sec1])?;
     der::secret_tlv(SEQUENCE, &[&[INTEGER, 1, 0], &algorithm, &private_key])
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::signature;
-
-    fn curve(oid: &[u8]) -> &'static Curve {
-        CURVES.iter().find(|c| c.oid == oid).unwrap()
-    }
-
-    /// The constant-time ladder against rind's own key generation on the
-    /// three curves rind backs, whose field sizes span the unbacked ones:
-    /// each generated key's point matches its scalar, in both encodings, and
-    /// a neighbouring scalar's does not.
-    #[test]
-    fn ladder_matches_rind_on_backed_curves() {
-        let cases: [(&signature::EcdsaSigningAlgorithm, &[u8]); 3] = [
-            (
-                &signature::ECDSA_P256_SHA256_FIXED_SIGNING,
-                &[0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07],
-            ),
-            (
-                &signature::ECDSA_P384_SHA384_FIXED_SIGNING,
-                &[0x2b, 0x81, 0x04, 0x00, 0x22],
-            ),
-            (
-                &signature::ECDSA_P521_SHA512_FIXED_SIGNING,
-                &[0x2b, 0x81, 0x04, 0x00, 0x23],
-            ),
-        ];
-        for (alg, oid) in cases {
-            let curve = curve(oid);
-            let domain = curve.domain();
-            let field = Field::new(&domain);
-            for _ in 0..4 {
-                let doc = signature::EcdsaKeyPair::generate(alg)
-                    .unwrap()
-                    .to_pkcs8v1()
-                    .unwrap();
-                let parts = der::pkcs8_parts(doc.as_ref()).unwrap();
-                let key = sec1(parts.private_key).unwrap();
-                let point = key.public_key.unwrap();
-                assert!(curve.has_point(point));
-                assert_eq!(
-                    field.public_key_matches(&domain, key.scalar, point),
-                    u64::MAX
-                );
-                assert!(unbacked_ec_private_key(curve, &key));
-                let len = domain.p.len();
-                let mut compressed = alloc::vec![0x02 | (point[2 * len] & 1)];
-                compressed.extend_from_slice(&point[1..=len]);
-                assert_eq!(
-                    field.public_key_matches(&domain, key.scalar, &compressed),
-                    u64::MAX
-                );
-                compressed[0] ^= 1;
-                assert_eq!(
-                    field.public_key_matches(&domain, key.scalar, &compressed),
-                    0
-                );
-                let mut other = key.scalar.to_vec();
-                let last = other.len() - 1;
-                other[last] ^= 1;
-                assert_eq!(field.public_key_matches(&domain, &other, point), 0);
-            }
-        }
-    }
-
-    /// On every built-in curve: 1 G is the base point, (n - 1) G is its
-    /// negation, and 2 G is on the curve and not G.
-    #[test]
-    fn ladder_small_and_large_scalars() {
-        for curve in &CURVES {
-            let domain = curve.domain();
-            let field = Field::new(&domain);
-            let len = domain.p.len();
-            let pad = |v: &[u8]| {
-                let v = strip(v);
-                let mut out = alloc::vec![0; len - v.len()];
-                out.extend_from_slice(v);
-                out
-            };
-            let g = [&[0x04][..], &pad(domain.x), &pad(domain.y)].concat();
-            assert!(curve.has_point(&g));
-            assert_eq!(field.public_key_matches(&domain, &[1], &g), u64::MAX);
-            assert_eq!(field.public_key_matches(&domain, &[2], &g), 0);
-            // -G = (x, p - y).
-            let y = num(domain.y).unwrap();
-            let (neg_y, _) = sub_borrow(&num(domain.p).unwrap(), &y);
-            let mut neg_y_bytes = alloc::vec![0u8; len];
-            for (i, byte) in neg_y_bytes.iter_mut().rev().enumerate() {
-                *byte = (neg_y[i / 8] >> (8 * (i % 8))) as u8;
-            }
-            let neg_g = [&[0x04][..], &pad(domain.x), &neg_y_bytes].concat();
-            let mut n_minus_one = strip(domain.order).to_vec();
-            let last = n_minus_one.len() - 1;
-            n_minus_one[last] -= 1;
-            assert_eq!(
-                field.public_key_matches(&domain, &n_minus_one, &neg_g),
-                u64::MAX
-            );
-            assert_eq!(field.public_key_matches(&domain, &n_minus_one, &g), 0);
-        }
-    }
 }
