@@ -77,29 +77,53 @@ final class BenchView extends LinearLayout {
     private final boolean restored;
     /** Between the activity's onStart and onStop. */
     private boolean onScreen = true;
-    /** A device runner's pending autostart, which leaving the screen or the Bench tab cancels. */
-    private Runnable autostart;
-    /** A runner launch with `autostart` not yet scheduled: each fresh launch sets it, and scheduling consumes it. */
-    private boolean launchPending;
     /**
-     * The pending launch's `libraries` and `sections` extras as it named them, null for one it doesn't
-     * name: its autostart passes them to the native start unchanged, so a name the picker lacks (as after
-     * a list that failed in part) still reaches the library's own check.
+     * A device runner's launch (an intent with `autostart`, on a runner build) as it arrived: everything its
+     * run takes, fixed then, so nothing that arrives later changes it.
      */
-    private List<String> launchLibs, launchSecs;
-    /** The pending launch left out `host`, so its autostart probes the collector afresh (a blank one keeps it). */
-    private boolean launchNoHost;
-    /** The pending launch's preset as it arrived: Full only when it asked for `full`. */
-    private boolean launchFull;
+    private static final class Launch {
+        /** The libraries and groups it names, or null where it names none: the list's defaults. */
+        final List<String> libs, secs;
+        final boolean full;
+        /**
+         * Its collector: the `host` (and `port`) it gives; with no `host`, the USB or built-in collector,
+         * probed afresh; a blank or unusable `host` keeps the collector as it is (README).
+         */
+        final String host;
+        final int port;
+        final boolean keepCollector;
+
+        Launch(Intent it) {
+            libs = it.hasExtra("libraries") ? new ArrayList<>(csv(it.getStringExtra("libraries"))) : null;
+            secs = it.hasExtra("sections") ? new ArrayList<>(csv(it.getStringExtra("sections"))) : null;
+            full = "full".equals(it.getStringExtra("preset"));
+            String h = it.getStringExtra("host");
+            if (h != null) h = h.trim();
+            int p = it.getIntExtra("port", Collector.PORT);
+            boolean usable = h != null && !h.isEmpty() && p > 0 && p <= 65535;
+            host = usable ? h : null;
+            port = usable ? p : Collector.PORT;
+            keepCollector = !usable && it.hasExtra("host");
+        }
+    }
+
+    /** Whether an intent is a device runner's launch: `autostart`, on a runner build. */
+    private static boolean isRunnerLaunch(Intent it) {
+        return Collector.RUNNER && it != null && it.getBooleanExtra("autostart", false);
+    }
+
+    /**
+     * The one launch waiting for its run, from its arrival until it starts or gets its started:false
+     * outcome; a newer launch replaces it whole. {@link #autostart} is its run, once queued.
+     */
+    private Launch pending;
+    private Runnable autostart;
     /** Whether the Bench tab is the one shown, as MainActivity's tab selection sets it. */
     private boolean tabShown = true;
     /** Set once the list of tests has loaded, so a launch before then waits for it. */
     private boolean loadedOnce;
-    /**
-     * Launches that arrived while the list loaded, in order, each with whether it sets the whole
-     * selection (a runner's) or only what it names; the loaded list then takes them over the first's.
-     */
-    private final List<Object[]> laterLaunches = new ArrayList<>();
+    /** The intent whose `libraries` and `sections` the list's first load preselects: the latest before it loads. */
+    private Intent pickIntent;
 
     /**
      * `restored`: the activity is being recreated from saved state, after a
@@ -113,8 +137,8 @@ final class BenchView extends LinearLayout {
         this.host = host;
         this.restored = restored;
         // A restored activity gets its old intent again: only a fresh launch asks for a run.
-        launchPending = Collector.RUNNER && !restored && intent != null && intent.getBooleanExtra("autostart", false);
-        if (launchPending) setLaunchNames(intent);
+        if (!restored && isRunnerLaunch(intent)) pending = new Launch(intent);
+        else pickIntent = intent;
         setBackgroundColor(Theme.surface);
         setContentDescription("Bench page");
         int s2 = Theme.dpi(host, 8), s4 = Theme.dpi(host, 16);
@@ -260,7 +284,7 @@ final class BenchView extends LinearLayout {
                 keysDir = sharedKeysDir;
             }
             String cat = Native.catalog();
-            ui.post(() -> loaded(cat, intent));
+            ui.post(() -> loaded(cat));
         }, "devbench-catalog").start();
     }
 
@@ -322,43 +346,36 @@ final class BenchView extends LinearLayout {
         }
     }
 
+    /**
+     * A launch that isn't a runner's: its options preselect what a run by hand takes. The launcher is
+     * exported, so any app can send these extras; only a device-runner build (build-apk.sh with
+     * DEVICE_RUNNER=1) takes a collector from them. A runner's launch carries its own (`Launch`).
+     */
     void applyIntent(Intent it) {
-        if (it == null) return;
-        // The launcher is exported, so any app can send these extras. Only a
-        // device-runner build (build-apk.sh with DEVICE_RUNNER=1) takes a collector
-        // or autostart from them; the other extras only preselect the picker.
         // As the preset buttons, nothing changes while a run is going: its collector was fixed at Start.
-        if (running) return;
+        if (it == null || running || isRunnerLaunch(it)) return;
         // A host that isn't a non-blank string, or a port out of range, leaves the collector as it is.
         String newHost = Collector.RUNNER ? it.getStringExtra("host") : null;
         if (newHost != null) newHost = newHost.trim();
         int newPort = it.getIntExtra("port", Collector.PORT);
-        if (newHost != null && !newHost.isEmpty() && newPort > 0 && newPort <= 65535) {
-            boolean changed = !newHost.equals(runnerHost) || newPort != runnerPort;
-            runnerHost = newHost;
-            runnerPort = newPort;
-            colHost = runnerHost;
-            colPort = runnerPort;
-            colHow = "set by adb";
-            // After setup, probe the new target; a probe of the old one still out is then ignored.
-            if (changed && probeGen > 0) findCollector();
-            // A launch waiting or queued keeps the collector it came with: one that isn't itself an
-            // autostart launch but moves the collector drops it, rather than sending its run elsewhere.
-            if (changed && !it.getBooleanExtra("autostart", false)) dropLaunch("a later launch changed its collector");
-        } else if (!it.hasExtra("host") && runnerHost != null && Collector.RUNNER && it.getBooleanExtra("autostart", false)) {
-            // A runner launch without `host` goes to the USB or built-in collector, not the last launch's.
-            runnerHost = null;
-            runnerPort = Collector.PORT;
-            colHost = null;
-            colHow = "";
-            if (probeGen > 0) findCollector();
-        }
-        // Each runner launch resolves its own preset, so one without `preset` runs Quick, as in a fresh
-        // process, rather than the Full a previous run picked.
+        if (newHost != null && !newHost.isEmpty() && newPort > 0 && newPort <= 65535)
+            useCollector(newHost, newPort);
         String preset = it.getStringExtra("preset");
-        boolean runnerLaunch = Collector.RUNNER && it.getBooleanExtra("autostart", false);
         if ("full".equals(preset)) { fullPreset = true; presetChanged(); }
-        else if ("quick".equals(preset) || runnerLaunch) { fullPreset = false; presetChanged(); }
+        else if ("quick".equals(preset)) { fullPreset = false; presetChanged(); }
+    }
+
+    /** Sends runs to {@code h}:{@code p}, or with a null {@code h} to the USB or built-in collector, and probes it if it changed. */
+    private boolean useCollector(String h, int p) {
+        boolean changed = h == null ? runnerHost != null : !h.equals(runnerHost) || p != runnerPort;
+        runnerHost = h;
+        runnerPort = h == null ? Collector.PORT : p;
+        colHost = h;
+        colPort = runnerPort;
+        colHow = h == null ? "" : "set by adb";
+        // After setup, probe the new target; a probe of the old one still out is then ignored.
+        if (changed && probeGen > 0) findCollector();
+        return changed;
     }
 
     /** What a status title says about the run: green for ready, running and done; error red for a failure; plain otherwise. */
@@ -401,20 +418,17 @@ final class BenchView extends LinearLayout {
         agreeChanged();
     }
 
-    private void loaded(String cat, Intent intent) {
+    private void loaded(String cat) {
+        Intent intent = pickIntent;
         try { catalog = new JSONObject(cat); catalogReady = true; }
         catch (Exception e) {
             catalog = null; catalogReady = false;
             detailsText = "Could not load test list.";
             agreeChanged();
             // A later launch is then scheduled, not left waiting on a list that won't come, and refused.
-            laterLaunches.clear();
             loadedOnce = true;
             // A runner's launch waiting on the list gets an outcome too, not silence.
-            if (launchPending) {
-                launchPending = false;
-                notStarted("the list of tests couldn't be read");
-            }
+            dropLaunch("the list of tests couldn't be read");
             return;
         }
         try {
@@ -458,11 +472,6 @@ final class BenchView extends LinearLayout {
         countsChanged();
         agreeChanged();
         JSONObject st = nativeStatus();
-        // The launches that came while the list loaded, over the first launch's selection, before
-        // anything can start a run from it; none changes the selection of a run that's going.
-        if (!st.optBoolean("running"))
-            for (Object[] l : laterLaunches) applySelection((Intent) l[0], (Boolean) l[1]);
-        laterLaunches.clear();
         loadedOnce = true;
         // The run lives in the native library, past this activity: after a recreation, such as a
         // dark mode switch, pick up a run that's going, or show the results of one that finished.
@@ -482,92 +491,85 @@ final class BenchView extends LinearLayout {
     }
 
     /**
-     * A runner launch that reaches the activity already open (onNewIntent): its options apply as
-     * applyIntent's do, and its autostart counts as a fresh one.
+     * A launch that reaches the activity already open (onNewIntent). A runner's replaces any launch still
+     * waiting, which gets its own outcome first; any other preselects as applyIntent does, and its
+     * `libraries` and `sections` set the picker once the list is up (before then, the list's first load
+     * takes the latest such launch's).
      */
     void newLaunch(Intent it) {
-        applyIntent(it);
-        boolean runnerLaunch = Collector.RUNNER && it != null && it.getBooleanExtra("autostart", false);
-        // The list's first load reads the first launch's selection; a later one sets it here once the
-        // list is up, or, while it loads, once it has (`loaded`), over the first launch's.
-        if (loadedOnce) {
-            if (!running) applySelection(it, runnerLaunch);
-        } else if (it != null && (runnerLaunch || it.hasExtra("libraries") || it.hasExtra("sections"))) {
-            // A runner's launch sets the whole selection, so what came before it no longer matters.
-            if (runnerLaunch) laterLaunches.clear();
-            laterLaunches.add(new Object[]{it, runnerLaunch});
-        }
-        if (runnerLaunch) {
-            // An earlier launch still waiting or queued is replaced: it gets its own outcome first.
+        if (it == null) return;
+        if (isRunnerLaunch(it)) {
             dropLaunch("a later launch replaced it");
-            launchPending = true;
-            setLaunchNames(it);
+            pending = new Launch(it);
             if (loadedOnce) scheduleAutostart();
+            return;
         }
+        applyIntent(it);
+        if (!it.hasExtra("libraries") && !it.hasExtra("sections")) return;
+        if (!loadedOnce) pickIntent = it;
+        else if (!running) applySelection(it);
+    }
+
+    /** A launch's `libraries` and `sections` extras, on the loaded list: it changes only what it names. */
+    private void applySelection(Intent it) {
+        boolean libs = it.hasExtra("libraries"), secs = it.hasExtra("sections");
+        showSelection(libs ? new ArrayList<>(csv(it.getStringExtra("libraries"))) : null,
+                secs ? new ArrayList<>(csv(it.getStringExtra("sections"))) : null, libs, secs);
     }
 
     /**
-     * A later launch's `libraries` and `sections` extras, on the loaded list. A runner's autostart
-     * launch sets both, as a first launch does, a missing extra meaning the default (every library,
-     * every group but the More ones), so it never runs the last launch's choice; any other launch
-     * changes only what it names, leaving the person's own choices.
+     * Sets the picker's switches: with {@code libs} (or {@code secs}) set, to the names it lists, or to the
+     * defaults when it lists none (every library; every group with rows but the More ones).
      */
-    private void applySelection(Intent it, boolean whole) {
-        if (it == null) return;
-        boolean libs = whole || it.hasExtra("libraries"), secs = whole || it.hasExtra("sections");
-        java.util.Set<String> wantLibs = csv(it.getStringExtra("libraries"));
-        java.util.Set<String> wantSecs = csv(it.getStringExtra("sections"));
+    private void showSelection(List<String> wantLibs, List<String> wantSecs, boolean libs, boolean secs) {
         if (libs)
             for (Map.Entry<String, CompoundButton> e : libSw.entrySet())
-                e.getValue().setChecked(wantLibs.isEmpty() || wantLibs.contains(e.getKey()));
+                e.getValue().setChecked(wantLibs == null || wantLibs.isEmpty() || wantLibs.contains(e.getKey()));
         if (secs)
             for (Map.Entry<String, CompoundButton> e : secSw.entrySet()) {
                 String s = e.getKey();
-                e.getValue().setChecked(e.getValue().isEnabled()
-                        && (wantSecs.isEmpty() ? !s.startsWith("More: ") : wantSecs.contains(s)));
+                e.getValue().setChecked(e.getValue().isEnabled() && (wantSecs == null || wantSecs.isEmpty()
+                        ? !s.startsWith("More: ") : wantSecs.contains(s)));
             }
         if (libs || secs) countsChanged();
     }
 
     /**
-     * Consumes a pending launch's autostart: one run, 3 s later, so a runner can capture the picker
-     * first (README). A launch that brings the app back reaches onNewIntent before onStart, so while
-     * the app is off screen the launch waits for onStart; onStop drops it. It is dropped, not kept
-     * for later, when a run is already going or the Bench tab isn't shown.
+     * Queues the pending launch's run, 3 s later, so a runner can capture the picker first (README). A
+     * launch that brings the app back reaches onNewIntent before onStart, so while the app is off screen
+     * it waits for onStart; onStop drops it. It is dropped, not kept for later, when a run is already going
+     * or the Bench tab isn't shown. Its run takes the launch as it arrived; the picker and preset show it.
      */
     private void scheduleAutostart() {
-        if (!launchPending || !onScreen) return;
-        launchPending = false;
-        cancelAutostart();
+        if (pending == null || autostart != null || !onScreen) return;
         if (running) {
-            notStarted("a run is going");
+            dropLaunch("a run is going");
             return;
         }
         if (!tabShown) {
-            notStarted("the Bench tab isn't shown");
+            dropLaunch("the Bench tab isn't shown");
             return;
         }
-        // The launch's own selection, kept as it arrived, with what it left out taken from the catalog's
-        // defaults rather than the picker: a later intent that only preselects (preset, libraries,
-        // sections), even one that came while the list loaded, can't change the queued run.
-        final List<String> libs = launchLibs != null && !launchLibs.isEmpty() ? launchLibs : defaultLibraries();
-        final List<String> secs = launchSecs != null && !launchSecs.isEmpty() ? launchSecs : defaultSections();
-        final boolean full = launchFull;
-        final boolean noHost = launchNoHost;
+        final Launch l = pending;
+        showSelection(l.libs, l.secs, true, true);
+        fullPreset = l.full;
+        presetChanged();
+        final List<String> libs = l.libs != null && !l.libs.isEmpty() ? l.libs : defaultLibraries();
+        final List<String> secs = l.secs != null && !l.secs.isEmpty() ? l.secs : defaultSections();
         autostart = new Runnable() {
             private boolean probed;
 
             @Override public void run() {
-                // A launch without `host` probes the collector afresh, as it may have changed since the
-                // last probe (as `adb reverse` turned on after a run over Wi-Fi), USB first. A blank `host`
-                // keeps the collector as it is (README), so it doesn't.
+                // Its collector, probed: a launch without `host` probes the USB or built-in one afresh, as it
+                // may have changed since (as `adb reverse` turned on after a run over Wi-Fi).
                 if (!probed) {
                     probed = true;
-                    if (noHost) findCollector();
+                    if (!l.keepCollector && !useCollector(l.host, l.port)) findCollector();
                 }
                 // Until the collector probe answers, the run's collector isn't known: wait for it, still queued.
                 if (probing) { ui.postDelayed(this, 250); return; }
                 autostart = null;
+                pending = null;
                 if (!onScreen || !tabShown || running) {
                     notStarted(running ? "a run is going" : "the app or the Bench tab was left");
                     return;
@@ -575,7 +577,7 @@ final class BenchView extends LinearLayout {
                 // A finished run's results stay until the library accepts this start, whose fresh status then
                 // replaces them; a launch dropped or refused leaves them shown and restorable.
                 agree.setChecked(true);
-                start(libs, secs, full);
+                start(libs, secs, l.full);
             }
         };
         ui.postDelayed(autostart, 3000);
@@ -775,14 +777,6 @@ final class BenchView extends LinearLayout {
         shareBtn.setAlpha(1f);
     }
 
-    /** Keeps a runner launch's `libraries` and `sections` extras for its autostart, as named. */
-    private void setLaunchNames(Intent it) {
-        launchNoHost = !it.hasExtra("host");
-        launchFull = "full".equals(it.getStringExtra("preset"));
-        launchLibs = it.hasExtra("libraries") ? new ArrayList<>(csv(it.getStringExtra("libraries"))) : null;
-        launchSecs = it.hasExtra("sections") ? new ArrayList<>(csv(it.getStringExtra("sections"))) : null;
-    }
-
     private void startTapped() {
         start(null, null, null);
     }
@@ -831,10 +825,9 @@ final class BenchView extends LinearLayout {
      * doesn't list. A run by hand passes nulls.
      */
     private void start(List<String> wantLibs, List<String> wantSecs, Boolean wantFull) {
-        // Any start, the person's or the runner's own, takes the place of a queued autostart. The
-        // autostart's own start clears it first, so one still queued here is replaced by hand: say so.
-        if (autostart != null) notStarted("a start by hand took its place");
-        cancelAutostart();
+        // A start by hand takes the place of a launch still waiting, which says so; the launch's own start
+        // has already taken it out of the slot.
+        dropLaunch("a start by hand took its place");
         if (running) return;
         if (!agree.isChecked() || !catalogReady) {
             notStarted(!catalogReady ? "the list of tests hasn't loaded" : "consent isn't given");
@@ -985,10 +978,10 @@ final class BenchView extends LinearLayout {
         }
     }
 
-    /** Drops a launch that is waiting or queued, logging its outcome; nothing when there is none. */
+    /** Drops the launch still waiting, queued or not, logging its outcome; nothing when there is none. */
     private void dropLaunch(String reason) {
-        boolean had = launchPending || autostart != null;
-        launchPending = false;
+        boolean had = pending != null;
+        pending = null;
         cancelAutostart();
         if (had) notStarted(reason);
     }
@@ -1052,6 +1045,12 @@ final class BenchView extends LinearLayout {
             renderResults(s.optJSONObject("results"));
         } catch (Exception e) {
             setBody("Status error.");
+        }
+        // A run that failed, as one whose thread panicked, says so rather than Done.
+        String err = s.optString("error", "");
+        if (!err.isEmpty()) {
+            setStatus("Run failed", Status.ERROR);
+            setBody(err);
         }
         host.getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         startBtn.setVisibility(VISIBLE);

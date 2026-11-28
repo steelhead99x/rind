@@ -618,6 +618,10 @@ static void SetTitle(UIButton *b, NSString *t) {
   } else if (running) {
     statusLbl.text = [NSString stringWithFormat:@"Running %@ of %@ · round %@ of %@", s[@"done"], s[@"total"], s[@"round"], s[@"rounds"]];
     currentLbl.text = [NSString stringWithFormat:@"%@\nerrors %@ · sent %@ lines (%@) · thermal %@", s[@"current"] ?: @"", s[@"errors"], s[@"lines"], s[@"sink"], thermal];
+  } else if ([s[@"error"] length]) {
+    // A run that failed, as one whose thread panicked, says so rather than Finished.
+    statusLbl.text = [NSString stringWithFormat:@"Run failed: %@", s[@"error"]];
+    currentLbl.text = @"";
   } else {
     statusLbl.text = [NSString stringWithFormat:@"%@ · %@ rows in %.0f s", [s[@"stopped"] boolValue] ? @"Stopped" : @"Finished", s[@"done"], [s[@"elapsed_s"] doubleValue]];
     currentLbl.text = [NSString stringWithFormat:@"errors %@ · sent %@ lines (%@) · thermal %@ · full timings saved on this device", s[@"errors"], s[@"lines"], s[@"sink"], thermal];
