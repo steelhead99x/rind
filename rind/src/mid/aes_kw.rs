@@ -620,8 +620,9 @@ mod tests {
         assert!(AesKek::new(&AES_256, &[0; 16]).is_err());
     }
 
-    // armv7's AES-KW on the crypto extension, which valgrind hides, for each
-    // key size, with a secret KEK and key, for `admin/ct-qemu`.
+    // armv7's AES-KW, on the crypto extension under qemu's `max` CPU and on
+    // NEON under the Cortex-A15, which valgrind hides, for each key size,
+    // with a secret KEK and key, for `admin/ct-qemu`.
     #[cfg(rind_backend = "arm")]
     #[test]
     #[ignore = "admin/ct-qemu runs it under qemu-arm"]
@@ -633,10 +634,17 @@ mod tests {
         for algorithm in [&AES_128, &AES_192, &AES_256] {
             let kek_bytes = bytes(algorithm.key_len);
             let kek = ct_qemu::traced(|| AesKek::new(algorithm, &kek_bytes).unwrap());
-            assert!(
-                matches!(AesDecKey::new(kek.key()), AesDecKey::Hw(_)),
-                "the crypto extension"
-            );
+            if ct_qemu::crypto_ext() {
+                assert!(
+                    matches!(AesDecKey::new(kek.key()), AesDecKey::Hw(_)),
+                    "the crypto extension"
+                );
+            } else {
+                assert!(
+                    matches!(AesDecKey::new(kek.key()), AesDecKey::Neon(_)),
+                    "NEON"
+                );
+            }
 
             let key = bytes(32);
             let mut wrapped = [0u8; 40];

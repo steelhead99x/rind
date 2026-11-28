@@ -13,7 +13,9 @@
 # test named `ct_qemu...` derives its secrets from a seed
 # and marks the calls it checks. This runs each one whose name contains
 # `filter` twice under qemu-arm's or qemu-aarch64's `max` CPU, which has
-# those features, with different seeds, and fails unless
+# those features, with different seeds, and armv7's AES tests, named
+# `ct_qemu_aes...`, also under the Cortex-A15, which has NEON but not the
+# crypto extension, so that the NEON AES and GHASH run, and fails unless
 # `admin/ct-qemu-plugin.c` traces the same instruction and memory addresses
 # in the same order between the marks. The traces stream through pipes and
 # are compared as they arrive, so no run stores one. It cannot see
@@ -34,13 +36,16 @@ SEEDS = ["0123456789abcdef", "fedcba9876543210"]
 QEMU = {"armv7-unknown-linux-gnueabihf": "qemu-arm", "aarch64-unknown-linux-gnu": "qemu-aarch64"}
 # The plugin's records: a kind, a size, padding, and a 64-bit address.
 RECORD = struct.Struct("<cBxxQ")
+# The CPUs under which armv7's AES tests also run: the Cortex-A15 is ARMv7
+# with NEON but without the crypto extension.
+AES_CPUS = {"armv7-unknown-linux-gnueabihf": ["max", "cortex-a15"], "aarch64-unknown-linux-gnu": ["max"]}
 # Records compared at a time.
 CHUNK = 1 << 16
 
 
-def qemu(target):
-    """qemu-user for `target`'s `max` CPU, without address randomization."""
-    return ["setarch", platform.machine(), "-R", QEMU[target], "-cpu", "max"]
+def qemu(target, cpu="max"):
+    """qemu-user for `target`'s `cpu`, without address randomization."""
+    return ["setarch", platform.machine(), "-R", QEMU[target], "-cpu", cpu]
 
 
 def build_env(target):
@@ -96,22 +101,23 @@ def describe(record):
     return "{} {} {:#014x}".format(kind.decode(), size, addr)
 
 
-def compare(target, exe, name, tmp, plugin, extra):
+def compare(target, exe, name, cpu, tmp, plugin, extra):
     """Traces `name` once for each seed, and returns where the traces differ,
     with the records before it, or None, and how many records they agreed
-    on. `extra` is added to the environment of both traces."""
+    on, under qemu's `cpu`. `extra` is added to the environment of both
+    traces."""
     procs = []
     files = []
     for i, seed in enumerate(SEEDS):
         # A pipe rather than a named one, so that if qemu fails, the trace
         # ends rather than waits for qemu to open it.
         r, w = os.pipe()
-        cmd = qemu(target)
+        cmd = qemu(target, cpu)
         cmd += ["-plugin", "{},out=/dev/fd/{}".format(plugin, w), exe]
         cmd += ["--ignored", "--exact", name, "--test-threads=1", "-q"]
         # The seeds have the same length, so the environment, and so
         # everything above it on the stack, lies at the same addresses.
-        env = dict(os.environ, RIND_CT_QEMU_SEED=seed)
+        env = dict(os.environ, RIND_CT_QEMU_SEED=seed, RIND_CT_QEMU_CPU=cpu)
         env.update(extra)
         log = open(os.path.join(tmp, "log{}".format(i)), "w+")
         proc = subprocess.Popen(cmd, env=env, stdout=log, stderr=log, pass_fds=[w])
@@ -144,7 +150,7 @@ def compare(target, exe, name, tmp, plugin, extra):
             proc.kill()
         elif proc.wait() != 0:
             log.seek(0)
-            sys.exit("ct-qemu: {} failed under qemu:\n{}".format(name, log.read()))
+            sys.exit("ct-qemu: {} failed under qemu {}:\n{}".format(name, cpu, log.read()))
     for f in files:
         f.close()
     for proc, _ in procs:
@@ -209,14 +215,20 @@ def main():
             expect_schedule(target, exe, extra, label == "wide")
 
     failed = False
+    # Only the AES tests, and no planted leak, run on each of AES_CPUS.
+    runs = [
+        (n, cpu)
+        for n in names
+        for cpu in (AES_CPUS[target] if n.split("::")[-1].startswith("ct_qemu_aes") else ["max"])
+    ]
     for label, extra in passes:
         if label:
             print("ct-qemu: {} multiplier".format(label))
-        for name in names:
+        for name, cpu in runs:
             with tempfile.TemporaryDirectory() as tmp:
-                diff, records = compare(target, exe, name, tmp, plugin, extra)
+                diff, records = compare(target, exe, name, cpu, tmp, plugin, extra)
             planted = is_planted(name)
-            shown = "{} ({})".format(name, label) if label else name
+            shown = "{} ({})".format(name, ", ".join(x for x in (cpu, label) if x))
             if records == 0:
                 print("FAIL {}: traced nothing".format(shown))
                 failed = True
