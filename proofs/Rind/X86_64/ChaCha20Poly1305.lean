@@ -10,11 +10,13 @@ open Aeneas Aeneas.Std Result rind.spec
 XChaCha20-Poly1305 from `Seals` and `Opens`, that the one pass computes RFC
 8439's AEAD. `seals` and `opens` prove those on CPUs that run a one pass,
 which `RunsSeal` and `RunsOpen` state. CPUs that pass
-`HaveIfmaForVgChaCha20Poly1305`'s `check_seal` or `check_open` for the
-message's length run pyca/verified-garbage's IFMA one pass, whose theorems
-`Rind.X86_64.VgChaCha20Poly1305` imports as axioms, so on them the theorems
-here earn the ✓: every length, but on Zen 4 a seal of fewer than 800 bytes
-and an open of fewer than 512. CPUs that fail the check and pass
+`HaveVgChaCha20Poly1305`'s `check_seal` or `check_open` for the
+message's length run pyca/verified-garbage's IFMA or AVX2 one pass, whose
+theorems `Rind.X86_64.VgChaCha20Poly1305` imports as axioms, so on them the
+theorems here earn the ✓: with AVX-512 IFMA every length, but on Zen 4 a
+seal of fewer than 800 bytes and an open of fewer than 512, and on Intel's
+CPUs with AVX2 but no AVX-512 from the lengths `cpu::INTEL_AVX2_SEAL_FROM`
+and `INTEL_AVX2_OPEN_FROM` name. CPUs that fail the check and pass
 `HaveSse41`'s run aws-lc's one-pass routines, but for the AVX2 seal, rind's
 structured copy of aws-lc's, which the theorems take as the hypothesis
 `OnePass`: that they compute RFC 8439's ciphertext and tag.
@@ -48,7 +50,7 @@ def OnePass : Prop :=
 
 /-- rind runs a one pass a theorem covers when it seals a message of `len`
 bytes on this CPU: its entry guard passes and holds, and of its CPU-feature
-checks, either `HaveIfmaForVgChaCha20Poly1305`'s `check_seal` passes and
+checks, either `HaveVgChaCha20Poly1305`'s `check_seal` passes and
 `HaveSse41`'s, which the dispatch reads first, returns, so it runs
 pyca/verified-garbage's one pass, or the first fails and `HaveSse41`'s passes,
 so it runs rind's copy of aws-lc's AVX2 seal, or aws-lc's SSE4.1 one without
@@ -57,10 +59,10 @@ which each takes as any `Usize` of value `len`. -/
 def RunsSeal (len : Nat) : Prop :=
   (∃ e, low.entry.Entry.new_secret = ok e) ∧ low.entry.Entry.assert_held = ok () ∧
   ((∃ t, ∀ l : Usize, l.val = len →
-      low.x86_64.cpu.HaveIfmaForVgChaCha20Poly1305.check_seal l = ok (some t)) ∧
+      low.x86_64.cpu.HaveVgChaCha20Poly1305.check_seal l = ok (some t)) ∧
       (∃ s, low.x86_64.cpu.HaveSse41.check = ok s) ∨
     (∀ l : Usize, l.val = len →
-      low.x86_64.cpu.HaveIfmaForVgChaCha20Poly1305.check_seal l = ok none) ∧
+      low.x86_64.cpu.HaveVgChaCha20Poly1305.check_seal l = ok none) ∧
       (∃ s, low.x86_64.cpu.HaveSse41.check = ok (some s)) ∧
       (∃ a, low.x86_64.cpu.HaveAvx2.check = ok a) ∧ OnePass)
 
@@ -69,10 +71,10 @@ def RunsSeal (len : Nat) : Prop :=
 def RunsOpen (len : Nat) : Prop :=
   (∃ e, low.entry.Entry.new_secret = ok e) ∧ low.entry.Entry.assert_held = ok () ∧
   ((∃ t, ∀ l : Usize, l.val = len →
-      low.x86_64.cpu.HaveIfmaForVgChaCha20Poly1305.check_open l = ok (some t)) ∧
+      low.x86_64.cpu.HaveVgChaCha20Poly1305.check_open l = ok (some t)) ∧
       (∃ s, low.x86_64.cpu.HaveSse41.check = ok s) ∨
     (∀ l : Usize, l.val = len →
-      low.x86_64.cpu.HaveIfmaForVgChaCha20Poly1305.check_open l = ok none) ∧
+      low.x86_64.cpu.HaveVgChaCha20Poly1305.check_open l = ok none) ∧
       (∃ s, low.x86_64.cpu.HaveSse41.check = ok (some s)) ∧
       (∃ a, low.x86_64.cpu.HaveAvx2.check = ok a) ∧ OnePass)
 
@@ -89,7 +91,7 @@ theorem chacha20_poly1305_seal_spec (key : Std.Array U8 32#usize)
   have hlen : (Slice.len inout).val = inout.length := by simp [Slice.len_val, Slice.length]
   obtain ⟨-, -, ⟨⟨t, hi⟩, ⟨s, hs⟩⟩ | ⟨hi, ⟨s, hs⟩, ⟨a, ha⟩, hop⟩⟩ := h
   · simp only [hi (Slice.len inout) hlen, hs, bind_ok]
-    exact seal_ifma_spec t key nonce aad inout
+    exact seal_vg_spec t key nonce aad inout
   · simp only [hi (Slice.len inout) hlen, hs, ha, bind_ok]
     exact (hop s a key nonce aad inout hl).1
 
@@ -108,7 +110,7 @@ theorem chacha20_poly1305_open_spec (key : Std.Array U8 32#usize)
   unfold low.x86_64.chacha20poly1305.open
   obtain ⟨-, -, ⟨⟨t, hi⟩, ⟨s, hs⟩⟩ | ⟨hi, ⟨s, hs⟩, ⟨a, ha⟩, hop⟩⟩ := h
   · simp only [hi (Slice.len inout) hlen, hs, bind_ok]
-    apply WP.spec_mono (open_ifma_spec t key nonce aad inout tag)
+    apply WP.spec_mono (open_vg_spec t key nonce aad inout tag)
     rintro ⟨valid, pt⟩ ⟨hv, hpt⟩
     have hk : (bvs key.val).length = 32 := by simp
     have hn : (bvs nonce.val).length = 12 := by simp

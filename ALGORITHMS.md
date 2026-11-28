@@ -1178,7 +1178,11 @@ otherwise, as aws-lc picks them, and on aarch64
 without SVE2, rind's structured copy of its NEON routine at the lengths VG's
 loses. x86_64 CPUs with AVX-512 IFMA run
 [verified-garbage]'s IFMA one-pass routines at every length instead, but
-AMD's Zen 4, below 800 bytes sealing and 512 opening. On
+AMD's Zen 4, below 800 bytes sealing and 512 opening, and Intel's CPUs
+with AVX2 but no AVX-512, such as Arrow Lake, run its AVX2 seal and open from
+1024 bytes, provisionally: under VG's own API, which runs them there,
+`desktop`'s Arrow Lake took 0.97 of rind's time to seal 1350 bytes and 0.88
+at 16 KB, and the limit waits on its timing of both under rind's glue. On
 Granite Rapids in [run 44962459177], sealing 32 B to 16 KB under rind's glue
 took 1.00 to 0.58 of the time of aws-lc's AVX2 routine, and opening 0.89 to
 0.58; on `fedora`'s Zen 5, 0.97 to 0.62. On an EPYC 9V74 (Zen 4), VG's

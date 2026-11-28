@@ -79,9 +79,9 @@ exclude_re = [
   'rind/src/low/x86_64/chacha20poly1305\.rs:\d+:\d+: replace \| with \^$',
   # Pinned to its line: a `const` has no name to match, and only `AES`'s
   # `1 << 0` survives.
-  'rind/src/low/x86_64/cpu\.rs:539:\d+: replace << with >>$',
+  'rind/src/low/x86_64/cpu\.rs:573:\d+: replace << with >>$',
   'rind/src/low/x86_64/cpu\.rs:\d+:\d+: replace \| with \^$',
-  'rind/src/low/x86_64/cpu\.rs:\d+:\d+: replace \| with \^ in (HaveAdxForVg::check|HaveAesHardware::check|HaveAvx::check|HaveAvx512ForVgMlKem::check|HaveAvxMovbeForAesGcm::check|HaveBmi2Adx::check|HaveIfmaForCurve25519::check|HaveIfmaForVgChaCha20Poly1305::check|HaveIfmaForVgP256::check|HaveSha1::check|HaveSha256::check|HaveSse41::check|HaveVaesAvx2ForAesGcm::check|detect|detect_once)$',
+  'rind/src/low/x86_64/cpu\.rs:\d+:\d+: replace \| with \^ in (HaveAdxForVg::check|HaveAesHardware::check|HaveAvx::check|HaveAvx512ForVgMlKem::check|HaveAvxMovbeForAesGcm::check|HaveBmi2Adx::check|HaveIfmaForCurve25519::check|HaveVgChaCha20Poly1305::avx2|HaveVgChaCha20Poly1305::ifma|HaveIfmaForVgP256::check|HaveSha1::check|HaveSha256::check|HaveSse41::check|HaveVaesAvx2ForAesGcm::check|detect|detect_once)$',
   'rind/src/low/x86_64/edwards25519_msm_avx2\.rs:\d+:\d+: replace \| with \^$',
   'rind/src/low/x86_64/edwards25519_msm_avx2\.rs:\d+:\d+: replace \| with \^ in (Fe4::diff_sum|Fe4::split)$',
   'rind/src/low/x86_64/ghash\.rs:\d+:\d+: replace \| with \^ in Ghash<\x27a>::add_lengths$',
@@ -297,11 +297,11 @@ exclude_re = [
   'rind/src/low/x86_64/cpu\.rs:\d+:45: replace \| with &$',
   'rind/src/low/x86_64/cpu\.rs:\d+:52: replace \| with &$',
   # Pinned to its line: `AVX2_KERNELS`'s `|` at the same column is caught.
-  'rind/src/low/x86_64/cpu\.rs:572:31: replace \| with &$',
+  'rind/src/low/x86_64/cpu\.rs:606:31: replace \| with &$',
   'rind/src/low/x86_64/cpu\.rs:\d+:72: replace \| with &$',
   'rind/src/low/x86_64/cpu\.rs:\d+:17: replace \| with & in HaveAvxMovbeForAesGcm::check$',
   'rind/src/low/x86_64/cpu\.rs:\d+:17: replace \| with & in HaveAesHardware::check$',
-  'rind/src/low/x86_64/cpu\.rs:\d+:(17|24|34): replace \| with & in HaveIfmaForVgChaCha20Poly1305::check$',
+  'rind/src/low/x86_64/cpu\.rs:\d+:(17|24|34): replace \| with & in HaveVgChaCha20Poly1305::(ifma|avx2)$',
   'rind/src/low/x86_64/cpu\.rs:\d+:\d+: replace enter_cpu_state -> u32 with 1$',
   # Pinned to its line: the `cpu_denied` of a release build or one without
   # an OS, which tests never are. The debug build's, under the same name, is
@@ -401,7 +401,7 @@ exclude_re = [
   'rind/src/low/(x86_64|aarch64)/p384_vg\.rs:\d+:\d+: replace (MulBase|Verify)::check -> Option<Self> with None$',
   # Refusing VG's ChaCha20-Poly1305 runs aws-lc's, which computes the same
   # result, as `paths_match` checks; only the time differs.
-  'rind/src/low/x86_64/cpu\.rs:\d+:\d+: replace HaveIfmaForVgChaCha20Poly1305::check -> Option<Self> with None$',
+  'rind/src/low/x86_64/cpu\.rs:\d+:\d+: replace HaveVgChaCha20Poly1305::(ifma|avx2) -> Option<Self> with None$',
   # Refusing VG's AES-GCM, or running it below its length, runs BoringSSL's
   # kernel or rind's by-16 path, which compute the same result, as
   # `paths_match` checks; only the time differs.
