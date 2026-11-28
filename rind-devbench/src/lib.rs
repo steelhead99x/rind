@@ -495,6 +495,10 @@ pub fn start(config_json: &str) -> Result<(), String> {
     if denies_missing() {
         return Err(DENIES_MISSING.into());
     }
+    // set_var panics on these, and a panic here would escape the C boundary holding the run slot.
+    if let Some(k) = cfg.env.iter().find(|(k, v)| k.is_empty() || k.contains(['=', '\0']) || v.contains('\0')).map(|(k, _)| k) {
+        return Err(format!("environment entry {k:?} has an empty name, or a name with '=' or NUL, or a value with NUL"));
+    }
     if RUNNING.swap(true, Ordering::SeqCst) {
         return Err("already running".into());
     }
@@ -648,5 +652,10 @@ mod tests {
         assert!(!RUNNING.load(Ordering::SeqCst));
         // The configured environment was in place before the catalog was listed for the check.
         assert_eq!(std::env::var("RIND_DEVBENCH_TEST_LISTED_AFTER_ENV").as_deref(), Ok("1"));
+        for bad in [r#"{"": "1"}"#, r#"{"A=B": "1"}"#, r#"{"A": "x\u0000"}"#] {
+            let e = start(&format!(r#"{{"env": {bad}}}"#)).unwrap_err();
+            assert!(e.contains("environment entry"), "{e}");
+            assert!(!RUNNING.load(Ordering::SeqCst));
+        }
     }
 }
