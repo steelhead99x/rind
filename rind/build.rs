@@ -100,6 +100,14 @@ fn main() {
     };
     println!(r#"cargo::rustc-cfg=rind_backend="{backend}""#);
 
+    // `rind_sse2`: an x86 or x86_64 target that enables SSE2 at compile time,
+    // where the bitsliced AES in `low/generic/aes_nohw.rs` takes eight blocks
+    // a pass in SSE2 words whatever the backend.
+    println!("cargo::rustc-check-cfg=cfg(rind_sse2)");
+    if matches!(arch.as_str(), "x86" | "x86_64") && enabled("sse2") {
+        println!("cargo::rustc-cfg=rind_sse2");
+    }
+
     // `rind_dit`: an aarch64 target with an OS, where `rind::cpu::Dit`
     // counts guards per thread and a debug build checks PSTATE.DIT under
     // every secret computation (`src/low/entry.rs`). Every aarch64 call that

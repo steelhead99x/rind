@@ -31,7 +31,7 @@ quest = "/quest/m2/speed/aarch64-quic-hp-direct.md"
 [[gap]]
 operations = ["aes*-gcm*", "rustls-bulk/*", "aes*-ctr/*", "aes*-cbc-*"]
 on = ["portable"]
-quest = "/quest/m2/speed/portable-aes-8way.md"
+reason = "Fixed, pending the weekly bench: the portable backend now bitslices eight blocks into SSE2 words on x86 and x86_64, as this row's aws-lc does ([steelhead99x/rind#352](https://github.com/steelhead99x/rind/pull/352)). On a shared 2-core x86_64 VM, AES-128 and AES-256 GCM, CTR, and CBC decryption at 1200 B and 16 KB took 0.67 to 1.05× aws-lc's time, from 1.20 to 1.88× before, and the four-block path's 88 instructions per CTR byte fell to 44. Remove this entry once a weekly run shows the row within 10%."
 
 [[gap]]
 operations = ["sha1/*", "hmac-sha1/*"]
