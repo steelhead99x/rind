@@ -180,6 +180,8 @@ pub(crate) mod rsa_vg;
 mod schedules;
 pub(crate) mod sha1;
 pub(crate) mod sha256;
+#[cfg(feature = "slh-dsa")]
+pub(crate) mod sha256x8;
 pub(crate) mod sha3_keccak2_f1600;
 pub(crate) mod sha3_keccak4_f1600;
 pub(crate) mod sha3_keccak4_f1600_alt;

@@ -265,7 +265,8 @@ if [ "${1:-}" = --expand-diff-self-test ]; then
     fi
     rm -f "$missing"
     # The shell must pass cargo-mutants the rewritten diff, and leave the
-    # caller's file alone. A fake cargo records the arguments.
+    # caller's file alone. A fake cargo records the arguments. Each run names
+    # x86_64's campaign, which lists on any host, macOS's included.
     bindir=$(mktemp -d)
     argsfile=$(mktemp)
     sample=$(mktemp)
@@ -291,7 +292,7 @@ diff --git a/rind/src/low/generic/aes_nohw.rs b/rind/src/low/generic/aes_nohw.rs
  context
 +added
 EOF
-    PATH="$bindir:$PATH" "$0" --in-diff "$sample" --list
+    PATH="$bindir:$PATH" "$0" --target x86_64-unknown-linux-gnu --in-diff "$sample" --list
     if grep -q 'portable/\.\./generic/aes_nohw.rs' "$sample"; then
         echo "admin/mutants: --in-diff rewrote the caller's diff" >&2
         exit 1
@@ -302,12 +303,12 @@ EOF
     fi
     # The other ways to name the diff, and a non-UTF-8 byte in another file.
     printf 'diff --git a/x.txt b/x.txt\n--- a/x.txt\n+++ b/x.txt\n@@ -1 +1 @@\n-\xff\n+\xfe\n' >>"$sample"
-    PATH="$bindir:$PATH" "$0" --list --in-diff /dev/stdin <"$sample"
+    PATH="$bindir:$PATH" "$0" --target x86_64-unknown-linux-gnu --list --in-diff /dev/stdin <"$sample"
     grep -q 'portable/\.\./generic/aes_nohw.rs' "$argsfile" ||
         { echo "admin/mutants: --in-diff /dev/stdin lost the diff" >&2; exit 1; }
     grep -qa $'^+\xfe$' "$argsfile" ||
         { echo "admin/mutants: a non-UTF-8 byte did not pass through" >&2; exit 1; }
-    PATH="$bindir:$PATH" "$0" --list "-D=$sample"
+    PATH="$bindir:$PATH" "$0" --target x86_64-unknown-linux-gnu --list "-D=$sample"
     grep -q 'portable/\.\./generic/aes_nohw.rs' "$argsfile" ||
         { echo "admin/mutants: -D=FILE lost the diff" >&2; exit 1; }
     rm -rf "$bindir" "$argsfile" "$sample"
@@ -537,6 +538,14 @@ case $host in
     *) default_campaign=$host ;;
 esac
 
+# Ed25519 verification's multi-scalar multiplication, which only the x86_64
+# backend compiles under a `cfg`, though cargo-mutants mutates it anyway:
+# on the other campaigns every one of its mutants survives, each costing a
+# whole test run.
+x86_64_only=(
+    rind/src/low/generic/edwards25519_msm.rs rind/src/mid/half_size.rs
+)
+
 # Only armv7 and the portable backend compile these.
 portable=(
     'rind/src/low/portable/**' 'rind/src/mid/portable/**'
@@ -557,7 +566,7 @@ case $campaign in
             'rind/src/low/aarch64/**' 'rind/src/low/arm/**' "${portable[@]}"
             rind/src/low/generic/mlkem_sample.rs
             rind/src/low/x86_64/mlkem_sample_poly_ntt_8x.rs
-            rind/src/low/x86_64/mlkem_shake256_8x.rs
+            rind/src/low/x86_64/sha3_keccak8_f1600.rs
             rind/src/low/x86_64/rsaz_avx512.rs
         )
         rows=(
@@ -571,6 +580,7 @@ case $campaign in
         triple=AARCH64_UNKNOWN_LINUX_GNU
         skip=(
             'rind/src/low/x86_64/**' 'rind/src/low/arm/**' "${portable[@]}"
+            "${x86_64_only[@]}"
             rind/src/low/generic/mlkem_poly.rs
             rind/src/low/generic/sha1.rs rind/src/low/generic/sha256.rs
         )
@@ -584,13 +594,16 @@ case $campaign in
         # The explicit target keeps these builds apart from the host's, and
         # RUSTFLAGS from its build scripts.
         export CARGO_BUILD_TARGET=x86_64-unknown-linux-gnu
-        export RUSTFLAGS='--cfg rind_portable --cfg curve25519_dalek_backend="serial"'
+        # `rind_no_sse2`: AES's integer words, which the x86_64 campaign's
+        # no-SSSE3 tests cannot reach.
+        export RUSTFLAGS='--cfg rind_portable --cfg rind_no_sse2 --cfg curve25519_dalek_backend="serial"'
         # The assembly backends, and the 32-bit limbs a 64-bit target
         # doesn't, which the x86_64 campaign's tests reach.
         skip=(
             'rind/src/low/x86_64/**' 'rind/src/low/aarch64/**' 'rind/src/low/arm/**'
             rind/src/low/generic/limb32.rs
             rind/src/low/generic/p256_mul32.rs rind/src/low/generic/p384_mul32.rs
+            "${x86_64_only[@]}"
         )
         rows=()
         ;;

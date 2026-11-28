@@ -72,12 +72,17 @@ fi
 # builds. Dropping either would otherwise leave this script green.
 # rustfmt wraps the attribute, so compare it with whitespace removed.
 tr -d ' \n' <"$root/rind/src/lib.rs" |
-  grep -F '#![cfg_attr(any(all(target_arch="xtensa",target_os="espidf"),rind_esp32s3),feature(asm_experimental_arch))]' \
+  grep -F '#![cfg_attr(any(all(target_arch="xtensa",target_os="espidf"),all(rind_esp32s3,feature="esp32s3-sha512-unrolled")),feature(asm_experimental_arch))]' \
     >/dev/null || {
   printf 'esp32s3-sha256-layout: rind/src/lib.rs no longer enables asm_experimental_arch on ESP-IDF Xtensa\n' >&2
   exit 1
 }
-grep -F 'all(target_arch = "xtensa", target_os = "espidf")' \
+grep -F 'if arch == "xtensa" && os == "espidf" {' -A1 "$root/rind/build.rs" |
+  grep -F 'println!("cargo::rustc-cfg=rind_sha256_iram");' >/dev/null || {
+  printf 'esp32s3-sha256-layout: rind/build.rs no longer selects the IRAM SHA-256 on ESP-IDF Xtensa\n' >&2
+  exit 1
+}
+grep -F 'all(rind_backend = "portable", not(rind_sha256_iram))' \
   "$root/rind/src/low/mod.rs" >/dev/null || {
   printf 'esp32s3-sha256-layout: sha256_k is no longer built for ESP-IDF Xtensa\n' >&2
   exit 1

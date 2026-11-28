@@ -665,10 +665,10 @@ impl JacobianPoint {
     /// NAF over the first comb table, which holds G to 16G.
     fn public_twin_multiply(g: &Scalar, p: &Scalar, odd_multiples: &[&[AffinePoint; 8]]) -> Self {
         let (mut g_digits, mut p_digits) = ([0; 522], [0; 522]);
-        util::public_naf::<5>(&g.0, &mut g_digits);
+        low::public_naf::<5>(&g.0, &mut g_digits);
         match odd_multiples.len() {
-            1 => util::public_naf::<5>(&p.0, &mut p_digits),
-            _ => util::public_naf::<6>(&p.0, &mut p_digits),
+            1 => low::public_naf::<5>(&p.0, &mut p_digits),
+            _ => low::public_naf::<6>(&p.0, &mut p_digits),
         }
         Self::public_twin_multiply_naf(&g_digits, &p_digits, odd_multiples)
     }

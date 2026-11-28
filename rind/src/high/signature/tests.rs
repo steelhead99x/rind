@@ -88,7 +88,7 @@ fn keys_shared_across_threads() {
     let (public, signature) = {
         let signer = ml_dsa::KeyPair::<MlDsa44>::generate().unwrap();
         let public = ml_dsa::PublicKey::<MlDsa44>::new(signer.public_key().as_ref()).unwrap();
-        (public, signer.sign(b"message").unwrap())
+        (public, signer.sign(b"", b"message").unwrap())
     };
     std::thread::scope(|s| {
         for _ in 0..4 {
@@ -99,7 +99,7 @@ fn keys_shared_across_threads() {
                         .verify(b"message", ecdsa.as_ref())
                         .unwrap();
                     #[cfg(feature = "ml-dsa")]
-                    public.verify(b"message", signature.as_ref()).unwrap();
+                    public.verify(b"", b"message", signature.as_ref()).unwrap();
                 }
             });
         }
@@ -654,10 +654,10 @@ fn ml_dsa_encodings() {
             rejected(PublicKey::<P>::from_spki(other_spki)),
             KeyFormatError::MismatchedSpkiAlgorithm.into()
         );
-        let signature = pair.sign(b"message").unwrap();
-        parsed.verify(b"message", signature.as_ref()).unwrap();
+        let signature = pair.sign(b"", b"message").unwrap();
+        parsed.verify(b"", b"message", signature.as_ref()).unwrap();
         assert_eq!(
-            parsed.verify(b"other", signature.as_ref()),
+            parsed.verify(b"", b"other", signature.as_ref()),
             Err(Error::BadSignature)
         );
     }
@@ -1098,16 +1098,16 @@ fn encodings_fit_the_largest_keys() {
 #[test]
 fn post_quantum_clones_verify() {
     let key = ml_dsa::KeyPair::<MlDsa44>::generate().unwrap();
-    let signature = key.sign(b"message").unwrap();
+    let signature = key.sign(b"", b"message").unwrap();
     let copy = signature.clone();
     assert_eq!(copy.as_ref(), signature.as_ref());
     let public_key = key.public_key().clone();
     for _ in 0..2 {
-        public_key.verify(b"message", copy.as_ref()).unwrap();
+        public_key.verify(b"", b"message", copy.as_ref()).unwrap();
     }
     assert_eq!(public_key.as_ref(), key.public_key().as_ref());
     let clone = public_key.clone();
-    clone.verify(b"message", signature.as_ref()).unwrap();
+    clone.verify(b"", b"message", signature.as_ref()).unwrap();
 
     let key = slh_dsa::KeyPair::<SlhDsaSha2_128f>::generate().unwrap();
     let signature = key.sign(b"message").unwrap();
@@ -1133,4 +1133,24 @@ fn signatures_debug_as_bytes() {
         format!("{signature:?}"),
         format!("Signature({:?})", signature.as_ref())
     );
+}
+
+/// A modulus a bit under an algorithm's floor verifies only once the floor is
+/// counted in whole bytes, as ring counts it.
+#[test]
+fn byte_floor_takes_a_modulus_a_bit_short() {
+    let key = rsa::KeyPair::from_pkcs1(include_bytes!("../rsa/rsa2047.der")).unwrap();
+    assert_eq!(key.public_key().modulus_bits(), 2047);
+    let signature = key.sign(&rsa::sign::PKCS1_SHA256, b"message").unwrap();
+    let public = key.public_key();
+
+    let bits = rsa::verify::PKCS1_SHA256.floor_in_bytes();
+    assert!(
+        public
+            .verify(&rsa::verify::PKCS1_SHA256, b"message", signature.as_ref())
+            .is_err()
+    );
+    public
+        .verify(&bits, b"message", signature.as_ref())
+        .unwrap();
 }

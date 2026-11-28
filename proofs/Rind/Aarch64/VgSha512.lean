@@ -34,8 +34,10 @@ with every register as the wrapper set it.
 
 namespace rind.aarch64
 
-/-- `compressAArch64`: the state's eight words, read as VG's hash value `H`,
-become `compressList` of `H` over `blocks`' whole blocks. -/
+/-- `vg_sha512_compress_sha512`, through the wrapper: the state's eight words,
+read as VG's hash value `H`, become `compressList` of `H` over `blocks`' whole
+blocks. VG's theorem is
+[`compress_verified`](https://github.com/pyca/verified-garbage/blob/0aa40d6c21fd02943fe5b38a5b69b6213d07764d/lean/VerifiedGarbage/Proof/Sha512/AArch64/Sha3/Compress.lean#L658). -/
 axiom vg_sha512_compress_sha512_spec (c : low.aarch64.cpu.HaveSha3)
     (state : Std.Array U64 8#usize) (blocks : Slice U8) (H : VG.Spec.Sha512.HashValue)
     (hH : H.toList = state.val.map (·.bv)) (hm : blocks.length % 128 = 0) :

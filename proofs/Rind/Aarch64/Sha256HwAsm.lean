@@ -565,10 +565,10 @@ def loopTrace (p k : Addr) : Nat → List Leak
   | c + 1 => bodyTrace p k ++ .branch true :: loopTrace (p + 64) k c
 
 /-- The loop. -/
-abbrev loop : Prog Rind.AArch64.isa := .loop (.block body) (.nonzero .x .x2)
+abbrev loop : Prog Rind.AArch64.isa := .loop (.block body) (.vg (.nonzero .x .x2))
 
 theorem eval_x2 (s : Rind.AArch64.State) :
-    Rind.AArch64.isa.eval (.nonzero .x .x2) s = some (s.vg.gpr .x2 != 0) := by
+    Rind.AArch64.isa.eval (.vg (.nonzero .x .x2)) s = some (s.vg.gpr .x2 != 0) := by
   simp [VG.AArch64.eval]
 
 theorem loop_ok (s₀ : Rind.AArch64.State) (H : List (BitVec 32)) (n : Nat) (hn : n < 2 ^ 64)

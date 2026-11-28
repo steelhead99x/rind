@@ -4,12 +4,14 @@
 # cannot. claude/handoff-lean-prove.md in the rind project has the reasons.
 #
 #   HW_PR=323 (default): the upstream sync to eba4c466. Its merge adds
-#     `sample_poly_cbd2_8x` in rind/src/mid/mlkem.rs, opaque in admin/prove
+#     `sample_poly_cbd2_8x` in rind/src/mid/mlkem.rs (since removed), opaque in admin/prove
 #     and declared in proofs/Rind/X86_64/FunsExternal.lean, so the Aeneas
 #     translation and every Lean module must still check: `admin/prove lean`.
 #   HW_PR=322: the smaller P-256 IFMA import into #246's branch:
 #     `admin/prove lean`, then `admin/prove vg` in the `vg` shell when Intel
 #     SDE is there (HW_SKIP_VG=1 skips it).
+#   HW_PR=<n>, any other PR, such as an upstream sync whose merge touched
+#     proofs: `admin/prove lean` alone.
 #   HW_FULL=1 also runs `admin/prove` with no argument (HOL Light included;
 #     hours).
 #
@@ -37,7 +39,7 @@ source "$(dirname "$0")/lib.sh"
 hw_args "$@"
 
 pr=${HW_PR:-323}
-[[ $pr == 323 || $pr == 322 ]] || hw_die "HW_PR is 323 or 322, not $pr"
+[[ $pr =~ ^[1-9][0-9]*$ ]] || hw_die "HW_PR is a pull request number, not $pr"
 [[ $(uname -s) == Linux && $(uname -m) == x86_64 ]] ||
     hw_refuse "the proofs run on Linux x86_64, not $(uname -s) $(uname -m)"
 hw_has_flag avx2 || hw_refuse "$(hw_cpu_model) has no AVX2, which the Lean intrinsic-model tests need"

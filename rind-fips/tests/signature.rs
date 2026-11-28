@@ -19,6 +19,7 @@ const RSA2048: &[u8] = include_bytes!("../../rind/src/high/rsa/rsa2048.pkcs8.der
 const RSA2048_PKCS1: &[u8] = include_bytes!("../../rind/src/high/rsa/rsa2048.der");
 const RSA2049: &[u8] = include_bytes!("../../rind/src/high/rsa/rsa2049.pkcs8.der");
 const RSA2050: &[u8] = include_bytes!("../../rind/src/high/rsa/rsa2050.pkcs8.der");
+const RSA2047: &[u8] = include_bytes!("../../rind/src/high/rsa/rsa2047.pkcs8.der");
 const RSA2047_PUBLIC: &[u8] = include_bytes!("../../rind/src/high/rsa/rsa2047.pub.der");
 const RSA3072: &[u8] = include_bytes!("../../rind/src/high/rsa/rsa3072.pkcs8.der");
 
@@ -786,13 +787,10 @@ fn rsa_moduli_fips_does_not_approve_are_refused() {
         Err(Error::KeyRejected(reason)) => reason,
         other => panic!("{other:?}"),
     });
-    // rind's reason for a modulus too small.
-    let reason =
-        rind::rsa::KeyPair::from_pkcs8(include_bytes!("../../rind/src/high/rsa/rsa2047.pkcs8.der"));
-    assert_eq!(
-        Some(refused.to_string()),
-        reason.err().map(|e| e.to_string())
-    );
+    // rind loads a 2047-bit key, and the module
+    // refuses it for the same reason.
+    assert!(rind::rsa::KeyPair::from_pkcs8(RSA2047).is_ok());
+    assert_eq!(rsa::KeyPair::from_pkcs8(RSA2047).err(), Some(refused));
 
     // An odd length rind signs with.
     assert!(rind::rsa::KeyPair::from_pkcs8(RSA2049).is_ok());
@@ -953,8 +951,8 @@ fn ml_dsa_matches_rind<P: ml_dsa::ParameterSet, Q: rind::ml_dsa::ParameterSet>()
     same_debug(&key.to_seed().unwrap(), &reference.to_seed().unwrap());
 
     // Signatures are hedged, so cross rather than match.
-    let signature = key.sign(MESSAGE).unwrap();
-    let their_signature = reference.sign(MESSAGE).unwrap();
+    let signature = key.sign(b"", MESSAGE).unwrap();
+    let their_signature = reference.sign(b"", MESSAGE).unwrap();
     assert_eq!(signature.as_ref().len(), their_signature.as_ref().len());
     let cloned = signature.clone();
     assert_eq!(format!("{cloned:?}"), format!("{signature:?}"));
@@ -963,11 +961,34 @@ fn ml_dsa_matches_rind<P: ml_dsa::ParameterSet, Q: rind::ml_dsa::ParameterSet>()
     let encoded = reference.public_key().as_ref();
     let our_public = ml_dsa::PublicKey::<P>::new(encoded).unwrap();
     let their_public = rind::ml_dsa::PublicKey::<Q>::new(encoded).unwrap();
-    their_public.verify(MESSAGE, signature.as_ref()).unwrap();
+    their_public
+        .verify(b"", MESSAGE, signature.as_ref())
+        .unwrap();
     same_verdicts(
-        |m, s| our_public.verify(m, s),
-        |m, s| their_public.verify(m, s),
+        |m, s| our_public.verify(b"", m, s),
+        |m, s| their_public.verify(b"", m, s),
         their_signature.as_ref(),
+    );
+
+    // A context signs and verifies across both, and a context past 255
+    // bytes fails alike.
+    let signature = key.sign(b"context", MESSAGE).unwrap();
+    their_public
+        .verify(b"context", MESSAGE, signature.as_ref())
+        .unwrap();
+    let their_signature = reference.sign(b"context", MESSAGE).unwrap();
+    our_public
+        .verify(b"context", MESSAGE, their_signature.as_ref())
+        .unwrap();
+    same_refusal(
+        &our_public.verify(b"other", MESSAGE, signature.as_ref()),
+        &their_public.verify(b"other", MESSAGE, signature.as_ref()),
+    );
+    let long = [0u8; 256];
+    same_error(&key.sign(&long, MESSAGE), &reference.sign(&long, MESSAGE));
+    same_error(
+        &our_public.verify(&long, MESSAGE, signature.as_ref()),
+        &their_public.verify(&long, MESSAGE, signature.as_ref()),
     );
     same_parse(
         ml_dsa::PublicKey::<P>::new,
@@ -1045,10 +1066,10 @@ fn cloned_public_keys_outlive_their_key_pairs() {
 
     let (key, signature) = {
         let pair = ml_dsa::KeyPair::<ml_dsa::MlDsa44>::from_seed(&[1; 32]).unwrap();
-        (pair.public_key().clone(), pair.sign(MESSAGE).unwrap())
+        (pair.public_key().clone(), pair.sign(b"", MESSAGE).unwrap())
     };
     assert_eq!(key.clone().as_ref(), key.as_ref());
-    key.verify(MESSAGE, signature.as_ref()).unwrap();
+    key.verify(b"", MESSAGE, signature.as_ref()).unwrap();
 }
 
 /// Key handles shared by threads sign and verify as on one thread, and one
@@ -1060,7 +1081,7 @@ fn cloned_public_keys_outlive_their_key_pairs() {
 fn keys_shared_across_threads() {
     let pair = ecdsa::KeyPair::from_pkcs8(&ecdsa::sign::P256_SHA256_ASN1, P256).unwrap();
     let signer = ml_dsa::KeyPair::<ml_dsa::MlDsa44>::from_seed(&[1; 32]).unwrap();
-    let signature = signer.sign(MESSAGE).unwrap();
+    let signature = signer.sign(b"", MESSAGE).unwrap();
     let public = ml_dsa::PublicKey::<ml_dsa::MlDsa44>::new(signer.public_key().as_ref()).unwrap();
     std::thread::scope(|s| {
         for _ in 0..4 {
@@ -1068,7 +1089,7 @@ fn keys_shared_across_threads() {
                 for _ in 0..2 {
                     let ecdsa = pair.sign(MESSAGE).unwrap();
                     pair.public_key().verify(MESSAGE, ecdsa.as_ref()).unwrap();
-                    public.verify(MESSAGE, signature.as_ref()).unwrap();
+                    public.verify(b"", MESSAGE, signature.as_ref()).unwrap();
                 }
             });
         }

@@ -23,5 +23,7 @@ and the control (aws-lc-rs in the same process, or a second run of the base
 binary) moved at most 1.02. They run until 5 rounds count for every row, or
 stop after 12 and say the result is incomplete. `admin/hw/ab` runs the rounds
 and writes `ab.md`, the comment for the PR, beside the raw criterion
-estimates. Results go under `.tmp/hw/`, and the last lines printed are the
+estimates. It times criterion's bench binaries, so only revisions from before
+rind-bench moved to swole (kixel-ai/rind#1141); a later one's A/B is `swole
+bench <base>`, which `ab` does not run yet. Results go under `.tmp/hw/`, and the last lines printed are the
 next step.

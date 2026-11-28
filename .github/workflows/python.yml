@@ -25,6 +25,11 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  # MSVC's linker stamps the link time unless told /Brepro, and a release's
+  # wheels must be reproducible. Set here rather than in the tree, since a
+  # release can build a tag older than this workflow.
+  CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS: -Clink-arg=/Brepro
+  CARGO_TARGET_AARCH64_PC_WINDOWS_MSVC_RUSTFLAGS: -Clink-arg=/Brepro
   # The dev shell's, which the tests and `just ci` use.
   MATURIN_VERSION: "1.15.0"
 
@@ -90,6 +95,12 @@ jobs:
           ref: ${{ inputs.ref }}
           persist-credentials: false
 
+      # maturin dates each file in a wheel by this, or by the current time
+      # without it, so the commit's time keeps the wheel reproducible.
+      - name: Date the build by its commit
+        shell: bash
+        run: echo "SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)" >>"$GITHUB_ENV"
+
       # The oldest CPython the stable ABI wheel targets, which both builds
       # it on Windows and tests it.
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
@@ -102,7 +113,41 @@ jobs:
           maturin-version: ${{ env.MATURIN_VERSION }}
           target: ${{ matrix.target }}
           manylinux: ${{ matrix.manylinux || 'auto' }}
+          # The container sees only the variables named here or with the
+          # prefixes maturin-action passes.
+          docker-options: --env SOURCE_DATE_EPOCH
           args: --release --locked --out dist --manifest-path rind-python/Cargo.toml
+
+      # A release's wheels must be reproducible: built again from a clean
+      # target directory, each matches bit for bit. On Linux the build ran
+      # in a container as root, which owns what it left.
+      - name: Clear the build
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == Linux ]]; then sudo rm -rf target; else rm -rf target; fi
+
+      - name: Rebuild
+        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
+        with:
+          maturin-version: ${{ env.MATURIN_VERSION }}
+          target: ${{ matrix.target }}
+          manylinux: ${{ matrix.manylinux || 'auto' }}
+          docker-options: --env SOURCE_DATE_EPOCH
+          args: --release --locked --out rebuilt --manifest-path rind-python/Cargo.toml
+
+      # On a mismatch, names each file in the wheels that differs.
+      - name: Compare
+        shell: bash
+        run: |
+          diff -r dist rebuilt && exit
+          python - dist/*.whl rebuilt/*.whl <<'PY'
+          import sys, zipfile
+          a, b = ({i.filename: (i.date_time, i.CRC) for i in zipfile.ZipFile(p).infolist()} for p in sys.argv[1:])
+          for name in sorted(a.keys() | b.keys()):
+              if a.get(name) != b.get(name):
+                  print(f"{name}: {a.get(name)} != {b.get(name)}")
+          PY
+          exit 1
 
       - name: Test
         if: matrix.test && !matrix.container

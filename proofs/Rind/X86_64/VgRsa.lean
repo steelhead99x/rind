@@ -22,7 +22,10 @@ The AVX-512 IFMA routines are VG's internal functions, which its padding
 schemes call, so their contracts are in VG's proofs rather than its trusted
 `Spec`; `R² mod n`'s is its `Spec`'s `publicPrecomputeContract`. The
 restatement, and that the wrapper passes the arguments the contract names,
-are trusted.
+are trusted: it calls each AVX-512 IFMA routine through `public_vg`,
+`crt_vg`, or `crt_vg512`, a naked entry whose one instruction, `jmp`,
+reaches the routine with every register, and the return address, as the
+wrapper set them.
 -/
 
 namespace rind.x86_64

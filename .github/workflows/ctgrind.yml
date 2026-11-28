@@ -173,7 +173,9 @@ jobs:
       - name: ctgrind tests
         run: nix develop .#ctgrind --command admin/ctgrind ${{ matrix.build == 'release' && '--release' || '' }}
         env:
-          RUSTFLAGS: --cfg rind_portable --cfg curve25519_dalek_backend="serial" --cfg rind_limb="${{ matrix.limb }}"
+          # `rind_no_sse2`: AES's integer words, which the architectures without
+          # SSE2 ship; the x86_64 backend's no-SSSE3 rows check the SSE2 words.
+          RUSTFLAGS: --cfg rind_portable --cfg rind_no_sse2 --cfg curve25519_dalek_backend="serial" --cfg rind_limb="${{ matrix.limb }}"
 
   # Valgrind runs no AVX-512, VAES, VPCLMULQDQ, or SHA instruction, so
   # `admin/ct-sde` compares Intel SDE traces of those paths for two secrets
@@ -186,7 +188,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        test: [rsa3072, rsa4096, crt_ifma_2048, crt_ifma512_2048, crt_ifma512_3072, crt_ifma_4096, crt_ifma512_4096, public_ifma, aes128_gcm, aes192_gcm, aes256_gcm, aes_gcm_vaes_avx2, hmac, chacha20, mlkem768, mlkem_prf_8x, x25519, ed25519, p256_ifma_ecdh]
+        test: [rsa3072, rsa4096, crt_ifma_2048, crt_ifma512_2048, crt_ifma512_3072, crt_ifma_4096, crt_ifma512_4096, public_ifma, aes128_gcm, aes192_gcm, aes256_gcm, aes_gcm_vaes_avx2, hmac, chacha20, expand_mask, x25519, ed25519, edwards25519_msm_avx2, p256_ifma_ecdh]
         exclude: ${{ fromJSON(needs.select.outputs.exclude || '{}')['x86_64-sde'] || fromJSON('[]') }}
     runs-on: ubuntu-latest
     steps:
@@ -378,7 +380,7 @@ jobs:
       - name: ct-binsec
         run: nix develop .#binsec --command admin/ct-binsec --timeout 480
         env:
-          RUSTFLAGS: ${{ matrix.backend == 'portable' && '--cfg rind_portable --cfg curve25519_dalek_backend="serial"' || '' }}
+          RUSTFLAGS: ${{ matrix.backend == 'portable' && '--cfg rind_portable --cfg rind_no_sse2 --cfg curve25519_dalek_backend="serial"' || '' }}
 
   # Consumers often build rind with LTO, which inlines it into their code and
   # reoptimizes it, or for size, where LLVM may pick a branch over a select

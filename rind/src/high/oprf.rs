@@ -77,13 +77,13 @@ pub static P521_SHA512: Suite = Suite {
 
 /// The protocol variant, whose value RFC 9497's context string carries.
 #[derive(Clone, Copy)]
-enum Mode {
+pub(super) enum Mode {
     Oprf = 0,
     Voprf = 1,
 }
 
 /// A suite's prime-order group and hash, as RFC 9497 section 4 defines them.
-trait Group: Sized + 'static {
+pub(super) trait Group: Sized + 'static {
     /// The suite's identifier.
     const NAME: &'static [u8];
 
@@ -164,7 +164,7 @@ trait Group: Sized + 'static {
 
 /// ristretto255 and SHA-512, over `mid`'s ristretto255.
 #[derive(Clone, Copy)]
-struct Ristretto255;
+pub(super) struct Ristretto255;
 
 impl Group for Ristretto255 {
     const NAME: &'static [u8] = b"ristretto255-SHA512";
@@ -290,7 +290,7 @@ macro_rules! nist_group {
     };
     ($group:ident, $curve:ident, $hash:ty, $name:literal, $suite:ident, $hash_to_curve:path) => {
         #[derive(Clone, Copy)]
-        struct $group;
+        pub(super) struct $group;
 
         impl Group for $group {
             const NAME: &'static [u8] = $name;
@@ -474,7 +474,7 @@ trait Pick<T> {
 }
 
 /// The longest element, P-521's.
-const MAX_ELEMENT: usize = p521::Point::COMPRESSED_BYTES;
+pub(super) const MAX_ELEMENT: usize = p521::Point::COMPRESSED_BYTES;
 
 /// The longest scalar, P-521's.
 const MAX_SCALAR: usize = p521::Scalar::BYTES;
@@ -488,17 +488,17 @@ const MAX_INPUT: usize = u16::MAX as usize - 1;
 
 /// Up to `N` bytes.
 #[derive(Clone)]
-struct Bytes<const N: usize> {
+pub(super) struct Bytes<const N: usize> {
     bytes: [u8; N],
     len: usize,
 }
 
 impl<const N: usize> Bytes<N> {
-    fn zeroed(len: usize) -> Self {
+    pub(super) fn zeroed(len: usize) -> Self {
         Self { bytes: [0; N], len }
     }
 
-    fn as_mut(&mut self) -> &mut [u8] {
+    pub(super) fn as_mut(&mut self) -> &mut [u8] {
         &mut self.bytes[..self.len]
     }
 }
@@ -512,7 +512,7 @@ impl<const N: usize> AsRef<[u8]> for Bytes<N> {
 impl<const N: usize> low::Zeroable for Bytes<N> {}
 
 /// `SerializeElement(element)`.
-fn encode<G: Group>(element: &G::Element) -> Bytes<MAX_ELEMENT> {
+pub(super) fn encode<G: Group>(element: &G::Element) -> Bytes<MAX_ELEMENT> {
     let mut bytes = Bytes::zeroed(G::ELEMENT_LEN);
     G::element_to_bytes(element, bytes.as_mut());
     bytes
@@ -520,7 +520,7 @@ fn encode<G: Group>(element: &G::Element) -> Bytes<MAX_ELEMENT> {
 
 /// `DeserializeElement(bytes)`, refusing a wrong length, an encoding that
 /// does not decode, and the identity.
-fn decode<G: Group>(bytes: &[u8]) -> Result<G::Element, Error> {
+pub(super) fn decode<G: Group>(bytes: &[u8]) -> Result<G::Element, Error> {
     if bytes.len() != G::ELEMENT_LEN {
         return Err(KeyFormatError::WrongLength.into());
     }
@@ -579,7 +579,11 @@ fn hash_to_scalar<G: Group>(mode: Mode, msg: &[&[u8]]) -> Result<G::Scalar, Erro
 }
 
 /// RFC 9497 3.2.1's `DeriveKeyPair(seed, info)`'s private key.
-fn derive_scalar<G: Group>(mode: Mode, seed: &[u8], info: &[u8]) -> Result<G::Scalar, Error> {
+pub(super) fn derive_scalar<G: Group>(
+    mode: Mode,
+    seed: &[u8],
+    info: &[u8],
+) -> Result<G::Scalar, Error> {
     check_len(info)?;
     let dst = Dst::new::<G>(b"DeriveKeyPair", mode);
     for counter in 0..=u8::MAX {
@@ -601,7 +605,7 @@ fn scalar_bytes<G: Group>(scalar: &G::Scalar) -> Bytes<MAX_SCALAR> {
 }
 
 /// Loads a private key: `Ns` bytes below the group order, and not zero.
-fn scalar_from_key<G: Group>(bytes: &[u8]) -> Result<G::Scalar, Error> {
+pub(super) fn scalar_from_key<G: Group>(bytes: &[u8]) -> Result<G::Scalar, Error> {
     if bytes.len() != G::SCALAR_LEN {
         return Err(KeyFormatError::WrongLength.into());
     }
@@ -616,7 +620,7 @@ fn scalar_from_key<G: Group>(bytes: &[u8]) -> Result<G::Scalar, Error> {
 }
 
 /// The client's state between `Blind` and `Finalize`.
-struct ClientState<G: Group> {
+pub(super) struct ClientState<G: Group> {
     blind: G::Scalar,
     /// `Finalize`'s hash, past `I2OSP(len(input), 2) || input`.
     hash: G::Hash,
@@ -629,7 +633,7 @@ impl<G: Group> ClientState<G> {
 
     /// RFC 9497 3.3.1's `Blind(input)` with the scalar `blind`, returning
     /// this state and the blinded element, made public.
-    fn blind(
+    pub(super) fn blind(
         mode: Mode,
         input: &[u8],
         blind: G::Scalar,
@@ -650,7 +654,7 @@ impl<G: Group> ClientState<G> {
     }
 
     /// RFC 9497 3.3.1's `Finalize`, for the evaluated element.
-    fn finalize(&self, evaluated: &G::Element) -> Output {
+    pub(super) fn finalize(&self, evaluated: &G::Element) -> Output {
         let unblinded = G::mul(evaluated, &G::invert(&self.blind));
         finish::<G>(self.hash.clone(), encode::<G>(&unblinded).as_ref())
     }

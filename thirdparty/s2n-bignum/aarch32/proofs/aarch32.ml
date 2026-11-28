@@ -21,6 +21,20 @@ let aarch32 = define
             (PC := word_add (read PC s) (word 4) ,,
              aarch32_execute instr) s s'`;;
 
+(* A state in T32, with the T bit set in PC, steps nowhere, since the fetch
+   takes only an aligned PC: the model runs no T32 instruction. *)
+
+let AARCH32_T32_STOPS = prove
+ (`!s s'. bit 0 (read PC s) ==> ~aarch32 s s'`,
+  REWRITE_TAC[aarch32; aarch32_decode; decode32; aligned_bytes_loaded;
+              BIT_LSB] THEN
+  REPEAT GEN_TAC THEN DISCH_TAC THEN
+  REWRITE_TAC[NOT_EXISTS_THM] THEN REPEAT STRIP_TAC THEN
+  UNDISCH_TAC `ODD (val (read PC s:int32))` THEN
+  UNDISCH_TAC `4 divides val (read PC s:int32)` THEN
+  REWRITE_TAC[divides] THEN STRIP_TAC THEN
+  ASM_REWRITE_TAC[ODD_MULT] THEN CONV_TAC NUM_REDUCE_CONV);;
+
 (* ------------------------------------------------------------------------- *)
 (* Forward symbolic execution, as for RV32: `read PC s` must be `word pc` or *)
 (* `word (pc + n)` for the code's symbolic base `pc`.                        *)
@@ -372,8 +386,9 @@ let AARCH32_CHECK_DECIDED_CONV tm =
    ("AARCH32_CONV: a conditional instruction's condition is undecided, " ^
     "an address or branch target is not known to be aligned, or a " ^
     "transfer is not known to stay below 2^32; establish the flags it " ^
-    "reads, or assume `aligned 4` of the address, or `aarch32_nowrap` of " ^
-    "a region holding the transfer or the value of its base, first")
+    "reads, or assume `aligned 4` of the address, `aarch32_bx_target` of " ^
+    "the branch target, or `aarch32_nowrap` of a region holding the " ^
+    "transfer or the value of its base, first")
   else REFL tm;;
 
 (* Convert one symbolic machine step to the explicit state update for the
@@ -445,12 +460,28 @@ let AARCH32_CONV (decode_ths:thm option array) (ths:thm list) tm =
   (* A branch target is a loaded word, which the assumptions give only at
      its address's normal form, and an address may be a known base's
      offset, which is aligned or not only once the sum is taken. *)
-  let target_conv =
-    SUB_ALIGNED_WORD_CONV
-     (TOP_DEPTH_CONV
-       (GEN_REWRITE_CONV I (filter (is_eq o concl) ths) ORELSEC
-        WORD_RED_CONV ORELSEC
-        NORMALIZE_RELATIVE_ADDRESS_CONV)) in
+  let value_conv =
+    TOP_DEPTH_CONV
+     (GEN_REWRITE_CONV I (filter (is_eq o concl) ths) ORELSEC
+      WORD_RED_CONV ORELSEC
+      NORMALIZE_RELATIVE_ADDRESS_CONV) in
+  let target_conv = SUB_ALIGNED_WORD_CONV value_conv in
+  (* An interworking target, such as a return address, holds by an
+     assumption that names it, as a subroutine theorem's does; any other
+     by its alignment or its bit 0, which the conversions below decide. *)
+  let bx_target_conv =
+    let known = map EQT_INTRO
+      (filter (fun th -> match concl th with
+                 Comb(Const("aarch32_bx_target",_),_) -> true
+               | _ -> false) ths) in
+    fun tm ->
+      match tm with
+        Comb(Const("aarch32_bx_target",_),_) ->
+          (RAND_CONV value_conv THENC
+           (GEN_REWRITE_CONV I known ORELSEC
+            (GEN_REWRITE_CONV I [aarch32_bx_target] THENC
+             RAND_CONV (TRY_CONV WORD_RED_CONV)))) tm
+      | _ -> failwith "bx_target_conv" in
   (* A transfer's address, as far as the assumptions give it, for deciding
      whether it stays below 2^32. *)
   let addr_conv =
@@ -475,6 +506,7 @@ let AARCH32_CONV (decode_ths:thm option array) (ths:thm list) tm =
    REWRITE_CONV AARCH32_CONDITION_CLAUSES THENC
    TOP_DEPTH_CONV COMPONENT_READ_OVER_WRITE_CONV THENC
    REWRITE_CONV (READ_RVALUE :: AARCH32_ALIGNED_1 :: flag_ths) THENC
+   ONCE_DEPTH_CONV bx_target_conv THENC
    target_conv THENC
    ALIGNED_WORD_EXTENDED_CONV aligned_ths THENC
    ONCE_DEPTH_CONV AARCH32_ALIGNED_NUMERAL_CONV THENC
@@ -647,11 +679,13 @@ let MAYCHANGE_REGS_AND_FLAGS_PERMITTED_BY_ABI = REWRITE_RULE
 (* ------------------------------------------------------------------------- *)
 (* Promote core correctness theorems to AAPCS subroutine theorems, as        *)
 (* s2n-bignum's RISCV_ADD_RETURN_NOSTACK_TAC and RISCV_ADD_RETURN_STACK_TAC  *)
-(* do. The subroutine theorem assumes `aligned 4 returnaddress`: it covers   *)
-(* an A32 caller, since returning to a Thumb one leaves the model. One with  *)
-(* a stack frame assumes `aligned 4 stackpointer` too, as the AAPCS keeps SP *)
-(* at every instruction, and `aarch32_nowrap` of the frame, which a push of  *)
-(* more than one word needs.                                                 *)
+(* do. The subroutine theorem assumes `aarch32_bx_target returnaddress`, so  *)
+(* it covers either caller: an A32 one, whose BL leaves an aligned address   *)
+(* in LR, and a T32 one, whose BLX leaves one with bit 0 set, to which the   *)
+(* return steps with the T bit set. One with a stack frame assumes           *)
+(* `aligned 4 stackpointer` too, as the AAPCS keeps SP at every instruction, *)
+(* and `aarch32_nowrap` of the frame, which a push of more than one word     *)
+(* needs.                                                                    *)
 (* ------------------------------------------------------------------------- *)
 
 let AARCH32_CHECK_FORALLVARS_TAC:tactic =
@@ -861,7 +895,7 @@ let AARCH32_SUBROUTINE_TESTS =
     AARCH32_SIM_TAC nostack_exec [1]) in
   let nostack = prove
    (`!pc a (returnaddress:int32).
-      aligned 4 returnaddress
+      aarch32_bx_target returnaddress
       ==> ensures aarch32
         (\s. aligned_bytes_loaded s (word pc) aarch32_test_nostack_mc /\
              read PC s = word pc /\
@@ -891,7 +925,7 @@ let AARCH32_SUBROUTINE_TESTS =
     AARCH32_SIM_TAC stack_exec [1;2]) in
   let stack = prove
    (`!pc a (stackpointer:int32) (returnaddress:int32).
-      aligned 4 returnaddress /\ aligned 4 stackpointer /\
+      aarch32_bx_target returnaddress /\ aligned 4 stackpointer /\
       aarch32_nowrap (word_sub stackpointer (word 8)) 8 /\
       nonoverlapping
         ((word pc):int32,LENGTH aarch32_test_stack_mc)
@@ -1125,7 +1159,12 @@ let AARCH32_SUBROUTINE_TESTS =
     (* ldrdne r4, r5, [r0] with Z set: nothing is transferred, at an
        unaligned address, but one past the top still leaves the model. *)
     "aarch32_test_skipped_ldrd_mc",0x11c040d0,0xfffffff5,false;
-    "aarch32_test_skipped_wrap_mc",0x11c040d0,0xfffffffd,true] in
+    "aarch32_test_skipped_wrap_mc",0x11c040d0,0xfffffffd,true;
+    (* bx r0: to an A32 target, aligned, or a T32 one, with bit 0 set, but
+       not to one with bit 1 set alone. *)
+    "aarch32_test_bx_a32_mc",0xe12fff10,0x1000,false;
+    "aarch32_test_bx_t32_mc",0xe12fff10,0x1003,false;
+    "aarch32_test_bx_bad_mc",0xe12fff10,0x1002,true] in
   (* vld1.8 {d0, d1}, [r0]!; veor q0, q0, q1; vst1.8 {d0, d1}, [r1]: a
      load into two D registers that one Q register is, and a store of its
      halves. *)
@@ -1204,7 +1243,7 @@ let AARCH32_SUBROUTINE_TESTS =
     AARCH32_SIM_TAC vstack_exec [1;2;3]) in
   let vstack = prove
    (`!pc a (stackpointer:int32) (returnaddress:int32).
-      aligned 4 returnaddress /\ aligned 4 stackpointer /\
+      aarch32_bx_target returnaddress /\ aligned 4 stackpointer /\
       aarch32_nowrap (word_sub stackpointer (word 24)) 24 /\
       nonoverlapping
         ((word pc):int32,LENGTH aarch32_test_vstack_mc)

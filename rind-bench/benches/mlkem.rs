@@ -2,18 +2,15 @@
 fn main() {}
 
 #[cfg(not(target_arch = "xtensa"))]
-mod criterion;
+mod common;
+
 #[cfg(not(target_arch = "xtensa"))]
 use std::hint::black_box;
 
 #[cfg(not(target_arch = "xtensa"))]
-use criterion::{BatchSize, Criterion, Throughput, criterion_group, criterion_main};
+use common::{Dit, dit};
 
-#[cfg(all(
-    feature = "__bench_openssl",
-    target_family = "unix",
-    not(target_arch = "xtensa")
-))]
+#[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
 #[cfg(not(target_arch = "xtensa"))]
 mod ossl {
     //! The openssl crate does not yet wrap ML-KEM keygen/encaps/decaps.
@@ -27,16 +24,14 @@ mod ossl {
     pub const CIPHERTEXT_LEN: usize = 1088;
     pub const SECRET_LEN: usize = 32;
 
-    /// ML-KEM requires OpenSSL 3.5 or later at runtime.
-    pub fn available() -> bool {
-        let ok = openssl::version::number() >= 0x3050_0000;
-        if !ok {
-            eprintln!(
-                "skipping openssl ML-KEM benchmark: {} is too old",
-                openssl::version::version()
-            );
-        }
-        ok
+    /// ML-KEM requires OpenSSL 3.5 or later at runtime: an older one fails
+    /// the row rather than leave it out.
+    pub fn require() {
+        assert!(
+            openssl::version::number() >= 0x3050_0000,
+            "openssl's ML-KEM rows need OpenSSL 3.5 or later, not {}",
+            openssl::version::version()
+        );
     }
 
     pub fn keygen() -> PKey<Private> {
@@ -139,605 +134,497 @@ fn vg_agrees_with_rind() {
     );
 }
 
-// client first operation
-#[cfg(not(target_arch = "xtensa"))]
-fn mlkem768_keygen(c: &mut Criterion) {
-    let mut group = c.benchmark_group("mlkem768-keygen");
-    group.throughput(Throughput::Elements(1));
-
-    #[cfg(all(
-        feature = "__bench_openssl",
-        target_family = "unix",
-        not(target_arch = "xtensa")
-    ))]
-    if ossl::available() {
-        group.bench_function("openssl", |b| {
-            b.iter(|| {
-                let decaps = ossl::keygen();
-                black_box(decaps.raw_public_key().unwrap())
-            })
-        });
-    }
-
-    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
-    group.bench_function("aws-lc-rs", |b| {
-        use aws_lc_rs::kem;
-
-        b.iter(|| {
-            let decaps = kem::DecapsulationKey::generate(&kem::ML_KEM_768).unwrap();
-            black_box(decaps.encapsulation_key().unwrap())
-        })
-    });
-
-    group.bench_function("libcrux-ml-kem", |b| {
-        use libcrux_ml_kem::mlkem768;
-
-        b.iter(|| {
-            let mut rand = [0u8; 64];
-            getrandom::fill(&mut rand).unwrap();
-            black_box(mlkem768::generate_key_pair(rand).into_parts());
-        });
-    });
-
-    group.bench_function("rustcrypto", |b| {
-        use ml_kem::{Kem, MlKem768};
-
-        b.iter(|| {
-            black_box(MlKem768::generate_keypair());
-        });
-    });
-
-    group.bench_function("rind", |b| {
-        let _dit = criterion::rind_dit();
-        use rind::kem::*;
-
-        b.iter(|| {
-            black_box(DecapsulationKey::<MlKem768>::generate().unwrap());
-        });
-    });
-
-    group.bench_function("verified-garbage", |b| {
-        vg_agrees_with_rind();
-        b.iter(|| black_box(vg_generate()));
-    });
-
-    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-    group.bench_function("graviola", |b| {
-        use graviola::key_agreement::mlkem768::DecapKey;
-
-        b.iter(|| {
-            black_box(DecapKey::generate().unwrap());
-        });
-    });
-}
-
-// server operation
-#[cfg(not(target_arch = "xtensa"))]
-fn mlkem768_encaps(c: &mut Criterion) {
-    let mut group = c.benchmark_group("mlkem768-encaps");
-    group.throughput(Throughput::Elements(1));
-
-    #[cfg(all(
-        feature = "__bench_openssl",
-        target_family = "unix",
-        not(target_arch = "xtensa")
-    ))]
-    if ossl::available() {
-        group.bench_function("openssl", |b| {
-            use openssl::pkey::{KeyType, PKey};
-
-            let encaps_bytes = ossl::keygen().raw_public_key().unwrap();
-
-            b.iter(|| {
-                let encaps = PKey::public_key_from_raw_bytes_ex(
-                    None,
-                    KeyType::ML_KEM_768,
-                    None,
-                    &encaps_bytes,
-                )
-                .unwrap();
-                black_box(ossl::encaps(&encaps))
-            })
-        });
-    }
-
-    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
-    group.bench_function("aws-lc-rs", |b| {
-        use aws_lc_rs::kem;
-
-        let decaps = kem::DecapsulationKey::generate(&kem::ML_KEM_768).unwrap();
-        let encaps_bytes = decaps
-            .encapsulation_key()
-            .unwrap()
-            .key_bytes()
-            .unwrap()
-            .as_ref()
-            .to_vec();
-
-        b.iter(|| {
-            let encaps = kem::EncapsulationKey::new(&kem::ML_KEM_768, &encaps_bytes).unwrap();
-            black_box(encaps.encapsulate().unwrap());
-        })
-    });
-
-    group.bench_function("libcrux-ml-kem", |b| {
-        use libcrux_ml_kem::mlkem768;
-
-        let mut rand = [0u8; 64];
-        getrandom::fill(&mut rand).unwrap();
-        let (_, encaps) = mlkem768::generate_key_pair(rand).into_parts();
-        let encaps_bytes = encaps.as_slice().to_vec();
-
-        b.iter(|| {
-            let encaps = mlkem768::MlKem768PublicKey::try_from(encaps_bytes.as_slice()).unwrap();
-            let mut rand = [0u8; 32];
-            getrandom::fill(&mut rand).unwrap();
-            black_box(mlkem768::encapsulate(&encaps, rand))
-        });
-    });
-
-    group.bench_function("rustcrypto", |b| {
-        use ml_kem::{Encapsulate, Kem, KeyExport, MlKem768, ml_kem_768::EncapsulationKey};
-
-        let (_decaps, encaps) = MlKem768::generate_keypair();
-        let encaps_bytes = encaps.to_bytes();
-
-        b.iter(|| {
-            let encaps = EncapsulationKey::new(&encaps_bytes).unwrap();
-            black_box(encaps.encapsulate());
-        });
-    });
-
-    group.bench_function("rind", |b| {
-        let _dit = criterion::rind_dit();
-        use rind::kem::*;
-
-        let encaps = DecapsulationKey::<MlKem768>::generate()
-            .unwrap()
-            .public_key()
-            .clone();
-
-        b.iter(|| {
-            let encaps = EncapsulationKey::<MlKem768>::new(encaps.as_ref()).unwrap();
-            black_box(encaps.encapsulate().unwrap());
-        });
-    });
-
-    group.bench_function("verified-garbage", |b| {
-        vg_agrees_with_rind();
-        use verified_garbage::mlkem768::EncapsulationKey768;
-
-        let encaps = *vg_generate().encapsulation_key().as_bytes();
-
-        b.iter(|| {
-            let encaps = EncapsulationKey768::from_bytes(&encaps).unwrap();
-            black_box(encaps.encapsulate().unwrap());
-        });
-    });
-
-    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-    group.bench_function("graviola", |b| {
-        use graviola::key_agreement::mlkem768::{DecapKey, EncapKey};
-
-        let encaps = DecapKey::generate().unwrap().encapsulation_key().as_bytes();
-
-        b.iter(|| {
-            let encaps = EncapKey::from_bytes(&encaps).unwrap();
-            black_box(encaps.encaps().unwrap());
-        });
-    });
-}
-
-// client second operation
-#[cfg(not(target_arch = "xtensa"))]
-fn mlkem768_decaps(c: &mut Criterion) {
-    let mut group = c.benchmark_group("mlkem768-decaps");
-    group.throughput(Throughput::Elements(1));
-
-    #[cfg(all(
-        feature = "__bench_openssl",
-        target_family = "unix",
-        not(target_arch = "xtensa")
-    ))]
-    if ossl::available() {
-        group.bench_function("openssl", |b| {
-            let decaps = ossl::keygen();
-            let (ciphertext, _secret) = ossl::encaps(&decaps);
-
-            b.iter(|| black_box(ossl::decaps(&decaps, &ciphertext)))
-        });
-    }
-
-    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
-    group.bench_function("aws-lc-rs", |b| {
-        use aws_lc_rs::kem;
-
-        let decaps = kem::DecapsulationKey::generate(&kem::ML_KEM_768).unwrap();
-        let (ciphertext, _secret) = decaps.encapsulation_key().unwrap().encapsulate().unwrap();
-        let ciphertext = ciphertext.as_ref().to_vec();
-
-        b.iter(|| {
-            let ciphertext = kem::Ciphertext::from(ciphertext.as_slice());
-            black_box(decaps.decapsulate(ciphertext).unwrap())
-        })
-    });
-
-    group.bench_function("libcrux-ml-kem", |b| {
-        use libcrux_ml_kem::mlkem768;
-
-        let mut rand = [0u8; 64];
-        getrandom::fill(&mut rand).unwrap();
-        let (decaps, encaps) = mlkem768::generate_key_pair(rand).into_parts();
-
-        let mut rand = [0u8; 32];
-        getrandom::fill(&mut rand).unwrap();
-        let (ciphertext, _secret) = mlkem768::encapsulate(&encaps, rand);
-        let ciphertext = ciphertext.as_slice().to_vec();
-
-        b.iter(|| {
-            let ciphertext = mlkem768::MlKem768Ciphertext::try_from(ciphertext.as_slice()).unwrap();
-            black_box(mlkem768::decapsulate(&decaps, &ciphertext));
-        });
-    });
-
-    group.bench_function("rustcrypto", |b| {
-        use ml_kem::{Decapsulate, Encapsulate, Kem, MlKem768};
-
-        let (decaps, encaps) = MlKem768::generate_keypair();
-        let (ciphertext, _secret) = encaps.encapsulate();
-        let ciphertext = ciphertext.as_slice().to_vec();
-
-        b.iter(|| {
-            black_box(decaps.decapsulate_slice(&ciphertext).unwrap());
-        });
-    });
-
-    group.bench_function("rind", |b| {
-        let _dit = criterion::rind_dit();
-        use rind::kem::*;
-
-        let decaps = DecapsulationKey::<MlKem768>::generate().unwrap();
-        let (ciphertext, _secret) = decaps.public_key().encapsulate().unwrap();
-
-        b.iter(|| {
-            let ciphertext = Ciphertext::<MlKem768>::new(ciphertext.as_ref()).unwrap();
-            black_box(decaps.decapsulate(&ciphertext))
-        })
-    });
-
-    group.bench_function("verified-garbage", |b| {
-        vg_agrees_with_rind();
-        let decaps = vg_generate();
-        let (_secret, ciphertext) = decaps.encapsulation_key().encapsulate().unwrap();
-
-        b.iter(|| black_box(decaps.decapsulate(&ciphertext).unwrap()))
-    });
-
-    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-    group.bench_function("graviola", |b| {
-        use graviola::key_agreement::mlkem768::DecapKey;
-
-        // Decapsulation consumes its key here too.
-        b.iter_batched(
-            || {
-                let decaps = DecapKey::generate().unwrap();
-                let (_secret, ciphertext) = decaps.encapsulation_key().encaps().unwrap();
-                (decaps, ciphertext)
-            },
-            |(decaps, ciphertext)| black_box(decaps.decaps(&ciphertext)),
-            BatchSize::SmallInput,
-        );
-    });
-}
-
-// combined operation: keygen, encaps-encode, encaps-decode, encaps, decaps
-#[cfg(not(target_arch = "xtensa"))]
-fn mlkem768_combined(c: &mut Criterion) {
-    let mut group = c.benchmark_group("mlkem768-combined");
-    group.throughput(Throughput::Elements(1));
-
-    #[cfg(all(
-        feature = "__bench_openssl",
-        target_family = "unix",
-        not(target_arch = "xtensa")
-    ))]
-    if ossl::available() {
-        group.bench_function("openssl", |b| {
-            use openssl::pkey::{KeyType, PKey};
-
-            b.iter(|| {
-                let decaps = ossl::keygen();
-                let encaps_encoded = decaps.raw_public_key().unwrap();
-                let encaps = PKey::public_key_from_raw_bytes_ex(
-                    None,
-                    KeyType::ML_KEM_768,
-                    None,
-                    &encaps_encoded,
-                )
-                .unwrap();
-                let (ciphertext, _secret) = ossl::encaps(&encaps);
-                black_box(ossl::decaps(&decaps, &ciphertext))
-            })
-        });
-    }
-
-    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
-    group.bench_function("aws-lc-rs", |b| {
-        use aws_lc_rs::kem;
-
-        b.iter(|| {
-            let decaps = kem::DecapsulationKey::generate(&kem::ML_KEM_768).unwrap();
-            let encaps_encoded = decaps.encapsulation_key().unwrap().key_bytes().unwrap();
-            let encaps =
-                kem::EncapsulationKey::new(&kem::ML_KEM_768, encaps_encoded.as_ref()).unwrap();
-            let (ciphertext, _secret) = encaps.encapsulate().unwrap();
-            black_box(decaps.decapsulate(ciphertext).unwrap())
-        })
-    });
-
-    group.bench_function("libcrux-ml-kem", |b| {
-        use libcrux_ml_kem::mlkem768;
-
-        b.iter(|| {
-            let mut rand = [0u8; 64];
-            getrandom::fill(&mut rand).unwrap();
-            let (decaps, encaps) = mlkem768::generate_key_pair(rand).into_parts();
-            let encaps_encoded = encaps.as_slice();
-            let encaps = mlkem768::MlKem768PublicKey::from(encaps_encoded);
-
-            let mut rand = [0u8; 32];
-            getrandom::fill(&mut rand).unwrap();
-            let (ciphertext, _secret) = mlkem768::encapsulate(&encaps, rand);
-            black_box(mlkem768::decapsulate(&decaps, &ciphertext));
-        });
-    });
-
-    group.bench_function("rustcrypto", |b| {
-        use ml_kem::{
-            Decapsulate, Encapsulate, Kem, KeyExport, MlKem768, ml_kem_768::EncapsulationKey,
-        };
-
-        b.iter(|| {
-            let (decaps, encaps) = MlKem768::generate_keypair();
-            let encaps_encoded = encaps.to_bytes();
-            let encaps = EncapsulationKey::new(&encaps_encoded).unwrap();
-            let (ciphertext, _secret) = encaps.encapsulate();
-            black_box(decaps.decapsulate(&ciphertext));
-        });
-    });
-
-    group.bench_function("rind", |b| {
-        let _dit = criterion::rind_dit();
-        use rind::kem::*;
-
-        b.iter(|| {
-            let decaps = DecapsulationKey::<MlKem768>::generate().unwrap();
-            let encaps_encoded = decaps.public_key();
-            let encaps = EncapsulationKey::<MlKem768>::new(encaps_encoded.as_ref()).unwrap();
-            let (ciphertext, _secret) = encaps.encapsulate().unwrap();
-            let ciphertext = Ciphertext::<MlKem768>::new(ciphertext.as_ref()).unwrap();
-            black_box(decaps.decapsulate(&ciphertext));
-        });
-    });
-
-    group.bench_function("verified-garbage", |b| {
-        vg_agrees_with_rind();
-        use verified_garbage::mlkem768::EncapsulationKey768;
-
-        b.iter(|| {
-            let decaps = vg_generate();
-            let encaps_encoded = decaps.encapsulation_key().as_bytes();
-            let encaps = EncapsulationKey768::from_bytes(encaps_encoded).unwrap();
-            let (_secret, ciphertext) = encaps.encapsulate().unwrap();
-            black_box(decaps.decapsulate(&ciphertext).unwrap());
-        });
-    });
-
-    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-    group.bench_function("graviola", |b| {
-        use graviola::key_agreement::mlkem768::{DecapKey, EncapKey};
-
-        b.iter(|| {
-            let decaps = DecapKey::generate().unwrap();
-            let encaps = EncapKey::from_bytes(&decaps.encapsulation_key().as_bytes()).unwrap();
-            let (_secret, ciphertext) = encaps.encaps().unwrap();
-            black_box(decaps.decaps(&ciphertext));
-        });
-    });
-}
-
-/// ML-KEM-512 and ML-KEM-1024 against aws-lc-rs and libcrux, each operation
-/// measured as its ML-KEM-768 group measures it.
-#[cfg(not(target_arch = "xtensa"))]
-macro_rules! mlkem_set {
-    (
-        $keygen:ident, $encaps:ident, $decaps:ident, $name:literal, $set:ident, $aws:ident,
-        $libcrux:ident, $public:ident, $ciphertext:ident
-    ) => {
-        #[cfg(not(target_arch = "xtensa"))]
-        fn $keygen(c: &mut Criterion) {
-            let mut group = c.benchmark_group(concat!($name, "-keygen"));
-            group.throughput(Throughput::Elements(1));
-
-            #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
-            group.bench_function("aws-lc-rs", |b| {
-                use aws_lc_rs::kem;
-
-                b.iter(|| {
-                    let decaps = kem::DecapsulationKey::generate(&kem::$aws).unwrap();
-                    black_box(decaps.encapsulation_key().unwrap())
-                })
-            });
-
-            group.bench_function("libcrux-ml-kem", |b| {
-                use libcrux_ml_kem::$libcrux;
-
-                b.iter(|| {
-                    let mut rand = [0u8; 64];
-                    getrandom::fill(&mut rand).unwrap();
-                    black_box($libcrux::generate_key_pair(rand).into_parts());
-                });
-            });
-
-            group.bench_function("rind", |b| {
-                let _dit = criterion::rind_dit();
-                use rind::kem::*;
-
-                b.iter(|| {
-                    black_box(DecapsulationKey::<$set>::generate().unwrap());
-                });
-            });
+/// A set's key generation against aws-lc-rs, libcrux, and rind.
+macro_rules! keygen_rows {
+    ($set:ident, $aws:ident, $libcrux:ident) => {
+        #[bench]
+        fn aws_lc_rs() {
+            use aws_lc_rs::kem;
+            let decaps = kem::DecapsulationKey::generate(&kem::$aws).unwrap();
+            black_box(decaps.encapsulation_key().unwrap());
         }
 
-        #[cfg(not(target_arch = "xtensa"))]
-        fn $encaps(c: &mut Criterion) {
-            let mut group = c.benchmark_group(concat!($name, "-encaps"));
-            group.throughput(Throughput::Elements(1));
+        #[bench]
+        fn libcrux_ml_kem() {
+            use libcrux_ml_kem::$libcrux;
+            let mut rand = [0u8; 64];
+            getrandom::fill(&mut rand).unwrap();
+            black_box($libcrux::generate_key_pair(rand).into_parts());
+        }
 
-            #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
-            group.bench_function("aws-lc-rs", |b| {
-                use aws_lc_rs::kem;
+        #[bench(setup = dit)]
+        fn rind(_dit: &Dit<()>) {
+            use rind::kem::*;
+            black_box(DecapsulationKey::<$set>::generate().unwrap());
+        }
+    };
+}
 
-                let decaps = kem::DecapsulationKey::generate(&kem::$aws).unwrap();
-                let encaps_bytes = decaps
-                    .encapsulation_key()
-                    .unwrap()
-                    .key_bytes()
-                    .unwrap()
-                    .as_ref()
-                    .to_vec();
+/// A set's encapsulation against aws-lc-rs, libcrux, and rind, decoding the
+/// encoded key each time.
+macro_rules! encaps_rows {
+    ($set:ident, $aws:ident, $libcrux:ident, $public:ident) => {
+        fn aws_key() -> Vec<u8> {
+            use aws_lc_rs::kem;
+            let decaps = kem::DecapsulationKey::generate(&kem::$aws).unwrap();
+            decaps
+                .encapsulation_key()
+                .unwrap()
+                .key_bytes()
+                .unwrap()
+                .as_ref()
+                .to_vec()
+        }
 
-                b.iter(|| {
-                    let encaps = kem::EncapsulationKey::new(&kem::$aws, &encaps_bytes).unwrap();
-                    black_box(encaps.encapsulate().unwrap());
-                })
-            });
+        #[bench(setup = aws_key)]
+        fn aws_lc_rs(encaps_bytes: &[u8]) {
+            use aws_lc_rs::kem;
+            let encaps = kem::EncapsulationKey::new(&kem::$aws, encaps_bytes).unwrap();
+            black_box(encaps.encapsulate().unwrap());
+        }
 
-            group.bench_function("libcrux-ml-kem", |b| {
-                use libcrux_ml_kem::$libcrux;
+        fn libcrux_key() -> Vec<u8> {
+            use libcrux_ml_kem::$libcrux;
+            let mut rand = [0u8; 64];
+            getrandom::fill(&mut rand).unwrap();
+            let (_, encaps) = $libcrux::generate_key_pair(rand).into_parts();
+            encaps.as_slice().to_vec()
+        }
 
-                let mut rand = [0u8; 64];
-                getrandom::fill(&mut rand).unwrap();
-                let (_, encaps) = $libcrux::generate_key_pair(rand).into_parts();
-                let encaps_bytes = encaps.as_slice().to_vec();
+        #[bench(setup = libcrux_key)]
+        fn libcrux_ml_kem(encaps_bytes: &[u8]) {
+            use libcrux_ml_kem::$libcrux;
+            let encaps = $libcrux::$public::try_from(encaps_bytes).unwrap();
+            let mut rand = [0u8; 32];
+            getrandom::fill(&mut rand).unwrap();
+            black_box($libcrux::encapsulate(&encaps, rand));
+        }
 
-                b.iter(|| {
-                    let encaps = $libcrux::$public::try_from(encaps_bytes.as_slice()).unwrap();
-                    let mut rand = [0u8; 32];
-                    getrandom::fill(&mut rand).unwrap();
-                    black_box($libcrux::encapsulate(&encaps, rand))
-                });
-            });
-
-            group.bench_function("rind", |b| {
-                let _dit = criterion::rind_dit();
-                use rind::kem::*;
-
-                let encaps = DecapsulationKey::<$set>::generate()
+        fn rind_key() -> Dit<rind::kem::EncapsulationKey<rind::kem::$set>> {
+            use rind::kem::*;
+            Dit::hold(
+                DecapsulationKey::<$set>::generate()
                     .unwrap()
                     .public_key()
-                    .clone();
-
-                b.iter(|| {
-                    let encaps = EncapsulationKey::<$set>::new(encaps.as_ref()).unwrap();
-                    black_box(encaps.encapsulate().unwrap());
-                });
-            });
+                    .clone(),
+            )
         }
 
-        #[cfg(not(target_arch = "xtensa"))]
-        fn $decaps(c: &mut Criterion) {
-            let mut group = c.benchmark_group(concat!($name, "-decaps"));
-            group.throughput(Throughput::Elements(1));
+        #[bench(setup = rind_key)]
+        fn rind(encaps: &Dit<rind::kem::EncapsulationKey<rind::kem::$set>>) {
+            use rind::kem::*;
+            let encaps = EncapsulationKey::<$set>::new(encaps.as_ref()).unwrap();
+            black_box(encaps.encapsulate().unwrap());
+        }
+    };
+}
 
-            #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
-            group.bench_function("aws-lc-rs", |b| {
-                use aws_lc_rs::kem;
+/// A set's decapsulation against aws-lc-rs, libcrux, and rind, decoding the
+/// encoded ciphertext each time.
+macro_rules! decaps_rows {
+    ($set:ident, $aws:ident, $libcrux:ident, $private:ident, $ciphertext:ident) => {
+        fn aws_pair() -> (aws_lc_rs::kem::DecapsulationKey, Vec<u8>) {
+            use aws_lc_rs::kem;
+            let decaps = kem::DecapsulationKey::generate(&kem::$aws).unwrap();
+            let (ciphertext, _secret) = decaps.encapsulation_key().unwrap().encapsulate().unwrap();
+            (decaps, ciphertext.as_ref().to_vec())
+        }
 
-                let decaps = kem::DecapsulationKey::generate(&kem::$aws).unwrap();
-                let (ciphertext, _secret) =
-                    decaps.encapsulation_key().unwrap().encapsulate().unwrap();
-                let ciphertext = ciphertext.as_ref().to_vec();
+        #[bench(setup = aws_pair)]
+        fn aws_lc_rs((decaps, ciphertext): &(aws_lc_rs::kem::DecapsulationKey, Vec<u8>)) {
+            let ciphertext = aws_lc_rs::kem::Ciphertext::from(ciphertext.as_slice());
+            black_box(decaps.decapsulate(ciphertext).unwrap());
+        }
 
-                b.iter(|| {
-                    let ciphertext = kem::Ciphertext::from(ciphertext.as_slice());
-                    black_box(decaps.decapsulate(ciphertext).unwrap())
-                })
-            });
+        fn libcrux_pair() -> (libcrux_ml_kem::$libcrux::$private, Vec<u8>) {
+            use libcrux_ml_kem::$libcrux;
+            let mut rand = [0u8; 64];
+            getrandom::fill(&mut rand).unwrap();
+            let (decaps, encaps) = $libcrux::generate_key_pair(rand).into_parts();
 
-            group.bench_function("libcrux-ml-kem", |b| {
-                use libcrux_ml_kem::$libcrux;
+            let mut rand = [0u8; 32];
+            getrandom::fill(&mut rand).unwrap();
+            let (ciphertext, _secret) = $libcrux::encapsulate(&encaps, rand);
+            (decaps, ciphertext.as_slice().to_vec())
+        }
 
-                let mut rand = [0u8; 64];
-                getrandom::fill(&mut rand).unwrap();
-                let (decaps, encaps) = $libcrux::generate_key_pair(rand).into_parts();
+        #[bench(setup = libcrux_pair)]
+        fn libcrux_ml_kem((decaps, ciphertext): &(libcrux_ml_kem::$libcrux::$private, Vec<u8>)) {
+            use libcrux_ml_kem::$libcrux;
+            let ciphertext = $libcrux::$ciphertext::try_from(ciphertext.as_slice()).unwrap();
+            black_box($libcrux::decapsulate(decaps, &ciphertext));
+        }
 
-                let mut rand = [0u8; 32];
-                getrandom::fill(&mut rand).unwrap();
-                let (ciphertext, _secret) = $libcrux::encapsulate(&encaps, rand);
-                let ciphertext = ciphertext.as_slice().to_vec();
+        fn rind_pair() -> Dit<(
+            rind::kem::DecapsulationKey<rind::kem::$set>,
+            rind::kem::Ciphertext<rind::kem::$set>,
+        )> {
+            use rind::kem::*;
+            let decaps = DecapsulationKey::<$set>::generate().unwrap();
+            let (ciphertext, _secret) = decaps.public_key().encapsulate().unwrap();
+            Dit::hold((decaps, ciphertext))
+        }
 
-                b.iter(|| {
-                    let ciphertext =
-                        $libcrux::$ciphertext::try_from(ciphertext.as_slice()).unwrap();
-                    black_box($libcrux::decapsulate(&decaps, &ciphertext));
-                });
-            });
-
-            group.bench_function("rind", |b| {
-                let _dit = criterion::rind_dit();
-                use rind::kem::*;
-
-                let decaps = DecapsulationKey::<$set>::generate().unwrap();
-                let (ciphertext, _secret) = decaps.public_key().encapsulate().unwrap();
-
-                b.iter(|| {
-                    let ciphertext = Ciphertext::<$set>::new(ciphertext.as_ref()).unwrap();
-                    black_box(decaps.decapsulate(&ciphertext))
-                })
-            });
+        #[bench(setup = rind_pair)]
+        fn rind(
+            pair: &Dit<(
+                rind::kem::DecapsulationKey<rind::kem::$set>,
+                rind::kem::Ciphertext<rind::kem::$set>,
+            )>,
+        ) {
+            use rind::kem::*;
+            let (decaps, ciphertext) = &**pair;
+            let ciphertext = Ciphertext::<$set>::new(ciphertext.as_ref()).unwrap();
+            black_box(decaps.decapsulate(&ciphertext));
         }
     };
 }
 
 #[cfg(not(target_arch = "xtensa"))]
-mlkem_set!(
-    mlkem512_keygen,
-    mlkem512_encaps,
-    mlkem512_decaps,
-    "mlkem512",
-    MlKem512,
-    ML_KEM_512,
-    mlkem512,
-    MlKem512PublicKey,
-    MlKem512Ciphertext
-);
-#[cfg(not(target_arch = "xtensa"))]
-mlkem_set!(
-    mlkem1024_keygen,
-    mlkem1024_encaps,
-    mlkem1024_decaps,
-    "mlkem1024",
-    MlKem1024,
-    ML_KEM_1024,
-    mlkem1024,
-    MlKem1024PublicKey,
-    MlKem1024Ciphertext
-);
+mod mlkem512_keygen {
+    use swole::bench;
+
+    use super::*;
+
+    keygen_rows!(MlKem512, ML_KEM_512, mlkem512);
+}
 
 #[cfg(not(target_arch = "xtensa"))]
-criterion_group!(
-    benches,
-    mlkem512_keygen,
-    mlkem512_encaps,
-    mlkem512_decaps,
-    mlkem768_keygen,
-    mlkem768_encaps,
-    mlkem768_decaps,
-    mlkem768_combined,
-    mlkem1024_keygen,
-    mlkem1024_encaps,
-    mlkem1024_decaps,
-);
+mod mlkem512_encaps {
+    use swole::bench;
+
+    use super::*;
+
+    encaps_rows!(MlKem512, ML_KEM_512, mlkem512, MlKem512PublicKey);
+}
+
 #[cfg(not(target_arch = "xtensa"))]
-criterion_main!(benches);
+mod mlkem512_decaps {
+    use swole::bench;
+
+    use super::*;
+
+    decaps_rows!(
+        MlKem512,
+        ML_KEM_512,
+        mlkem512,
+        MlKem512PrivateKey,
+        MlKem512Ciphertext
+    );
+}
+
+#[cfg(not(target_arch = "xtensa"))]
+mod mlkem1024_keygen {
+    use swole::bench;
+
+    use super::*;
+
+    keygen_rows!(MlKem1024, ML_KEM_1024, mlkem1024);
+}
+
+#[cfg(not(target_arch = "xtensa"))]
+mod mlkem1024_encaps {
+    use swole::bench;
+
+    use super::*;
+
+    encaps_rows!(MlKem1024, ML_KEM_1024, mlkem1024, MlKem1024PublicKey);
+}
+
+#[cfg(not(target_arch = "xtensa"))]
+mod mlkem1024_decaps {
+    use swole::bench;
+
+    use super::*;
+
+    decaps_rows!(
+        MlKem1024,
+        ML_KEM_1024,
+        mlkem1024,
+        MlKem1024PrivateKey,
+        MlKem1024Ciphertext
+    );
+}
+
+// client first operation
+#[cfg(not(target_arch = "xtensa"))]
+mod mlkem768_keygen {
+    use swole::bench;
+
+    use super::*;
+
+    keygen_rows!(MlKem768, ML_KEM_768, mlkem768);
+
+    #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+    #[bench(setup = ossl::require)]
+    fn openssl(_: &()) {
+        let decaps = ossl::keygen();
+        black_box(decaps.raw_public_key().unwrap());
+    }
+
+    #[bench]
+    fn rustcrypto() {
+        use ml_kem::{Kem, MlKem768};
+        black_box(MlKem768::generate_keypair());
+    }
+
+    #[bench(setup = vg_agrees_with_rind)]
+    fn verified_garbage(_: &()) {
+        black_box(vg_generate());
+    }
+
+    #[cfg(graviola)]
+    #[bench]
+    fn graviola() {
+        use graviola::key_agreement::mlkem768::DecapKey;
+        black_box(DecapKey::generate().unwrap());
+    }
+}
+
+// server operation
+#[cfg(not(target_arch = "xtensa"))]
+mod mlkem768_encaps {
+    use swole::bench;
+
+    use super::*;
+
+    encaps_rows!(MlKem768, ML_KEM_768, mlkem768, MlKem768PublicKey);
+
+    #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+    fn openssl_key() -> Vec<u8> {
+        ossl::require();
+        ossl::keygen().raw_public_key().unwrap()
+    }
+
+    #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+    #[bench(setup = openssl_key)]
+    fn openssl(encaps_bytes: &[u8]) {
+        use openssl::pkey::{KeyType, PKey};
+        let encaps =
+            PKey::public_key_from_raw_bytes_ex(None, KeyType::ML_KEM_768, None, encaps_bytes)
+                .unwrap();
+        black_box(ossl::encaps(&encaps));
+    }
+
+    fn rustcrypto_key() -> ml_kem::Key<ml_kem::ml_kem_768::EncapsulationKey> {
+        use ml_kem::{Kem, KeyExport, MlKem768};
+        let (_decaps, encaps) = MlKem768::generate_keypair();
+        encaps.to_bytes()
+    }
+
+    #[bench(setup = rustcrypto_key)]
+    fn rustcrypto(encaps_bytes: &ml_kem::Key<ml_kem::ml_kem_768::EncapsulationKey>) {
+        use ml_kem::{Encapsulate, ml_kem_768::EncapsulationKey};
+        let encaps = EncapsulationKey::new(encaps_bytes).unwrap();
+        black_box(encaps.encapsulate());
+    }
+
+    fn vg_key() -> [u8; 1184] {
+        vg_agrees_with_rind();
+        *vg_generate().encapsulation_key().as_bytes()
+    }
+
+    #[bench(setup = vg_key)]
+    fn verified_garbage(encaps: &[u8; 1184]) {
+        use verified_garbage::mlkem768::EncapsulationKey768;
+        let encaps = EncapsulationKey768::from_bytes(encaps).unwrap();
+        black_box(encaps.encapsulate().unwrap());
+    }
+
+    #[cfg(graviola)]
+    fn graviola_key() -> [u8; 1184] {
+        use graviola::key_agreement::mlkem768::DecapKey;
+        DecapKey::generate().unwrap().encapsulation_key().as_bytes()
+    }
+
+    #[cfg(graviola)]
+    #[bench(setup = graviola_key)]
+    fn graviola(encaps: &[u8; 1184]) {
+        use graviola::key_agreement::mlkem768::EncapKey;
+        let encaps = EncapKey::from_bytes(encaps).unwrap();
+        black_box(encaps.encaps().unwrap());
+    }
+}
+
+// client second operation
+#[cfg(not(target_arch = "xtensa"))]
+mod mlkem768_decaps {
+    use swole::bench;
+
+    use super::*;
+
+    decaps_rows!(
+        MlKem768,
+        ML_KEM_768,
+        mlkem768,
+        MlKem768PrivateKey,
+        MlKem768Ciphertext
+    );
+
+    #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+    fn openssl_pair() -> (
+        openssl::pkey::PKey<openssl::pkey::Private>,
+        [u8; ossl::CIPHERTEXT_LEN],
+    ) {
+        ossl::require();
+        let decaps = ossl::keygen();
+        let (ciphertext, _secret) = ossl::encaps(&decaps);
+        (decaps, ciphertext)
+    }
+
+    #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+    #[bench(setup = openssl_pair)]
+    fn openssl(
+        (decaps, ciphertext): &(
+            openssl::pkey::PKey<openssl::pkey::Private>,
+            [u8; ossl::CIPHERTEXT_LEN],
+        ),
+    ) {
+        black_box(ossl::decaps(decaps, ciphertext));
+    }
+
+    fn rustcrypto_pair() -> (ml_kem::ml_kem_768::DecapsulationKey, Vec<u8>) {
+        use ml_kem::{Encapsulate, Kem, MlKem768};
+        let (decaps, encaps) = MlKem768::generate_keypair();
+        let (ciphertext, _secret) = encaps.encapsulate();
+        (decaps, ciphertext.as_slice().to_vec())
+    }
+
+    #[bench(setup = rustcrypto_pair)]
+    fn rustcrypto((decaps, ciphertext): &(ml_kem::ml_kem_768::DecapsulationKey, Vec<u8>)) {
+        use ml_kem::Decapsulate;
+        black_box(decaps.decapsulate_slice(ciphertext).unwrap());
+    }
+
+    fn vg_pair() -> (verified_garbage::mlkem768::DecapsulationKey768, [u8; 1088]) {
+        vg_agrees_with_rind();
+        let decaps = vg_generate();
+        let (_secret, ciphertext) = decaps.encapsulation_key().encapsulate().unwrap();
+        (decaps, ciphertext)
+    }
+
+    #[bench(setup = vg_pair)]
+    fn verified_garbage(
+        (decaps, ciphertext): &(verified_garbage::mlkem768::DecapsulationKey768, [u8; 1088]),
+    ) {
+        black_box(decaps.decapsulate(ciphertext).unwrap());
+    }
+
+    /// Decapsulation consumes its key, so each call gets a new key and
+    /// ciphertext, made untimed.
+    #[cfg(graviola)]
+    fn graviola_pair() -> (
+        graviola::key_agreement::mlkem768::DecapKey,
+        graviola::key_agreement::mlkem768::Ciphertext,
+    ) {
+        use graviola::key_agreement::mlkem768::DecapKey;
+        let decaps = DecapKey::generate().unwrap();
+        let (_secret, ciphertext) = decaps.encapsulation_key().encaps().unwrap();
+        (decaps, ciphertext)
+    }
+
+    #[cfg(graviola)]
+    #[bench(setup = graviola_pair)]
+    fn graviola(
+        (decaps, ciphertext): (
+            graviola::key_agreement::mlkem768::DecapKey,
+            graviola::key_agreement::mlkem768::Ciphertext,
+        ),
+    ) {
+        black_box(decaps.decaps(&ciphertext));
+    }
+}
+
+// combined operation: keygen, encaps-encode, encaps-decode, encaps, decaps
+#[cfg(not(target_arch = "xtensa"))]
+mod mlkem768_combined {
+    use swole::bench;
+
+    use super::*;
+
+    #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+    #[bench(setup = ossl::require)]
+    fn openssl(_: &()) {
+        use openssl::pkey::{KeyType, PKey};
+        let decaps = ossl::keygen();
+        let encaps_encoded = decaps.raw_public_key().unwrap();
+        let encaps =
+            PKey::public_key_from_raw_bytes_ex(None, KeyType::ML_KEM_768, None, &encaps_encoded)
+                .unwrap();
+        let (ciphertext, _secret) = ossl::encaps(&encaps);
+        black_box(ossl::decaps(&decaps, &ciphertext));
+    }
+
+    #[bench]
+    fn aws_lc_rs() {
+        use aws_lc_rs::kem;
+        let decaps = kem::DecapsulationKey::generate(&kem::ML_KEM_768).unwrap();
+        let encaps_encoded = decaps.encapsulation_key().unwrap().key_bytes().unwrap();
+        let encaps = kem::EncapsulationKey::new(&kem::ML_KEM_768, encaps_encoded.as_ref()).unwrap();
+        let (ciphertext, _secret) = encaps.encapsulate().unwrap();
+        black_box(decaps.decapsulate(ciphertext).unwrap());
+    }
+
+    #[bench]
+    fn libcrux_ml_kem() {
+        use libcrux_ml_kem::mlkem768;
+        let mut rand = [0u8; 64];
+        getrandom::fill(&mut rand).unwrap();
+        let (decaps, encaps) = mlkem768::generate_key_pair(rand).into_parts();
+        let encaps_encoded = encaps.as_slice();
+        let encaps = mlkem768::MlKem768PublicKey::from(encaps_encoded);
+
+        let mut rand = [0u8; 32];
+        getrandom::fill(&mut rand).unwrap();
+        let (ciphertext, _secret) = mlkem768::encapsulate(&encaps, rand);
+        black_box(mlkem768::decapsulate(&decaps, &ciphertext));
+    }
+
+    #[bench]
+    fn rustcrypto() {
+        use ml_kem::{
+            Decapsulate, Encapsulate, Kem, KeyExport, MlKem768, ml_kem_768::EncapsulationKey,
+        };
+        let (decaps, encaps) = MlKem768::generate_keypair();
+        let encaps_encoded = encaps.to_bytes();
+        let encaps = EncapsulationKey::new(&encaps_encoded).unwrap();
+        let (ciphertext, _secret) = encaps.encapsulate();
+        black_box(decaps.decapsulate(&ciphertext));
+    }
+
+    #[bench(setup = dit)]
+    fn rind(_dit: &Dit<()>) {
+        use rind::kem::*;
+        let decaps = DecapsulationKey::<MlKem768>::generate().unwrap();
+        let encaps_encoded = decaps.public_key();
+        let encaps = EncapsulationKey::<MlKem768>::new(encaps_encoded.as_ref()).unwrap();
+        let (ciphertext, _secret) = encaps.encapsulate().unwrap();
+        let ciphertext = Ciphertext::<MlKem768>::new(ciphertext.as_ref()).unwrap();
+        black_box(decaps.decapsulate(&ciphertext));
+    }
+
+    #[bench(setup = vg_agrees_with_rind)]
+    fn verified_garbage(_: &()) {
+        use verified_garbage::mlkem768::EncapsulationKey768;
+        let decaps = vg_generate();
+        let encaps_encoded = decaps.encapsulation_key().as_bytes();
+        let encaps = EncapsulationKey768::from_bytes(encaps_encoded).unwrap();
+        let (_secret, ciphertext) = encaps.encapsulate().unwrap();
+        black_box(decaps.decapsulate(&ciphertext).unwrap());
+    }
+
+    #[cfg(graviola)]
+    #[bench]
+    fn graviola() {
+        use graviola::key_agreement::mlkem768::{DecapKey, EncapKey};
+        let decaps = DecapKey::generate().unwrap();
+        let encaps = EncapKey::from_bytes(&decaps.encapsulation_key().as_bytes()).unwrap();
+        let (_secret, ciphertext) = encaps.encaps().unwrap();
+        black_box(decaps.decaps(&ciphertext));
+    }
+}
+
+#[cfg(not(target_arch = "xtensa"))]
+fn main() {
+    swole::main();
+}

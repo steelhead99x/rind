@@ -149,6 +149,23 @@ fn kem() {
     assert_eq!(leaks(&secret, || drop((sent, received))), 0);
 }
 
+/// A decapsulation key's saved bytes, and the key loaded from them.
+#[test]
+fn kem_key_bytes() {
+    let bytes = kem::DecapsulationKey::generate(&kem::ML_KEM_768)
+        .unwrap()
+        .key_bytes()
+        .unwrap();
+    let secret: [u8; NEEDLE_LEN] = bytes.as_ref()[..NEEDLE_LEN].try_into().unwrap();
+    let leaked = leaks(&secret, || {
+        let key = kem::DecapsulationKey::new(&kem::ML_KEM_768, bytes.as_ref()).unwrap();
+        let saved = key.key_bytes().unwrap();
+        assert_eq!(saved.as_ref(), bytes.as_ref());
+        drop((key, saved, bytes));
+    });
+    assert_eq!(leaked, 0);
+}
+
 /// A smaller set's decapsulation key leaves no stale stack bytes on the heap:
 /// held inline in space sized for ML-KEM-1024, its slack would carry what the
 /// stack last held, such as another key's seed, past the key's own wipe.
@@ -303,11 +320,11 @@ fn pqdsa_leaks(doc: &[u8], needle: &[u8], expected: Result<(), &str>) -> usize {
 const EC_PUBLIC_KEY: [u8; 9] = [0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01];
 
 /// The "another algorithm" checks in `PqdsaKeyPair::from_pkcs8` that copy a
-/// private key: EC keys on a curve rind cannot back, consistent and not; RSA
-/// keys below 2048 bits, consistent and not; and the PKCS#8 documents the
-/// adapter rebuilds, for a P-256 key with explicit parameters, a hybrid
-/// public key, or a short scalar, and for an ML-DSA seed followed by stray
-/// bytes. Every heap copy of the scalar, the RSA primes, or the seed is
+/// private key: EC keys on a curve rind cannot back, with their own public
+/// key and another point's; RSA keys below 2048 bits, consistent and not;
+/// and the PKCS#8 documents the adapter rebuilds, for a P-256 key with
+/// explicit parameters, a hybrid public key, or a short scalar, and for an
+/// ML-DSA seed followed by stray bytes. Every heap copy of the scalar, the RSA primes, or the seed is
 /// wiped before it is freed, on refusal and on success.
 #[test]
 fn key_type_checks() {
@@ -334,7 +351,8 @@ fn key_type_checks() {
         .concat(),
     );
     assert_eq!(
-        pqdsa_leaks(&pkcs8(&k1, &mismatched), &scalar, Err("InvalidEncoding")),
+        // aws-lc-rs says `InvalidEncoding`: the difference the README lists.
+        pqdsa_leaks(&pkcs8(&k1, &mismatched), &scalar, Err("WrongAlgorithm")),
         0
     );
 

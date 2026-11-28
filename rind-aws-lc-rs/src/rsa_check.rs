@@ -149,7 +149,12 @@ fn mul(a: &[u64], b: &[u64]) -> Limbs {
     for (i, &bi) in b.iter().enumerate() {
         let mut carry = 0u128;
         for (j, &aj) in a.iter().enumerate() {
-            let t = u128::from(out[i + j]) + u128::from(aj) * u128::from(bi) + carry;
+            // At most (2^64 - 1) + (2^64 - 1)^2 + (2^64 - 1) = 2^128 - 1, so it
+            // never wraps; the wrapping forms keep a debug build's overflow
+            // checks from branching on the secret limbs.
+            let t = u128::from(out[i + j])
+                .wrapping_add(u128::from(aj).wrapping_mul(u128::from(bi)))
+                .wrapping_add(carry);
             out[i + j] = t as u64;
             carry = t >> 64;
         }

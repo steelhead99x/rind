@@ -86,6 +86,8 @@ pub trait Params:
     #[doc(hidden)]
     fn parse(_: Internal, input: &Self::EncapKeyBytes) -> Result<EncapKey<Self>, Error>;
     #[doc(hidden)]
+    fn parse_decap_key(_: Internal, dk: &Self::DecapKeyBytes) -> Result<DecapKey<Self>, Error>;
+    #[doc(hidden)]
     fn encaps(_: Internal, key: &EncapKey<Self>, m: Message) -> (SharedSecret, Ciphertext<Self>);
 }
 
@@ -115,6 +117,12 @@ macro_rules! algorithms {
         fn parse(_: Internal, input: &Self::EncapKeyBytes) -> Result<EncapKey<Self>, Error> {
             let _mcdt = low::Mcdt::enter();
             EncapKey::parse_mitigated(input)
+        }
+
+        #[inline(never)]
+        fn parse_decap_key(_: Internal, dk: &Self::DecapKeyBytes) -> Result<DecapKey<Self>, Error> {
+            let _mcdt = low::Mcdt::enter();
+            DecapKey::parse_mitigated(dk)
         }
 
         #[inline(never)]
@@ -290,14 +298,21 @@ pub struct DecapKey<P: Params> {
 }
 
 impl<P: Params> DecapKey<P> {
-    /// Generate a random [`DecapKey`] (which contains the corresponding [`EncapKey`]).
+    /// Generate a random [`DecapKey`] (which contains the corresponding
+    /// [`EncapKey`]), and the seed `d || z` it came from.
     ///
     /// This fails only if random material generation fails.
-    pub(crate) fn generate() -> Result<Self, Error> {
+    pub(crate) fn generate() -> Result<(Self, [u8; 64]), Error> {
         let _entry = low::Entry::new_secret();
         let mut seed = [0u8; 64];
         SystemRandom.fill(&mut seed)?;
-        Ok(Self::keygen_internal(&seed))
+        Ok((Self::keygen_internal(&seed), seed))
+    }
+
+    /// FIPS 203's `ML-KEM.KeyGen_internal`, from the seed `d || z`.
+    pub(crate) fn from_seed(seed: &[u8; 64]) -> Self {
+        let _entry = low::Entry::new_secret();
+        Self::keygen_internal(seed)
     }
 
     /// Decapsulate ciphertext `c`, yielding a [`SharedSecret`].
@@ -360,10 +375,7 @@ impl<P: Params> DecapKey<P> {
         }
     }
 
-    /// Encode the key as bytes.
-    ///
-    /// This is used for testing, and by the FIPS module's self-test.
-    #[cfg(any(test, rind_fips))]
+    /// FIPS 203's encoding of the key, `dkPKE || ek || H(ek) || z`.
     pub(crate) fn as_bytes(&self) -> P::DecapKeyBytes {
         let _entry = low::Entry::new_secret();
         self.encode()
@@ -376,18 +388,52 @@ impl<P: Params> DecapKey<P> {
     /// reduced mod q. It decapsulates with rind's arithmetic, since VG's
     /// takes only a key VG generated.
     ///
-    /// This is used for testing, and by the FIPS module's ACVP build: rind
-    /// generates keys only from seeds.
+    /// The FIPS module's ACVP build tests this check alone; a key from
+    /// outside rind goes through [`Self::parse`].
     #[cfg(any(test, rind_fips))]
     pub(crate) fn from_bytes(dk: &P::DecapKeyBytes) -> Option<Self> {
         // Decoding reads the secret polynomials, so under DIT.
         let _entry = low::Entry::new_secret();
         // Its arithmetic runs multiplies Intel's MXCSR mitigation covers.
         let _mcdt = low::Mcdt::enter();
+        Self::from_bytes_mitigated(dk)
+    }
+
+    /// [`Self::from_bytes`], under the caller's MXCSR mitigation.
+    fn from_bytes_mitigated(dk: &P::DecapKeyBytes) -> Option<Self> {
         let key = Self::decode(dk, true);
         let mut h = sha3::Sha3_256Context::new();
         h.update(key.ek_pke.bytes.as_ref());
         (h.finish() == key.ek_pke.h_ek).then_some(key)
+    }
+
+    /// Parses FIPS 203's encoding `dk` of a key from outside rind: refused
+    /// unless it passes the decapsulation input check (section 7.3), whose
+    /// `H(ek)` must be its encapsulation key's, and the modulus check, on
+    /// its encapsulation key (section 7.2) and on its secret vector, whose
+    /// every coefficient must be below q, as Wycheproof holds such a key to.
+    pub(crate) fn parse(dk: &P::DecapKeyBytes) -> Result<Self, Error> {
+        let _entry = low::Entry::new_secret();
+        P::parse_decap_key(Internal(()), dk)
+    }
+
+    /// [`Self::parse`], under the caller's MXCSR mitigation.
+    fn parse_mitigated(dk: &P::DecapKeyBytes) -> Result<Self, Error> {
+        let (dk_pke, rest) = dk.as_ref().split_at(P::K * 384);
+        let (t_hat, rest) = rest.split_at(P::K * 384);
+        // The encapsulation key and its hash are public.
+        low::ct::public_slice(&rest[..64]);
+        low::ct::public_slice(t_hat);
+        let reduced = |bytes: &[u8]| {
+            let mut encoded = Encoded::<P>::filled([0; 384]);
+            encoded.as_mut().as_flattened_mut().copy_from_slice(bytes);
+            let decoded = Coeffs::<P::Vector, Ntt>::from_bytes(&encoded);
+            ct_equal(decoded.to_bytes().as_ref().as_flattened(), bytes)
+        };
+        if !(reduced(t_hat) && low::ct::into_public(reduced(dk_pke))) {
+            return Err(KeyFormatError::MlKemModulus.into());
+        }
+        Self::from_bytes_mitigated(dk).ok_or_else(|| KeyFormatError::MismatchedPublicKey.into())
     }
 
     pub(crate) fn keygen_internal(seed: &[u8; 64]) -> Self {
@@ -499,16 +545,7 @@ impl<P: Params> DecapKey<P> {
         // 8. - 15.
         let mut s = Coeffs::<P::Vector, Normal>::zero();
         let mut e = Coeffs::<P::Vector, Normal>::zero();
-        let mut none: [Poly; 0] = [];
-        sample_poly_cbd(
-            P::ETA1,
-            P::K,
-            &sigma.0,
-            0,
-            s.0.as_mut(),
-            e.0.as_mut(),
-            &mut none,
-        );
+        sample_poly_cbd(P::ETA1, &sigma.0, 0, s.0.as_mut(), e.0.as_mut());
 
         // 16. ŝ <- NTT(s)
         let mut s_hat = s.ntt();
@@ -640,29 +677,15 @@ impl<P: Params> Decoded<P> {
         // 4. - 8. rolled into self.transpose_a_hat.
 
         // 9. - 12. y_i <- SamplePolyCBD_eta1(PRF(r, N))
+        let mut y = Coeffs::<P::Vector, Normal>::zero();
+        let mut none: [Poly; 0] = [];
+        sample_poly_cbd(P::ETA1, &r.0, 0, y.0.as_mut(), &mut none);
+
         // 13. - 16. e_1 <- SamplePolyCBD_eta2(PRF(r, N))
         // 17. e_2 <- SamplePolyCBD_eta2(PRF(r, N))
-        //
-        // N counts on from y's into e_1's and e_2's, so where eta1 is eta2
-        // one call samples all three, and hashes them in fewer batches.
-        let mut y = Coeffs::<P::Vector, Normal>::zero();
         let mut e_1 = Coeffs::<P::Vector, Normal>::zero();
         let mut e_2 = [[0; N]; 1];
-        let mut none: [Poly; 0] = [];
-        if P::ETA1 == ETA2 {
-            sample_poly_cbd(ETA2, P::K, &r.0, 0, y.0.as_mut(), e_1.0.as_mut(), &mut e_2);
-        } else {
-            sample_poly_cbd(P::ETA1, P::K, &r.0, 0, y.0.as_mut(), &mut [], &mut none);
-            sample_poly_cbd(
-                ETA2,
-                P::K,
-                &r.0,
-                P::K as u8,
-                e_1.0.as_mut(),
-                &mut e_2,
-                &mut none,
-            );
-        }
+        sample_poly_cbd(ETA2, &r.0, P::K as u8, e_1.0.as_mut(), &mut e_2);
 
         // 18. y^ <- NTT(y)
         let y_hat = y.ntt();
@@ -1275,108 +1298,23 @@ impl<V: FixedArray<Poly>> Coeffs<V, Normal> {
 }
 
 /// `SamplePolyCBD_eta(PRF_eta(sigma, n))` into each polynomial of `a`, then
-/// of `b`, then of `c`, with `n` counting from `first`, for the parameter set
-/// of rank `k`: eight polynomials at a time where the CPU hashes eight at once
-/// (but for ML-KEM-768), and four at a time otherwise.
-fn sample_poly_cbd(
-    eta: usize,
-    k: usize,
-    sigma: &[u8; 32],
-    first: u8,
-    a: &mut [Poly],
-    b: &mut [Poly],
-    c: &mut [Poly],
-) {
-    let total = a.len() + b.len() + c.len();
+/// of `b`, with `n` counting from `first`, four polynomials at a time.
+fn sample_poly_cbd(eta: usize, sigma: &[u8; 32], first: u8, a: &mut [Poly], b: &mut [Poly]) {
+    let total = a.len() + b.len();
     let mut done = 0;
     while done < total {
-        let left = total - done;
-        // ML-KEM-768 never hashes eight at a time: it takes its six or seven
-        // four at a time, over the verified four-way Keccak-f, so Graviola's
-        // unproven eight-way Keccak is off its path, as in `sample_ntt`.
-        // Where that would run, ML-KEM-768 runs pyca/verified-garbage's
-        // routines instead. Only x86_64 has an eight-way PRF, and only
-        // ML-KEM-1024's eta = 2 batches pass four.
-        #[cfg(rind_backend = "x86_64")]
-        if eta == 2 && k == 4 && left > 4 {
-            let count = if left < 8 { left } else { 8 };
-            let polys = sample_poly_cbd2_8x(sigma, first + done as u8, count);
-            for t in 0..count {
-                put_poly(a, b, c, done + t, &polys[t]);
-            }
-            done += count;
-            continue;
-        }
-        #[cfg(not(rind_backend = "x86_64"))]
-        let _ = k;
-        let count = if left < 4 { left } else { 4 };
+        let count = if total - done < 4 { total - done } else { 4 };
         let polys = sample_poly_cbd_4x(eta, sigma, first + done as u8, count);
         for t in 0..count {
-            put_poly(a, b, c, done + t, &polys[t]);
+            let poly = done + t;
+            if poly < a.len() {
+                a[poly] = polys[t];
+            } else {
+                b[poly - a.len()] = polys[t];
+            }
         }
         done += count;
     }
-}
-
-/// Stores `poly` as polynomial `i` of `a`, `b`, and `c` laid end to end.
-fn put_poly(a: &mut [Poly], b: &mut [Poly], c: &mut [Poly], i: usize, poly: &Poly) {
-    if i < a.len() {
-        a[i] = *poly;
-    } else if i < a.len() + b.len() {
-        b[i - a.len()] = *poly;
-    } else {
-        c[i - a.len() - b.len()] = *poly;
-    }
-}
-
-/// `SamplePolyCBD_2(PRF_2(sigma, n + t))` for each `t` below `count`, which is
-/// five to eight, on x86_64's eight-way SHAKE256 where the CPU has it and four
-/// at a time otherwise; the rest are zero. It hands the eight-way Keccak a
-/// function pointer, which Aeneas cannot translate, so `admin/prove` leaves it
-/// opaque.
-#[cfg(rind_backend = "x86_64")]
-fn sample_poly_cbd2_8x(sigma: &[u8; 32], n: u8, count: usize) -> [Poly; 8] {
-    let mut inputs = [[0; 40]; 8];
-    for t in 0..count {
-        inputs[t][..32].copy_from_slice(sigma);
-        inputs[t][32] = n + t as u8;
-        inputs[t][33] = sha3::SHAKE_PAD_BYTE;
-    }
-
-    let mut samples = [[0; 128]; 8];
-    low::mlkem_shake256_8x(&inputs, &mut samples, count, shake256_fours);
-
-    let mut polys = [[0; N]; 8];
-    for t in 0..count {
-        sample_cbd2(&samples[t], &mut polys[t]);
-    }
-    polys
-}
-
-/// [`sha3::shake256_batch`] of the first `count` of eight inputs, four at a
-/// time.
-#[cfg(rind_backend = "x86_64")]
-fn shake256_fours(inputs: &[[u8; 40]; 8], outputs: &mut [[u8; 128]; 8], count: usize) {
-    let (inputs, _) = inputs.as_chunks::<4>();
-    let (outputs, _) = outputs.as_chunks_mut::<4>();
-    for (i, (inputs, outputs)) in inputs.iter().zip(outputs).enumerate() {
-        match count.saturating_sub(i * 4) {
-            0 => {}
-            1 => shake256_batch_of::<1>(inputs, outputs),
-            2 => shake256_batch_of::<2>(inputs, outputs),
-            3 => shake256_batch_of::<3>(inputs, outputs),
-            _ => sha3::shake256_batch(inputs, outputs),
-        }
-    }
-}
-
-/// [`sha3::shake256_batch`] of the first `P` of four inputs.
-#[cfg(rind_backend = "x86_64")]
-fn shake256_batch_of<const P: usize>(inputs: &[[u8; 40]; 4], outputs: &mut [[u8; 128]; 4]) {
-    sha3::shake256_batch::<P>(
-        inputs.first_chunk().unwrap(),
-        outputs.first_chunk_mut().unwrap(),
-    );
 }
 
 /// `SamplePolyCBD_eta(PRF_eta(sigma, n + t))` for each `t` below `count`,
@@ -1421,8 +1359,8 @@ fn sample_poly_cbd_4x(eta: usize, sigma: &[u8; 32], n: u8, count: usize) -> [Pol
             }
 
             // The 192 bytes each polynomial takes span two blocks.
-            let mut samples = [[0; 2 * sha3::SHAKE_256_R_BYTES]; 4];
-            sha3::Shake256x4::new(&inputs[..count]).squeeze(&mut samples);
+            let mut samples = [[0; 2 * sha3::SHAKE_256_R_BYTES]; 8];
+            sha3::Shake256x8::new(&inputs[..count]).squeeze(&mut samples);
 
             for t in 0..count {
                 sample_cbd3(samples[t].first_chunk().unwrap(), &mut polys[t]);
@@ -1637,7 +1575,7 @@ mod tests {
     #[test]
     fn pairwise() {
         fn check<P: Params>() {
-            let d = DecapKey::<P>::generate().unwrap();
+            let (d, _) = DecapKey::<P>::generate().unwrap();
             let (ess, ct) = d.encapsulation_key().encaps().unwrap();
             let dss = d.decaps(&ct);
             assert_eq!(low::ct::into_public(ess.0), low::ct::into_public(dss.0));
@@ -1794,60 +1732,55 @@ mod tests {
         ct_qemu::traced(|| ek.encaps_internal(m()));
     }
 
-    // Valgrind runs no AVX-512, so `admin/ctgrind` never reaches
+    // Valgrind and BINSEC run no AVX-512, so neither reaches
     // pyca/verified-garbage's ML-KEM-768 key generation and decapsulation,
-    // nor its AVX-512 encapsulation; `admin/ct-sde` traces them here, under
-    // Sapphire Rapids, as `ct_qemu_mlkem` traces aarch64's. Encapsulating a
-    // secret message to a fixed key, with the key's hash and without, then
-    // decapsulating the ciphertext and a tampered copy. A second key then
-    // takes its implicit-rejection secret `z` from the seed, as its
-    // generation is traced: `𝜌` comes from the rest, so it stays fixed.
-    // Fixing `d` also fixes the secret vectors it derives, and key generation
-    // cannot vary them without varying `𝜌`, so the last key decapsulates
-    // with the fixed key's `ek` but the `dkPKE` of a key generated from a
-    // seeded `d`. VG's contract asks for a whole key its key generation
-    // wrote, and none varies `dkPKE` with `𝜌` fixed; each field here is one
-    // VG's key generation wrote, so every coefficient is in range.
+    // nor its AVX-512 encapsulation. Each routine's leakage is VG's proven
+    // contract, which `Rind.X86_64.VgMlKem768Ct` imports; these check the
+    // Rust around them, as it runs where the CPU has AVX-512: the tests
+    // force the routines' CPU check, and `admin/ct-binsec` stubs each
+    // routine by its contract (`CONTRACTS`), so that its outputs are fresh
+    // secrets and a secret `ρ` it is given fails. The region generates a key
+    // from a secret seed, encapsulates a secret message to its public key,
+    // with the key's hash, and to the same key parsed, without it, and
+    // decapsulates the ciphertext. A VG routine fails only at a `SampleNTT`
+    // bound reached on `ρ`, which is public, so the stubs succeed; with
+    // `fallback`, encapsulation and decapsulation then discard what they
+    // returned, and run rind's arithmetic on the key VG generated.
+    #[cfg(rind_backend = "x86_64")]
+    fn mlkem768_vg(fallback: bool) {
+        use low::ct::into_secret;
+
+        low::force_avx512_for_vg_mlkem();
+        let parsed = EncapKey::<MlKem768>::from_bytes(
+            DecapKey::<MlKem768>::keygen_internal(&[1; 64])
+                .encapsulation_key()
+                .as_bytes(),
+        )
+        .unwrap();
+        low::ct_binsec::checked(|| {
+            let dk = DecapKey::<MlKem768>::keygen_internal(&into_secret([1; 64]));
+            assert!(dk.ek_pke.decoded.is_none(), "VG's key generation ran");
+            FORCE_FALLBACK.set(fallback);
+            let m = || Message(into_secret([2; 32]));
+            let (_, c) = dk.encapsulation_key().encaps_internal(m());
+            core::hint::black_box(parsed.encaps_internal(m()));
+            let k = dk.decaps(&c);
+            FORCE_FALLBACK.set(false);
+            k
+        });
+    }
+
     #[cfg(rind_backend = "x86_64")]
     #[test]
-    #[ignore = "admin/ct-sde runs it under Intel SDE"]
-    fn ct_sde_mlkem768() {
-        use crate::low::ct_sde;
+    #[ignore = "admin/ct-binsec runs it under BINSEC"]
+    fn ct_binsec_mlkem768_vg() {
+        mlkem768_vg(false);
+    }
 
-        assert!(vg_key_pair::<MlKem768>().is_some(), "AVX-512 F, BW, and VL");
-        let seed = ct_sde::seed().to_le_bytes();
-        let m = || Message(core::array::from_fn(|i| seed[i % seed.len()]));
-        let dk = DecapKey::<MlKem768>::keygen_internal(&[0x5a; 64]);
-        let ek = dk.encapsulation_key();
-        let (_, c) = ct_sde::traced(|| ek.encaps_internal(m()));
-        let ek = EncapKey::<MlKem768>::from_bytes(ek.as_bytes()).unwrap();
-        ct_sde::traced(|| ek.encaps_internal(m()));
-        ct_sde::traced(|| dk.decaps(&c));
-        let mut c = c.0;
-        c[0] ^= 1;
-        ct_sde::traced(|| dk.decaps(&Ciphertext(c)));
-
-        let dk = ct_sde::traced(|| {
-            DecapKey::<MlKem768>::keygen_internal(&core::array::from_fn(|i| match i {
-                ..32 => 0x5a,
-                _ => seed[i % seed.len()],
-            }))
-        });
-        let (_, c) = dk.encapsulation_key().encaps_internal(Message([0xa5; 32]));
-        ct_sde::traced(|| dk.decaps(&c));
-        let mut c = c.0;
-        c[0] ^= 1;
-        ct_sde::traced(|| dk.decaps(&Ciphertext(c)));
-
-        let fixed = DecapKey::<MlKem768>::keygen_internal(&[0x5a; 64]).encode();
-        let seeded = DecapKey::<MlKem768>::keygen_internal(&core::array::from_fn(|i| {
-            seed[i % seed.len()] ^ i as u8
-        }))
-        .encode();
-        let mut spliced = fixed;
-        spliced[..3 * 384].copy_from_slice(&seeded[..3 * 384]);
-        let dk = DecapKey::<MlKem768>::decode(&spliced, false);
-        let (_, c) = dk.encapsulation_key().encaps_internal(Message([0xa5; 32]));
-        ct_sde::traced(|| dk.decaps(&c));
+    #[cfg(rind_backend = "x86_64")]
+    #[test]
+    #[ignore = "admin/ct-binsec runs it under BINSEC"]
+    fn ct_binsec_mlkem768_vg_fallback() {
+        mlkem768_vg(true);
     }
 }

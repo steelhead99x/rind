@@ -46,7 +46,6 @@ where
     Id: AlgorithmIdentifier,
 {
     id: Id,
-    #[allow(dead_code)]
     decapsulate_key_size: usize,
     encapsulate_key_size: usize,
 }
@@ -156,7 +155,10 @@ macro_rules! for_set {
     };
 }
 
-generated_encodings!((EncapsulationKeyBytes, EncapsulationKeyBytesType, false));
+generated_encodings!(
+    (EncapsulationKeyBytes, EncapsulationKeyBytesType, false),
+    (DecapsulationKeyBytes, DecapsulationKeyBytesType, true),
+);
 
 /// A decapsulation key, which decapsulates any number of ciphertexts, wiped on drop.
 pub struct DecapsulationKey<Id = AlgorithmId>
@@ -177,6 +179,33 @@ impl<Id: AlgorithmIdentifier> DecapsulationKey<Id> {
             algorithm: alg,
             key,
         })
+    }
+
+    /// Loads a decapsulation key for `alg` from the bytes [`Self::key_bytes`]
+    /// writes, FIPS 203's expanded form.
+    ///
+    /// Unlike aws-lc-rs, which checks only the length, this refuses bytes
+    /// that are not a well-formed key.
+    pub fn new(alg: &'static Algorithm<Id>, bytes: &[u8]) -> Result<Self, KeyRejected> {
+        match bytes.len().cmp(&alg.decapsulate_key_size) {
+            core::cmp::Ordering::Less => return Err(KeyRejected::too_small()),
+            core::cmp::Ordering::Greater => return Err(KeyRejected::too_large()),
+            core::cmp::Ordering::Equal => {}
+        }
+        let key = for_set!(alg, Set => {
+            rind::kem::DecapsulationKey::<Set>::new(bytes).map_err(KeyRejected::rind)?
+        });
+        Ok(Self {
+            algorithm: alg,
+            key,
+        })
+    }
+
+    /// The key's bytes, FIPS 203's expanded form, which [`Self::new`] loads.
+    pub fn key_bytes(&self) -> Result<DecapsulationKeyBytes<'static>, Unspecified> {
+        Ok(DecapsulationKeyBytes::new(
+            each!(&self.key, key => key.to_bytes().as_ref().to_vec()),
+        ))
     }
 
     /// The key's encapsulation key.

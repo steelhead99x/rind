@@ -10,7 +10,7 @@ Planned with the maintainer on 2026-11-12 from 14 days of Actions data (Oct 29 t
 
 - moq-dev/rind is public, so hosted minutes are free; the cost is the org's cap of 60 concurrent hosted jobs. PR jobs waited p50 0.1 min but p90 37 min and p99 116 min for `ubuntu-latest`. About 4,050 hosted machine-hours ran in 14 days: dispatched `bench` 1,123 h, `mutants` on PRs about 700 h in two days (gone since [moq-dev/rind#668](https://github.com/moq-dev/rind/pull/668)), x86-cpu under SDE 239 h, `miri` on PRs 240 h with 0 of 34 runs finishing inside the 6 h timeout.
 - The merge queue build itself is fast (median 2.5 min, runner idle 89%); its overhead is around it.
-- ✅ Cut waste first, buy no hardware (rejected: a dedicated Ryzen 9950X or Threadripper runner; old Intel boxes for native SDE tiers; an Ampere Altra for native armv7). The Mac mini [already planned](/quest/m0/mac-mini-runner.md) is the only new machine.
+- ✅ Cut waste first, buy no hardware (rejected: a dedicated Ryzen 9950X or Threadripper runner; old Intel boxes for native SDE tiers; an Ampere Altra for native armv7). The Mac mini, which now runs the merge queue's aarch64 builds, is the only new machine.
 - ✅ Heavy x86 suites stay on hosted runners at a weekly cadence (rejected: self-hosted on nixos, which also runs the queue).
 - ✅ armv7 runs natively on GitHub's `ubuntu-24.04-arm` wherever CI still runs it under qemu on x86 (rejected: buying ARM hardware). ctgrind's `armv7-qemu` stays on qemu: Valgrind hides the crypto extension it checks.
 - ✅ Of `sh/armv7.sh`'s tiers, only the Cortex-A15 one, NEON without the crypto extension, stays under qemu; the crypto extension's and the NEON-denied one run natively (maintainer, 2026-11-17, rejected: the NEON-denied tier on qemu's Cortex-A15 too). The NEON denial is rind's software mask, and the Cortex-A15 tier's qemu run already faults on an instruction from the extension; natively, the NEON-denied tier no longer faults on a NEON instruction outside rind's dispatch, which saves about 33 min a run.
@@ -35,5 +35,3 @@ Extended with the maintainer on 2026-11-21 after profiling the last 15 self-host
 ## Related
 
 - [The merge queue builds through mbx, warm across groups](/quest/m0/queue-warm-target.md) - activates `mbx` in `flake.nix` and `queue-build.yml` so local worktrees and the thin merge queue build warm
-- [The merge queue runs rind's tests natively on aarch64](/quest/m0/mac-mini-runner.md) - adds the Mac mini as a second queue runner, which the thin merge queue keeps fast
-- [Apple-silicon nightlies run on the Mac mini](/quest/m2/confidence/apple-nightlies.md) - takes the aarch64 and macOS heavy jobs off hosted runners

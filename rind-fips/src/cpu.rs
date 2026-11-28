@@ -104,7 +104,10 @@ impl Dit {
     /// ```
     /// assert!(!rind_fips::cpu::Dit::is_held());
     /// let total = rind_fips::cpu::Dit::with(|| {
-    ///     assert_eq!(rind_fips::cpu::Dit::is_held(), cfg!(target_arch = "aarch64"));
+    ///     assert_eq!(
+    ///         rind_fips::cpu::Dit::is_held(),
+    ///         cfg!(target_arch = "aarch64")
+    ///     );
     ///     2 + 2
     /// });
     /// assert_eq!(total, 4);

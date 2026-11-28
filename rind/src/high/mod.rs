@@ -20,6 +20,7 @@ pub(super) mod hmac_drbg;
 pub(super) mod hpke;
 pub(super) mod kem;
 pub(super) mod oaep;
+pub(super) mod opaque;
 pub(super) mod oprf;
 pub(super) mod pbkdf2;
 pub(super) mod pkcs1;

@@ -7,9 +7,10 @@ public import Rind.Aarch64.Neon
 open Aeneas Aeneas.Std Result
 set_option linter.dupNamespace false
 
-/-! The rind types the aarch64 translation leaves opaque. `Rind.Aarch64.Dispatch` and
-`Rind.Aarch64.DigestDispatch` model the last five, and `Rind.Aarch64.DigestAlgorithm`
-`Algorithm` and `Digest`, and `Rind.Aarch64.Neon` the vector types. -/
+/-! The rind types the aarch64 translation leaves opaque. `Rind.Aarch64.Dispatch`,
+`Rind.Aarch64.DigestDispatch`, and `Rind.Aarch64.AeadDispatch` model the last
+six, and `Rind.Aarch64.DigestAlgorithm` `Algorithm` and `Digest`, and
+`Rind.Aarch64.Neon` the vector types. -/
 
 namespace rind.aarch64
 
@@ -112,5 +113,10 @@ model calls directly. -/
 nothing, since `Hashing::start` builds the only one, of `C`'s own
 `HashContext` functions, which the model calls directly. -/
 @[reducible] def high.digest.Ops (_C : Type) : Type := Unit
+
+/-- An expanded AEAD key with its cipher's functions, as `Rind.Aarch64.AeadDispatch`
+models it: the key, since `Sealer::expand` builds every one with `C`'s own
+`seal` and `open`, which the model calls directly. -/
+@[reducible] def aead.Sealer (C : Type) : Type := C
 
 end rind.aarch64

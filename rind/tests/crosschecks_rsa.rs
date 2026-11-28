@@ -741,12 +741,22 @@ mod rsa {
         }
     }
 
+    /// aws-lc refuses a 2047-bit private key, which rind loads, as two
+    /// 1024-bit primes give it the strength of 2048 bits and ring loads it;
+    /// rind-aws-lc-rs refuses it as aws-lc-rs does.
     #[test]
-    fn refuses_modulus_below_2048_bits() {
+    fn loads_2047_bit_private_key() {
         let private = include_bytes!("../src/high/rsa/rsa2047.pkcs8.der");
         assert!(KeyPair::from_pkcs8(private).is_err());
+        let ours = RsaKeyPair::from_pkcs8(private).unwrap();
+        // OpenSSL drew its primes at 1024 and 1023 bits, so ring refuses it.
+        assert_eq!(ours.prime_bits(), [1024, 1023]);
+        assert!(ours.sign(&sign::PKCS1_SHA256, b"message").is_ok());
+        // One bit less, with two 1023-bit primes, both refuse.
+        let too_small = include_bytes!("../src/high/rsa/rsa2046.der");
+        assert!(aws_lc_rs::rsa::KeyPair::from_der(too_small).is_err());
         assert!(matches!(
-            RsaKeyPair::from_pkcs8(private),
+            RsaKeyPair::from_pkcs1(too_small),
             Err(Error::KeyRejected(_))
         ));
         // The public key parses, as a legacy algorithm verifies with it,

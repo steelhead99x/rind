@@ -2,22 +2,24 @@
 
 # Usage: admin/audit check | fix | unsafe
 #
-# `check` fails unless AUDIT.md's pins table, between its two markers, is the
-# one this renders from the pins themselves, and `fix` rewrites it: each
-# importer's and vector sync's revision, the base of rind's s2n-bignum fork,
-# and the version Cargo.lock resolves for each crate the `rind` crate's own code links. `check` also fails on a link
-# to a quest that no longer exists, since finishing it changes the gap
-# AUDIT.md describes there.
-#
-# `unsafe` prints how often the `unsafe` keyword appears outside comments and
-# literals in each area of the tree, for AUDIT.md's dated count.
+# `check` fails unless AUDIT.md's two generated tables, each between its
+# markers, are the ones this renders, and `fix` rewrites them. The pins table
+# holds each importer's and vector sync's revision, the base of rind's
+# s2n-bignum fork, and the version Cargo.lock resolves for each crate the
+# `rind` crate's own code links. The `unsafe` table names each area of shipped
+# code that may hold the `unsafe` keyword (outside comments and literals), and
+# fails on one in an area it does not describe or an area that holds none. It
+# leaves the counts out, since nearly every PR touching `unsafe` would change
+# them and parallel PRs would race to regenerate it; `unsafe` prints them.
+# `check` also fails on a link to a quest that no longer exists, since
+# finishing it changes the gap AUDIT.md describes there.
 
 import pathlib, re, subprocess, sys, tomllib
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 PAGE = ROOT / "AUDIT.md"
-BEGIN = "<!-- admin/audit pins: begin -->"
-END = "<!-- admin/audit pins: end -->"
+PINS_MARKERS = ("<!-- admin/audit pins: begin -->", "<!-- admin/audit pins: end -->")
+UNSAFE_MARKERS = ("<!-- admin/audit unsafe: begin -->", "<!-- admin/audit unsafe: end -->")
 
 SHA = r"([0-9a-f]{40})"
 REV = rf'^REV = "{SHA}"$'
@@ -30,6 +32,7 @@ PINS = [
     ("OpenSSL", "copied code", "admin/import-openssl", REV),
     ("HACL\\*", "Vale's x86_64 AES-GCM", "admin/import-hacl", REV),
     ("pyca/verified-garbage", "copied code and the Lean ISA models its proofs rest on", "admin/import-vg", REV),
+    ("mlkem-native", "aarch64 ML-KEM ciphertext compression, and the HOL Light proofs of it and of x86_64's", "admin/import-mlkem-native", REV),
     (
         "s2n-bignum",
         "assembly and the HOL Light proofs of it",
@@ -53,6 +56,7 @@ PINS = [
     ("blind-rsa-signatures", "RFC 9474 test vectors", "admin/sync-vectors", rf"^BLIND_RSA={SHA}$"),
     ("RFC 9497", "OPRF test vectors", "admin/sync-vectors", rf"^VOPRF={SHA}$"),
     ("RFC 9591", "FROST test vectors", "admin/sync-vectors", rf"^FROST={SHA}$"),
+    ("RFC 9807", "OPAQUE test vectors", "admin/sync-vectors", rf"^OPAQUE={SHA}$"),
 ]
 
 
@@ -102,7 +106,7 @@ def crates():
     return rows
 
 
-def render():
+def render_pins():
     lines = [
         "| Upstream | Pin | Pinned in | What rind takes at it |",
         "|---|---|---|---|",
@@ -116,12 +120,17 @@ def render():
     return "\n".join(lines)
 
 
-def replace(text, table):
-    before, sep, rest = text.partition(BEGIN + "\n")
-    middle, sep2, after = rest.partition(END)
+def replace(text, markers, table):
+    begin, end = markers
+    before, sep, rest = text.partition(begin + "\n")
+    middle, sep2, after = rest.partition(end)
     if not sep or not sep2:
-        sys.exit(f"error: AUDIT.md lacks the {BEGIN} and {END} markers")
-    return f"{before}{BEGIN}\n{table}\n{END}{after}"
+        sys.exit(f"error: AUDIT.md lacks the {begin} and {end} markers")
+    return f"{before}{begin}\n{table}\n{end}{after}"
+
+
+def render(text):
+    return replace(replace(text, PINS_MARKERS, render_pins()), UNSAFE_MARKERS, render_unsafe())
 
 
 # One Rust token the lexer skips or keeps: a comment opener, a string or char
@@ -161,44 +170,118 @@ def idents(src):
             yield m["ident"]
 
 
-def unsafe():
-    """Counts `unsafe` outside comments, by area."""
-    counts = {}
+# Each area of shipped code that may hold `unsafe`, a directory or a file,
+# longest prefix first where one nests in another: its path, what the
+# `unsafe` there is, and what justifies it.
+UNSAFE = [
+    (
+        "rind/src/low/x86_64/",
+        "`asm!`, naked functions, and intrinsics",
+        "[`rind::doc::inline_assembly_safety`](rind/src/low/inline_assembly_safety.rs), "
+        "with the calling-convention, bounds, and `admin/prove bytes` checks above",
+    ),
+    ("rind/src/low/aarch64/", "the same", "the same"),
+    ("rind/src/low/arm/", "`global_asm!` and the calls into it", "the same"),
+    (
+        "rind/src/low/generic/",
+        "SSE2 intrinsics in `aes_nohw`, Argon2's memory of blocks set one at a time, `ReuseCache`'s one-time "
+        "initialization, the volatile wipe, a cast between same-layout arrays, the link section that puts "
+        "SHA-256's constants in ESP-IDF's internal RAM, and MD5's empty `asm!` barrier",
+        "each block's `SAFETY:` comment; Miri checks `ReuseCache` and the wipe",
+    ),
+    (
+        "rind/src/low/portable/",
+        "volatile writes and reads for the wipe and the constant-time compare, and Xtensa `asm!` in SHA-256 "
+        "for ESP-IDF",
+        "the same",
+    ),
+    (
+        "rind/src/low/",
+        "test harnesses (`abi`, `guard_pages`, `ct_binsec`, `vartime_planted`), the `asm_call!` macro, and "
+        "`Mcdt`'s MXCSR loads and `cpuid`",
+        "test code, but for the macro and `Mcdt`, which `SAFETY:` comments and `admin/ct-vartime` cover",
+    ),
+    ("rind/src/mid/", "a test's call into aws-lc", "test code"),
+    ("rind/src/high/opaque/", "a test's read-back of a dropped key's bytes", "test code, with its `SAFETY:` comment"),
+    ("rind/src/fips_rng.rs", "the FIPS build's DRBG handle and its test's `fork`", "`SAFETY:` comments"),
+    ("rind/src/test.rs", "a test helper", "`SAFETY:` comments"),
+    (
+        "rind-aws-lc-rs/src/",
+        "`Send` and `Sync` for the KEM keys, bounded as aws-lc-rs bounds them",
+        "`SAFETY:` comments, and a compile-time check that what the keys hold is `Send` and `Sync`",
+    ),
+    ("rind-dart/", "the C ABI Dart's FFI calls", "`SAFETY:` comments, `dart test`, and ctgrind over its exports"),
+    ("rind-python/", "Python's buffer protocol", "`SAFETY:` comments"),
+    (
+        "rind-openssl/",
+        "the C ABI OpenSSL's core calls, and the `OSSL_PARAM` arrays it passes",
+        "`SAFETY:` comments, `fuzz::openssl`, and OpenSSL's own tests with it loaded",
+    ),
+    ("rind-fips/", "the unpublished FIPS module's C ABI", "out of scope until published"),
+]
+
+# Test code and tooling, which the table leaves out: integration tests, and
+# the crates nothing ships.
+TOOLING = ("admin/", "fuzz/", "rind-acvp/", "rind-bench/", "rind-cpuid/", "rind-devbench/", "rind-timing/")
+
+
+def unsafe_counts():
+    """Each area's count of the `unsafe` keyword outside comments and literals."""
+    counts = {area: 0 for area, _, _ in UNSAFE}
+    # Tracked and new files alike, as the checks see the working tree; a file
+    # deleted from it but not from the index is gone.
     files = subprocess.run(
-        ["git", "-C", str(ROOT), "ls-files", "--", "*.rs"], capture_output=True, text=True, check=True
-    ).stdout.split()
-    for f in files:
-        parts = f.split("/")
-        if parts[0] == "rind" and parts[1] == "src":
-            if parts[2] == "low" and len(parts) > 4:
-                area = "/".join(parts[:4])
-            elif parts[2] in ("low", "mid", "high") and len(parts) > 3:
-                area = "/".join(parts[:3])
-            else:
-                area = "rind/src"
-        else:
-            area = parts[0]
+        ["git", "-C", str(ROOT), "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", "*.rs"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split("\0")
+    for f in sorted(set(files)):
+        if not f or not (ROOT / f).is_file() or f.startswith(TOOLING) or "tests" in f.split("/")[:-1]:
+            continue
         n = sum(1 for t in idents((ROOT / f).read_text()) if t == "unsafe")
-        if n:
-            counts[area] = counts.get(area, 0) + n
-    for area in sorted(counts):
-        print(f"{counts[area]:6} {area}")
+        if not n:
+            continue
+        area = next((a for a, _, _ in UNSAFE if f.startswith(a)), None)
+        if area is None:
+            sys.exit(f"error: {f} holds `unsafe`, in no area admin/audit's UNSAFE describes; add one")
+        counts[area] += n
+    for area, n in counts.items():
+        if not n:
+            sys.exit(f"error: admin/audit's UNSAFE describes {area}, which holds no `unsafe`; remove it")
+    return counts
+
+
+def area_name(area):
+    return "other `rind/src/low` files" if area == "rind/src/low/" else f"`{area.rstrip('/')}`"
+
+
+def render_unsafe():
+    """The `unsafe` table: each area that holds it, what it is, and what justifies it."""
+    unsafe_counts()
+    lines = [
+        "| Area | What it is | What justifies it |",
+        "|---|---|---|",
+    ]
+    lines += [f"| {area_name(area)} | {what} | {why} |" for area, what, why in UNSAFE]
+    return "\n".join(lines)
 
 
 def main():
     match sys.argv[1:]:
         case ["check"]:
             text = PAGE.read_text()
-            if replace(text, render()) != text:
-                sys.exit("error: AUDIT.md's pins table is stale; run `admin/audit fix`")
+            if render(text) != text:
+                sys.exit("error: AUDIT.md's generated tables are stale; run `admin/audit fix`")
             # A finished quest is deleted, and its gap with it.
             for link in re.findall(r"\]\((/quest/[^)#]+)", text):
                 if not (ROOT / link[1:]).is_file():
                     sys.exit(f"error: AUDIT.md links {link}, which is finished; say what changed")
         case ["fix"]:
-            PAGE.write_text(replace(PAGE.read_text(), render()))
+            PAGE.write_text(render(PAGE.read_text()))
         case ["unsafe"]:
-            unsafe()
+            for area, n in unsafe_counts().items():
+                print(f"{n:6}  {area}")
         case _:
             sys.exit("usage: admin/audit check | fix | unsafe")
 

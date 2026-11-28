@@ -6,7 +6,7 @@
 #
 # Each target's translation is its own namespace, but they share global names,
 # so no Lean module imports both. The aarch64 hand models and its X25519,
-# SHA-512, ChaCha20, Ed25519, SHA-1, SHA-256, HMAC, digest, HKDF, and PBKDF2 proofs are the
+# SHA-512, ChaCha20, Ed25519, SHA-1, SHA-256, HMAC, digest, HKDF, PBKDF2, and AEAD API proofs are the
 # x86_64 ones with the target renamed, which this writes too, all but each
 # target's own `ShaBlocks.lean` and `HashAxioms.lean`; aarch64 alone also
 # translates `mid::pbkdf2_vg`, which only its CPUs run, and proves it in its
@@ -17,7 +17,7 @@
 # does armv7, its header-protection model
 # and ChaCha20 proof.
 #
-# Usage: admin/prove [bytes | hol-light [<arch>] | cosim | vg | lean | spec-tests | session <arch> [<file>] | key <check>]
+# Usage: admin/prove [bytes | hol-light [<arch>] | cosim | vg | dalek | lean | spec-tests | session <arch> [<file>] | key <check>]
 #
 # An argument checks only those proofs, `bytes` only that the assembly rind
 # imports is the object code its upstream's proofs checked, and declares
@@ -30,7 +30,10 @@
 # an x86_64 CPU with AVX2 too, to test the intrinsic models. `vg`, which no
 # other run includes either, checks pyca/verified-garbage's code for this
 # CPU's target against VG's Lean models, as `vg` below describes, in the
-# flake's `vg` dev shell: `nix develop .#vg --command admin/prove vg`. A run
+# flake's `vg` dev shell: `nix develop .#vg --command admin/prove vg`.
+# `dalek`, which `lean` and a run of everything include, checks that the
+# curve25519-dalek rind builds is the code Beneficial AI Foundation's proofs,
+# which armv7's restate, are about, as `dalek` below describes. A run
 # of everything ends by testing the Lean specs the proofs trust on a fixed
 # sample, as `spec_tests` below describes, and `lean` alone does not;
 # `spec-tests` runs those tests alone, which the nightly does unsampled, as
@@ -39,14 +42,20 @@
 # `x86_64` or `aarch64`, which `session` below describes. Run it in the flake's
 # `prove` dev shell: `nix develop .#prove --command admin/prove`, or for the
 # HOL Light proofs, the cosimulation, the bytes alone, or a session, `nix
-# develop .#hol-light --command admin/prove hol-light`. `key`, given
+# develop .#hol-light --command admin/prove hol-light`. A run keeps Aeneas's
+# translations and the Lean proofs' Lake outputs for the next, in
+# `~/.cache/rind/` and Lake's own cache; `RIND_PROVE_CACHE_HOST`, an SSH host
+# set alike on every host, the one it names included, shares them through
+# that host, as `cached` and `lake_get` below describe. `key`, given
 # `hol-light <arch>`, `cosim`, or `lean`, checks nothing either: it prints the
 # key that check's result is cached under, which `result_key` below
 # describes, running only what the key hashes; `lean`'s runs in the `prove`
-# dev shell, the others' in `hol-light`.
+# dev shell, the others' in `hol-light`. `lean` also runs on aarch64 macOS, in
+# the same shell, where it names the checks the host cannot run, the intrinsic
+# vectors, and exits nonzero for them after everything else passes.
 set -euo pipefail
 
-usage="usage: admin/prove [bytes | hol-light [x86_64 | aarch64 | armv7] | cosim | vg | lean | spec-tests | session <x86_64 | aarch64> [<file>] | key <hol-light <x86_64 | aarch64 | armv7> | cosim | lean>]"
+usage="usage: admin/prove [bytes | hol-light [x86_64 | aarch64 | armv7] | cosim | vg | dalek | lean | spec-tests | session <x86_64 | aarch64> [<file>] | key <hol-light <x86_64 | aarch64 | armv7> | cosim | lean>]"
 key_only=
 if [[ ${1:-} == key ]]; then
     if [[ ! (($# -eq 3 && $2 == hol-light && $3 != '') || ($# -eq 2 && ($2 == cosim || $2 == lean))) ]]; then
@@ -60,7 +69,7 @@ if [[ ${1:-} == key ]]; then
     exec 3>&1 1>&2
 fi
 case "${1:-}" in
-'' | bytes | cosim | vg | lean) only=${1:-} ;;
+'' | bytes | cosim | vg | dalek | lean) only=${1:-} ;;
 spec-tests)
     # Its settings come from the environment, as `spec_tests` says.
     if [[ $# -gt 1 ]]; then
@@ -91,24 +100,48 @@ session)
     ;;
 esac
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
+# What this host cannot run of `lean`'s checks, which the run names at its end
+# and fails for, so a partial run never passes as the whole one. On macOS that
+# is the intrinsic vectors, which run x86_64's instructions on this CPU. Decided
+# before any translation, so a key this host cannot compute fails at once.
+skipped=()
+if [[ $(uname -sm) != "Linux x86_64" ]] || ! grep -qw avx2 /proc/cpuinfo; then
+    skipped+=("the intrinsic vectors (admin/simd-vectors.rs needs an x86_64 Linux CPU with AVX2)")
+fi
+if [[ -n $key_only && $only == lean && ${#skipped[@]} -gt 0 ]]; then
+    echo "admin/prove: no key for a host that cannot run ${skipped[*]}" >&2
+    exit 1
+fi
 out=.tmp/prove
 mkdir -p "$out"
 tools=$(rustc --print sysroot)/lib/rustlib/$(rustc -vV | sed -n 's/^host: //p')/bin
 
 # Prints the target triple of `arch` Linux: armv7's names its hard-float ABI.
+# A whole triple, such as `armv7a-none-eabi`, is itself.
 triple() {
     case $1 in
     armv7) echo armv7-unknown-linux-gnueabihf ;;
+    *-*) echo "$1" ;;
     *) echo "$1-unknown-linux-gnu" ;;
     esac
 }
 
 # Builds rind's release library for `arch` Linux with its assembly, for
-# `asm_block` and `relocation_data` to read.
+# `asm_block` and `relocation_data` to read, and records the rlib cargo says it
+# produced, since `deps` also holds the rlibs of earlier builds.
 build_asm() {
     local arch=$1
+    mkdir -p "$out/asm"
     cargo rustc -q -p rind --lib --release --target "$(triple "$arch")" \
-        --target-dir "$out/asm" -- --emit=asm -C codegen-units=16
+        --target-dir "$out/asm" --message-format=json-render-diagnostics -- --emit=asm -C codegen-units=16 |
+        python3 -c '
+import json, sys
+for line in sys.stdin:
+    m = json.loads(line)
+    if m["reason"] == "compiler-artifact" and m["target"]["name"] == "rind" and "lib" in m["target"]["kind"]:
+        print(*[f for f in m["filenames"] if f.endswith(".rlib")], sep="\n")
+' >"$out/asm/$arch-rlib"
+    [[ -s "$out/asm/$arch-rlib" ]] || { echo "admin/prove: cargo reported no rind rlib for $arch" >&2; return 1; }
     rm -rf "$out/asm/$arch-units"
 }
 
@@ -205,7 +238,7 @@ rind_index() {
     if [[ ! -f "$units/index" ]]; then
         rm -rf "$units"
         mkdir -p "$units"
-        "$tools/llvm-ar" x --output "$units" "$out/asm/$(triple "$arch")/release/deps"/librind-*.rlib
+        "$tools/llvm-ar" x --output "$units" "$(<"$out/asm/$arch-rlib")"
         for unit in "$units"/*.rcgu.o; do
             paste <("$tools/llvm-nm" --defined-only "$unit") <("$tools/llvm-nm" --defined-only -C "$unit") |
                 awk -F '\t' -v u="$unit" '{ s = $1; d = $2; sub(/^[^ ]* [^ ]* /, "", s); sub(/^[^ ]* [^ ]* /, "", d); sub(/ \(\.llvm\.[0-9]+\)$/, "", d); print u "\t" s "\t" d }'
@@ -267,22 +300,105 @@ symbol_bounds() {
 }
 
 # Writes to `dest` the bytes of the static at `path`, as rind's release build
-# for `arch` Linux emits them, failing if a relocation falls in them, which
-# would leave bytes for the linker to fill.
+# for `arch` Linux emits them, or, given `last`, from `path` through the end of
+# the symbol `last` after it in the same section, failing if a relocation
+# falls in them, which would leave bytes for the linker to fill, unless it is
+# an A32 `bl` to a label in them, which it resolves as the linker would.
+# Given `last`, it writes `last`'s offset in them, in decimal, to `dest` with
+# `.offset` for its extension, which the proof checks is the entry its
+# theorems take, since moving the symbol within unchanged bytes would leave
+# them about other code.
 rind_static() {
-    local arch=$1 path=$2 dest=$3 found obj sym section value size off
+    local arch=$1 path=$2 dest=$3 last=${4:-} found obj sym section value size end off
     found=$(rind_symbol "$arch" "$path")
     read -r obj sym <<<"$found"
     read -r section value size < <(symbol_bounds "$obj" "$sym")
-    while read -r off _ _; do
-        if ((16#$off >= 16#$value && 16#$off < 16#$value + 16#$size)); then
-            echo "admin/prove: $path has a relocation" >&2
+    end=$((16#$value + 16#$size))
+    if [[ -n $last ]]; then
+        local lobj lsym lsection lvalue lsize
+        found=$(rind_symbol "$arch" "$last")
+        read -r lobj lsym <<<"$found"
+        read -r lsection lvalue lsize < <(symbol_bounds "$lobj" "$lsym")
+        if [[ $lobj != "$obj" || $lsection != "$section" ]] || ((16#$lvalue < 16#$value)); then
+            echo "admin/prove: $last does not follow $path in its section" >&2
+            return 1
+        fi
+        end=$((16#$lvalue + 16#$lsize))
+        echo $((16#$lvalue - 16#$value)) >"${dest%.*}.offset"
+    fi
+    local calls=() type target tsection tvalue
+    while read -r off type target; do
+        if ((16#$off >= 16#$value && 16#$off < end)); then
+            # An A32 call to a label in the bytes, such as vpaes's to its
+            # local subroutines, which the linker resolves to the same
+            # displacement wherever it places them.
+            read -r tsection tvalue _ < <(symbol_bounds "$obj" "$target") || true
+            if [[ $type == R_ARM_CALL && $tsection == "$section" ]] &&
+                ((16#$tvalue >= 16#$value && 16#$tvalue < end)); then
+                calls+=("$((16#$off - 16#$value)) $((16#$tvalue - 16#$value))")
+                continue
+            fi
+            echo "admin/prove: $path${last:+ through $last} has a relocation" >&2
             return 1
         fi
     done < <(relocations "$obj" "$section")
     "$tools/llvm-objcopy" --dump-section="$section=$dest.section" "$obj" "$dest.o"
-    tail -c +$((16#$value + 1)) "$dest.section" | head -c $((16#$size)) >"$dest"
+    head -c $((end)) "$dest.section" | tail -c +$((16#$value + 1)) >"$dest"
     rm "$dest.section" "$dest.o"
+    ((${#calls[@]} == 0)) || resolve_calls "$dest" "${calls[@]}"
+}
+
+# Resolves in the bytes at `dest` each `bl` at the offset given first in a
+# `calls` entry to the label at the offset given second, as the linker does an
+# R_ARM_CALL: its displacement is the label's offset plus the addend the
+# instruction holds, less its own offset, in words. Fails on any other
+# instruction, an unaligned label, or a displacement out of range.
+resolve_calls() {
+    python3 - "$@" <<'PY'
+import sys
+dest, calls = sys.argv[1], [tuple(map(int, c.split())) for c in sys.argv[2:]]
+code = bytearray(open(dest, "rb").read())
+for off, label in calls:
+    word = int.from_bytes(code[off:off + 4], "little")
+    if word >> 24 != 0xEB or label % 4 or off % 4:
+        sys.exit(f"admin/prove: the relocation at {off:#x} is not an A32 bl to an aligned label")
+    addend = ((word & 0xFFFFFF) ^ 0x800000) - 0x800000 << 2
+    disp = label + addend - off
+    if not -(1 << 25) <= disp < 1 << 25:
+        sys.exit(f"admin/prove: the bl at {off:#x} cannot reach {label:#x}")
+    code[off:off + 4] = (0xEB000000 | (disp >> 2) & 0xFFFFFF).to_bytes(4, "little")
+open(dest, "wb").write(code)
+PY
+}
+
+# Prints the symbol in rind's `arch` build of the `global_asm!` routine
+# `name`, which `aws_lc_symbol!` qualifies by rind's version, or else of the
+# label `name`, failing unless it defines exactly one.
+routine_symbol() {
+    local arch=$1 name=$2 sym
+    sym=$(awk -F '\t' -v n="$name" '$2 ~ ("^rind_[0-9]+_[0-9]+_[0-9]+_" n "$") || $2 == n { print $2 }' \
+        "$(rind_index "$arch")" | sort -u)
+    if [[ -z $sym || $(wc -l <<<"$sym") != 1 ]]; then
+        echo "admin/prove: rind's $arch build defines no one routine $name" >&2
+        return 1
+    fi
+    echo "$sym"
+}
+
+# Writes to `dest` the bytes of the `global_asm!` routine `name` through the
+# size its `.size` gives, as rind's release build for `arch` Linux emits them,
+# failing if a relocation falls in them. A `name` of `first..last` is the
+# bytes from the label or routine `first` through the end of the routine
+# `last`, for routines that read a table or literal outside their own `.size`,
+# as `sha256-armv4`'s read K256 from before the first of them, with `last`'s
+# offset in them beside them, which `rind_static` writes.
+asm_routine() {
+    local arch=$1 name=$2 dest=$3 first last=
+    first=$(routine_symbol "$arch" "${name%%..*}")
+    if [[ $name == *..* ]]; then
+        last=$(routine_symbol "$arch" "${name##*..}")
+    fi
+    rind_static "$arch" "$first" "$dest" "$last"
 }
 
 # Writes to `dest` an object holding the naked Rust function at `path`, as
@@ -339,7 +455,9 @@ stable_name() {
 # descriptor, which holds it already rather than waiting on itself. `scratch`
 # guards what every run and session rewrites: the asm build and its symbol
 # index. `hol-light` and `cosim` guard their own directories under `$out` for
-# a whole run. Everything else a run writes is its own.
+# a whole run. `lake` guards `proofs/.lake/build`, which `lake_get` may
+# remove, from a build to the last command that reads it. Everything else a
+# run writes is its own.
 declare -A held
 hold() {
     local fd
@@ -380,6 +498,79 @@ rooted_hash() {
         done
 }
 
+# Translations, which take most of a run's time: an edit to the proofs alone
+# changes none. Each entry holds what one translation wrote, under a key that
+# hashes everything it reads, so checkouts and hosts share it. With
+# `RIND_PROVE_CACHE_HOST`, an SSH host, a miss here reads that host's cache,
+# and a new entry goes there too, so one host serves every other's agents. An
+# unreachable host fails the run, since setting it says the host is there.
+# Entries unread for 14 days go.
+translations=${XDG_CACHE_HOME:-$HOME/.cache}/rind/translations
+mkdir -p "$translations"
+find "$translations" -type f -mtime +14 -delete
+# The SSH host's cache, as its own shell expands it.
+remote_translations='"${XDG_CACHE_HOME:-$HOME/.cache}/rind/translations"'
+
+# Runs the command after `$1`, a key, and `$2`, the directory it writes,
+# which this empties first, or takes what an earlier run under that key wrote
+# there from the cache. Each step's status is checked by hand, since a
+# caller's `||` turns off `set -e` in here.
+cached() {
+    local key=$1 dest=$2 entry status=0
+    shift 2
+    entry=$translations/$key.tar.gz
+    rm -rf "$dest"
+    mkdir -p "$dest"
+    if [[ ! -f $entry && -n ${RIND_PROVE_CACHE_HOST:-} ]]; then
+        ssh -o BatchMode=yes "$RIND_PROVE_CACHE_HOST" \
+            "f=$remote_translations/$key.tar.gz; [ -f \"\$f\" ] || exit 3; touch \"\$f\" && cat \"\$f\"" \
+            </dev/null >"$entry.$$" || status=$?
+        case $status in
+        0) mv "$entry.$$" "$entry" ;;
+        3) rm "$entry.$$" ;;
+        *)
+            rm "$entry.$$"
+            echo "admin/prove: cannot read the translation cache on RIND_PROVE_CACHE_HOST, $RIND_PROVE_CACHE_HOST" >&2
+            return 1
+            ;;
+        esac
+    fi
+    if [[ -f $entry ]]; then
+        touch "$entry" && tar -xzf "$entry" -C "$dest"
+        return
+    fi
+    "$@" || return
+    tar -czf "$entry.$$" -C "$dest" . && mv "$entry.$$" "$entry" || return
+    if [[ -n ${RIND_PROVE_CACHE_HOST:-} ]]; then
+        ssh -o BatchMode=yes "$RIND_PROVE_CACHE_HOST" \
+            "d=$remote_translations; mkdir -p \"\$d\" && cat >\"\$d/$key.tar.gz.\$\$\" &&
+                mv \"\$d/$key.tar.gz.\$\$\" \"\$d/$key.tar.gz\" && find \"\$d\" -type f -mtime +14 -exec rm -f {} +" \
+            <"$entry" || {
+            echo "admin/prove: cannot write the translation cache on RIND_PROVE_CACHE_HOST, $RIND_PROVE_CACHE_HOST" >&2
+            return 1
+        }
+    fi
+}
+
+# Runs Aeneas, `$1`, on the `.llbc` file `$2` with the options after them,
+# into `$3`, through the cache. The key is the `.llbc`, hashed as
+# `rooted_hash` hashes it, since Charon writes the destination's path into
+# it; Aeneas's version; and the options. Charon lists one of its maps in
+# another order on macOS than on Linux, so the two share no entries. Charon
+# itself runs every time: it
+# costs little once its target directory is warm, and the key would otherwise
+# have to name every file the crate's build reads.
+aeneas_cached() {
+    local aeneas=$1 llbc=$2 dest=$3 key
+    shift 3
+    key=$({
+        "$aeneas" -version
+        printf '%q\n' "$@"
+        rooted_hash "$llbc" | cut -d' ' -f1
+    } | sha256sum | cut -d' ' -f1) || return
+    cached "$key" "$dest" "$aeneas" "$@" -dest "$dest" "$llbc"
+}
+
 # Writes to `$out/keys/<name>`, and with `key` prints, the key the prove
 # workflow caches the result of the check `name` under, `<name>-<hash>`. The
 # workflow saves it once the check passes on main; main's nightly and
@@ -403,7 +594,7 @@ result_key() {
     {
         echo "$shell"
         declare -f
-        declare -p hol_light_proofs hol_light_data hol_light_specs
+        declare -p hol_light_proofs hol_light_data
         set +o
         files_hash thirdparty/s2n-bignum .github/workflows/prove.yml .github/actions/nix .github/actions/prove
         rooted_hash "$@"
@@ -411,13 +602,15 @@ result_key() {
     [[ -z $key_only ]] || cat "$out/keys/$name" >&3
 }
 
-# rind's own HOL Light proofs, each of the `asm!` block in a Rust function or
-# of a naked one, on the model, tactics, and specs of rind's fork of
-# s2n-bignum in `thirdparty/s2n-bignum`, which `RIND.md` there describes.
-# Each `<arch>/<file>.ml` reads its object code from `<arch>/<file>.bin`, the
-# block's bytes, which `asm_block` writes, or `<arch>/<file>.o`, the naked
-# function's object, which `asm_function` writes, and asserts it is what it
-# lists. A target's proofs compile into one program, as s2n-bignum's
+# rind's own HOL Light proofs, each of the `asm!` block in a Rust function,
+# of a naked one, or of a `global_asm!` routine, on the model, tactics, and
+# specs of rind's fork of s2n-bignum in `thirdparty/s2n-bignum`, which
+# `RIND.md` there describes. Each `<arch>/<file>.ml` reads its object code
+# from `<arch>/<file>.bin`, the block's bytes, which `asm_block` writes, or
+# the routine's, which `asm_routine` writes for a path that is the routine's
+# symbol without rind's version, or a `first..last` range of them, or from
+# `<arch>/<file>.o`, the naked function's object, which `asm_function` writes,
+# and asserts it is what it lists. A target's proofs compile into one program, as s2n-bignum's
 # `tools/build-proof.sh` compiles each of its own, which fails on an error or
 # an axiom beyond HOL Light's.
 hol_light_proofs=(
@@ -425,10 +618,17 @@ hol_light_proofs=(
     "aarch64 bn_mul_mont.o rind::low::aarch64::mont::bn_mul_mont"
     "aarch64 ct_compare_bytes.bin rind::low::aarch64::cpu::ct_compare_bytes"
     "aarch64 ct_compare_16.bin rind::low::aarch64::cpu::ct_compare_16"
+    "aarch64 p256_montjmixadd.bin rind::low::aarch64::p256_montjmixadd::p256_montjmixadd"
+    "aarch64 p384_montjmixadd.bin rind::low::aarch64::p384_montjmixadd::p384_montjmixadd"
     "x86_64 ct_compare_bytes.bin rind::low::x86_64::cpu::ct_compare_bytes"
     "x86_64 ct_compare_16.bin rind::low::x86_64::cpu::ct_compare_16"
-    "armv7 ct_compare_bytes.bin rind::low::arm::cpu::ct_compare_bytes"
-    "armv7 ct_compare_16.bin rind::low::arm::cpu::ct_compare_16"
+    "armv7 ct_compare_bytes.bin ct_compare_bytes"
+    "armv7 ct_compare_16.bin ct_compare_16"
+    "armv7 gcm_init_neon.bin gcm_init_neon"
+    "armv7 gcm_ghash_neon.bin gcm_ghash_neon"
+    "armv7 sha256_armv4.bin K256..sha256_block_data_order_hw"
+    "armv7 sha512_armv4.bin K512..sha512_block_data_order_neon"
+    "armv7 vpaes_encrypt.bin _vpaes_consts..vpaes_encrypt"
     "x86_64 sha512_block_data_order_avx2.o rind::low::x86_64::sha512::sha512_block_data_order_avx2"
     "x86_64 sha256_block_data_order_avx2.o rind::low::x86_64::sha256::sha256_block_data_order_avx2"
     "x86_64 bn_mul_mont_nohw.o rind::low::x86_64::mont::bn_mul_mont_nohw"
@@ -437,6 +637,11 @@ hol_light_proofs=(
     "x86_64 sha256_finish_shaext.bin rind::low::x86_64::sha256::sha256_finish_shaext"
     "x86_64 ecp_nistz256_point_add_affine.o rind::low::x86_64::ecp_nistz256::ecp_nistz256_point_add_affine"
     "x86_64 ecp_nistz256_point_add_affinex.o rind::low::x86_64::ecp_nistz256::ecp_nistz256_point_add_affinex"
+    "x86_64 p256_montjmixadd.bin rind::low::x86_64::p256_montjmixadd::p256_montjmixadd"
+    "x86_64 p256_montjmixadd_alt.bin rind::low::x86_64::p256_montjmixadd_alt::p256_montjmixadd_alt"
+    "x86_64 p384_montjmixadd.bin rind::low::x86_64::p384_montjmixadd::p384_montjmixadd"
+    "x86_64 p384_montjmixadd_alt.bin rind::low::x86_64::p384_montjmixadd_alt::p384_montjmixadd_alt"
+    "x86_64 chacha20_ctr32_ssse3_4x.o rind::low::x86_64::chacha20::chacha20_ctr32_ssse3_4x"
 )
 # The statics the proofs above read through a register, each `<arch>/<file>`
 # the static's bytes, which `rind_static` writes and the proof asserts are
@@ -444,13 +649,8 @@ hol_light_proofs=(
 hol_light_data=(
     "x86_64 sha256_shaext_k.bin rind::low::x86_64::sha256::K"
 )
-# The specs that no proof above loads yet, each loaded into the named target's
-# program so its known-answer tests run.
-hol_light_specs=(
-    "x86_64 common/chacha20poly1305.ml"
-)
 hol_light() {
-    local dir=$out/hol-light arches arch file proof spec
+    local dir=$out/hol-light arches arch file proof
     hold hol-light
     hold scratch
     rm -rf "$dir"
@@ -466,11 +666,6 @@ hol_light() {
         # Each proof's time, so the log shows where a job's limit goes.
         printf 'let proof_start = Unix.time ();;\nloadt "%s";;\nPrintf.printf "%s: %%.0f s\\n%%!" (Unix.time () -. proof_start);;\n' \
             "$arch/${file%.*}.ml" "$arch/${file%.*}" >>"$dir/$arch.ml"
-    done
-    for spec in "${hol_light_specs[@]}"; do
-        read -r arch file <<<"$spec"
-        [[ -f $dir/$arch.ml ]] || continue
-        echo "needs \"$file\";;" >>"$dir/$arch.ml"
     done
     for arch in $arches; do
         printf 'check_axioms ();; Printf.printf "%s: %%.0f s\\n" (Unix.time () -. prove_start);;\n' "$arch" >>"$dir/$arch.ml"
@@ -495,7 +690,11 @@ hol_light_objects() {
         read -r parch file path <<<"$proof"
         [[ $parch == "$arch" ]] || continue
         case $file in
-        *.bin) asm_block "$arch" "$path" "$dir/$file" ;;
+        *.bin) if [[ $path == *::* ]]; then
+            asm_block "$arch" "$path" "$dir/$file"
+        else
+            asm_routine "$arch" "$path" "$dir/$file"
+        fi ;;
         *.o) asm_function "$arch" "$path" "$dir/$file" ;;
         esac
     done
@@ -577,14 +776,17 @@ cosim() {
 # Checks pyca/verified-garbage's (VG's) code for this CPU's target against
 # VG's Lean models, so a theorem of VG's about a routine rind vendors from it
 # is about rind's machine code: `admin/import-vg-models --check` that
-# `proofs/verified-garbage` holds VG's models at its REV; `admin/vg-bytes`
+# `proofs/verified-garbage` holds VG's models at its REV; `admin/vg-binding`
+# that each routine rind vendors is one an axiom's VG theorem covers or is
+# listed as uncovered;
+# `admin/vg-bytes`
 # that VG's machine code, and each routine rind vendors, is the text VG's
 # proofs are about; and the cosimulation, which runs each distinct
 # instruction of VG's code, for `VG_COSIM_CASES` random states each from the
 # seed `VG_COSIM_SEED`, on this CPU, or where it lacks a feature the
 # instruction needs, under Intel SDE or qemu-aarch64, and fails unless every
-# end state is the one VG's model gives; on aarch64, also each instruction of
-# the functions rind proves in its own extension of that model
+# end state is the one VG's model gives; also each instruction of the
+# functions rind proves in its own extension of that model
 # (`proofs/verified-garbage/RindIsa/`). The groups split into a fixed number
 # of parts, each seeded from its index, so a seed gives the same cases on
 # every machine.
@@ -606,12 +808,24 @@ vg() {
     mkdir -p "$dir"
     admin/upstream verified-garbage
     admin/import-vg-models --check "$upstream"
+    admin/vg-binding "$upstream"
+    # `lake build` alone builds only the default target (vg-cosim).
+    (cd proofs/verified-garbage && lake build vg-cosim vg-print)
+    local vgprint=proofs/verified-garbage/.lake/build/bin/vg-print
+    if [[ ! -x $vgprint ]]; then
+        echo "admin/prove: lake build did not produce $vgprint" >&2
+        return 1
+    fi
+    # The text of each `Prog` rind's axioms about VG's leakage are about, which
+    # `admin/vg-bytes` checks is VG's assembly (so VG's printer is trusted to
+    # print that `Prog` as it does, which it does not check).
+    "$vgprint" "$arch" >"$dir/progs.txt"
+    local progs=(--progs "$dir/progs.txt")
     hold scratch
     build_asm "$arch"
     rind_index "$arch" >/dev/null
-    admin/vg-bytes "$upstream" "$arch" "$dir" --rind "$out/asm/$arch-units"/*.rcgu.o
+    admin/vg-bytes "$upstream" "$arch" "$dir" "${progs[@]}" --rind "$out/asm/$arch-units"/*.rcgu.o
     release scratch
-    (cd proofs/verified-garbage && lake build)
     rustc --edition 2024 -O -o "$dir/runner" admin/vg-cosim-runner.rs
     # A case that faults must name its instruction and fail the run, on the
     # CPU and under the emulator.
@@ -641,19 +855,165 @@ vg() {
             "$cpu" "$dir/part.$part.cpu" "$emulated" "$dir/part.$part.emu" &
         pids+=($!)
     done
-    # On aarch64, the instructions of the functions rind proves in its own
-    # extension of VG's model too, as one more part.
-    if [[ $arch == aarch64 ]]; then
-        "$cosim" aarch64 --rind "$cases" $((seed * parts + parts)) \
-            "$cpu" "$dir/part.rind.cpu" "$emulated" "$dir/part.rind.emu" &
-        pids+=($!)
-    fi
+    # The instructions of the functions rind proves in its own extension of
+    # VG's model of this target too, as one more part.
+    "$cosim" "$arch" --rind "$cases" $((seed * parts + parts)) \
+        "$cpu" "$dir/part.rind.cpu" "$emulated" "$dir/part.rind.emu" &
+    pids+=($!)
     for pid in "${pids[@]}"; do
         wait "$pid" || failed=1
     done
     "$dir/runner" "$dir"/part.*.cpu || failed=1
     "${emu[@]}" "$dir/runner" "$dir"/part.*.emu || failed=1
     return $failed
+}
+
+# The functions of curve25519-dalek whose theorems in Beneficial AI
+# Foundation's Lean proofs `proofs/Rind/Armv7/Dalek.lean` restates as axioms,
+# as BAIF's translation names them.
+dalek_roots=(
+    montgomery.MontgomeryPoint.mul_clamped
+    montgomery.MontgomeryPoint.mul_base_clamped
+    'edwards.CompressedEdwardsY.decompress.«32bit-tables»'
+    'edwards.«EdwardsPoint32bit-tables».compress'
+    'edwards.EdwardsPoint.«32bit-tables».Insts.«CoreOpsArithNegEdwardsPoint32bit-tables».neg'
+    'edwards.«EdwardsPoint32bit-tables».mul_base'
+    'edwards.«EdwardsPoint32bit-tables».vartime_double_scalar_mul_basepoint'
+    scalar.Scalar.from_bytes_mod_order
+    scalar.Scalar.from_bytes_mod_order_wide
+    scalar.Scalar.from_canonical_bytes
+    scalar.Scalar.Insts.CoreOpsArithMulScalarScalar.mul
+    scalar.Scalar.Insts.CoreOpsArithAddScalarScalar.add
+)
+# The functions whose code a BAIF translation patch on the roots' path copies
+# into their caller, as `file:function`. `montgomery-MontgomeryPoint-mul.patch`
+# writes `mul_bits_be`'s ladder and `bits_le`'s bit order out in `Mul::mul`,
+# so the translation compares BAIF's copy, and the call the patch removes
+# reads the same whatever they hold: `dalek` compares their source with the
+# fork's instead. A patch that rewrites only the lines it removes needs no
+# entry, since a change to them stops it applying. A root added above adds
+# the functions its patches copy.
+dalek_copied=(
+    src/montgomery.rs:mul_bits_be
+    src/scalar.rs:bits_le
+)
+# BAIF's translation of its workspace in `$1/work`, with the configurations
+# after it and `charon_opts`, into `$1/lean`, for `dalek`.
+dalek_translate() {
+    local dir=$1
+    shift
+    # Unset, not empty: cargo takes an empty CARGO_ENCODED_RUSTFLAGS over
+    # each configuration's flags.
+    (cd "$dir/work/curve25519-dalek" && env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS CARGO_TARGET_DIR=$PWD/../target \
+        "$DALEK_AENEAS/charon" cargo --preset=aeneas "$@" "${charon_opts[@]}" \
+        --dest-file "$PWD/../../curve25519_dalek.llbc" \
+        -- --locked --no-default-features --features alloc,zeroize -Zjson-target-spec -Zbuild-std=core,alloc) &&
+        "$DALEK_AENEAS/aeneas" -backend lean -split-files -namespace Curve25519Dalek \
+            -dest "$dir/lean" -subdir Curve25519Dalek "$dir/curve25519_dalek.llbc"
+}
+
+# Checks that the curve25519-dalek rind builds on armv7 is the code BAIF's
+# proofs at `admin/import-dalek`'s REV are about, in every definition
+# `dalek_roots` reach: that it is the crates.io release Cargo.lock pins with
+# the features BAIF's proofs build it with, and that BAIF's own translation,
+# its patches applied and run with the Charon and Aeneas its
+# `AENEAS_VERSION.txt` names, `$DALEK_AENEAS`, gives that release the Lean
+# BAIF's proofs read, `admin/dalek-closure` comparing each definition, and
+# that each function `dalek_copied` names is the fork's source. The
+# proofs' configurations are 32- and 64-bit limbs, with and without
+# precomputed tables; armv7 builds the first with tables. A patch that no
+# longer applies to the release is skipped: a definition it would have
+# changed then differs.
+dalek() {
+    local dir=$out/dalek fork=.tmp/upstream/curve25519-dalek lean src features bits triple spec patch key
+    local targets=() charon_opts
+    hold dalek
+    rm -rf "$dir"
+    mkdir -p "$dir/work"
+    admin/upstream curve25519-dalek
+    admin/import-dalek --check "$fork"
+    lean=$fork/curve25519-dalek/lean
+    if [[ "$("$DALEK_AENEAS/aeneas" -version)" != "aeneas $(<"$lean/AENEAS_VERSION.txt")" ]]; then
+        echo "admin/prove: BAIF's proofs pin Aeneas $(<"$lean/AENEAS_VERSION.txt"); bump flake.nix's aeneas-dalek-release" >&2
+        return 1
+    fi
+    # The release rind depends on for armv7, and the features rind asks of it.
+    read -r src features < <(cargo metadata --locked --format-version 1 \
+        --filter-platform armv7-unknown-linux-gnueabihf | python3 -c '
+import json, sys
+m = json.load(sys.stdin)
+rind = next(p for p in m["packages"] if p["name"] == "rind")
+asked = next(d for d in rind["dependencies"] if d["name"] == "curve25519-dalek" and d["kind"] is None)
+node = next(n for n in m["resolve"]["nodes"] if n["id"] == rind["id"])
+dep = next(d["pkg"] for d in node["deps"] if d["name"] == "curve25519_dalek")
+pkg = next(p for p in m["packages"] if p["id"] == dep)
+features = sorted(asked["features"]) + (["default"] if asked["uses_default_features"] else [])
+print(pkg["manifest_path"].rsplit("/", 1)[0], ",".join(features))')
+    if [[ $features != alloc,precomputed-tables,zeroize ]]; then
+        echo "admin/prove: rind builds curve25519-dalek with $features, not the alloc, precomputed-tables, and zeroize BAIF's proofs build it with" >&2
+        return 1
+    fi
+    # The functions the patches copy, in the release and in the fork.
+    python3 - "$src" "$fork" "${dalek_copied[@]}" <<'PY'
+import re, subprocess, sys
+
+def function(text, name, where):
+    found = list(re.finditer(rf"(?m)^[ \t]*(?:pub(?:\([^)]*\))?[ \t]+)?fn {name}\b", text))
+    if len(found) != 1:
+        sys.exit(f"admin/prove: {len(found)} definitions of {name} in {where}")
+    depth = 0
+    for i in range(text.index("{", found[0].end()), len(text)):
+        depth += {"{": 1, "}": -1}.get(text[i], 0)
+        if depth == 0:
+            return text[found[0].start() : i + 1]
+    sys.exit(f"admin/prove: {name} in {where} never closes")
+
+release, fork = sys.argv[1:3]
+for copied in sys.argv[3:]:
+    path, name = copied.split(":")
+    with open(f"{release}/{path}") as f:
+        ours = function(f.read(), name, f"the release's {path}")
+    fork_text = subprocess.run(["git", "-C", fork, "show", f"HEAD:curve25519-dalek/{path}"],
+                               check=True, capture_output=True, text=True).stdout
+    if ours != function(fork_text, name, f"the fork's {path}"):
+        sys.exit(f"admin/prove: the release's {name} is not the fork's, which a BAIF translation patch copies")
+PY
+    # BAIF's workspace, with the release's source and build script.
+    git -C "$fork" archive HEAD Cargo.toml Cargo.lock curve25519-dalek curve25519-dalek-derive \
+        ed25519-dalek x25519-dalek | tar -x -C "$dir/work" --exclude curve25519-dalek/lean
+    rm -rf "$dir/work/curve25519-dalek/src"
+    cp -R "$src/src" "$src/build.rs" "$dir/work/curve25519-dalek/"
+    for patch in "$lean"/translation-patches/*.patch; do
+        GIT_CEILING_DIRECTORIES=$PWD/$dir git -C "$dir/work" apply -C1 "$PWD/$patch" 2>/dev/null ||
+            echo "admin/prove: $(basename "$patch") does not apply to curve25519-dalek $(basename "$src")" >&2
+    done
+    # BAIF's four configurations and Charon options, as its translate script sets them.
+    for bits in 64:x86_64-unknown-linux-gnu 32:i686-unknown-linux-gnu; do
+        triple=${bits#*:} bits=${bits%%:*}
+        for spec in "${bits}bit-tables" "${bits}bit-notables"; do
+            "$("$DALEK_AENEAS/charon" toolchain-path)/bin/rustc" -Z unstable-options --print target-spec-json \
+                --target "$triple" >"$dir/$spec.json"
+            targets+=(--targets "$PWD/$dir/$spec.json")
+        done
+        export "CARGO_TARGET_${bits}BIT_TABLES_RUSTFLAGS=--cfg curve25519_dalek_backend=\"serial\" --cfg feature=\"precomputed-tables\""
+        export "CARGO_TARGET_${bits}BIT_NOTABLES_RUSTFLAGS=--cfg curve25519_dalek_backend=\"serial\""
+    done
+    eval "$(sed -n '/^charon_opts=(/,/^)/p' "$lean/scripts/aeneas-translate.sh")"
+    # The translation reads nothing but the workspace, the configurations,
+    # the options, and the release of Charon and Aeneas, which name their
+    # toolchain, so they key it, Charon's build included: `$dir` starts empty,
+    # so that build is cold every run.
+    key=$({
+        realpath -e "$DALEK_AENEAS"
+        declare -f dalek_translate
+        declare -p charon_opts
+        env | grep '^CARGO_TARGET_.*BIT_.*TABLES_RUSTFLAGS=' | LC_ALL=C sort
+        cd "$dir" && files_hash work ./*.json
+    } | sha256sum | cut -d' ' -f1)
+    cached "$key" "$dir/lean" dalek_translate "$dir" "${targets[@]}" >"$dir/translate.log" 2>&1 ||
+        { tail -20 "$dir/translate.log" >&2; return 1; }
+    admin/dalek-closure "$lean/Curve25519Dalek" "$dir/lean/Curve25519Dalek" 32bit-tables "${dalek_roots[@]}"
+    release dalek
 }
 
 # Fetches Mathlib and Aeneas for the Lean proofs, from `proofs/`. Mathlib's
@@ -676,6 +1036,85 @@ lean_deps() {
     fi
 }
 
+# The proofs' Lake outputs, shared through `RIND_PROVE_CACHE_HOST` as
+# `translations` are: a build there leaves an entry under the commit it built
+# on, its input-to-output mappings and the artifacts they name, and a build
+# here first takes the entry of the nearest commit on its first-parent line.
+# Lake replays a module only when its inputs hash as a mapping says, so any
+# entry is safe to take, and the nearest shares the most. Entries are per
+# platform, since Lake's hashes may differ between them; their artifacts are
+# hard links into a pool that holds each once. Entries unread for 14 days go,
+# and with them the artifacts no other entry holds. From `proofs/`.
+lake_platform=$(uname -s)-$(uname -m)
+# On the SSH host, given the platform: prints the first of the commits after
+# it that has an entry, marking the entry read.
+lake_remote_find='d=${XDG_CACHE_HOME:-$HOME/.cache}/rind/lake/$1; shift
+for r in "$@"; do if [ -f "$d/$r/outputs.jsonl" ]; then touch "$d/$r"; echo "$r"; exit 0; fi; done'
+# On the SSH host, given the platform and a commit: stores the staged
+# outputs on stdin as that commit's entry, unless it has one, then prunes,
+# under a lock, since two uploads can hold the same new artifact.
+lake_remote_put='set -e; d=${XDG_CACHE_HOME:-$HOME/.cache}/rind/lake/$1; t=$d/tmp.$$
+mkdir -p "$d/pool" "$t"; tar -xf - -C "$t"
+exec 9>"$d/lock"; flock 9
+for f in "$t"/*; do n=${f##*/}; [ "$n" = outputs.jsonl ] && continue
+if [ -e "$d/pool/$n" ]; then ln -f "$d/pool/$n" "$f"; else ln "$f" "$d/pool/$n"; fi; done
+if [ -e "$d/$2" ]; then rm -rf "$t"; else mv "$t" "$d/$2"; fi
+find "$d" -mindepth 1 -maxdepth 1 \( -name "tmp.*" -mtime +1 -o -name "[0-9a-f]*" -mtime +14 \) -exec rm -rf {} +
+find "$d/pool" -type f -links 1 -exec rm -f {} +'
+
+# Takes the nearest commit's entry into Lake's cache, unless this checkout
+# already took it, which `.lake/rind-fetched` records.
+lake_get() {
+    local rev stage=../$out/lake-stage cache input
+    [[ -n ${RIND_PROVE_CACHE_HOST:-} ]] || return 0
+    # shellcheck disable=SC2046 # one argument per commit
+    rev=$(ssh -o BatchMode=yes "$RIND_PROVE_CACHE_HOST" "sh -c '$lake_remote_find' sh $lake_platform" \
+        $(git rev-list --first-parent -n 100 HEAD) </dev/null) || {
+        echo "admin/prove: cannot read the Lake cache on RIND_PROVE_CACHE_HOST, $RIND_PROVE_CACHE_HOST" >&2
+        return 1
+    }
+    [[ -n $rev && $rev != "$(cat .lake/rind-fetched 2>/dev/null)" ]] || return 0
+    rm -rf "$stage"
+    mkdir -p "$stage"
+    ssh -o BatchMode=yes "$RIND_PROVE_CACHE_HOST" \
+        "tar -cf - -C \"\${XDG_CACHE_HOME:-\$HOME/.cache}/rind/lake/$lake_platform/$rev\" ." </dev/null |
+        tar -xf - -C "$stage"
+    # The entry's outputs replace this host's own for the same inputs, and
+    # this checkout's build, so the entry's importers match: see UPSTREAM.md,
+    # "Lean's `.olean` differs between builds of the same inputs". Only the
+    # mappings go, not `--force-overwrite`'s artifacts, which another
+    # checkout's build may be reading; an artifact's name is its content's.
+    cache=$(lake env printenv LAKE_CACHE_DIR)
+    sed -n 's/^\["\([0-9a-f]*\)",.*/\1/p' "$stage/outputs.jsonl" | while read -r input; do
+        rm -f "$cache/outputs/rind/$input.json"
+    done
+    lake cache unstage "$stage"
+    rm -rf "$stage" .lake/build
+    echo "$rev" >.lake/rind-fetched
+}
+
+# Leaves the outputs of the build whose mappings are in `$1` as this commit's
+# entry, unless it has one or the proofs differ from the commit's.
+lake_put() {
+    local rev stage=../$out/lake-stage found
+    [[ -n ${RIND_PROVE_CACHE_HOST:-} && -z $(git status --porcelain --untracked-files=all -- .) ]] || return 0
+    rev=$(git rev-parse HEAD)
+    found=$(ssh -o BatchMode=yes "$RIND_PROVE_CACHE_HOST" "sh -c '$lake_remote_find' sh $lake_platform $rev" </dev/null) || {
+        echo "admin/prove: cannot read the Lake cache on RIND_PROVE_CACHE_HOST, $RIND_PROVE_CACHE_HOST" >&2
+        return 1
+    }
+    [[ -z $found ]] || return 0
+    rm -rf "$stage"
+    lake cache stage "$1" "$stage"
+    tar -cf - -C "$stage" . |
+        ssh -o BatchMode=yes "$RIND_PROVE_CACHE_HOST" "sh -c '$lake_remote_put' sh $lake_platform $rev" || {
+        echo "admin/prove: cannot write the Lake cache on RIND_PROVE_CACHE_HOST, $RIND_PROVE_CACHE_HOST" >&2
+        return 1
+    }
+    rm -rf "$stage"
+    echo "$rev" >.lake/rind-fetched
+}
+
 # Tests the Lean specs the proofs trust, as `admin/spec-tests` describes:
 # builds them as `proofs/`'s `spec-server`, and runs each on its published
 # vectors in `thirdparty/vectors/` and on `SPEC_TESTS_RANDOM` random inputs
@@ -686,54 +1125,101 @@ lean_deps() {
 spec_tests() {
     local random=${SPEC_TESTS_RANDOM:-8} seed=${SPEC_TESTS_SEED:-1} full=()
     [[ -z ${SPEC_TESTS_FULL:-} ]] || full=(full)
+    hold lake
     (cd proofs && lake build spec-server)
     CARGO_TARGET_DIR=$PWD/target cargo run --release --locked -q -p spec-tests -- \
         proofs/.lake/build/bin/spec-server thirdparty/vectors "$seed" "$random" "${full[@]}"
+    release lake
 }
 
 # Checks that each function rind proves in its own extension of VG's AArch64
-# model, `proofs/verified-garbage/RindIsa/`, is in rind's build the machine
-# code its theorem is about: `rind-asm` prints each function's words and
-# relocations, from the program the theorem names, and the words each static
-# it reads begins with; this prints the same of rind's release build, from
-# the object `asm_function` writes and the statics `rind_static` writes, and
-# fails unless the two are the same. A relocation must reach the start of the
-# one read-only section `asm_function` keeps, which must be the static the
-# program names.
+# and x86_64 models, `proofs/verified-garbage/RindIsa/`, is in rind's build
+# the machine code its theorem is about: `rind-asm` prints each function's
+# words and relocations on aarch64, and its bytes on x86_64, from the program
+# the theorem names, and the words each static it reads begins with; this
+# prints the same of rind's release build, from the object `asm_function`
+# writes, or on x86_64 the function's own section, and the statics
+# `rind_static` writes, and fails unless the two are the same. Every
+# relocation must reach a static the program names: on aarch64 the start of
+# the one read-only section `asm_function` keeps, and on x86_64 a read-only
+# section of the function's object, with the addend the program gives,
+# that the static starts, or a call (`R_X86_64_PLT32`) of a function rind
+# defines, printed by its Rust path, which `rind-asm` checks is one it
+# proves, of the same program as the call names.
 rind_isa() {
-    local dir=$out/rind-isa kind a b c n=0 rodata sym
+    local dir=$out/rind-isa kind a b c n=0 rodata obj sym arch section size secsize off type target base callee
     local -A statics=()
     hold scratch
     rm -rf "$dir"
     mkdir -p "$dir"
     (cd proofs/verified-garbage && lake build -q rind-asm)
-    proofs/verified-garbage/.lake/build/bin/rind-asm >"$dir/want"
+    proofs/verified-garbage/.lake/build/bin/rind-asm aarch64 >"$dir/want"
+    proofs/verified-garbage/.lake/build/bin/rind-asm x86_64 >>"$dir/want"
     build_asm aarch64
-    # Each static's Rust symbol, to the program's name for it.
+    build_asm x86_64
+    # Each static's Rust symbol, to the program's name for it, in the build
+    # of the function it follows.
     while read -r kind a b _; do
-        if [[ $kind == static ]]; then
-            read -r _ sym <<<"$(rind_symbol aarch64 "$b")"
+        case $kind in
+        function) arch=${a#rind::low::} arch=${arch%%::*} ;;
+        static)
+            read -r _ sym <<<"$(rind_symbol "$arch" "$b")"
             statics[$(stable_name <<<"$sym")]=$a
-        fi
+            ;;
+        esac
     done <"$dir/want"
     while read -r kind a b c; do
         case $kind in
         function)
             n=$((n + 1))
+            arch=${a#rind::low::} arch=${arch%%::*}
             echo "function $a"
+            if [[ $arch == x86_64 ]]; then
+                read -r obj sym <<<"$(rind_symbol x86_64 "$a")"
+                read -r section _ size < <(symbol_bounds "$obj" "$sym")
+                secsize=$("$tools/llvm-objdump" -h "$obj" | awk -v s="$section" '$2 == s { print $3 }')
+                if [[ $section != ".text.$sym" || $((16#$size)) != $((16#${secsize:-0})) ]]; then
+                    echo "admin/prove: $a is not the whole of its own section" >&2
+                    return 1
+                fi
+                "$tools/llvm-objcopy" --dump-section="$section=$dir/$n.text" "$obj" "$dir/$n.o"
+                od -An -v -tx1 -w16 "$dir/$n.text" | awk '{ $1 = $1; gsub(/ /, ""); printf "text %04x %s\n", 16 * (NR - 1), $0 }'
+                relocations "$obj" "$section" | while read -r off type target; do
+                    base=${target%%[-+]0x*} rodata=
+                    if [[ $type == R_X86_64_PLT32 ]]; then
+                        # A call of a local function may name its section, which holds it alone.
+                        callee=$(awk -F '\t' -v s="${base#.text.}" '$2 == s { print $3 }' "$(rind_index x86_64)")
+                        if [[ -z $callee || $(wc -l <<<"$callee") != 1 ]]; then
+                            echo "admin/prove: $a calls $target, which is not one function rind defines" >&2
+                            exit 1
+                        fi
+                        echo "reloc $((16#$off)) $type $callee${target#"$base"}"
+                        continue
+                    fi
+                    [[ $base != .rodata.* ]] ||
+                        rodata=$("$tools/llvm-objdump" -t "$obj" | awk -v s="$base" '$1 ~ /^0+$/ && $3 == "O" && $4 == s { print $NF }')
+                    if [[ -z $rodata || -z ${statics[$(stable_name <<<"$rodata")]:-} ]]; then
+                        echo "admin/prove: $a relocates against $target, which starts no static its program names" >&2
+                        exit 1
+                    fi
+                    echo "reloc $((16#$off)) $type ${statics[$(stable_name <<<"$rodata")]}${target#"$base"}"
+                done
+                continue
+            fi
             asm_function aarch64 "$a" "$dir/$n.o"
             "$tools/llvm-objcopy" -O binary --only-section=.text "$dir/$n.o" "$dir/$n.text"
             od -An -v -tx4 -w4 "$dir/$n.text" | awk '{ print "insn " $1 }'
             rodata=$("$tools/llvm-objdump" -t "$dir/$n.o" | awk '$1 ~ /^0+$/ && $3 == "O" && $4 == ".rodata" { print $NF }')
             relocations "$dir/$n.o" .text | while read -r off type target; do
-                if [[ $target == .rodata && -n $rodata && -n ${statics[$rodata]:-} ]]; then
-                    target=${statics[$rodata]}
+                if [[ $target != .rodata || -z $rodata || -z ${statics[$rodata]:-} ]]; then
+                    echo "admin/prove: $a relocates against $target, which starts no static its program names" >&2
+                    exit 1
                 fi
-                echo "reloc $((16#$off)) $type $target"
+                echo "reloc $((16#$off)) $type ${statics[$rodata]}"
             done
             ;;
         static)
-            rind_static aarch64 "$b" "$dir/static"
+            rind_static "$arch" "$b" "$dir/static"
             echo "static $a $b $(od -An -v -tx1 "$dir/static" | tr -d ' \n' | head -c ${#c})"
             ;;
         esac
@@ -942,7 +1428,7 @@ routine_layout() {
 # Each routine rind imports with a published proof, against the object code
 # that proof checked, which `admin/prove-bytes` describes. Vale's and aws-lc's
 # are assembled here from their upstream's text, at the revision of their
-# proofs, with the GNU assembler.
+# proofs, with the GNU assembler; mlkem-native's proofs list their bytes.
 bytes() {
     local dir=$out/bytes arch kind path name obj sym target found
     hold scratch
@@ -955,6 +1441,7 @@ bytes() {
     hacl=.tmp/upstream/hacl-star aws_lc=.tmp/upstream/aws-lc@$(admin/prove-bytes aws-lc-revision)
     admin/upstream hacl-star
     admin/upstream aws-lc "${aws_lc#*@}"
+    admin/upstream mlkem-native
     # `-L` keeps the local symbols that size aws-lc's tables.
     x86_64-linux-gnu-as -o "$dir/vale.o" "$hacl/dist/vale/aesgcm-x86_64-linux.S"
     x86_64-linux-gnu-cpp -I "$aws_lc/include" "$aws_lc/generated-src/linux-x86_64/crypto/fipsmodule/sha512-x86_64.S" |
@@ -977,7 +1464,13 @@ bytes() {
             read -r rind_obj rind_sym <<<"$found"
             read -r section value size < <(symbol_bounds "$rind_obj" "$rind_sym")
             routine_layout "$rind_obj" "$section" $((16#$value)) $((16#$value + 16#$size)) "$dir/$arch/$name.bin"
+        fi
+        if [[ $kind == naked ]]; then
             object_routine "$dir/$obj" "$sym" "$dir/$arch/$name.proof"
+        elif [[ $kind == listed && $obj != - ]]; then
+            # A naked function whose proof lists its bytes, and here the
+            # static it reads its table from.
+            rind_static "$arch" "$obj" "$dir/$arch/$name.table"
         fi
         found=$(rind_symbol "$arch" "$path")
         relocation_data "${found%% *}" "$dir/$arch/$name.bin.relocs" "$dir/$arch/$name.bin.data" "$arch"
@@ -996,6 +1489,9 @@ if [[ $only == cosim ]]; then
 fi
 if [[ $only == vg ]]; then
     vg
+fi
+if [[ $only == dalek ]]; then
+    dalek
 fi
 if [[ $only == session ]]; then
     session "$session_arch" "$session_file"
@@ -1092,13 +1588,14 @@ aes_gcm_items() {
 check_quote X86_64/AesGcmModel aes_gcm_items
 check_quote X86_64/TypesExternal items rind/src/low/x86_64/chacha20.rs 'struct VgState('
 check_quote Aarch64/TypesExternal items rind/src/low/aarch64/chacha20.rs 'struct VgState('
+check_quote Aarch64/FunsExternal items rind/src/low/aarch64/mlkem.rs 'pub(crate) fn mlkem_rej_uniform_vartime('
 aarch64_aes_gcm_items() {
     items rind/src/low/aarch64/ghash.rs 'macro_rules! mul {' 'macro_rules! reduce {' \
         '    pub(crate) fn add(&mut self, bytes: &[u8]) {' '    fn one_block(' '    fn eight_blocks(' \
         'fn mul8(' 'fn _mul_h(' 'fn _mul8(' "pub(crate) struct Aggregate<'a> {" "impl<'a> Aggregate<'a> {" \
         'fn reverse(' 'fn vmull_p64_fix(' 'fn vmull_high_p64_fix(' 'fn zero(' 'fn from_u128(' 'fn to_u128(' \
         'const GF128_POLY_HI:' 'const GF128_POLY_CARRY_MASK:'
-    items rind/src/low/aarch64/aes_gcm.rs 'fn short<' 'static KEEP:' 'fn encrypt<' 'fn load(' 'fn store('
+    items rind/src/low/aarch64/aes_gcm.rs 'fn short<' 'static KEEP:' 'fn encrypt<' 'fn load(' 'fn store(' 'fn stitched<'
 }
 check_quote Aarch64/AesGcmModel aarch64_aes_gcm_items
 select_items() {
@@ -1108,6 +1605,32 @@ select_items() {
     items rind/src/low/x86_64/cpu.rs 'pub(crate) fn prefetch<'
 }
 check_quote X86_64/PointSelectModel select_items
+check_quote X86_64/GatherModel items rind/src/low/x86_64/mont_exp.rs 'fn gather_avx2(' \
+    '#[target_feature(enable = "avx,avx2")]'
+funs_external_items() {
+    items rind/src/low/x86_64/sha3_keccak8_f1600.rs 'fn set_row('
+    items rind/src/low/generic/zeroise.rs 'pub(crate) fn zeroise<'
+}
+check_quote X86_64/FunsExternal funs_external_items
+# The source of the curve25519-dalek rind depends on for armv7, and of the
+# subtle that dalek depends on, whose getters armv7's translation reaches.
+# Followed along the dependency edges, since the workspace also resolves an
+# older dalek for tests.
+{ read -r subtle_src; read -r dalek_src; } < <(cargo metadata --locked --format-version 1 \
+    --filter-platform armv7-unknown-linux-gnueabihf | python3 -c 'import json, sys
+m = json.load(sys.stdin)
+packages = {p["id"]: p for p in m["packages"]}
+nodes = {n["id"]: n for n in m["resolve"]["nodes"]}
+def dep(of, name):
+    return next(d["pkg"] for d in nodes[of]["deps"] if d["name"] == name)
+dalek = dep(next(i for i, p in packages.items() if p["name"] == "rind"), "curve25519_dalek")
+for pkg in (dep(dalek, "subtle"), dalek):
+    print(packages[pkg]["manifest_path"].rsplit("/", 1)[0])')
+armv7_getters() {
+    items "$subtle_src/src/lib.rs" '    pub fn unwrap_u8(&self)' '    pub fn is_some(&self)'
+    items "$dalek_src/src/scalar.rs" '    pub const fn as_bytes(&self)'
+}
+check_quote Armv7/FunsExternal armv7_getters
 check_quote Aarch64/PointSelectModel items rind/src/low/aarch64/bignum_point_select.rs \
     'pub(crate) fn bignum_aff_point_select_p384(' 'fn select<' '#[target_feature(enable = "neon")]'
 check_quote X86_64/AeadDispatch items rind/src/aead.rs 'pub struct Algorithm ' 'impl Algorithm {' \
@@ -1136,6 +1659,8 @@ check_quote X86_64/HmacDispatch items rind/src/high/hmac.rs 'pub struct Algorith
 check_quote X86_64/HkdfExpand items rind/src/high/hkdf.rs '    fn expand_into('
 check_quote Portable/Compare items rind/src/low/portable/cpu.rs 'pub(in crate::low) fn ct_compare_bytes(' \
     'pub(in crate::low) fn ct_compare_16('
+check_quote Mcu/Sha256IramModel items rind/src/low/portable/sha256_iram.rs 'struct RoundConstants(' \
+    'impl RoundConstants {' 'struct Window(' 'impl Window {' 'struct Blocks<' "impl<'a> Blocks<'a> {"
 check_quote X86_64/SignatureBuffer items rind/src/high/signature.rs 'impl<const N: usize> Buffer<N> {'
 rsa_items() {
     items rind/src/high/signature.rs 'enum HashId {' 'impl HashId {'
@@ -1204,7 +1729,9 @@ only_quoted rind/src/aead.rs "$out/AeadDispatch.rs" '= Algorithm \{'
 # `proofs/Rind/X86_64/Simd.lean` and `proofs/Rind/Aarch64/Neon.lean` model.
 # Then Ed25519 from
 # `high::signature::ed25519`'s key pair and public key, which call no function
-# pointer, down to s2n-bignum's routines and the SHA-512 context. On x86_64, ChaCha20-Poly1305 and
+# pointer, down to s2n-bignum's routines and the SHA-512 context, with x86_64's
+# multi-scalar multiplication for verification over s2n-bignum's point
+# routines, whose AVX2 port is opaque. On x86_64, ChaCha20-Poly1305 and
 # XChaCha20-Poly1305 from their keys down to the call of aws-lc's one-pass
 # routine, which is opaque, as are the separate passes CPUs without SSE4.1
 # run, with HChaCha20 over HACL*'s rounds.
@@ -1242,13 +1769,18 @@ only_quoted rind/src/aead.rs "$out/AeadDispatch.rs" '= Algorithm \{'
 # targets; its comb tables are translated, which `P384Table.lean` checks.
 # HMAC's keyed states are translated over any hash, and its
 # `Key` and `Context`, which hold function pointers, are not.
-# On x86_64, RSA verification is translated from `high::rsa::VerifyingKey`
-# down to `low::posint` and the Montgomery products' dispatch in
-# `low::x86_64::mont`, whose s2n-bignum and aws-lc routines are opaque, and
-# to `RsaIfma::check` and `rsa_vg::Precompute::check`, over their opaque CPU
-# checks. pyca/verified-garbage's AVX-512 IFMA public operation and CRT, and
-# its `R² mod n`, are opaque behind `RsaIfma::public`, `IfmaCrt::crt`, and
-# `Precompute::precompute`, which `VgRsa.lean`'s axioms state. Its DER parsing and
+# On x86_64, RSA verification is translated from `high::rsa::VerifyingKey`,
+# and the private key's loading and operation from `RsaPrivateKey::new` and
+# `RsaPrivateKey::private_op`, down to
+# `low::posint`, `low::x86_64::mont_exp`, and the Montgomery products'
+# dispatch in `low::x86_64::mont`, whose s2n-bignum and aws-lc routines are
+# opaque, and to `RsaIfma::check`, `rsa_vg::Precompute::check`, and the RSAZ
+# checks, over their opaque CPU checks. aws-lc's `bn_power5`, `bn_powerx5`,
+# and RSAZ, behind `power5` and the `mod_exp_rsaz` pair, are opaque, and `GatherModel.lean`
+# models the AVX2 gather. pyca/verified-garbage's AVX-512 IFMA public
+# operation and CRT, and its `R² mod n`, are opaque behind
+# `RsaIfma::public`, `IfmaCrt::crt`, and `Precompute::precompute`, which
+# `VgRsa.lean`'s axioms state. Its DER parsing and
 # encoding, which the ✓ leaves out, are opaque too, and `RsaDispatch.lean`
 # models `signature::rsa::PublicKey` above it.
 # x86_64's RSA reaches `Digest::ct_equal`, so every target starts from it,
@@ -1258,9 +1790,8 @@ only_quoted rind/src/aead.rs "$out/AeadDispatch.rs" '= Algorithm \{'
 # its polynomial routines in `low`, which are opaque. The sets' `Params`
 # impls are not translated, so the translation takes a set's impl as a
 # parameter: see UPSTREAM.md, "Aeneas cannot translate an auto trait's
-# built-in impl". x86_64's eight-way matrix sampler and eight-way CBD
-# sampler, which only ML-KEM-1024 runs and which pass function pointers, are
-# opaque.
+# built-in impl". x86_64's eight-way matrix sampler, which only ML-KEM-1024
+# runs and which passes function pointers, is opaque.
 # See UPSTREAM.md, "Aeneas cannot translate several kinds of Rust".
 # The hash, HMAC, and header-protection paths, which every target translates,
 # and the curves', signatures', SHA-3 sponge's, and AES modes', which only the
@@ -1307,16 +1838,13 @@ hashes=(
     --include crate::low::generic::blockwise
     --include crate::low::generic::ct_equal
     --include crate::low::generic::chacha20
+    --include crate::low::generic::naf
 )
-assembly=(
-    --start-from '{impl crate::high::agreement::Agree for crate::high::agreement::X25519Curve}'
-    --start-from '{impl crate::high::agreement::Agree for crate::high::curve::P256}'
-    --start-from '{impl crate::high::agreement::Agree for crate::high::curve::P384}'
-    --start-from '{impl crate::high::agreement::Agree for crate::high::curve::P521}'
-    --start-from '{impl core::convert::AsRef for crate::high::agreement::PublicKey}'
-    --start-from '{impl core::convert::AsRef for crate::high::agreement::SharedSecret}'
-    --start-from crate::high::agreement::PrivateKey
-    --start-from crate::high::agreement::AlgorithmId
+# Ed25519 from `high::signature::ed25519`'s key pair and public key, which
+# call no function pointer, which every target with a proof of its curve
+# arithmetic translates: s2n-bignum's on x86_64 and aarch64, and
+# curve25519-dalek's on armv7.
+ed25519=(
     --start-from crate::high::ed25519::Ed25519VerifyingKey::from_bytes
     --start-from crate::high::ed25519::Ed25519VerifyingKey::verify
     --start-from crate::high::ed25519::Ed25519VerifyingKey::as_bytes
@@ -1332,6 +1860,17 @@ assembly=(
     --start-from crate::high::signature::ed25519::PublicKey::verify
     --start-from '{impl core::convert::AsRef for crate::high::signature::ed25519::PublicKey}'
     --start-from '{impl core::convert::AsRef for crate::high::signature::ed25519::Signature}'
+)
+assembly=(
+    --start-from '{impl crate::high::agreement::Agree for crate::high::agreement::X25519Curve}'
+    --start-from '{impl crate::high::agreement::Agree for crate::high::curve::P256}'
+    --start-from '{impl crate::high::agreement::Agree for crate::high::curve::P384}'
+    --start-from '{impl crate::high::agreement::Agree for crate::high::curve::P521}'
+    --start-from '{impl core::convert::AsRef for crate::high::agreement::PublicKey}'
+    --start-from '{impl core::convert::AsRef for crate::high::agreement::SharedSecret}'
+    --start-from crate::high::agreement::PrivateKey
+    --start-from crate::high::agreement::AlgorithmId
+    "${ed25519[@]}"
     --start-from crate::high::signature::Buffer::new
     --start-from crate::high::ecdsa::EncodedPoint::copy_from
     --start-from '{impl core::convert::AsRef for crate::high::signature::ecdsa::Signature}'
@@ -1344,7 +1883,7 @@ assembly=(
     --start-from crate::mid::sha3::Sponge::finish
     --start-from 'crate::mid::sha3::Sha3Context::_'
     --start-from 'crate::mid::sha3::Shake::_'
-    --start-from 'crate::mid::sha3::Shake4x::_'
+    --start-from 'crate::mid::sha3::Shake8x::_'
     --start-from crate::mid::aes::AesCtr::new
     --start-from crate::mid::aes::AesCtr::apply_keystream
     --start-from crate::mid::aes_cbc::AesCbcEncryptingKey::new
@@ -1383,33 +1922,64 @@ assembly=(
     --include crate::low::generic::ct_copy::ct_select_i16
     --include crate::low::generic::ct_copy::ct_copy
 )
+# RSA verification, from the key's constructors down to `low::posint`, whose
+# Montgomery products and word routines each target adds.
+rsa=(
+    --start-from crate::high::rsa::VerifyingKey::from_components
+    --start-from crate::high::rsa::VerifyingKey::from_pkcs1_der
+    --start-from crate::high::rsa::VerifyingKey::from_spki_der
+    --start-from crate::high::rsa::VerifyingKey::to_pkcs1_der
+    --start-from crate::high::rsa::VerifyingKey::modulus_len_bits
+    --start-from crate::high::rsa::VerifyingKey::verify_pkcs1_sha1
+    --start-from crate::high::rsa::VerifyingKey::verify_pkcs1_sha256
+    --start-from crate::high::rsa::VerifyingKey::verify_pkcs1_sha384
+    --start-from crate::high::rsa::VerifyingKey::verify_pkcs1_sha512
+    --start-from crate::high::rsa::VerifyingKey::verify_pss_sha256
+    --start-from crate::high::rsa::VerifyingKey::verify_pss_sha384
+    --start-from crate::high::rsa::VerifyingKey::verify_pss_sha512
+    --opaque crate::high::rsa::pkcs1_components
+    --opaque crate::high::rsa::spki_components
+    --opaque 'crate::high::rsa::_::to_pkcs1_der'
+    --include crate::low::posint
+)
 extract() {
     local arch=$1 dir=$2
     shift 2
     (cd rind && charon cargo --preset=aeneas "$@" \
         --dest-file "$PWD/../$out/${dir,,}.llbc" \
-        -- -p rind --lib --target "$arch-unknown-linux-gnu")
+        -- -p rind --lib --target "$(triple "$arch")")
     to_lean "$dir"
 }
 
 # Translates `$out/<dir, lowercased>.llbc` into `proofs/Rind/<dir>/{Types,Funs}.lean`.
 to_lean() {
     local dir=$1
-    rm -rf "$out/lean"
-    # x86_64's generator table rows are 512-word literals, which elaborate
-    # past Aeneas's default recursion depth of 2048.
-    aeneas -backend lean -split-files -abort-on-error \
-        -no-progress-bar -max-recdepth 4096 -dest "$out/lean" -subdir "Rind/$dir" \
-        -namespace "rind.${dir,,}" "$out/${dir,,}.llbc"
+    # x86_64's generator table rows are 512-word literals, and Ed25519's
+    # tables of B's odd multiples 1024-word ones, which elaborate past Aeneas's
+    # default recursion depth of 2048.
+    aeneas_cached aeneas "$out/${dir,,}.llbc" "$out/lean" -backend lean -split-files -abort-on-error \
+        -no-progress-bar -max-recdepth 8192 -subdir "Rind/$dir" -namespace "rind.${dir,,}"
     cp "$out/lean/Rind/$dir/Types.lean" "$out/lean/Rind/$dir/Funs.lean" "proofs/Rind/$dir/"
 }
 
 # armv7's translation reaches the header-protection API, ChaCha20's the one
-# armv7 path that is Rust down to code a proof covers, and the AES-GCM API,
-# down to the bitsliced AES and integer GHASH a CPU with neither NEON nor the
-# crypto extension runs: the rest of armv7's operations run assembly, which no
-# instruction model covers yet, or Rust its own proof quests translate.
-# `Rind/Armv7/{Types,Funs}External.lean` define what it leaves opaque.
+# armv7 path that is Rust down to code a proof covers; the AES-GCM API, from
+# its `aead::Key` cipher impl down to the bitsliced AES and integer GHASH a
+# CPU with neither NEON nor the crypto extension runs, with ChaCha20-Poly1305
+# below its cipher impl opaque, since `aead::Key` holds it; the agreement API,
+# down to the curve25519-dalek functions X25519 runs on a CPU without NEON,
+# and for the public key on every CPU; and the signature API's Ed25519, down
+# to dalek's point and scalar functions and the wrappers around aws-lc's
+# SHA-512 routines, which `Rind/Armv7/Sha512Entry.lean` states.
+# `Rind/Armv7/Dalek.lean` restates BAIF's theorems about those dalek
+# functions. Of dalek's and subtle's code, the translation reads `Scalar`,
+# `CtOption`, and the trivial functions Ed25519 calls, which need no theorem,
+# but not the bodies of three getters, which `FunsExternal` models and quotes.
+# SHA-256's digest is reached too, since `Rind/Armv7/Blockwise.lean`, x86_64's,
+# covers it. The rest of armv7's operations, the NIST curves' among
+# them, run assembly, which no instruction model covers yet, or Rust its own
+# proof quests translate. `Rind/Armv7/{Types,Funs}External.lean` define what
+# it leaves opaque.
 extract_armv7() {
     (cd rind && charon cargo --preset=aeneas \
         --start-from '{impl crate::aead::quic::Mask for crate::mid::chacha20::ChaCha20}' \
@@ -1417,12 +1987,49 @@ extract_armv7() {
         --start-from crate::aead::quic::HeaderProtectionKey \
         --start-from crate::aead::quic::AlgorithmId \
         --start-from crate::mid::chacha20::ChaCha20::new \
+        --start-from crate::mid::aes::Aes::new \
         --start-from crate::error::Error \
         --start-from crate::mid::aes_gcm::AesGcm::new \
         --start-from crate::mid::aes_gcm::AesGcm::encrypt \
         --start-from crate::mid::aes_gcm::AesGcm::decrypt \
         --start-from crate::mid::aes_gcm::AesGcm::encrypt_any \
         --start-from crate::mid::aes_gcm::AesGcm::decrypt_any \
+        --start-from '{impl crate::aead::Cipher for crate::mid::aes_gcm::AesGcm}' \
+        --start-from '{impl crate::aead::Cipher for crate::mid::chacha20poly1305::ChaCha20Poly1305}' \
+        --start-from crate::aead::Key \
+        --start-from crate::aead::AlgorithmId \
+        --opaque crate::aead::Algorithm \
+        --opaque crate::aead::Sealer \
+        --opaque crate::aead::Ops \
+        --opaque crate::mid::chacha20poly1305 \
+        --start-from '{impl crate::high::agreement::Agree for crate::high::agreement::X25519Curve}' \
+        --start-from '{impl crate::high::agreement::Agree for crate::high::curve::P256}' \
+        --start-from '{impl crate::high::agreement::Agree for crate::high::curve::P384}' \
+        --start-from '{impl crate::high::agreement::Agree for crate::high::curve::P521}' \
+        --start-from '{impl core::convert::AsRef for crate::high::agreement::PublicKey}' \
+        --start-from '{impl core::convert::AsRef for crate::high::agreement::SharedSecret}' \
+        --start-from crate::high::agreement::PrivateKey \
+        --start-from crate::high::agreement::AlgorithmId \
+        "${ed25519[@]}" \
+        --start-from crate::low::generic::blockwise::sha256_digest \
+        --opaque crate::high::agreement::Algorithm \
+        --opaque crate::high::agreement::Ops \
+        --opaque crate::high::agreement::x25519_from_pkcs8 \
+        --opaque crate::high::agreement::x25519_to_pkcs8 \
+        --opaque crate::high::sec1::decode \
+        --opaque crate::high::sec1::decode_pkcs8 \
+        --opaque crate::high::sec1::encode \
+        --opaque crate::high::sec1::encode_pkcs8 \
+        --opaque 'crate::high::agreement::_::encode_pkcs8' \
+        --opaque 'crate::high::agreement::_::encode_scalar' \
+        --opaque '{impl crate::high::agreement::Agree for crate::high::curve::P521}::load' \
+        --opaque 'crate::high::curve::_::oid' \
+        --opaque crate::mid::p256 \
+        --opaque crate::mid::p384 \
+        --opaque crate::mid::p521 \
+        --include crate::mid::p256::SharedSecret \
+        --include crate::mid::p384::SharedSecret \
+        --include crate::mid::p521::SharedSecret \
         --opaque crate::aead::quic::Masker \
         --opaque crate::mid::aes \
         --include crate::mid::aes::check_gcm_lengths \
@@ -1432,9 +2039,21 @@ extract_armv7() {
         --include crate::low::ct \
         --include crate::low::generic::chacha20 \
         --include crate::low::generic::ct_equal \
+        --include crate::low::generic::blockwise \
+        --include crate::low::arm::sha_armv4::sha512_compress_blocks \
+        --include curve25519_dalek::scalar::Scalar \
+        --include curve25519_dalek::scalar::clamp_integer \
+        --include '{impl core::clone::Clone for curve25519_dalek::edwards::EdwardsPoint}' \
+        --include subtle::Choice \
+        --include subtle::CtOption \
+        --include '{impl core::convert::From<subtle::CtOption<_>> for core::option::Option<_>}' \
         --include crate::low::portable::aes \
         --include crate::low::portable::aes_nohw \
         --include crate::low::portable::ghash_nohw \
+        --include crate::low::arm::curve25519 \
+        --opaque crate::low::arm::curve25519::ladder_neon \
+        --include crate::low::portable::curve25519 \
+        --include crate::low::portable::bignum_eq \
         --dest-file "$PWD/../$out/armv7.llbc" \
         -- -p rind --lib --target armv7-unknown-linux-gnueabihf)
     to_lean Armv7
@@ -1472,10 +2091,8 @@ extract_kdf() {
         "$@" \
         --dest-file "$PWD/../$out/${dir,,}-kdf.llbc" \
         -- -p rind --lib --target "$arch-unknown-linux-gnu")
-    rm -rf "$out/lean"
-    aeneas -backend lean -split-files -abort-on-error \
-        -no-progress-bar -dest "$out/lean" -subdir "Rind/$dir/Kdf" \
-        -namespace "rind.${dir,,}.kdf" "$out/${dir,,}-kdf.llbc"
+    aeneas_cached aeneas "$out/${dir,,}-kdf.llbc" "$out/lean" -backend lean -split-files -abort-on-error \
+        -no-progress-bar -subdir "Rind/$dir/Kdf" -namespace "rind.${dir,,}.kdf"
     mkdir -p "proofs/Rind/$dir/Kdf"
     # Aeneas names both of `ZeroablePrimitive`'s `Copy` clauses, which
     # `NonZeroU32::get` brings in, `markerCopyInst`, which Lean refuses as a
@@ -1506,7 +2123,8 @@ rustc_version=$(rustc -vV)
 toolchain=$(printf '%s\n' "$charon_path" "$rustc_version" | sha256sum)
 prove_target=$PWD/target/prove-${toolchain:0:16}
 mkdir -p target
-find "$PWD/target" -mindepth 1 -maxdepth 1 -name 'prove*' ! -name "prove-${toolchain:0:16}" ! -name "prove-${toolchain:0:16}-portable" -exec rm -rf {} +
+find "$PWD/target" -mindepth 1 -maxdepth 1 -name 'prove*' ! -name "prove-${toolchain:0:16}" ! -name "prove-${toolchain:0:16}-portable" \
+    ! -name "prove-${toolchain:0:16}-mcu" -exec rm -rf {} +
 export CARGO_TARGET_DIR=$prove_target
 
 extract x86_64 X86_64 "${hashes[@]}" "${assembly[@]}" \
@@ -1567,6 +2185,12 @@ extract x86_64 X86_64 "${hashes[@]}" "${assembly[@]}" \
     --include crate::low::x86_64::adx_mux::edwards25519_decode \
     --include crate::low::x86_64::adx_mux::edwards25519_scalarmulbase \
     --include crate::low::x86_64::adx_mux::bignum_madd_n25519 \
+    --include crate::low::x86_64::adx_mux::bignum_mul_p25519 \
+    --include crate::low::x86_64::adx_mux::edwards25519_msm \
+    --include crate::low::x86_64::adx_mux::edwards25519_epadd \
+    --include crate::low::x86_64::adx_mux::edwards25519_epdouble \
+    --include crate::low::x86_64::adx_mux::edwards25519_pdouble \
+    --include crate::low::generic::edwards25519_msm \
     --include crate::low::x86_64::sha1_mux \
     --opaque crate::low::x86_64::sha1_mux::path \
     --opaque crate::low::x86_64::sha1_mux::sha1_compress_blocks \
@@ -1576,6 +2200,9 @@ extract x86_64 X86_64 "${hashes[@]}" "${assembly[@]}" \
     --opaque crate::low::x86_64::sha512::path \
     --include crate::low::x86_64::sha3_keccak4_f1600_shim \
     --include crate::low::x86_64::sha3_keccak_nof4_f1600 \
+    --include crate::low::x86_64::sha3_keccak8_f1600 \
+    --opaque crate::low::x86_64::sha3_keccak8_f1600::set_row \
+    --include crate::low::generic::keccak8 \
     --start-from '{impl crate::aead::Cipher for crate::mid::aes_gcm::AesGcm}' \
     --start-from crate::mid::aes_gcm::AesGcm::encrypt_any \
     --start-from crate::mid::aes_gcm::AesGcm::decrypt_any \
@@ -1633,39 +2260,39 @@ extract x86_64 X86_64 "${hashes[@]}" "${assembly[@]}" \
     --include crate::low::x86_64::aes_gcm_avx \
     --opaque crate::low::x86_64::aes_gcm_avx::counter_block \
     --opaque crate::low::x86_64::aes_gcm_avx::aead \
-    --start-from crate::high::rsa::VerifyingKey::from_components \
-    --start-from crate::high::rsa::VerifyingKey::from_pkcs1_der \
-    --start-from crate::high::rsa::VerifyingKey::from_spki_der \
-    --start-from crate::high::rsa::VerifyingKey::to_pkcs1_der \
-    --start-from crate::high::rsa::VerifyingKey::modulus_len_bits \
-    --start-from crate::high::rsa::VerifyingKey::verify_pkcs1_sha1 \
-    --start-from crate::high::rsa::VerifyingKey::verify_pkcs1_sha256 \
-    --start-from crate::high::rsa::VerifyingKey::verify_pkcs1_sha384 \
-    --start-from crate::high::rsa::VerifyingKey::verify_pkcs1_sha512 \
-    --start-from crate::high::rsa::VerifyingKey::verify_pss_sha256 \
-    --start-from crate::high::rsa::VerifyingKey::verify_pss_sha384 \
-    --start-from crate::high::rsa::VerifyingKey::verify_pss_sha512 \
-    --opaque crate::high::rsa::pkcs1_components \
-    --opaque crate::high::rsa::spki_components \
-    --opaque 'crate::high::rsa::_::to_pkcs1_der' \
+    "${rsa[@]}" \
     --include crate::low::x86_64::rsa_ifma::RsaIfma \
     --include 'crate::low::x86_64::rsa_ifma::_::check' \
     --include crate::low::x86_64::rsa_ifma::IfmaCrt \
     --start-from crate::low::x86_64::rsa_ifma::IfmaCrt::crt \
     --include crate::low::x86_64::rsa_vg::Precompute \
     --include 'crate::low::x86_64::rsa_vg::_::check' \
-    --include crate::low::posint \
     --include crate::low::x86_64::mont::mont_mul \
     --include crate::low::x86_64::mont::mont_sqr \
     --include crate::low::x86_64::mont::karatsuba_mul \
     --include crate::low::x86_64::mont::karatsuba_sqr \
     --include crate::low::x86_64::mont::redc_8n \
+    --start-from crate::mid::rsa_priv::RsaPrivateKey::new \
+    --start-from crate::mid::rsa_priv::RsaPrivateKey::private_op \
+    --include crate::low::x86_64::mont_exp \
+    --opaque crate::low::x86_64::mont_exp::power5 \
+    --opaque crate::low::x86_64::mont_exp::gather_avx2 \
+    --opaque crate::low::x86_64::mont_exp::power5_table \
+    --opaque 'crate::low::posint::_::mod_exp_pair_rsaz' \
+    --opaque 'crate::low::posint::_::mod_exp_rsaz' \
+    --include 'crate::low::x86_64::rsa_ifma::_::runs' \
+    --include 'crate::low::x86_64::rsa_ifma::_::new' \
+    --include 'crate::low::x86_64::rsa_ifma::_::try_new' \
+    --include 'crate::low::x86_64::rsa_ifma::_::precompute' \
+    --include crate::low::x86_64::rsaz::Rsaz \
+    --include 'crate::low::x86_64::rsaz::_::check' \
+    --include crate::low::x86_64::rsaz_avx512::RsazAvx512 \
+    --include 'crate::low::x86_64::rsaz_avx512::_::check' \
     --start-from crate::low::x86_64::mlkem768_vg::Encaps::check_ek \
     --start-from crate::low::x86_64::mlkem768_vg::Encaps::encaps \
     --start-from crate::low::x86_64::mlkem768_vg::KeyPair::keygen \
     --start-from crate::low::x86_64::mlkem768_vg::KeyPair::decaps \
-    --opaque crate::mid::mlkem::sample_ntt::sample_ntt_8x \
-    --opaque crate::mid::mlkem::sample_poly_cbd2_8x
+    --opaque crate::mid::mlkem::sample_ntt::sample_ntt_8x
 extract aarch64 Aarch64 "${hashes[@]}" "${assembly[@]}" \
     --include crate::low::aarch64::sha512::sha512_compress_blocks \
     --start-from crate::mid::p256::PrivateKey::from_bytes \
@@ -1702,6 +2329,7 @@ extract aarch64 Aarch64 "${hashes[@]}" "${assembly[@]}" \
     --include crate::low::aarch64::sha3_keccak_f1600_mux \
     --include crate::low::aarch64::sha3_keccak4_f1600_mux \
     --include crate::low::aarch64::sha3_keccak_nof4_f1600 \
+    --include crate::low::generic::keccak8 \
     --include crate::low::aarch64::sha256 \
     --opaque crate::low::aarch64::sha256::compress_hw \
     --opaque crate::low::aarch64::sha256::compress_nohw \
@@ -1718,10 +2346,12 @@ extract aarch64 Aarch64 "${hashes[@]}" "${assembly[@]}" \
     --opaque crate::low::aarch64::aes_cbc::aese_chained \
     --include crate::low::generic::mlkem \
     --start-from crate::low::generic::mlkem::mlkem_frombytes \
-    --start-from crate::low::generic::mlkem::mlkem_compress_d4 \
-    --start-from crate::low::generic::mlkem::mlkem_compress_d5 \
-    --start-from crate::low::generic::mlkem::mlkem_compress_d10 \
-    --start-from crate::low::generic::mlkem::mlkem_compress_d11 \
+    --include crate::low::aarch64::mlkem \
+    --opaque crate::low::aarch64::mlkem::mlkem_compress_d4 \
+    --opaque crate::low::aarch64::mlkem::mlkem_compress_d5 \
+    --opaque crate::low::aarch64::mlkem::mlkem_compress_d10 \
+    --opaque crate::low::aarch64::mlkem::mlkem_compress_d11 \
+    --opaque crate::low::aarch64::mlkem::mlkem_rej_uniform_vartime \
     --start-from crate::low::aarch64::mlkem768_vg::Encaps::check_ek \
     --start-from crate::low::aarch64::mlkem768_vg::Encaps::encaps \
     --include crate::low::aarch64::pbkdf2_vg \
@@ -1731,8 +2361,16 @@ extract aarch64 Aarch64 "${hashes[@]}" "${assembly[@]}" \
     --start-from crate::low::aarch64::pbkdf2_vg::Pbkdf2::sha512 \
     --start-from 'crate::low::aarch64::pbkdf2_vg::_::derive' \
     --opaque 'crate::low::aarch64::pbkdf2_vg::_::derive' \
-    --start-from crate::low::aarch64::chacha20poly1305::seal \
-    --start-from crate::low::aarch64::chacha20poly1305::open \
+    --start-from '{impl crate::aead::Cipher for crate::mid::aes_gcm::AesGcm}' \
+    --start-from crate::aead::Key \
+    --start-from crate::aead::AlgorithmId \
+    --opaque crate::aead::Algorithm \
+    --opaque crate::aead::Sealer \
+    --opaque crate::aead::Ops \
+    --start-from '{impl crate::aead::Cipher for crate::mid::chacha20poly1305::ChaCha20Poly1305}' \
+    --start-from crate::mid::xchacha20poly1305::XChaCha20Poly1305::new \
+    --start-from crate::mid::xchacha20poly1305::XChaCha20Poly1305::encrypt \
+    --start-from crate::mid::xchacha20poly1305::XChaCha20Poly1305::decrypt \
     --include crate::low::aarch64::chacha20poly1305::seal \
     --include crate::low::aarch64::chacha20poly1305::open \
     --include crate::low::aarch64::chacha20poly1305::seal_runs_vg \
@@ -1761,10 +2399,9 @@ extract aarch64 Aarch64 "${hashes[@]}" "${assembly[@]}" \
     --opaque 'crate::low::aarch64::ghash::_::add' \
     --include crate::low::aarch64::aes_gcm \
     --opaque crate::low::aarch64::aes_gcm::short \
-    --opaque crate::low::aarch64::aes_gcm::cipher
+    --opaque crate::low::aarch64::aes_gcm::stitched
 
-# The AEAD key's conversion is x86_64's alone: the AEAD API's model and proofs
-# are x86_64's, as AES-GCM's are.
+# The AEAD key's conversion from HKDF's output is proven on x86_64 alone.
 extract_kdf x86_64 X86_64 --start-from '{impl core::convert::From for crate::aead::Key}'
 extract_kdf aarch64 Aarch64 --include crate::mid::pbkdf2_vg \
     --include 'crate::mid::sha1::_::BLOCK_SZ' --include 'crate::mid::sha1::_::OUTPUT_SZ' \
@@ -1773,56 +2410,192 @@ extract_armv7
 
 # The portable backend, which builds only under the cfg CI's portable jobs
 # build with, here on x86_64: the hashes, down to the SHA-2 block functions in
-# `low::generic`, which are opaque, and the Keccak-f.
-# `proofs/Rind/Portable/Compare.lean`
+# `low::generic`, the Keccak-f, and RSA verification, down to
+# `low::generic`'s word routines and Montgomery products, with the signature
+# API's `Buffer`, which `RsaDispatch.lean`'s model writes keys' encodings
+# into. `proofs/Rind/Portable/Compare.lean`
 # models its constant-time compares, which read through raw pointers and
 # `black_box`. The error type and `into_public`, which the other targets reach
 # through their curves, are start points of their own here.
 portable_cfg='--cfg rind_portable --cfg curve25519_dalek_backend="serial"'
 portable_target=$prove_target-portable
 CARGO_TARGET_DIR=$portable_target RUSTFLAGS=$portable_cfg extract x86_64 Portable "${hashes[@]}" --include crate::low::portable::sha \
+    --include crate::low::generic::sha256 --include crate::low::generic::sha256_k \
+    --include crate::low::generic::sha512 \
     --start-from crate::error::Error --start-from crate::low::ct::into_public \
     --start-from crate::low::portable::keccak::sha3_keccak4_f1600 \
     --start-from crate::low::portable::keccak::sha3_keccak_nof4_f1600 \
     --include crate::low::portable::keccak \
-    --opaque crate::mid::sha3
+    --opaque crate::mid::sha3 \
+    "${rsa[@]}" \
+    --start-from crate::high::signature::Buffer::new \
+    --start-from '{impl core::convert::AsRef for crate::high::signature::Buffer<_>}' \
+    --include crate::low::generic::rsa_vg \
+    --include crate::low::generic::bignum \
+    --include crate::low::portable::bignum_eq \
+    --include crate::low::generic::limb64::join \
+    --include crate::low::generic::limb64::limbs \
+    --include crate::low::generic::limb64::mont
 CARGO_TARGET_DIR=$portable_target RUSTFLAGS=$portable_cfg extract_kdf x86_64 Portable
+
+# The portable backend on 32-bit microcontrollers, `target_os = "espidf"` or
+# `"none"`, whose SHA-2 differs from the other targets': SHA-384/512 is the
+# rolled loop in `low::generic::sha512_rolled`, and on ESP-IDF Xtensa SHA-256
+# is `low/portable/sha256_iram.rs`. `armv7a-none-eabi` selects the first
+# itself. Charon cannot build for Xtensa, whose esp toolchain is a fork of
+# Rust, so `rind_sha256_iram` forces the second, and the translation reads
+# that module's Rust fallbacks for its Xtensa `asm!`.
+# `proofs/Rind/Mcu/Sha256IramModel.lean` models the window and the two raw
+# pointer cursors it leaves opaque. The hashes alone: no other operation
+# differs here.
+mcu_cfg='--cfg rind_portable --cfg rind_sha256_iram --cfg getrandom_backend="custom"'
+CARGO_TARGET_DIR=$prove_target-mcu RUSTFLAGS=$mcu_cfg extract armv7a-none-eabi Mcu "${hashes[@]}" \
+    --include crate::low::portable::sha \
+    --opaque crate::low::portable::sha::iram::RoundConstants \
+    --opaque crate::low::portable::sha::iram::Window \
+    --opaque crate::low::portable::sha::iram::Blocks \
+    --opaque 'crate::low::portable::sha::iram::_::first' \
+    --opaque 'crate::low::portable::sha::iram::_::new' \
+    --opaque 'crate::low::portable::sha::iram::_::get' \
+    --opaque 'crate::low::portable::sha::iram::_::set' \
+    --opaque 'crate::low::portable::sha::iram::_::next' \
+    --opaque 'crate::low::portable::sha::iram::_::block' \
+    --include crate::low::generic::sha256_k \
+    --include crate::low::generic::sha512::K \
+    --include crate::low::generic::sha512_rolled \
+    --opaque crate::mid::sha3 \
+    --start-from crate::error::Error --start-from crate::low::ct::into_public
 
 mkdir -p proofs/Rind/Aarch64/Kdf
 # P-256's generator multiplication and its table differ per target, so each
 # target has its own `P256Base` stating it, and `P256KeyCheck` for the key
 # check x86_64 shortcuts; key generation and ECDSA above them are shared.
 # Each target's `P384KeyCheck` reads its own translation of the key check.
-for file in Dispatch QuicDispatch P256Dispatch P256Agree P384Dispatch X25519 P384 P384Table P384Keygen DigestAlgorithm \
-    DigestDispatch Sha512 ChaCha20 SignatureBuffer Ed25519 \
+for file in Dispatch QuicDispatch P256Dispatch P256Agree P384Dispatch X25519Bytes X25519 P384 P384Table P384Keygen DigestAlgorithm \
+    DigestDispatch Sha512Context Sha512 ChaCha20 SignatureBuffer Ed25519 \
     Blockwise Sha Hmac HmacDispatch HkdfExpand Kdf/TypesExternal Kdf/FunsExternal \
     CtEqual HmacApi DigestApi Hkdf Pbkdf2 Sha3 AesCipher HkdfAes AesModesApi AesKw P256 EcdsaDispatch Naf P256Ecdsa P256Signature \
-    P384Ecdsa P384Signature MlKemCoding; do
+    P384Ecdsa P384Signature MlKemCoding MlKemCbd AeadDispatch AeadVec ChaCha20Poly1305Api; do
     sed 's/X86_64/Aarch64/g; s/x86_64/aarch64/g' "proofs/Rind/X86_64/$file.lean" >"proofs/Rind/Aarch64/$file.lean"
 done
-# The AEAD model imports nothing aarch64 has, and no aarch64 translation reaches it.
-sed -i '/Rind.Aarch64.AeadDispatch/d' proofs/Rind/Aarch64/Kdf/TypesExternal.lean
+# aarch64's KDF translation does not reach the AEAD key's conversion.
 sed -i '/-- BEGIN aead/,/-- END aead/d' proofs/Rind/Aarch64/Kdf/FunsExternal.lean
 # aarch64 translates `mid::pbkdf2_vg`, which the other targets leave opaque.
 sed -i '/-- BEGIN vg/,/-- END vg/d' proofs/Rind/Aarch64/Kdf/TypesExternal.lean proofs/Rind/Aarch64/Kdf/FunsExternal.lean
 sed -i 's/^public import Rind.Aarch64.HkdfExpand$/&\npublic import Rind.Aarch64.Kdf.VgExternal/' proofs/Rind/Aarch64/Kdf/FunsExternal.lean
+# aarch64's `RunsAesGcm` takes the key's algorithm, since AES-192 with SHA3
+# runs kernels nothing proves, so `GcmKey` passes it on.
+sed 's/X86_64/Aarch64/g; s/x86_64/aarch64/g
+    s/^theorem gcm_key_new (h : RunsAesGcm) (algorithm : cipher.Algorithm) (alg : Algorithm)$/theorem gcm_key_new (algorithm : cipher.Algorithm) (alg : Algorithm) (h : RunsAesGcm alg)/
+    s/(aes_gcm_new h alg A hAlg key)/(aes_gcm_new alg h A hAlg key)/' \
+    proofs/Rind/X86_64/GcmKey.lean >proofs/Rind/Aarch64/GcmKey.lean
+if ! grep -qF '(h : RunsAesGcm alg)' proofs/Rind/Aarch64/GcmKey.lean ||
+    ! grep -qF '(aes_gcm_new alg h A hAlg key)' proofs/Rind/Aarch64/GcmKey.lean; then
+    echo "admin/prove: proofs/Rind/X86_64/GcmKey.lean no longer has the lines aarch64's copy rewrites" >&2
+    exit 1
+fi
 # The portable backend's hash, HMAC, KDF, and header-protection proofs are the
 # x86_64 ones with the target renamed, over its own block functions' contracts
 # in `Sha512Entry.lean` and `ShaBlocks.lean`, and its compares' proof in
 # `CtEqual.lean`.
 mkdir -p proofs/Rind/Portable/Kdf
-for file in QuicDispatch DigestAlgorithm DigestDispatch Sha512 ChaCha20 Blockwise Sha Hmac HmacDispatch \
+for file in QuicDispatch DigestAlgorithm DigestDispatch Sha512Context Sha512 ChaCha20 Blockwise Sha Hmac HmacDispatch \
     HkdfExpand Kdf/TypesExternal Kdf/FunsExternal HmacApi DigestApi Hkdf Pbkdf2; do
     sed 's/X86_64/Portable/g; s/x86_64/portable/g; s/Rind\.Portable\.AwsLc/Rind.Portable.Sha512Entry/' \
         "proofs/Rind/X86_64/$file.lean" >"proofs/Rind/Portable/$file.lean"
 done
 sed -i '/Rind.Portable.AeadDispatch/d' proofs/Rind/Portable/Kdf/TypesExternal.lean
 sed -i '/-- BEGIN aead/,/-- END aead/d' proofs/Rind/Portable/Kdf/FunsExternal.lean
-# armv7's header-protection model and ChaCha20 proof are x86_64's with the
-# target renamed.
-for file in QuicDispatch ChaCha20; do
-    sed 's/X86_64/Armv7/g; s/x86_64/armv7/g' "proofs/Rind/X86_64/$file.lean" >"proofs/Rind/Armv7/$file.lean"
+# 32-bit microcontrollers' hash, HMAC, and header-protection proofs and
+# compares' models are the portable backend's with the namespace renamed, over
+# `Rind/Mcu/`'s own block functions' proofs: the Rust paths are the same.
+for file in QuicDispatch DigestAlgorithm DigestDispatch Sha512Context Sha512 ChaCha20 Blockwise Sha Hmac HmacDispatch \
+    HmacApi DigestApi Compare CtEqual; do
+    sed 's/Rind\.Portable/Rind.Mcu/g; s/rind\.portable/rind.mcu/g' "proofs/Rind/Portable/$file.lean" >"proofs/Rind/Mcu/$file.lean"
 done
+# RSA verification's portable proofs, which admin/prove wrote from x86_64's
+# over `RsaMont.lean`, are parked in `proofs/parked/`, outside the `Rind`
+# library's glob, until quest/m4/verified/rsa-verify-portable-four-product.md
+# reproves them over the four-product `mul_add`. Copies an earlier run wrote
+# would still match the glob, so they go.
+rm -f proofs/Rind/Portable/{RsaPublic,RsaBytes,RsaIfma,RsaVerify,RsaPss,RsaKey,SignatureBuffer,RsaDispatch}.lean
+# armv7's header-protection, agreement, AEAD, and compares' models and its
+# ChaCha20, X25519, AEAD, and SHA-512 context proofs are x86_64's with the
+# target renamed. X25519's are over `Rind.Armv7.Curve25519`'s dispatch where
+# x86_64's are over s2n-bignum's: the CPU check that picks the routine is
+# NEON's. armv7's compares live in `low::arm::cpu`. SHA-512's context is over
+# `Rind/Armv7/Sha512Entry.lean`'s block-function contract, as the portable
+# backend's is.
+for file in QuicDispatch Dispatch P256Dispatch P384Dispatch ChaCha20 CtEqual X25519Bytes X25519 Blockwise \
+    Sha512Context AeadDispatch AeadVec AesGcmApi GcmKey; do
+    sed 's/X86_64/Armv7/g; s/x86_64/armv7/g; s/low\.armv7\.cpu/low.arm.cpu/g; s/Rind\.Armv7\.S2nBignum/Rind.Armv7.Curve25519/; s/low\.armv7\.curve25519_ifma\.Curve25519Ifma/low.arm.cpu.HaveNeon/g; s/CurveIfma/DalekCpu/g; s/Rind\.Armv7\.AwsLc/Rind.Armv7.Sha512Entry/' \
+        "proofs/Rind/X86_64/$file.lean" >"proofs/Rind/Armv7/$file.lean"
+done
+# armv7's AEAD model leaves out `RandomizedNonceKey`, whose XChaCha20-Poly1305
+# its translation does not reach. Its AES-GCM API and custom-IV key are over
+# `Rind.Armv7.AesGcm`, which proves under x86_64's names what x86_64's
+# `AesGcmAead` and `AesGcmAny` do.
+sed -i '/-- BEGIN xchacha/,/-- END xchacha/d' proofs/Rind/Armv7/AeadDispatch.lean
+sed -i 's/^import Rind\.Armv7\.AesGcmAead$/import Rind.Armv7.AesGcm/' proofs/Rind/Armv7/AesGcmApi.lean
+sed -i 's/^import Rind\.Armv7\.AesGcmAny$/import Rind.Armv7.AesGcmApi/' proofs/Rind/Armv7/GcmKey.lean
+if grep -q 'xchacha' proofs/Rind/Armv7/AeadDispatch.lean ||
+    ! grep -qx 'import Rind.Armv7.AesGcm' proofs/Rind/Armv7/AesGcmApi.lean ||
+    ! grep -qx 'import Rind.Armv7.AesGcmApi' proofs/Rind/Armv7/GcmKey.lean; then
+    echo "admin/prove: proofs/Rind/X86_64/{AeadDispatch,AesGcmApi,GcmKey}.lean no longer have the lines armv7's copies rewrite" >&2
+    exit 1
+fi
+
+# The elements of the HOL Light list `$2` that `$1` defines, as Lean writes
+# them: `-- &1600` is -1600 and `&630` is 630.
+hol_list() {
+    local list
+    list=$(awk -v n="$2" '$0 ~ "^let " n " = " { on = 1 } on { printf "%s ", $0 } on && /`;;/ { exit }' "$1" |
+        sed -E 's/^[^`]*`//; s/^[^[]*\[//; s/\].*$//; s/-- &/-/g; s/&//g; s/;/,/g; s/[[:space:]]+/ /g; s/^ //; s/ $//')
+    if [[ -z $list ]]; then
+        echo "admin/prove: no list $2 in $1" >&2
+        return 1
+    fi
+    echo "$list"
+}
+
+# The tables s2n-bignum's aarch64 ML-KEM theorems assume, from its HOL Light
+# sources, so that no hand copy of them is trusted:
+# `proofs/Rind/Aarch64/MlKemRoutines.lean` checks rind's against them.
+{
+    echo "-- Written by admin/prove from thirdparty/s2n-bignum/arm/proofs: the tables"
+    echo "-- s2n-bignum's ML-KEM theorems assume. Do not edit."
+    echo "namespace rind.aarch64.MlKemTables"
+    for row in \
+        "mlkem_ntt ntt_zetas_layer01234 nttZetasLayer01234 Int" \
+        "mlkem_ntt ntt_zetas_layer56 nttZetasLayer56 Int" \
+        "mlkem_intt intt_zetas_layer01234 inttZetasLayer01234 Int" \
+        "mlkem_intt intt_zetas_layer56 inttZetasLayer56 Int" \
+        "mlkem_mulcache_compute mulcache_zetas mulcacheZetas Int" \
+        "mlkem_mulcache_compute mulcache_zetas_twisted mulcacheZetasTwisted Int"; do
+        read -r file name lean type <<<"$row"
+        echo "/-- \`$name\`, from \`arm/proofs/$file.ml\`. -/"
+        echo "def $lean : List $type := [$(hol_list "thirdparty/s2n-bignum/arm/proofs/$file.ml" "$name")]"
+    done
+    echo "end rind.aarch64.MlKemTables"
+} >proofs/Rind/Aarch64/MlKemTables.lean
+# The rejection sampler's 4096-byte table is too long a literal for Lean to
+# elaborate, so the translation leaves its wrapper opaque, and this checks the
+# table it passes is s2n-bignum's, each -1 the byte 255.
+rej_table() {
+    awk '/MLKEM_REJ_UNIFORM_TABLE: \[i8; 4096\] = \[/ { on = 1; next } on && /^\];/ { exit }
+        on { sub(/\/\/.*/, ""); printf "%s", $0 }' "$1" |
+        tr -d ' ' | tr ',' '\n' | sed '/^$/d; s/^-1$/255/'
+}
+rind_rej=$(rej_table rind/src/low/aarch64/mlkem.rs)
+s2n_rej=$(hol_list thirdparty/s2n-bignum/arm/proofs/mlkem_rej_uniform_VARIABLE_TIME.ml mlkem_rej_uniform_table) || exit 1
+if [[ $(wc -l <<<"$rind_rej") -ne 4096 ]]; then
+    echo "admin/prove: no 4096-entry rejection table in rind/src/low/aarch64/mlkem.rs" >&2
+    exit 1
+fi
+if ! diff <(echo "$rind_rej") <(tr -d ' ' <<<"$s2n_rej" | tr ',' '\n') >/dev/null; then
+    echo "admin/prove: rind's aarch64 rejection table is not s2n-bignum's" >&2
+    exit 1
+fi
 
 [ "${PROVE_TRANSLATE_ONLY:-}" ] && exit 0
 # Each hand model of a CPU intrinsic, a `core.core_arch` definition but its
@@ -1836,49 +2609,71 @@ done
 # VPCLMULQDQ, which this checks is still what it prints where this CPU has
 # them; no CI runner is sure to. Fail on a model none tests, so a new one
 # cannot go untested.
-rustc --edition 2024 -O -o "$out/simd-vectors" admin/simd-vectors.rs
-"$out/simd-vectors" >"$out/SimdVectors.lean"
-has_avx512() {
-    local feature
-    for feature in avx512f avx512bw avx512vl vaes vpclmulqdq; do
-        grep -qw "$feature" /proc/cpuinfo || return 1
-    done
-}
-if has_avx512; then
-    rustc --edition 2024 -O -o "$out/avx512-vectors" admin/avx512-vectors.rs
-    "$out/avx512-vectors" | diff -u --label avx512-vectors - proofs/Rind/X86_64/Avx512Vectors.lean
-else
-    echo "admin/prove: this CPU lacks AVX-512, so proofs/Rind/X86_64/Avx512Vectors.lean is checked against the models but not rerun" >&2
-fi
-untested=$(grep -rhoE '^def core\.core_arch\.[^ ]+' proofs/Rind | sed 's/^def //' | grep -vE '\.__m|_t\.Insts\.' | sort -u |
-    while read -r model; do
-        grep -qF " $model " "$out/SimdVectors.lean" proofs/Rind/Aarch64/NeonVectors.lean \
-            proofs/Rind/X86_64/Avx512Vectors.lean || echo "$model"
-    done)
-if [[ -n $untested ]]; then
-    echo "admin/prove: no vectors test these intrinsic models:" $untested >&2
-    exit 1
+if [[ ${#skipped[@]} -eq 0 ]]; then
+    rustc --edition 2024 -O -o "$out/simd-vectors" admin/simd-vectors.rs
+    "$out/simd-vectors" >"$out/SimdVectors.lean"
+    has_avx512() {
+        local feature
+        for feature in avx512f avx512bw avx512vl vaes vpclmulqdq; do
+            grep -qw "$feature" /proc/cpuinfo || return 1
+        done
+    }
+    if has_avx512; then
+        rustc --edition 2024 -O -o "$out/avx512-vectors" admin/avx512-vectors.rs
+        "$out/avx512-vectors" | diff -u --label avx512-vectors - proofs/Rind/X86_64/Avx512Vectors.lean
+    else
+        echo "admin/prove: this CPU lacks AVX-512, so proofs/Rind/X86_64/Avx512Vectors.lean is checked against the models but not rerun" >&2
+    fi
+    untested=$(grep -rhoE '^def core\.core_arch\.[^ ]+' proofs/Rind | sed 's/^def //' | grep -vE '\.__m|_t\.Insts\.' | sort -u |
+        while read -r model; do
+            grep -qF " $model " "$out/SimdVectors.lean" proofs/Rind/Aarch64/NeonVectors.lean \
+                proofs/Rind/X86_64/Avx512Vectors.lean || echo "$model"
+        done)
+    if [[ -n $untested ]]; then
+        echo "admin/prove: no vectors test these intrinsic models:" $untested >&2
+        exit 1
+    fi
 fi
 
 rind_isa
 
 # Every input the Lean proofs take from rind's source is now in `proofs/`, as
 # a translation or a quote the checks above found unchanged, or in
-# `SimdVectors.lean` and `rind_isa`'s listing. So `lean`'s key hashes those,
-# this whole script, whose top-level code runs the check, and its vector
-# programs, with the `prove` dev shell, which holds the Lean toolchain's
-# installer and Aeneas; `proofs/` pins the toolchain and Mathlib.
-result_shell=prove result_key lean admin/prove admin/simd-vectors.rs admin/avx512-vectors.rs \
-    proofs "$out/SimdVectors.lean" "$out/rind-isa/got"
+# `SimdVectors.lean` and `rind_isa`'s listing, but curve25519-dalek's, whose
+# release and checksum Cargo.lock pins, with the features rind's manifest
+# asks of it, and `dalek` checks below. So `lean`'s key hashes those, that pin
+# and those features, `dalek`'s scripts, this whole script, whose top-level
+# code runs the check, and its vector programs, with the `prove` dev shell,
+# which holds the Lean toolchain's installer and Aeneas; `proofs/` pins the
+# toolchain and Mathlib.
+{
+    sed -n '/^name = "curve25519-dalek"$/,/^$/p' Cargo.lock
+    grep '^curve25519-dalek = ' rind/Cargo.toml
+} >"$out/dalek.lock"
+# A host that skipped the vectors has no key to save.
+if [[ ${#skipped[@]} -eq 0 ]]; then
+    result_shell=prove result_key lean admin/prove admin/simd-vectors.rs admin/avx512-vectors.rs \
+        admin/import-dalek admin/dalek-closure proofs "$out/SimdVectors.lean" "$out/rind-isa/got" "$out/dalek.lock"
+fi
 [[ -z $key_only ]] || exit 0
 
+dalek
+hold lake
 cd proofs
 lean_deps
-lake build
-lake env lean "../$out/SimdVectors.lean"
+lake_get
+# The mappings, which archive each module's outputs, only for `lake_put`.
+lake build ${RIND_PROVE_CACHE_HOST:+-o "../$out/lake-outputs.jsonl"}
+lake_put "../$out/lake-outputs.jsonl"
+[[ ${#skipped[@]} -gt 0 ]] || lake env lean "../$out/SimdVectors.lean"
 cd ..
+release lake
 # The spec tests compile Mathlib to C to link `spec-server`, so CI runs them
 # in a job of their own: `prove.yml`'s `spec-tests`.
 if [[ -z $only ]]; then
     spec_tests
+fi
+if [[ ${#skipped[@]} -gt 0 ]]; then
+    printf 'admin/prove: not run on this host: %s\n' "${skipped[@]}" >&2
+    exit 1
 fi

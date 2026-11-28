@@ -34,6 +34,10 @@ for target in "$@"; do
             cargo=(cargo-zigbuild)
             triple=$target.2.17
             ;;
+        # MSVC's linker stamps the link time unless told /Brepro, and a
+        # release's libraries must be reproducible. Spelled with `-`, since
+        # Git Bash rewrites an argument starting `/` into a Windows path.
+        *-windows-msvc) link=(-- -Clink-arg=-Brepro) ;;
     esac
     case "$target" in
         *-apple-*) file=librind_dart.dylib ext=dylib ;;

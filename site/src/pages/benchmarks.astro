@@ -245,8 +245,7 @@ const list = new Intl.ListFormat("en");
 		<section>
 			<h2>How these are measured</h2>
 			<p>
-				Times are criterion's estimates. Each host builds with the pinned toolchain in the Nix dev shell and runs the
-				benchmarks only when idle; the weekly <code>bench</code> workflow times the CPU tiers on GitHub's runners.
+				Each host builds with the pinned toolchain in the Nix dev shell. A dedicated host times the benchmarks only when idle; a host that CI runners and agent sessions share times them on two whole cores kept free of that work for the run. The weekly <code>bench</code> workflow times the CPU tiers on GitHub's runners.
 				<a href={reportUrl}>BENCHMARKS.md</a> is the full report, with the method, and this page is drawn from the same
 				data in the same commit.
 			</p>

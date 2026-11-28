@@ -20,7 +20,8 @@ use std::io::{BufReader, Read, Write};
 const CODE: usize = 0x10_0000_0000;
 const INSN: usize = CODE + 0x1000;
 const TARGET: usize = INSN + 0x100;
-const DATA: usize = 0x20_0000_0000;
+// Within 2 GiB of the code, so an x86_64 RIP-relative operand reaches it.
+const DATA: usize = 0x10_4000_0000;
 const DATA_LEN: usize = 2048;
 
 /// glibc's `struct sigaction` on Linux, the same on x86_64 and aarch64.

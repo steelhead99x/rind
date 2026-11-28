@@ -11,7 +11,8 @@
 //! the same key, and rind evaluates the crate's clients' blinded elements to
 //! what they finalize to the direct outputs. An untampered exchange
 //! finalizes to the server's direct evaluation of each input. A tampered
-//! element is refused exactly when the crate cannot decode it, and a
+//! element is refused exactly when the crate cannot decode it, or, on the NIST
+//! suites, when its tag is not one RFC 9497 allows, and a
 //! tampered exchange is refused, or, in the OPRF mode, which cannot tell,
 //! finalizes to another output, rather than panicking or finalizing to the
 //! right one.
@@ -91,6 +92,14 @@ fuzz_target!(|input: Input| {
         (_, true) => run_voprf!(p521_voprf::NistP521, index, &input, inputs),
     }
 });
+
+/// Whether `element` has a tag RFC 9497 3.3.2 allows: the NIST suites encode
+/// an element SEC1-compressed, tagged `0x02` or `0x03`, but the crates also
+/// decode the compact tag `0x05`, an `x` alone, which rind refuses.
+/// ristretto255 has no tag.
+fn tagged(index: usize, element: &[u8]) -> bool {
+    index == 0 || matches!(element.first(), Some(0x02 | 0x03))
+}
 
 /// Each suite's `SerializeScalar` length, in `SUITES`' order.
 const SCALAR_LENS: [usize; 4] = [32, 32, 48, 66];
@@ -173,12 +182,21 @@ macro_rules! run_oprf {
             outputs.push(direct);
             let direct = outputs.last().unwrap();
 
-            // rind takes exactly the elements the crate decodes: on the
-            // curve, canonical, and not the identity. The crate ignores
-            // bytes past an element, so the length is checked here.
+            // rind takes exactly the elements the crate decodes that RFC
+            // 9497 allows: on the curve, canonical, tagged as `tagged`
+            // says, and not the identity. The crate ignores bytes past an
+            // element, so the length is checked here.
             let decodes = |bytes: &[u8]| {
-                bytes.len() == right.len() && BlindedElement::<$cs>::deserialize(bytes).is_ok()
+                bytes.len() == right.len()
+                    && tagged(index, bytes)
+                    && BlindedElement::<$cs>::deserialize(bytes).is_ok()
             };
+            // The compact tag, which the crate decodes, always fails.
+            if index != 0 {
+                let mut compact = blinded.clone();
+                compact[0] = 0x05;
+                assert!(key.blind_evaluate(&compact).is_err());
+            }
             input.blinded.apply(&mut blinded);
             let evaluated = key.blind_evaluate(&blinded);
             assert_eq!(
@@ -319,14 +337,22 @@ macro_rules! run_voprf {
             }
         }
 
+        // The compact tag, which the crate decodes, always fails.
+        if index != 0 && !blinded.is_empty() {
+            let mut compact = blinded.clone();
+            compact[0] = 0x05;
+            assert!(key.blind_evaluate(&compact).is_err());
+        }
+
         let mut changed = input.blinded.apply(&mut blinded);
-        // rind takes a batch of one or more elements the crate decodes;
-        // edits only shrink it, so it stays within rind's batch limit.
+        // rind takes a batch of one or more elements the crate decodes that
+        // RFC 9497 allows; edits only shrink it, so it stays within rind's
+        // batch limit.
         let decodes = !blinded.is_empty()
             && blinded.len().is_multiple_of(element_len)
-            && blinded
-                .chunks(element_len)
-                .all(|element| BlindedElement::<$cs>::deserialize(element).is_ok());
+            && blinded.chunks(element_len).all(|element| {
+                tagged(index, element) && BlindedElement::<$cs>::deserialize(element).is_ok()
+            });
         let evaluated = key.blind_evaluate(&blinded);
         assert_eq!(evaluated.is_ok(), decodes, "{:?}", evaluated.as_ref().err());
         let Ok((evaluated, proof)) = evaluated else {

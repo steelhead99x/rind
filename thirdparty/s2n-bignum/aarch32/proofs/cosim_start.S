@@ -9,12 +9,14 @@
  * `cosim_slot`, and stores the state it reaches back to both, with how far
  * from the instruction it landed: 4 when it falls through, or -8, -4, 8, 12,
  * or 16 when it branches to one of the slots around it, the first two a
- * backward branch's. It keeps D8-D15, which the AAPCS has a callee keep.
- * The section is writable, since `cosim_runner.c` writes each instruction into
- * the slot, and the scratch buffer and the state follow the code in the next
- * page, so a store to them never touches a page that holds code. The buffer
- * comes early there, which puts its first words in reach of a literal load,
- * at 32 bytes, which aligns it for any Advanced SIMD alignment qualifier. */
+ * backward branch's, or 21 when it interworks to the T32 slot at 20, the
+ * model's PC for that slot with the T bit set. It keeps D8-D15, which the
+ * AAPCS has a callee keep. The section is writable, since `cosim_runner.c`
+ * writes each instruction into the slot, and the scratch buffer and the
+ * state follow the code in the next page, so a store to them never touches a
+ * page that holds code. The buffer comes early there, which puts its first
+ * words in reach of a literal load, at 32 bytes, which aligns it for any
+ * Advanced SIMD alignment qualifier. */
 
 	.syntax unified
 	.arm
@@ -55,6 +57,14 @@ cosim_slot:
 	b	land8
 	b	land12
 	b	land16
+	.thumb
+landt20:			@ the T32 slot, which BX or a load into PC reaches
+	bx	pc		@ at its address plus 1, and which goes back to A32
+	nop			@ at its address plus 4
+	.arm
+	str	r0, saved_r0
+	mov	r0, #21
+	b	landed
 
 land4:	str	r0, saved_r0
 	mov	r0, #4

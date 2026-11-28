@@ -1,5 +1,5 @@
 import Rind.X86_64.Hkdf
-import Rind.X86_64.AesGcmAead
+import Rind.X86_64.AesGcmApi
 import Rind.X86_64.ChaCha20Poly1305
 open Aeneas Aeneas.Std Result rind.vale rind.spec
 
@@ -8,7 +8,7 @@ open Aeneas Aeneas.Std Result rind.vale rind.spec
 
 `From<Okm<&'static aead::Algorithm>> for aead::Key` fills the algorithm's key
 length of HKDF-Expand into a buffer, then keys the algorithm with it through
-`Key::new`. This file composes that with `AesGcmAead`'s `aes_gcm_new`, so the key
+`Key::new`. This file composes that with `AesGcmApi`'s `aes_gcm_new`, so the key
 holds AES-GCM for the HKDF bytes, and with
 `ChaCha20Poly1305`'s `chacha20_poly1305_new`, so it holds ChaCha20-Poly1305
 for them. It lives apart from `Hkdf` because these proofs are x86_64's, and
@@ -48,7 +48,11 @@ theorem aead_key_from_spec (h : RunsAesGcm) (a : high.hmac.Algorithm) (hr : Runs
     rcases halg with ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ <;> rfl
   have hnk : nk alg ≤ 8 := by cases alg <;> decide
   have hpos := tagLen_pos a
+  -- The conversion opens one `Entry` over the expand and the keying, which
+  -- `RunsHmac` says succeeds.
+  obtain ⟨e, he⟩ := hr.1
   unfold aead.Key.Insts.CoreConvertFromOkm0SharedStaticAlgorithm.from
+  rw [he, bind_ok]
   unfold aead.Algorithm.key_len
   simp only [bind_ok]
   apply WP.spec_bind (Array.index_mut_SliceIndexRangeToUsizeSlice (Array.repeat 64#usize 0#u8)
@@ -87,7 +91,11 @@ theorem aead_key_from_chacha20_poly1305_spec (a : high.hmac.Algorithm) (hr : Run
       ChaChaKeyHolds (hkdfExpand (hmacOf a) (tagLen a) prk (bv (infoBytes info)) 32) key ⦄ := by
   have hkl : (rind.x86_64.aead.Algorithm.key_len aead.CHACHA20_POLY1305).val = 32 := rfl
   have hpos := tagLen_pos a
+  -- The conversion opens one `Entry` over the expand and the keying, which
+  -- `RunsHmac` says succeeds.
+  obtain ⟨e, he⟩ := hr.1
   unfold aead.Key.Insts.CoreConvertFromOkm0SharedStaticAlgorithm.from
+  rw [he, bind_ok]
   unfold aead.Algorithm.key_len
   simp only [bind_ok]
   apply WP.spec_bind (Array.index_mut_SliceIndexRangeToUsizeSlice (Array.repeat 64#usize 0#u8)

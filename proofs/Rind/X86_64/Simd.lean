@@ -8,7 +8,7 @@ set_option linter.style.nameCheck false
 open Aeneas Aeneas.Std Result
 
 /-!
-# x86_64's vectors and the intrinsics rind's AES-GCM and point select call
+# x86_64's vectors and the intrinsics rind's AES-GCM, ChaCha20, Keccak, point select, and RSA gather call
 
 `core::arch` implements each intrinsic with an LLVM builtin, which Aeneas
 cannot translate, so these model them by hand, each as Intel's Software
@@ -37,6 +37,12 @@ def lane32x8 (x : BitVec 256) (i : Nat) : BitVec 32 := x.extractLsb' (32 * i) 32
 /-- The 256-bit vector of eight 32-bit lanes, lane 0 lowest. -/
 def ofLanes32x8 (f : Nat → BitVec 32) : BitVec 256 :=
   f 7 ++ f 6 ++ f 5 ++ f 4 ++ f 3 ++ f 2 ++ f 1 ++ f 0
+
+/-- A 256-bit vector's 64-bit lane `i`. -/
+def lane64x4 (x : BitVec 256) (i : Nat) : BitVec 64 := x.extractLsb' (64 * i) 64
+
+/-- The 256-bit vector of four 64-bit lanes, lane 0 lowest. -/
+def ofLanes64x4 (f : Nat → BitVec 64) : BitVec 256 := f 3 ++ f 2 ++ f 1 ++ f 0
 
 end rind.simd
 
@@ -241,6 +247,21 @@ def core.core_arch.x86.avx2._mm256_xor_si256 (a b : core.core_arch.x86.__m256i) 
     Result core.core_arch.x86.__m256i :=
   ok (a ^^^ b)
 
+/-- `_mm256_set1_epi64x`: each 64-bit lane `a`. -/
+def core.core_arch.x86.avx._mm256_set1_epi64x (a : Std.I64) : Result core.core_arch.x86.__m256i :=
+  ok (ofLanes64x4 fun _ => a.bv)
+
+/-- `_mm256_cmpeq_epi64`, `VPCMPEQQ`: each 64-bit lane all ones where the
+lanes are equal, and zero where not. -/
+def core.core_arch.x86.avx2._mm256_cmpeq_epi64 (a b : core.core_arch.x86.__m256i) :
+    Result core.core_arch.x86.__m256i :=
+  ok (ofLanes64x4 fun i => if lane64x4 a i = lane64x4 b i then BitVec.allOnes 64 else 0)
+
+/-- `_mm256_add_epi64`, `VPADDQ`: each 64-bit lane's sum, wrapping. -/
+def core.core_arch.x86.avx2._mm256_add_epi64 (a b : core.core_arch.x86.__m256i) :
+    Result core.core_arch.x86.__m256i :=
+  ok (ofLanes64x4 fun i => lane64x4 a i + lane64x4 b i)
+
 namespace rind.simd
 
 /-- A 256-bit vector's 128-bit half `j`. -/
@@ -269,6 +290,12 @@ accepts only 0 to 7; the model reads `INDEX`'s low three bits. -/
 def core.core_arch.x86.avx._mm256_extract_epi32 (INDEX : Std.I32) (a : core.core_arch.x86.__m256i) :
     Result Std.I32 :=
   ok ⟨lane32x8 a (INDEX.bv.toNat % 8)⟩
+
+/-- `_mm256_extract_epi64::<INDEX>`: the 64-bit lane that bits 0 and 1 of
+`INDEX` select. -/
+def core.core_arch.x86_64.avx._mm256_extract_epi64 (INDEX : Std.I32) (a : core.core_arch.x86.__m256i) :
+    Result Std.I64 :=
+  ok ⟨lane64x4 a (INDEX.bv.toNat % 4)⟩
 
 /-- `_mm256_or_si256`, `VPOR`. -/
 def core.core_arch.x86.avx2._mm256_or_si256 (a b : core.core_arch.x86.__m256i) :
@@ -319,6 +346,13 @@ byte shuffle and 32-bit operations below act on each 128-bit lane as their
 @[reducible] def core.core_arch.x86.__m512i : Type := BitVec 512
 
 namespace rind.simd
+
+/-- A 512-bit vector's 64-bit element `i`. -/
+def lane64x8 (x : BitVec 512) (i : Nat) : BitVec 64 := x.extractLsb' (64 * i) 64
+
+/-- The 512-bit vector of eight 64-bit elements, element 0 lowest. -/
+def ofLanes64x8 (f : Nat → BitVec 64) : BitVec 512 :=
+  f 7 ++ f 6 ++ f 5 ++ f 4 ++ f 3 ++ f 2 ++ f 1 ++ f 0
 
 /-- A 512-bit vector's 128-bit lane `j`. -/
 def lane128 (x : BitVec 512) (j : Nat) : BitVec 128 := x.extractLsb' (128 * j) 128
@@ -426,3 +460,48 @@ def core.core_arch.x86.vpclmulqdq._mm512_clmulepi64_epi128 (IMM8 : Std.I32)
     (a b : core.core_arch.x86.__m512i) : Result core.core_arch.x86.__m512i :=
   ok (ofLanes128 fun j => clmul (lane64 (lane128 a j) (if IMM8.bv.getLsbD 0 then 1 else 0))
     (lane64 (lane128 b j) (if IMM8.bv.getLsbD 4 then 1 else 0)))
+
+/-- `_mm512_setr_epi64`: the 64-bit elements in order, the first lowest. -/
+def core.core_arch.x86.avx512f._mm512_setr_epi64 (e0 e1 e2 e3 e4 e5 e6 e7 : Std.I64) :
+    Result core.core_arch.x86.__m512i :=
+  ok (e7.bv ++ e6.bv ++ e5.bv ++ e4.bv ++ e3.bv ++ e2.bv ++ e1.bv ++ e0.bv)
+
+/-- `_mm512_set1_epi64`: each 64-bit element `a`. -/
+def core.core_arch.x86.avx512f._mm512_set1_epi64 (a : Std.I64) : Result core.core_arch.x86.__m512i :=
+  ok (ofLanes64x8 fun _ => a.bv)
+
+/-- `_mm512_xor_si512`, `VPXORQ`. -/
+def core.core_arch.x86.avx512f._mm512_xor_si512 (a b : core.core_arch.x86.__m512i) :
+    Result core.core_arch.x86.__m512i :=
+  ok (a ^^^ b)
+
+/-- `_mm512_rol_epi64::<IMM8>`, `VPROLQ`: each 64-bit element rotated left by
+the low six bits of `IMM8`. -/
+def core.core_arch.x86.avx512f._mm512_rol_epi64 (IMM8 : Std.I32) (a : core.core_arch.x86.__m512i) :
+    Result core.core_arch.x86.__m512i :=
+  ok (ofLanes64x8 fun i => (lane64x8 a i).rotateLeft (IMM8.bv.toNat % 64))
+
+/-- `_mm512_unpacklo_epi64`, `VPUNPCKLQDQ`: in each 128-bit lane, `a`'s low
+64 bits, then `b`'s. -/
+def core.core_arch.x86.avx512f._mm512_unpacklo_epi64 (a b : core.core_arch.x86.__m512i) :
+    Result core.core_arch.x86.__m512i :=
+  ok (ofLanes128 fun j => lane64 (lane128 b j) 0 ++ lane64 (lane128 a j) 0)
+
+/-- `_mm512_unpackhi_epi64`, `VPUNPCKHQDQ`: in each 128-bit lane, `a`'s high
+64 bits, then `b`'s. -/
+def core.core_arch.x86.avx512f._mm512_unpackhi_epi64 (a b : core.core_arch.x86.__m512i) :
+    Result core.core_arch.x86.__m512i :=
+  ok (ofLanes128 fun j => lane64 (lane128 b j) 1 ++ lane64 (lane128 a j) 1)
+
+/-- `_mm512_shuffle_i64x2::<MASK>`, `VSHUFI64X2`: 128-bit lanes 0 and 1 from
+`a`, and 2 and 3 from `b`, lane `j` the one bits `2j` and `2j + 1` of `MASK`
+select. -/
+def core.core_arch.x86.avx512f._mm512_shuffle_i64x2 (MASK : Std.I32) (a b : core.core_arch.x86.__m512i) :
+    Result core.core_arch.x86.__m512i :=
+  ok (ofLanes128 fun j => lane128 (if j < 2 then a else b) (MASK.bv.toNat / 4 ^ j % 4))
+
+/-- `_mm512_extracti64x4_epi64::<IMM1>`, `VEXTRACTI64X4`: the 256-bit half that
+bit 0 of `IMM1` selects. -/
+def core.core_arch.x86.avx512f._mm512_extracti64x4_epi64 (IMM1 : Std.I32)
+    (a : core.core_arch.x86.__m512i) : Result core.core_arch.x86.__m256i :=
+  ok (a.extractLsb' (256 * (IMM1.bv.toNat % 2)) 256)

@@ -54,7 +54,7 @@ qemu. iOS devices' code is only built.
   [verified-garbage]'s assembly, and
   table lookups use SSE2 (see [ALGORITHMS.md](ALGORITHMS.md)). Without `sse4.1`,
   as on the first Core 2s and Atoms and AMD's Bobcat, ChaCha20 and Poly1305
-  run in separate passes.
+  run in separate passes, Poly1305 in a port of aws-lc's SSE2 lanes.
   Without `ssse3` either, as on Intel's CPUs before Core 2, AMD's before
   Bobcat and Bulldozer, and QEMU's default `qemu64` model, AES and GHASH run
   Rust ports of [aws-lc]'s constant-time SSE2 and integer C, SHA1 and SHA256
@@ -71,11 +71,13 @@ qemu. iOS devices' code is only built.
   parameter sets hash eight SHA-256 inputs at once with a port of the
   SPHINCS+ team's AVX2 code. With `avx512ifma`, as on Ice Lake,
   Sapphire Rapids, and AMD's Zen 4 and 5, ChaCha20-Poly1305 runs
-  [verified-garbage]'s assembly, RSA-2048 and 4096 signing and
+  [verified-garbage]'s assembly (on Zen 4 from 800 bytes sealing and 512 opening, below which aws-lc's is faster), RSA-2048 and 4096 signing and
   the public operation of 2048-, 3072-, and 4096-bit moduli with
   e = 65537 run [verified-garbage]'s routines, and RSA-3072 signing too with `avx512fp16`, as on Intel's
   since Sapphire Rapids, and aws-lc's dual AVX-512 RSAZ without it, as
-  for the 3969- to 4032-bit keys VG's CRT does not take.
+  for the 3969- to 4032-bit keys VG's CRT does not take. On AMD's Zen 5,
+  AES-GCM seals and opens of 6 KB or more run [verified-garbage]'s AVX-512
+  assembly, which is slower on Intel's cores and for shorter messages.
 - 32-bit `arm` from ARMv7 on (tested on `armv7-unknown-linux-gnueabihf` and
   `armv7-linux-androideabi`) runs portable Rust instead, mostly from
   [libcrux] (see [ALGORITHMS.md](ALGORITHMS.md)), and needs no CPU features. RSA's
@@ -92,11 +94,11 @@ qemu. iOS devices' code is only built.
   NEON, X25519's shared secret runs [BoringSSL]'s assembly. SHA-3's, ML-KEM's,
   and ML-DSA's Keccak-f runs [OpenSSL]'s assembly, on NEON where the CPU has it,
   and so do P-256's field multiplication, squaring, addition, and subtraction.
-  That assembly is A32 on every target, but `armv7-linux-androideabi` and
-  the `thumbv7` targets build Rust as Thumb-2, the inline assembly of the
-  constant-time compares included, so the compares' proofs (see
-  [proofs/README.md](proofs/README.md)) cover only targets that build A32,
-  such as `armv7-unknown-linux-gnueabihf`.
+  That assembly, the constant-time compares' included, is A32 on every
+  target, though `armv7-linux-androideabi` and the `thumbv7` targets build
+  Rust as Thumb-2, so the compares' proofs (see
+  [proofs/README.md](proofs/README.md)), which hold for a caller in either
+  instruction set, cover every target.
 
   On a Raspberry Pi 2 B's Cortex-A7 (900 MHz, NEON, no crypto extension),
   `armv7-unknown-linux-gnueabihf`, rind runs the key-derivation and public-key
@@ -167,13 +169,11 @@ qemu. iOS devices' code is only built.
   Raspberry Pi 1 and Zero), on `arm-linux-androideabi`, which Rust builds for
   ARMv5TE, on `powerpc64le` and big-endian `powerpc64` and `powerpc` Linux,
   and on `x86_64`,
-  where `--cfg rind_portable` forces it. `just ci` also compiles the library
-  for `wasm32-wasip2` and `wasm32-unknown-unknown`
-  when a change touches rind, the workspace manifest or lockfile, or the
-  flake, and `just gate` always does. It compiles every published adapter
-  for both, and rind-rustls's and rind-ring's tests for each, when
-  a change touches an adapter, rind's manifest, the workspace manifest or
-  lockfile, or the flake. `wasm32-unknown-unknown` enables `getrandom/wasm_js`
+  where `--cfg rind_portable` forces it. `just gate`, nightly, also compiles the
+  library for `wasm32-wasip2` and `wasm32-unknown-unknown` (its `cross`
+  module), and every published adapter for both, with rind-rustls's and
+  rind-ring's tests for each (`wasm`); `CHECK_MODULES='cross wasm' just ci`
+  does so over a branch's diff. `wasm32-unknown-unknown` enables `getrandom/wasm_js`
   for JavaScript randomness, as rind-ring's `wasm32_unknown_unknown_js` does
   for a ring caller; the WASI target uses its system random source. There the
   adapters' upstreams need what they need with any backend, which
@@ -227,9 +227,9 @@ qemu. iOS devices' code is only built.
   and `xtensa-esp32s3-none-elf` the same four ways, check the ESP-IDF library
   (`xtensa-esp32s3-espidf`, which has std and getrandom's own backend) the
   same four ways, and check `rind-bench`'s bench targets there. Those
-  benches are empty programs on Xtensa: criterion does not build against
-  ESP-IDF's libc, and ring and OpenSSL have no Xtensa port, so those paths
-  are `cfg`'d out. The check compiles the empty programs. A name inside that
+  benches are empty programs on Xtensa: ring and OpenSSL have no Xtensa
+  port, and swole's harness is not checked there, so those paths are
+  `cfg`'d out. The check compiles the empty programs. A name inside that
   `cfg` is not typechecked. None of these targets runs a test or a
   constant-time check.
   RSA and the NIST curves run on 64-bit limbs on 64-bit targets and on
@@ -354,11 +354,10 @@ operands, so it is not constant-time on them:
   The rest of rind's secret arithmetic on a target with no multiply
   instruction still calls `__mulsi3` or `__muldi3`.
 - `riscv64` without the M extension and without Zmmul: there is no `mul`.
-  Poly1305 stays on 64-bit limbs, so each 64x64->128 product is a call to
-  `__multi3` on the secret limbs. `rind_mul16` does not apply to that width.
-  The build warns. Zmmul is a multiplier, and then those products are `mul`
-  and `mulhu`. The rest of rind's secret arithmetic on a target with no
-  multiply instruction still calls `__multi3`.
+  Poly1305 uses its 26-bit limbs with the same masked shifts and adds as
+  RV32I. With M or Zmmul it keeps 64-bit limbs and `mul` and `mulhu`.
+  The rest of rind's secret arithmetic on a target with no multiply
+  instruction still calls `__multi3`.
 - `s390x`: IBM publishes no instruction timing for IBM Z, so rind cannot say.
 - 32-bit `arm` before ARMv7: Intel's XScale (ARMv5TE), whose `mul`, `umull`,
   and `smull` terminate early by the top bits of their second operand

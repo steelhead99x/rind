@@ -452,18 +452,36 @@ def low.aarch64.aes_cbc.aese_chained (y b : core.core_arch.arm_shared.neon.uint8
     Result core.core_arch.arm_shared.neon.uint8x16_t :=
   core.core_arch.arm_shared.neon.generated.vaeseq_u8 y b
 
-/-! s2n-bignum's ML-KEM polynomial routines: the NTTs, mulcache, and
-sampler behind wrappers that pass their tables, the rest called directly. -/
+/-! s2n-bignum's ML-KEM polynomial routines, whose contracts
+`Rind.Aarch64.MlKemRoutines` states: the NTTs, mulcache, and sampler take the
+tables the translated wrappers in `low::aarch64::mlkem` pass, and the rest
+are called directly. mlkem-native's NEON ciphertext compression follows,
+behind wrappers that take only the destination and polynomial, except
+`mlkem_compress_d5`'s, which also passes its table itself. -/
 
-opaque low.aarch64.mlkem.mlkem_ntt
-  : Array Std.I16 256#usize → Result (Array Std.I16 256#usize)
+opaque low.aarch64.mlkem_ntt.mlkem_ntt
+  : Array Std.I16 256#usize → Array Std.I16 80#usize → Array Std.I16 384#usize →
+    Result (Array Std.I16 256#usize)
 
-opaque low.aarch64.mlkem.mlkem_intt
-  : Array Std.I16 256#usize → Result (Array Std.I16 256#usize)
+opaque low.aarch64.mlkem_intt.mlkem_intt
+  : Array Std.I16 256#usize → Array Std.I16 80#usize → Array Std.I16 384#usize →
+    Result (Array Std.I16 256#usize)
 
-opaque low.aarch64.mlkem.mlkem_mulcache_compute
-  : Array Std.I16 128#usize → Array Std.I16 256#usize → Result (Array Std.I16 128#usize)
+opaque low.aarch64.mlkem_mulcache_compute.mlkem_mulcache_compute
+  : Array Std.I16 128#usize → Array Std.I16 256#usize → Array Std.I16 128#usize →
+    Array Std.I16 128#usize → Result (Array Std.I16 128#usize)
 
+/-- The sampler behind its wrapper, which passes rind's table, too long a
+literal for Lean to elaborate: `admin/prove` checks the table's text is
+s2n-bignum's, and that the wrapper is this one, which passes it:
+
+```rust
+pub(crate) fn mlkem_rej_uniform_vartime(r: &mut [i16; 256], input: &[u8]) -> u64 {
+    super::mlkem_rej_uniform_vartime::mlkem_rej_uniform_vartime(r, input, &MLKEM_REJ_UNIFORM_TABLE)
+}
+
+```
+-/
 opaque low.aarch64.mlkem.mlkem_rej_uniform_vartime
   : Array Std.I16 256#usize → Slice Std.U8 → Result (Std.U64 × (Array Std.I16 256#usize))
 
@@ -487,6 +505,18 @@ opaque low.aarch64.mlkem_tobytes.mlkem_tobytes
 
 opaque low.aarch64.mlkem_tomont.mlkem_tomont
   : Array Std.I16 256#usize → Result (Array Std.I16 256#usize)
+
+opaque low.aarch64.mlkem.mlkem_compress_d4
+  : Array Std.U8 128#usize → Array Std.I16 256#usize → Result (Array Std.U8 128#usize)
+
+opaque low.aarch64.mlkem.mlkem_compress_d5
+  : Array Std.U8 160#usize → Array Std.I16 256#usize → Result (Array Std.U8 160#usize)
+
+opaque low.aarch64.mlkem.mlkem_compress_d10
+  : Array Std.U8 320#usize → Array Std.I16 256#usize → Result (Array Std.U8 320#usize)
+
+opaque low.aarch64.mlkem.mlkem_compress_d11
+  : Array Std.U8 352#usize → Array Std.I16 256#usize → Result (Array Std.U8 352#usize)
 
 /-! pyca/verified-garbage's ML-KEM-768 routines, behind their Rust wrappers,
 whose contracts `Rind.Aarch64.VgMlKem` states, and the check for the SHA-3
@@ -728,12 +758,7 @@ abbrev low.aarch64.wide_mux.p521_jdouble := @low.aarch64.p521_jdouble.p521_jdoub
 abbrev low.aarch64.wide_mux.p521_jmixadd := @low.aarch64.p521_jmixadd.p521_jmixadd
 abbrev low.aarch64.wide_mux.p521_jscalarmul := @low.aarch64.p521_jscalarmul.p521_jscalarmul
 
-/-! AES-GCM's stitched kernels and the separate passes around them, which no
-proof covers yet, and aws-lc's NEON GHASH table. -/
-
-opaque low.aarch64.aes_gcm.cipher
-  : Bool → low.aarch64.aes.AesKey → low.aarch64.ghash.Ghash → Array Std.U8 16#usize → Slice Std.U8 →
-    Slice Std.U8 → Result (low.aarch64.ghash.Ghash × Slice Std.U8)
+/-! aws-lc's NEON GHASH table. -/
 
 opaque low.aarch64.ghash_neon_armv8.NeonTable.new
   : Array Std.U8 16#usize → Result low.aarch64.ghash_neon_armv8.NeonTable

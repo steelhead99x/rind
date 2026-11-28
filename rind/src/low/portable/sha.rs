@@ -13,27 +13,29 @@
 //! `generic::sha512_rolled`, whose code 32-bit codegen keeps to a few
 //! kilobytes; the ESP32-S3 runs it through `generic::sha512_esp32s3`, whose
 //! `esp32s3-sha512-unrolled` feature swaps in an unrolled body in IRAM. On
-//! ESP-IDF Xtensa, SHA-256 is rind's own unproven compression in
-//! `sha256_iram`, run from internal RAM, at about 0.65-0.74 of HACL*'s time
-//! from flash on a Seeed XIAO ESP32-S3 from 1200 B to 16 KB. Host tests
-//! call that body by name, on its Rust fallbacks.
+//! ESP-IDF Xtensa, SHA-256 is rind's own compression in `sha256_iram`, run
+//! from internal RAM, at about 0.65-0.74 of HACL*'s time from flash on a
+//! Seeed XIAO ESP32-S3 from 1200 B to 16 KB. Host tests call that body by
+//! name, on its Rust fallbacks. `proofs/Rind/Mcu/` proves both the rolled
+//! SHA-512 and the IRAM SHA-256 against FIPS 180-4, with this dispatch; the
+//! opt-in unrolled ESP32-S3 SHA-512 body is not proven.
 
 pub(crate) use crate::low::generic::sha1::sha1_compress_blocks;
 
 // The IRAM body is what ESP-IDF Xtensa ships. Other builds compile it only
 // for the tests below, which call it by name.
-#[cfg(any(all(target_arch = "xtensa", target_os = "espidf"), test))]
+#[cfg(any(rind_sha256_iram, test))]
 #[path = "sha256_iram.rs"]
 mod iram;
 
 /// Compresses whole 64-byte `blocks` into `state`.
 pub(crate) fn sha256_compress_blocks(state: &mut [u32; 8], blocks: &[u8]) {
-    #[cfg(all(target_arch = "xtensa", target_os = "espidf"))]
+    #[cfg(rind_sha256_iram)]
     {
         assert!(blocks.len().is_multiple_of(64));
         iram::sha256_update_nblocks(state, blocks);
     }
-    #[cfg(not(all(target_arch = "xtensa", target_os = "espidf")))]
+    #[cfg(not(rind_sha256_iram))]
     crate::low::generic::sha256::sha256_compress_blocks(state, blocks);
 }
 

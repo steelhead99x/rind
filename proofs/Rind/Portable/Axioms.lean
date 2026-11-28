@@ -5,10 +5,13 @@ open rind.portable
 
 /-!
 The axioms each theorem rests on: Lean's own, and nothing else. The SHA-2
-block functions' contracts are hypotheses, `RunsSha512` and `Sha256Blocks`,
-of the SHA-512 family's theorems and of HMAC's, HKDF's, and PBKDF2's. The
-compares behind HMAC's and PBKDF2's `verify`, and ChaCha20's rounds, are
-proven here. A change here is a change to the trust base.
+block functions are proven here; `RunsSha512` and `Sha256Blocks`, hypotheses
+of the SHA-512 family's theorems and of HMAC's, HKDF's, and PBKDF2's, state
+only their entry checks. The compares behind HMAC's and PBKDF2's `verify`
+and ChaCha20's rounds are proven here too. RSA verification's theorems are
+parked in `proofs/parked/` until
+quest/m4/verified/rsa-verify-portable-four-product.md reproves them over the
+four-product `mul_add`. A change here is a change to the trust base.
 -/
 
 /-- info: 'rind.portable.sha512_family_digest' depends on axioms: [propext, Classical.choice, Quot.sound] -/

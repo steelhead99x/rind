@@ -300,8 +300,8 @@ pub mod ed25519 {
     pub use crate::signature::ed25519::{KeyPair, PublicKey, Seed, Signature};
 }
 
-/// ML-DSA signatures (FIPS 204): ML-DSA-44, ML-DSA-65, and ML-DSA-87, pure
-/// with the empty context.
+/// ML-DSA signatures (FIPS 204): ML-DSA-44, ML-DSA-65, and ML-DSA-87, pure,
+/// signed and verified under a context string of up to 255 bytes.
 ///
 /// The parameter set is a type, so a key of one set fails to compile where
 /// another's is expected, and a signature is a fixed-size array.
@@ -311,10 +311,10 @@ pub mod ed25519 {
 /// use rind_fips::ml_dsa::{KeyPair, MlDsa65, PublicKey};
 ///
 /// let key_pair = KeyPair::<MlDsa65>::generate()?;
-/// let signature = key_pair.sign(b"hello")?;
+/// let signature = key_pair.sign(b"", b"hello")?;
 ///
 /// let public_key = PublicKey::<MlDsa65>::new(key_pair.public_key().as_ref())?;
-/// public_key.verify(b"hello", signature.as_ref())?;
+/// public_key.verify(b"", b"hello", signature.as_ref())?;
 /// # Ok(())
 /// # }
 /// ```

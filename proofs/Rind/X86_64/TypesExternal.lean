@@ -50,9 +50,9 @@ opaque low.x86_64.cpu.HaveAvx2 : Type
 opaque low.x86_64.cpu.HaveSsse3 : Type
 opaque low.x86_64.cpu.HaveSse41 : Type
 
-/-- The token proving pyca/verified-garbage's AVX-512 IFMA ChaCha20-Poly1305
-runs here. -/
-opaque low.x86_64.cpu.HaveIfmaForVgChaCha20Poly1305 : Type
+/-- The token proving one of pyca/verified-garbage's one-pass
+ChaCha20-Poly1305 pairs, AVX-512 IFMA or AVX2, runs here. -/
+opaque low.x86_64.cpu.HaveVgChaCha20Poly1305 : Type
 
 /-- The tokens proving pyca/verified-garbage's ML-KEM-768 encapsulation, and
 its key generation and decapsulation, run here. -/
@@ -93,6 +93,11 @@ opaque low.x86_64.aes_nohw.NohwKey : Type
 opaque low.x86_64.ghash_ssse3_x86_64.Ssse3Table : Type
 opaque low.x86_64.ghash_nohw.NohwTable : Type
 opaque low.x86_64.aes_gcm_vaes.VaesKernel : Type
+
+/-- pyca/verified-garbage's AES-GCM key context, which a key on Zen 5 makes on
+its first long message, and the cell that holds it. -/
+opaque low.x86_64.aes_gcm_vg.LazyVgKey : Type
+opaque low.x86_64.aes_gcm_vg.VgKey : Type
 
 /-- A `&'static T` that a wiped value may hold, as `Rind.X86_64.Dispatch` models it:
 the `T`, since only the drop that wipes it leaves it `None`. -/

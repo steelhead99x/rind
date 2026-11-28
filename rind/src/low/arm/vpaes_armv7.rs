@@ -11,9 +11,12 @@
 //! once with logic alone, so neither indexes memory by the key or data. Each
 //! key holds its vpaes schedule and that schedule converted to the plain one
 //! bsaes reads, converted once at setup rather than per call, as aws-lc's
-//! CTR does. It is not formally verified: its correctness rests on its use
-//! and testing in OpenSSL, BoringSSL, and aws-lc, and on rind's tests of it
-//! against the portable code, Wycheproof, and aws-lc-rs.
+//! CTR does. `proofs/hol-light/armv7/vpaes_encrypt.ml` proves that
+//! `vpaes_encrypt` computes FIPS 197's cipher from a schedule in vpaes's
+//! form; the key setup that writes that schedule, and the rest, are not yet
+//! formally verified: their correctness rests on their use and testing in
+//! OpenSSL, BoringSSL, and aws-lc, and on rind's tests of them against the
+//! portable code, Wycheproof, and aws-lc-rs.
 
 use super::cpu::HaveNeon;
 use crate::low;

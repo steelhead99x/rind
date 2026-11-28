@@ -1,5 +1,5 @@
 import Rind.X86_64.S2nBignum
-import Rind.KeccakStates
+import Rind.X86_64.Keccak8Avx512
 open Aeneas Aeneas.Std Result rind.spec
 
 /-!
@@ -7,7 +7,9 @@ open Aeneas Aeneas.Std Result rind.spec
 
 What the routines rind's sponge calls compute, from s2n-bignum's contracts in
 `Rind.X86_64.S2nBignum`: `keccak_f1600_spec`, one state; `keccak4_f1600_spec`,
-four; `keccak_nof4_f1600_spec`, the first `N` of four. The sponge's proof,
+four; `keccak_nof4_f1600_spec`, the first `N` of four; and
+`keccak_nof8_f1600_spec`, the first `n` of eight, on AVX-512 through rind's own
+eight-way kernel, which `Rind.X86_64.Keccak8Avx512` proves. The sponge's proof,
 which `admin/prove` writes for aarch64 from x86_64's, uses these names on both,
 and `Rind.Aarch64.KeccakDispatch` proves aarch64's.
 -/
@@ -15,10 +17,12 @@ and `Rind.Aarch64.KeccakDispatch` proves aarch64's.
 namespace rind.x86_64
 
 /-- rind's SHA-3 runs on this CPU: its entry guard, the debug build's check
-that one is held, and its AVX2 check pass. None reads an input. -/
+that one is held, and its AVX2 and AVX-512 checks pass, none reading an
+input. -/
 def RunsSha3 : Prop :=
   (∃ e, low.entry.Entry.new_secret = ok e) ∧ low.entry.Entry.assert_held = ok () ∧
-    ∃ t, low.x86_64.cpu.HaveAvx2.check = ok t
+    (∃ t, low.x86_64.cpu.HaveAvx2.check = ok t) ∧
+    (∃ t, low.x86_64.cpu.HaveAvx512Vl.check = ok t)
 
 theorem sha3_new_secret_spec (h : RunsSha3) : low.entry.Entry.new_secret ⦃ _ => True ⦄ := by
   obtain ⟨⟨e, he⟩, -⟩ := h
@@ -77,7 +81,7 @@ theorem keccak4_f1600_spec (h : RunsSha3) (a : Std.Array (Std.Array U64 25#usize
     low.x86_64.sha3_keccak4_f1600_shim.sha3_keccak4_f1600 a mid.sha3.RC ⦃ r =>
       states r = (states a).map (keccak 24) ⦄ := by
   have hl : (states a).length = 4 := by simp
-  obtain ⟨-, -, t, ht⟩ := id h
+  obtain ⟨-, -, ⟨t, ht⟩, -⟩ := id h
   unfold low.x86_64.sha3_keccak4_f1600_shim.sha3_keccak4_f1600
   rw [ht, bind_ok]
   cases t with
@@ -112,7 +116,7 @@ theorem keccak_nof4_f1600_spec (h : RunsSha3) (N : Usize) (hN : 1 ≤ N.val ∧ 
     low.x86_64.sha3_keccak_nof4_f1600.sha3_keccak_nof4_f1600 N a mid.sha3.RC ⦃ r =>
       (states r).take N.val = ((states a).take N.val).map (keccak 24) ⦄ := by
   have hl : (states a).length = 4 := by simp
-  obtain ⟨-, -, t, ht⟩ := id h
+  obtain ⟨-, -, ⟨t, ht⟩, -⟩ := id h
   unfold low.x86_64.sha3_keccak_nof4_f1600.sha3_keccak_nof4_f1600
   rw [ht, bind_ok]
   cases t with
@@ -131,5 +135,125 @@ theorem keccak_nof4_f1600_spec (h : RunsSha3) (N : Usize) (hN : 1 ≤ N.val ∧ 
       apply WP.spec_mono (keccak_loop_spec h (states a) N.val hN.2 _ a (by simp) rfl (by simp))
       intro r hr
       rw [hr, take_loop _ _ (by omega)]
+
+/-- `generic::keccak8`'s `nof4`: the first `n` of four states, one to four. -/
+theorem generic_nof4_spec (h : RunsSha3) (n : Usize) (hn : 1 ≤ n.val ∧ n.val ≤ 4)
+    (a : Std.Array (Std.Array U64 25#usize) 4#usize) :
+    low.generic.keccak8.nof4 a n mid.sha3.RC ⦃ r =>
+      (states r).take n.val = ((states a).take n.val).map (keccak 24) ⦄ := by
+  unfold low.generic.keccak8.nof4
+  have hl : (states a).length = 4 := by simp
+  obtain h1 | h2 | h3 | h4 : n.val = 1 ∨ n.val = 2 ∨ n.val = 3 ∨ n.val = 4 := by omega
+  · simp only [h1]
+    exact keccak_nof4_f1600_spec h 1#usize (by decide) a
+  · simp only [h2]
+    exact keccak_nof4_f1600_spec h 2#usize (by decide) a
+  · simp only [h3]
+    exact keccak_nof4_f1600_spec h 3#usize (by decide) a
+  · simp only [h4]
+    apply WP.spec_mono (keccak4_f1600_spec h a)
+    intro r hr
+    have hr4 : (states r).length = 4 := by simp
+    rw [List.take_of_length_le (by omega), List.take_of_length_le (by omega)]
+    exact hr
+
+/-- `generic::keccak8`: the first `n` of eight states, four at a time. -/
+theorem generic_nof8_spec (h : RunsSha3) (n : Usize) (hn : 1 ≤ n.val ∧ n.val ≤ 8)
+    (a : Std.Array (Std.Array U64 25#usize) 8#usize) :
+    low.generic.keccak8.sha3_keccak_nof8_f1600 a n mid.sha3.RC ⦃ r =>
+      (states8 r).take n.val = ((states8 a).take n.val).map (keccak 24) ⦄ := by
+  unfold low.generic.keccak8.sha3_keccak_nof8_f1600
+  step with Std.Array.to_slice_mut_spec a as ⟨s, back, hs, hback⟩
+  step with as_chunks_mut_four_spec s (by simp [Slice.length, hs]) as
+    ⟨quads, rest, cback, hq, hrest, hcback⟩
+  have hq2 : quads.val.length = 2 := by
+    have := congrArg List.length hq; simpa using this
+  have hqe : ∀ i (hi : i < 2), (quads.val[i]!).val = [a.val.take 4, a.val.drop 4][i]! := by
+    intro i hi
+    have := congrArg (·[i]!) hq
+    simp only [List.getElem!_eq_getElem?_getD, List.getElem?_map,
+      List.getElem?_eq_getElem (show i < quads.val.length by omega), Option.map_some,
+      Option.getD_some, hs] at this ⊢
+    exact this
+  have hq0 : (quads.val[0]!).val = a.val.take 4 := hqe 0 (by omega)
+  have hq1 : (quads.val[1]!).val = a.val.drop 4 := hqe 1 (by omega)
+  -- The view writes two groups back in order.
+  have hflat : ∀ p : Slice (Std.Array (Std.Array U64 25#usize) 4#usize), p.val.length = 2 →
+      (back (cback (p, rest))).val = (p.val[0]!).val ++ (p.val[1]!).val := by
+    intro p hp
+    obtain ⟨p0, p1, hp'⟩ := List.length_eq_two.1 hp
+    have hc := hcback p hp
+    rw [hp'] at hc
+    simp only [List.flatMap_cons, List.flatMap_nil, List.append_nil] at hc
+    rw [hback, Std.Array.from_slice_val _ _ (by rw [hc]; simp), hc, hp']
+    rfl
+  have ha8 : (states8 a).length = 8 := by simp
+  split
+  · rename_i hgt
+    step with Slice.index_mut_usize_spec as ⟨x, imb, hx, himb⟩
+    step with keccak4_f1600_spec h x as ⟨z, hz⟩
+    step with Slice.index_mut_usize_spec (imb z) 1#usize (by rw [himb]; simp [Slice.length, hq2])
+      as ⟨x2, imb2, hx2, himb2⟩
+    step as ⟨m, hm⟩
+    step with generic_nof4_spec h m (by scalar_tac) x2 as ⟨z2, hz2⟩
+    have hx0 : x.val = a.val.take 4 := by rw [hx, ← getElem!_pos, hq0]
+    have hx1 : x2.val = a.val.drop 4 := by
+      rw [hx2, ← getElem!_pos, himb, Slice.set_val_eq, getElem!_set' _ _ _ _ (by omega)]
+      simp only [show (0#usize : Usize).val = 0 from rfl, show ¬((0 : Nat) = 1) by omega,
+        ite_false, hq1]
+    have hp' : (imb2 z2).val.length = 2 := by rw [himb2, himb]; simp [hq2]
+    have hr : (back (cback (imb2 z2, rest))).val = z.val ++ z2.val := by
+      obtain ⟨q0, q1, hq'⟩ := List.length_eq_two.1 hq2
+      rw [hflat _ hp', himb2, himb, Slice.set_val_eq, Slice.set_val_eq, hq']
+      rfl
+    have hzl : z.val.length = 4 := by simp
+    apply take_eq_map_take _ _ _ _ (by simp; omega) (by simp; omega)
+    intro i hi
+    rw [states8_getElem! _ i (by omega), states8_getElem! a i (by omega), hr,
+      getElem!_append_cond, hzl]
+    by_cases hi4 : i < 4
+    · rw [ite_eq_left hi4, ← states_getElem! z i hi4, hz, getElem!_pos _ i (by simp; omega),
+        List.getElem_map, ← getElem!_pos, states_getElem! x i hi4, hx0,
+        getElem!_take' _ _ _ hi4]
+    · rw [ite_eq_right hi4, ← states_getElem! z2 _ (by omega),
+        getElem!_of_take_map _ _ _ m.val _ hz2 (by omega) (by simp; omega) (by simp; omega),
+        states_getElem! x2 _ (by omega), hx1, getElem!_drop', show 4 + (i - 4) = i by omega]
+  · rename_i hle
+    step with Slice.index_mut_usize_spec as ⟨x, imb, hx, himb⟩
+    step with generic_nof4_spec h n (by scalar_tac) x as ⟨z, hz⟩
+    have hx0 : x.val = a.val.take 4 := by rw [hx, ← getElem!_pos, hq0]
+    have hp' : (imb z).val.length = 2 := by rw [himb]; simp [hq2]
+    have hr : (back (cback (imb z, rest))).val = z.val ++ a.val.drop 4 := by
+      rw [hflat _ hp', himb, Slice.set_val_eq, getElem!_set' _ _ _ _ (by omega),
+        getElem!_set' _ _ _ _ (by omega)]
+      simp only [show (0#usize : Usize).val = 0 from rfl, ite_true,
+        show ¬((0 : Nat) = 1) by omega, ite_false, hq1]
+    have hzl : z.val.length = 4 := by simp
+    apply take_eq_map_take _ _ _ _ (by simp; omega) (by simp; omega)
+    intro i hi
+    have hi4 : i < 4 := by scalar_tac
+    rw [states8_getElem! _ i (by omega), states8_getElem! a i (by omega), hr,
+      getElem!_append_cond, hzl, ite_eq_left hi4, ← states_getElem! z i hi4,
+      getElem!_of_take_map _ _ _ n.val _ hz (by omega) (by simp; omega) (by simp; omega),
+      states_getElem! x i hi4, hx0, getElem!_take' _ _ _ hi4]
+
+/-- `keccak_nof8_f1600_spec`: the first `n` of eight states, all eight at
+once on AVX-512, through `Rind.X86_64.Keccak8Avx512`'s kernel. -/
+theorem keccak_nof8_f1600_spec (h : RunsSha3) (n : Usize) (hn : 1 ≤ n.val ∧ n.val ≤ 8)
+    (a : Std.Array (Std.Array U64 25#usize) 8#usize) :
+    low.x86_64.sha3_keccak8_f1600.sha3_keccak_nof8_f1600 a n mid.sha3.RC ⦃ r =>
+      (states8 r).take n.val = ((states8 a).take n.val).map (keccak 24) ⦄ := by
+  obtain ⟨-, -, -, ⟨t, ht⟩⟩ := id h
+  unfold low.x86_64.sha3_keccak8_f1600.sha3_keccak_nof8_f1600
+  rw [ht, bind_ok]
+  cases t with
+  | none => exact generic_nof8_spec h n hn a
+  | some t =>
+    simp only
+    split
+    · apply WP.spec_mono (keccak8.permute_spec a mid.sha3.RC rc_bv t)
+      intro r hr
+      rw [hr, List.map_take]
+    · exact generic_nof8_spec h n hn a
 
 end rind.x86_64

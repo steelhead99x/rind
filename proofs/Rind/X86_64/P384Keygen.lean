@@ -1,4 +1,5 @@
 import Rind.X86_64.P384
+import Rind.X86_64.Naf
 import Rind.P384Comb
 import Rind.X86_64.P384Table
 import Rind.X86_64.P384Select
@@ -218,7 +219,7 @@ theorem add_inplace_affine_spec (_h : Runs) (pt : mid.p384.JacobianMontPoint) (p
   rw [hr]
   refine ⟨fun h0 => by simp [h0], fun h0 P1 P2 h1 h2 hne => ?_⟩
   simp only [h0, ↓reduceIte, jrep]
-  exact ha P1 P2 h1 h2 hne
+  exact (ha P1 P2 h1 h2).1 hne
 
 theorem double_inplace_n_spec (_h : Runs) (iter : core.ops.range.Range Usize) (pt : mid.p384.JacobianMontPoint)
     (P : nist.Point) (hP : jrep P pt) (hle : iter.start.val ≤ iter.end.val) :
@@ -602,27 +603,6 @@ theorem comb_inner_spec (h : Runs) (X : p384Curve.Point) (hX : nist.fromM X = p3
       rwa [show (20 : Nat) = it.start.val by omega]
   · exact ⟨hs, he, hres⟩
 
-
-@[step]
-theorem rev_next_spec (r : core.iter.adapters.rev.Rev (core.ops.range.Range Usize)) :
-    core.iter.adapters.rev.Rev.Insts.CoreIterTraitsIteratorIterator.next
-      (core.ops.range.Range.Insts.DoubleEndedIterator core.iter.range.StepUsize) r ⦃ o r' =>
-      r'.iter.start = r.iter.start ∧
-        (if r.iter.start.val < r.iter.end.val then o = some r'.iter.end ∧ r'.iter.end.val + 1 = r.iter.end.val
-          else o = none) ⦄ := by
-  unfold core.iter.adapters.rev.Rev.Insts.CoreIterTraitsIteratorIterator.next
-  simp only [
-    core.ops.range.Range.Insts.CoreIterTraitsDoubleEndedIterator.next_back, core.iter.range.StepUsize,
-    core.iter.range.UScalarStep, core.iter.range.UScalarStep.backward_checked]
-  by_cases hlt : r.iter.start.val < r.iter.end.val
-  · have hb : liftFun2 core.cmp.impls.PartialOrdUsize.lt r.iter.start r.iter.end = ok true := by
-      simp [liftFun2, core.cmp.impls.PartialOrdUsize.lt, hlt]
-    have h1 : (1#usize).val ≤ r.iter.end.val := by simp; omega
-    simp only [hb, bind_ok, ↓reduceIte, h1, ↓reduceDIte, hlt]
-    simp [UScalar.ofNatCore_val_eq]; omega
-  · have hb : liftFun2 core.cmp.impls.PartialOrdUsize.lt r.iter.start r.iter.end = ok false := by
-      simp [liftFun2, core.cmp.impls.PartialOrdUsize.lt, hlt]
-    simp [hb, hlt, WP.spec_ok]
 
 theorem iterate_double (X : p384Curve.Point) (n : Nat) (a : Int) :
     (fun Q => p384Add Q Q)^[n] (gpt X a) = gpt X (2 ^ n * a) := by

@@ -26,6 +26,10 @@ pub(crate) struct RsaPrivateKey {
     p0: u64,
     q0: u64,
 
+    /// The primes' bit lengths, public as `new` reveals them.
+    p_bits: usize,
+    q_bits: usize,
+
     /// pyca/verified-garbage's values for its IFMA CRT, where it runs.
     #[cfg(rind_backend = "x86_64")]
     ifma: low::IfmaCrt,
@@ -97,7 +101,15 @@ impl RsaPrivateKey {
 
         let p_montifier: SecretRsaPosIntModP = p.montifier().into();
         let q_montifier = q.montifier().into();
-        let iqmp_mont: SecretRsaPosIntModP = iqmp.to_montgomery(&p_montifier, &p).into();
+        // Montgomery multiplication takes operands below the modulus, and
+        // iqmp is checked against p only with the other relations, so this
+        // reduces it first: a no-op for a valid key, and a refused key's
+        // value is never used.
+        let iqmp_wide: RsaPosIntModN = iqmp.widen();
+        let iqmp_mont: SecretRsaPosIntModP = iqmp_wide
+            .reduce(&p, &p_montifier)
+            .to_montgomery(&p_montifier, &p)
+            .into();
         let p0 = p.mont_neg_inverse();
         let q0 = q.mont_neg_inverse();
 
@@ -139,6 +151,8 @@ impl RsaPrivateKey {
             q_montifier,
             p0,
             q0,
+            p_bits,
+            q_bits,
         })
     }
 
@@ -166,6 +180,11 @@ impl RsaPrivateKey {
 
     pub(crate) fn modulus_len_bits(&self) -> usize {
         self.public.modulus_len_bits()
+    }
+
+    /// The bit lengths of `p` and `q`, which `new` already revealed.
+    pub(crate) fn prime_bits(&self) -> [usize; 2] {
+        [self.p_bits, self.q_bits]
     }
 
     pub(crate) fn encode_components<'a>(
@@ -247,11 +266,14 @@ impl RsaPrivateKey {
         let p_len = self.p.as_words().len() * 8;
         let mut x = [0u8; MAX_PUBLIC_MODULUS_BYTES];
         c.to_bytes_fixed(&mut x[..k]);
-        let mut parts = [[0u8; MAX_PRIVATE_MODULUS_BYTES]; 3];
-        for (bytes, value) in parts.iter_mut().zip([&self.dp, &self.dq, &self.iqmp]) {
-            value.to_bytes_fixed(&mut bytes[..p_len]);
-        }
-        let [dp, dq, qinv] = &parts;
+        // Each its own array, not one destructured, which Aeneas cannot
+        // translate, so `proofs/` can prove the private operation.
+        let mut dp = [0u8; MAX_PRIVATE_MODULUS_BYTES];
+        let mut dq = [0u8; MAX_PRIVATE_MODULUS_BYTES];
+        let mut qinv = [0u8; MAX_PRIVATE_MODULUS_BYTES];
+        self.dp.to_bytes_fixed(&mut dp[..p_len]);
+        self.dq.to_bytes_fixed(&mut dq[..p_len]);
+        self.iqmp.to_bytes_fixed(&mut qinv[..p_len]);
         let mut m = [0u8; MAX_PUBLIC_MODULUS_BYTES];
         // `new` and the caller ruled out each input it refuses.
         if !self.ifma.crt(
@@ -292,7 +314,7 @@ impl RsaPrivateKey {
         // width of p or q rather than pq.)
         let cmp = c.reduce(&self.p, &self.p_montifier);
         let cmq = c.reduce(&self.q, &self.q_montifier);
-        let [m_1, m_2] = low::PosInt::mod_exp_pair([
+        let (m_1, m_2) = low::PosInt::mod_exp_pair(
             low::ModExp {
                 base: &cmp,
                 e: &self.dp,
@@ -307,7 +329,7 @@ impl RsaPrivateKey {
                 n_montifier: &self.q_montifier,
                 n_0: self.q0,
             },
-        ]);
+        );
 
         // ii. If u > 2, let m_i = c^(d_i) mod r_i, i = 3, ..., u.
         // (we don't support multiprime rsa)
@@ -333,6 +355,8 @@ impl Drop for RsaPrivateKey {
     fn drop(&mut self) {
         low::zeroise_value(&mut self.p0);
         low::zeroise_value(&mut self.q0);
+        low::zeroise_value(&mut self.p_bits);
+        low::zeroise_value(&mut self.q_bits);
         // Not secret, but wiping it lets `tests/zeroing.rs` check every byte.
         low::zeroise_value(&mut self.public);
     }
@@ -392,8 +416,10 @@ pub(crate) const MAX_PRIVATE_MODULUS_BYTES: usize = MAX_PRIVATE_MODULUS_BITS / 8
 const MIN_PRIVATE_MODULUS_BITS: usize = 1024;
 const MIN_PRIVATE_MODULUS_BYTES: usize = MIN_PRIVATE_MODULUS_BITS / 8;
 
-// Signing keeps the 2048-bit floor that only legacy verification goes below.
-const MIN_MODULUS_BITS: usize = 2048;
+// Signing keeps a 2048-bit floor, but for a 2047-bit modulus: two 1024-bit
+// primes give it the strength of 2048 bits, and ring loads it. Only legacy
+// verification goes below.
+const MIN_MODULUS_BITS: usize = 2047;
 
 type SecretRsaPosIntModP = low::SecretPosInt<MAX_PRIVATE_MODULUS_WORDS>;
 type SecretRsaPosIntD = low::SecretPosInt<{ MAX_PRIVATE_MODULUS_WORDS * 2 }>;

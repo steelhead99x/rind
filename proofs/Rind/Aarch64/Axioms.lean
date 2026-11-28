@@ -15,16 +15,24 @@ import Rind.Aarch64.AesKw
 import Rind.Aarch64.AesModesApi
 import Rind.Aarch64.MlKemCoding
 import Rind.Aarch64.MlKemGeneric
+import Rind.Aarch64.MlKemPke
+import Rind.Aarch64.MlKemEncrypt
+import Rind.Aarch64.MlKemSample
 import Rind.Aarch64.GhashPmull
 import Rind.Aarch64.AesGcm
+import Rind.Aarch64.AesGcmLong
+import Rind.Aarch64.GcmKey
+import Rind.Aarch64.ChaCha20Poly1305
 import Rind.Aarch64.VgChaCha20Poly1305
 import Rind.Aarch64.VgChaCha20
+import Rind.Aarch64.VgChaCha20Poly1305Ct
 open rind.aarch64
 
 /-!
 The axioms each theorem rests on, beyond Lean's own: s2n-bignum's contracts
-in `Rind.Aarch64.S2nBignum` for X25519, P-256, P-384, Ed25519, and the
-Keccak-f of SHA-3 and ML-KEM's SHAKE; for the SHA-512 family, for HMAC,
+in `Rind.Aarch64.S2nBignum` for X25519, P-256, P-384, Ed25519, the
+Keccak-f of SHA-3 and ML-KEM's SHAKE, and AES-GCM with AES-128 and AES-256
+keys past the short path; for the SHA-512 family, for HMAC,
 HKDF, and PBKDF2, which cover SHA-384 and SHA-512, and for Ed25519's hashes,
 aws-lc's scalar routine's in `Rind.Aarch64.AwsLc` and, on the SHA-512
 instructions, pyca/verified-garbage's Lean proof of its block function,
@@ -35,24 +43,37 @@ crypto extension, a trusted axiom: the kernel checks the proof,
 cannot reach the routine through the opaque wrapper, for the theorems over
 every HMAC algorithm; rind's HOL Light proofs of its
 constant-time compares in `Rind.Aarch64.CtEqual` for HMAC's and PBKDF2's
-`verify` and key wrap's `unwrap` and `unwrap_padded`; for P-256's public
+`verify`, key wrap's `unwrap` and `unwrap_padded`, and AES-GCM's open; for P-256's public
 key, ECDH, and ECDSA verification, pyca/verified-garbage's Lean proofs of its
 routines, which `Rind.Aarch64.VgP256` restates; for P-384's `d·G`, which
 key generation and each ECDSA signature's nonce point take, and its ECDSA
 verification, pyca/verified-garbage's Lean proofs of its routines, which
 `Rind.Aarch64.VgP384` restates; for PBKDF2 on
 pyca/verified-garbage's routines, its contracts in `Rind.Aarch64.VgPbkdf2`;
-and nothing else.
+for ML-KEM-768, s2n-bignum's and mlkem-native's contracts for its routines in
+`Rind.Aarch64.MlKemRoutines`; and nothing else.
 P-384's comb table select rests on no axiom, only on the hand model in
 `Rind.Aarch64.PointSelectModel`. The PMULL GHASH's table and `Ghash::add`, and
 AES-GCM's counter blocks and its `tagged_from` and `tagged` on short messages
 with the crypto extension's key, rest on no axiom, only on the hand model in
-`Rind.Aarch64.AesGcmModel`.
-ML-KEM's decompression, message coding, CBD sampling, compression, and
-12-bit unpacking rest on no axiom.
-ChaCha20-Poly1305's one pass on SVE2 rests on the axioms restating
-pyca/verified-garbage's theorems for its routines in
-`Rind.Aarch64.VgChaCha20Poly1305`.
+`Rind.Aarch64.AesGcmModel`. The all-length `tagged_from` and `tagged` proofs,
+and the AEAD API and `gcm::Key` above them, rest also on s2n-bignum's
+stitched kernels' contracts for AES-128 and AES-256 keys, the `_alt` ones'
+taking their address bound from the compare `stitched` makes before running
+one, `KernelBuffersLow` in the hand model. AES-192 past the short path, proven
+only on cores without SHA3, runs `composed`, which rests on no axiom.
+ML-KEM's decompression, message coding, CBD sampling, and 12-bit unpacking
+rest on no axiom; its noise sampling, `sample_poly_cbd`, rests on SHAKE256's.
+ChaCha20-Poly1305's one pass on pyca/verified-garbage's SVE2 and NEON
+routines rests on the axioms restating its theorems for them in
+`Rind.Aarch64.VgChaCha20Poly1305`, and its open on rind's HOL Light proofs
+of its constant-time compares where aws-lc's runs; at the lengths aws-lc's
+routines run, it also takes their contract as the hypothesis `AwsLc`, which
+no axiom states. The AEAD API above it rests on none, taking the one pass as
+the hypotheses `Seals` and `Opens`.
+Its two axioms that VG's SVE2 routines are constant time under their contracts,
+in `Rind.Aarch64.VgChaCha20Poly1305Ct`, are used by no theorem about rind's
+wrappers.
 ChaCha20's `apply_keystream` rests on the axioms restating
 pyca/verified-garbage's theorems for its routines in `Rind.Aarch64.VgChaCha20`;
 at every length it also takes rind's NEON code's contract as the hypothesis
@@ -815,29 +836,111 @@ A change here is a change to the trust base.
 #guard_msgs in
 #print axioms MlKemCoding.sample_cbd3_spec
 
-/-- info: 'rind.aarch64.MlKemGeneric.compress_spec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs in
-#print axioms MlKemGeneric.compress_spec
-
-/-- info: 'rind.aarch64.MlKemGeneric.mlkem_compress_d4_spec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs in
-#print axioms MlKemGeneric.mlkem_compress_d4_spec
-
-/-- info: 'rind.aarch64.MlKemGeneric.mlkem_compress_d5_spec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs in
-#print axioms MlKemGeneric.mlkem_compress_d5_spec
-
-/-- info: 'rind.aarch64.MlKemGeneric.mlkem_compress_d10_spec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs in
-#print axioms MlKemGeneric.mlkem_compress_d10_spec
-
-/-- info: 'rind.aarch64.MlKemGeneric.mlkem_compress_d11_spec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs in
-#print axioms MlKemGeneric.mlkem_compress_d11_spec
-
 /-- info: 'rind.aarch64.MlKemGeneric.mlkem_frombytes_spec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
 #print axioms MlKemGeneric.mlkem_frombytes_spec
+
+/-- info: 'rind.aarch64.MlKemPke.kpke_decrypt_fips' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ MlKemRoutines.mlkem_basemul_k3_axiom,
+ MlKemRoutines.mlkem_intt_axiom,
+ MlKemRoutines.mlkem_mulcache_compute_axiom,
+ MlKemRoutines.mlkem_ntt_axiom,
+ MlKemRoutines.mlkem_reduce_axiom] -/
+#guard_msgs in
+#print axioms MlKemPke.kpke_decrypt_fips
+
+/-- info: 'rind.aarch64.MlKemCbd.sample_poly_cbd_spec' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ sha3_keccak2_f1600_spec,
+ sha3_keccak4_f1600_alt_spec,
+ sha3_keccak4_f1600_spec,
+ sha3_keccak_f1600_alt2_spec,
+ sha3_keccak_f1600_alt_spec,
+ sha3_keccak_f1600_spec] -/
+#guard_msgs in
+#print axioms MlKemCbd.sample_poly_cbd_spec
+
+/-- info: 'rind.aarch64.MlKemEncrypt.kpke_encrypt_fips' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ sha3_keccak2_f1600_spec,
+ sha3_keccak4_f1600_alt_spec,
+ sha3_keccak4_f1600_spec,
+ sha3_keccak_f1600_alt2_spec,
+ sha3_keccak_f1600_alt_spec,
+ sha3_keccak_f1600_spec,
+ MlKemRoutines.mlkem_basemul_k3_axiom,
+ MlKemRoutines.mlkem_compress_d10_axiom,
+ MlKemRoutines.mlkem_compress_d4_axiom,
+ MlKemRoutines.mlkem_intt_axiom,
+ MlKemRoutines.mlkem_mulcache_compute_axiom,
+ MlKemRoutines.mlkem_ntt_axiom,
+ MlKemRoutines.mlkem_reduce_axiom] -/
+#guard_msgs in
+#print axioms MlKemEncrypt.kpke_encrypt_fips
+
+/-- info: 'rind.aarch64.MlKemSample.decoded_new_spec' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ sha3_keccak2_f1600_spec,
+ sha3_keccak4_f1600_alt_spec,
+ sha3_keccak4_f1600_spec,
+ sha3_keccak_f1600_alt2_spec,
+ sha3_keccak_f1600_alt_spec,
+ sha3_keccak_f1600_spec,
+ MlKemRoutines.mlkem_reduce_axiom,
+ MlKemRoutines.mlkem_rej_uniform_vartime_axiom] -/
+#guard_msgs in
+#print axioms MlKemSample.decoded_new_spec
+
+/-- info: 'rind.aarch64.MlKemPoly.to_bytes_spec' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ MlKemRoutines.mlkem_tobytes_axiom] -/
+#guard_msgs in
+#print axioms MlKemPoly.to_bytes_spec
+
+/-- info: 'rind.aarch64.MlKemPoly.inverse_ntt_spec' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ MlKemRoutines.mlkem_intt_axiom] -/
+#guard_msgs in
+#print axioms MlKemPoly.inverse_ntt_spec
+
+/-- info: 'rind.aarch64.MlKemPoly.reduce_in_place_spec' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ MlKemRoutines.mlkem_reduce_axiom] -/
+#guard_msgs in
+#print axioms MlKemPoly.reduce_in_place_spec
+
+/-- info: 'rind.aarch64.MlKemPoly.add1_spec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms MlKemPoly.add1_spec
+
+/-- info: 'rind.aarch64.MlKemRoutines.mlkem_tomont_spec' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ MlKemRoutines.mlkem_tomont_axiom] -/
+#guard_msgs in
+#print axioms MlKemRoutines.mlkem_tomont_spec
+
+/-- info: 'rind.aarch64.MlKemRoutines.mlkem_compress_d10_spec' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ MlKemRoutines.mlkem_compress_d10_axiom] -/
+#guard_msgs in
+#print axioms MlKemRoutines.mlkem_compress_d10_spec
+
+/-- info: 'rind.aarch64.MlKemRoutines.mlkem_compress_d4_spec' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ MlKemRoutines.mlkem_compress_d4_axiom] -/
+#guard_msgs in
+#print axioms MlKemRoutines.mlkem_compress_d4_spec
 
 /-- info: 'rind.aarch64.pmull.ghash_table_new_spec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
@@ -867,6 +970,194 @@ A change here is a change to the trust base.
 #guard_msgs in
 #print axioms tagged_open_short_spec
 
+/-- info: 'rind.aarch64.long.tagged_from_spec' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ aes128_gcm_dec_alt_spec,
+ aes128_gcm_dec_spec,
+ aes128_gcm_enc_alt_spec,
+ aes128_gcm_enc_spec,
+ aes256_gcm_dec_alt_spec,
+ aes256_gcm_dec_spec,
+ aes256_gcm_enc_alt_spec,
+ aes256_gcm_enc_spec] -/
+#guard_msgs in
+#print axioms long.tagged_from_spec
+
+/-- info: 'rind.aarch64.long.tagged_seal_spec' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ aes128_gcm_dec_alt_spec,
+ aes128_gcm_dec_spec,
+ aes128_gcm_enc_alt_spec,
+ aes128_gcm_enc_spec,
+ aes256_gcm_dec_alt_spec,
+ aes256_gcm_dec_spec,
+ aes256_gcm_enc_alt_spec,
+ aes256_gcm_enc_spec] -/
+#guard_msgs in
+#print axioms long.tagged_seal_spec
+
+/-- info: 'rind.aarch64.long.tagged_open_spec' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ aes128_gcm_dec_alt_spec,
+ aes128_gcm_dec_spec,
+ aes128_gcm_enc_alt_spec,
+ aes128_gcm_enc_spec,
+ aes256_gcm_dec_alt_spec,
+ aes256_gcm_dec_spec,
+ aes256_gcm_enc_alt_spec,
+ aes256_gcm_enc_spec] -/
+#guard_msgs in
+#print axioms long.tagged_open_spec
+
+/-- info: 'rind.aarch64.composed.composed_spec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms composed.composed_spec
+
+/-- info: 'rind.aarch64.aes_gcm_new' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms aes_gcm_new
+
+/-- info: 'rind.aarch64.aes_gcm_seal' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ aes128_gcm_dec_alt_spec,
+ aes128_gcm_dec_spec,
+ aes128_gcm_enc_alt_spec,
+ aes128_gcm_enc_spec,
+ aes256_gcm_dec_alt_spec,
+ aes256_gcm_dec_spec,
+ aes256_gcm_enc_alt_spec,
+ aes256_gcm_enc_spec] -/
+#guard_msgs in
+#print axioms aes_gcm_seal
+
+/-- info: 'rind.aarch64.aes_gcm_seal_append_tag' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ aes128_gcm_dec_alt_spec,
+ aes128_gcm_dec_spec,
+ aes128_gcm_enc_alt_spec,
+ aes128_gcm_enc_spec,
+ aes256_gcm_dec_alt_spec,
+ aes256_gcm_dec_spec,
+ aes256_gcm_enc_alt_spec,
+ aes256_gcm_enc_spec] -/
+#guard_msgs in
+#print axioms aes_gcm_seal_append_tag
+
+/-- info: 'rind.aarch64.aes_gcm_seal_append_tag_vec' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ aes128_gcm_dec_alt_spec,
+ aes128_gcm_dec_spec,
+ aes128_gcm_enc_alt_spec,
+ aes128_gcm_enc_spec,
+ aes256_gcm_dec_alt_spec,
+ aes256_gcm_dec_spec,
+ aes256_gcm_enc_alt_spec,
+ aes256_gcm_enc_spec] -/
+#guard_msgs in
+#print axioms aes_gcm_seal_append_tag_vec
+
+/-- info: 'rind.aarch64.aes_gcm_open_separate_tag' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ aes128_gcm_dec_alt_spec,
+ aes128_gcm_dec_spec,
+ aes128_gcm_enc_alt_spec,
+ aes128_gcm_enc_spec,
+ aes256_gcm_dec_alt_spec,
+ aes256_gcm_dec_spec,
+ aes256_gcm_enc_alt_spec,
+ aes256_gcm_enc_spec,
+ ct_compare_16_spec,
+ ct_compare_bytes_spec] -/
+#guard_msgs in
+#print axioms aes_gcm_open_separate_tag
+
+/-- info: 'rind.aarch64.aes_gcm_open' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ aes128_gcm_dec_alt_spec,
+ aes128_gcm_dec_spec,
+ aes128_gcm_enc_alt_spec,
+ aes128_gcm_enc_spec,
+ aes256_gcm_dec_alt_spec,
+ aes256_gcm_dec_spec,
+ aes256_gcm_enc_alt_spec,
+ aes256_gcm_enc_spec,
+ ct_compare_16_spec,
+ ct_compare_bytes_spec] -/
+#guard_msgs in
+#print axioms aes_gcm_open
+
+/-- info: 'rind.aarch64.gcm_key_new' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms gcm_key_new
+
+/-- info: 'rind.aarch64.gcm_key_seal' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ aes128_gcm_dec_alt_spec,
+ aes128_gcm_dec_spec,
+ aes128_gcm_enc_alt_spec,
+ aes128_gcm_enc_spec,
+ aes256_gcm_dec_alt_spec,
+ aes256_gcm_dec_spec,
+ aes256_gcm_enc_alt_spec,
+ aes256_gcm_enc_spec] -/
+#guard_msgs in
+#print axioms gcm_key_seal
+
+/-- info: 'rind.aarch64.gcm_key_seal_append_tag' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ aes128_gcm_dec_alt_spec,
+ aes128_gcm_dec_spec,
+ aes128_gcm_enc_alt_spec,
+ aes128_gcm_enc_spec,
+ aes256_gcm_dec_alt_spec,
+ aes256_gcm_dec_spec,
+ aes256_gcm_enc_alt_spec,
+ aes256_gcm_enc_spec] -/
+#guard_msgs in
+#print axioms gcm_key_seal_append_tag
+
+/-- info: 'rind.aarch64.gcm_key_open_separate_tag' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ aes128_gcm_dec_alt_spec,
+ aes128_gcm_dec_spec,
+ aes128_gcm_enc_alt_spec,
+ aes128_gcm_enc_spec,
+ aes256_gcm_dec_alt_spec,
+ aes256_gcm_dec_spec,
+ aes256_gcm_enc_alt_spec,
+ aes256_gcm_enc_spec,
+ ct_compare_16_spec,
+ ct_compare_bytes_spec] -/
+#guard_msgs in
+#print axioms gcm_key_open_separate_tag
+
+/-- info: 'rind.aarch64.gcm_key_open' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ aes128_gcm_dec_alt_spec,
+ aes128_gcm_dec_spec,
+ aes128_gcm_enc_alt_spec,
+ aes128_gcm_enc_spec,
+ aes256_gcm_dec_alt_spec,
+ aes256_gcm_dec_spec,
+ aes256_gcm_enc_alt_spec,
+ aes256_gcm_enc_spec,
+ ct_compare_16_spec,
+ ct_compare_bytes_spec] -/
+#guard_msgs in
+#print axioms gcm_key_open
+
 /-- info: 'rind.aarch64.chacha20_poly1305_seal_sve2_spec' depends on axioms: [propext,
  Classical.choice,
  Quot.sound,
@@ -880,6 +1171,110 @@ A change here is a change to the trust base.
  vg_chacha20_poly1305_open_sve2_spec] -/
 #guard_msgs in
 #print axioms chacha20_poly1305_open_sve2_spec
+
+/-- info: 'rind.aarch64.chacha20_poly1305_seal_neon_spec' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ vg_chacha20_poly1305_seal_neon_spec] -/
+#guard_msgs in
+#print axioms chacha20_poly1305_seal_neon_spec
+
+/-- info: 'rind.aarch64.chacha20_poly1305_open_neon_spec' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ vg_chacha20_poly1305_open_neon_spec] -/
+#guard_msgs in
+#print axioms chacha20_poly1305_open_neon_spec
+
+/-- info: 'rind.aarch64.seals' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ vg_chacha20_poly1305_seal_neon_spec,
+ vg_chacha20_poly1305_seal_sve2_spec] -/
+#guard_msgs in
+#print axioms seals
+
+/-- info: 'rind.aarch64.opens' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ ct_compare_16_spec,
+ ct_compare_bytes_spec,
+ vg_chacha20_poly1305_open_neon_spec,
+ vg_chacha20_poly1305_open_sve2_spec] -/
+#guard_msgs in
+#print axioms opens
+
+/-- info: 'rind.aarch64.seals_sve2' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ vg_chacha20_poly1305_seal_neon_spec,
+ vg_chacha20_poly1305_seal_sve2_spec] -/
+#guard_msgs in
+#print axioms seals_sve2
+
+/-- info: 'rind.aarch64.opens_sve2' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ ct_compare_16_spec,
+ ct_compare_bytes_spec,
+ vg_chacha20_poly1305_open_neon_spec,
+ vg_chacha20_poly1305_open_sve2_spec] -/
+#guard_msgs in
+#print axioms opens_sve2
+
+/-- info: 'rind.aarch64.seals_neon' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ vg_chacha20_poly1305_seal_neon_spec,
+ vg_chacha20_poly1305_seal_sve2_spec] -/
+#guard_msgs in
+#print axioms seals_neon
+
+/-- info: 'rind.aarch64.opens_neon' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ ct_compare_16_spec,
+ ct_compare_bytes_spec,
+ vg_chacha20_poly1305_open_neon_spec,
+ vg_chacha20_poly1305_open_sve2_spec] -/
+#guard_msgs in
+#print axioms opens_neon
+
+/-- info: 'rind.aarch64.chacha20_poly1305_new' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms chacha20_poly1305_new
+
+/-- info: 'rind.aarch64.chacha20_poly1305_seal' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms chacha20_poly1305_seal
+
+/-- info: 'rind.aarch64.chacha20_poly1305_seal_append_tag' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms chacha20_poly1305_seal_append_tag
+
+/-- info: 'rind.aarch64.chacha20_poly1305_seal_append_tag_vec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms chacha20_poly1305_seal_append_tag_vec
+
+/-- info: 'rind.aarch64.chacha20_poly1305_open_separate_tag' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms chacha20_poly1305_open_separate_tag
+
+/-- info: 'rind.aarch64.chacha20_poly1305_open' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms chacha20_poly1305_open
+
+/-- info: 'rind.aarch64.randomized_nonce_key_new' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms randomized_nonce_key_new
+
+/-- info: 'rind.aarch64.randomized_nonce_key_seal_append_tag_vec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms randomized_nonce_key_seal_append_tag_vec
+
+/-- info: 'rind.aarch64.randomized_nonce_key_open' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms randomized_nonce_key_open
 
 /-- info: 'rind.aarch64.chacha20_apply_keystream_vg' depends on axioms: [propext,
  Classical.choice,
@@ -898,3 +1293,15 @@ A change here is a change to the trust base.
  vg_chacha20_init_spec] -/
 #guard_msgs in
 #print axioms chacha20_apply_keystream
+
+/-- info: 'rind.aarch64.vg_chacha20_poly1305_seal_sve2_ct' depends on axioms: [propext,
+ Quot.sound,
+ vg_chacha20_poly1305_seal_sve2_ct] -/
+#guard_msgs in
+#print axioms vg_chacha20_poly1305_seal_sve2_ct
+
+/-- info: 'rind.aarch64.vg_chacha20_poly1305_open_sve2_ct' depends on axioms: [propext,
+ Quot.sound,
+ vg_chacha20_poly1305_open_sve2_ct] -/
+#guard_msgs in
+#print axioms vg_chacha20_poly1305_open_sve2_ct

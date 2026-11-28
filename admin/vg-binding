@@ -1,0 +1,319 @@
+#!/usr/bin/env python3
+"""Checks that each routine of pyca/verified-garbage's (VG's) that rind runs is
+covered by an axiom that cites VG's theorem of it, or is listed below as
+covered by none.
+
+`admin/vg-bytes` checks that rind runs VG's machine code, byte for byte, and
+that it is the text VG's proofs are about; this checks which theorem covers
+that code. VG emits every routine of its text from an artifact whose proof
+`Verified code contract` is checked against its contract, and its emitter
+fails unless that proof rests on Lean's standard axioms (`TCB/Emit.lean`).
+So a routine's theorem is its artifact's, and rind's axiom restates the
+artifact's contract, which VG's generated Rust documents (`Contract:`).
+This checks the chain from rind's side, on the files at rind's pin of VG:
+
+- Each axiom in `proofs/Rind/<Arch>/Vg*.lean` names, in backticks, the routines
+  it covers, and VG's text for that architecture has each.
+- It names the contract VG's generated documentation gives each such routine,
+  and one of the VG files it links, at the pinned revision, holds that
+  contract. A link with a line lands on a theorem, a definition, a field that
+  states `Verified` code, or a registration.
+- Where an axiom names several variants of one contract, each variant's tag
+  (`adx`, `ifma`) is where one of its links lands, in a file holding that
+  contract, so each has a proof of its own, unless the axiom is in `GENERIC`.
+- No file of VG's `lean/` holds a `sorry` or an `axiom`.
+- Each routine rind vendors under `rind/src/low/<arch>/vg/` is reached by a
+  routine an axiom covers, through the calls in VG's text, or by an
+  `UNCOVERED` routine below, which no theorem of rind's covers. A routine an
+  axiom does cover must not be listed.
+
+What it leaves to VG's proofs and `admin/prove vg`: that a theorem proves its
+contract, and that the instruction models are the CPU's.
+
+Usage: admin/vg-binding <vg-checkout>
+"""
+
+import pathlib
+import re
+import sys
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+ARCHS = {"x86_64": "X86_64", "aarch64": "Aarch64"}
+SYM = re.compile(r"\{(vg_[A-Za-z0-9_]+)\}")
+URL = re.compile(r"https://github\.com/pyca/verified-garbage/blob/([^/\s]+)/(\S+?)(?:#L(\d+))?(?=[\s)`]|[.,;:]?(?:\s|$))")
+# What else a link lands on: a registration in `Artifacts/` builds an artifact
+# from its `Api`, and a proof's field states `Verified` code and contract.
+ARTIFACT = re.compile(r"\.artifact\b|\bArtifact\b|\bVerified\b")
+DECL = re.compile(r"^\s*(?:@\[[^\]]*\]\s*)*(?:(?:private|protected|noncomputable)\s+)*(?:theorem|lemma|def|abbrev|instance)\b")
+
+# Routines rind vendors that no axiom covers, and why. A routine that calls
+# others covers them too.
+UNCOVERED = {
+    "x86_64": {
+        name: "rind's AVX-512 AES-GCM is not proven yet; [its quest](/quest/m4/verified/aes-gcm-x86-vaes.md) restates VG's"
+        for name in [
+            "vg_aes_gcm_prepare_vpclmul_avx512",
+            "vg_aes_gcm_seal_prepared_vaes_vpclmul_avx512",
+            "vg_aes_gcm_open_prepared_vaes_vpclmul_avx512",
+        ]
+    },
+    "aarch64": {
+        "vg_rsa_public_precompute": "rind's aarch64 RSA is not proven yet; [its quest](/quest/m4/verified/rsa-aarch64-mont-import.md) restates VG's",
+    },
+}
+
+
+# Axioms whose one theorem is generic over the variants of a routine, so no
+# link lands on a variant's own: VG's wipe wrapper takes the variant as an
+# argument (`Proof.MlKem.<Arch>.Wipe.suffix`), and its ChaCha20-Poly1305
+# registrations `sealReg` and `openReg` (`Proof.ChaCha20Poly1305.X86_64.Scrub`)
+# cover the IFMA and AVX2 pairs alike.
+GENERIC = {"vg_mlkem768_encaps_spec", "vg_chacha20_poly1305_seal_spec", "vg_chacha20_poly1305_open_spec"}
+
+
+def fail(msg):
+    sys.exit(f"admin/vg-binding: {msg}")
+
+
+def pinned():
+    m = re.search(r'^REV = "([0-9a-f]{40})"$', (ROOT / "admin/import-vg").read_text(), re.M)
+    if not m:
+        fail("admin/import-vg pins no REV")
+    return m.group(1)
+
+
+# A character literal, which may hold a double quote.
+CHAR = re.compile(r"'(?:\\(?:x[0-9a-fA-F]{2}|u\{[0-9a-fA-F]+\}|.)|[^\\'\n])'")
+
+# A raw string literal, whose quotes need no escape, closed by a quote and as
+# many `#` as opened it.
+RAW = re.compile(r'r(#*)"')
+
+
+# `axiom` is a keyword, so a use not part of a longer name declares one.
+AXIOM = re.compile(r"(?<![\w.'])axiom\s")
+
+
+def code_only(src):
+    """Lean source without comments, which nest, and string literals."""
+    out, i, n = [], 0, len(src)
+    while i < n:
+        if src.startswith("--", i):
+            j = src.find("\n", i)
+            i = n if j < 0 else j
+        elif src.startswith("/-", i):
+            depth, i = 1, i + 2
+            while i < n and depth:
+                if src.startswith("/-", i):
+                    depth, i = depth + 1, i + 2
+                elif src.startswith("-/", i):
+                    depth, i = depth - 1, i + 2
+                else:
+                    i += 1
+            out.append(" ")
+        elif src[i] == "«":
+            j = src.find("»", i)
+            i = n if j < 0 else j + 1
+            out.append(" ")
+        elif src[i] == "r" and RAW.match(src, i) and not (out and (out[-1][-1].isalnum() or out[-1][-1] in "_'.")):
+            m = RAW.match(src, i)
+            end = src.find('"' + m.group(1), m.end())
+            i = n if end < 0 else end + 1 + len(m.group(1))
+            out.append(" ")
+        elif src[i] == "'" and CHAR.match(src, i) and not (out and (out[-1][-1].isalnum() or out[-1][-1] in "_'")):
+            i = CHAR.match(src, i).end()
+            out.append(" ")
+        elif src[i] == '"':
+            i += 1
+            while i < n and src[i] != '"':
+                i += 2 if src[i] == "\\" else 1
+            i += 1
+        else:
+            out.append(src[i])
+            i += 1
+    return "".join(out)
+
+
+def vg_text(vg, arch):
+    """VG's routines for `arch`, each with the routines its text calls."""
+    asm = vg / "crates" / f"verified-garbage-asm-{arch}" / "assembly"
+    calls, cur = {}, None
+    for path in sorted(asm.glob("*.s")) + sorted(asm.glob("internal/*.s")):
+        for line in path.read_text().splitlines():
+            m = re.match(r"^(vg_[a-z0-9_]+):$", line)
+            if m:
+                cur = calls[m.group(1)] = set()
+            elif cur is not None and not line.startswith("//"):
+                cur.update(SYM.findall(line))
+    if not calls:
+        fail(f"no routines in {asm}")
+    return calls
+
+
+def vg_contracts(vg, arch):
+    """The contract VG's generated documentation names for each artifact, and
+    the internal routines it says have none, whose callers' proofs cover them."""
+    out, internal = {}, set()
+    src = vg / "crates" / f"verified-garbage-asm-{arch}" / "src"
+    for path in [*src.glob("*.rs"), *src.glob("internal/*.rs")]:
+        for m in re.finditer(
+            r'((?:///[^\n]*\n)+)#\[unsafe\(naked\)\]\s*pub\(crate\) unsafe extern "[A-Za-z0-9]+" fn (vg_\w+)',
+            path.read_text(),
+        ):
+            out[m.group(2)] = re.findall(r"Contract: `([^`]+)`", m.group(1))
+            if "An internal function of the verified functions" in m.group(1):
+                internal.add(m.group(2))
+    return out, internal
+
+
+def vendored(arch):
+    """The routines under `rind/src/low/<arch>/vg/`; its other files are tables."""
+    out = {}
+    for path in sorted((ROOT / "rind/src/low" / arch / "vg").glob("vg_*.rs")):
+        if re.search(rf"\bfn {path.stem}\b", path.read_text()):
+            out[path.stem] = path
+    return out
+
+
+def axioms(arch):
+    """Each axiom of `Rind/<Arch>/Vg*.lean`: its name, file, and docstring."""
+    out = []
+    for path in sorted((ROOT / "proofs/Rind" / ARCHS[arch]).glob("Vg*.lean")):
+        text = path.read_text()
+        found = [
+            (m.group(2), path.name, m.group(1))
+            for m in re.finditer(
+                r"/--((?:(?!-/).)*)-/\s*(?:@\[[^\]]*\]\s*)*(?:(?:private|protected|noncomputable|unsafe)\s+)*axiom\s+(\S+)",
+                text,
+                re.S,
+            )
+        ]
+        declared = len(AXIOM.findall(code_only(text)))
+        if declared != len(found):
+            fail(f"{ARCHS[arch]}/{path.name} declares {declared} axioms, {len(found)} of them with a docstring the checks read")
+        out += found
+    return out
+
+
+def links(vg, rev, doc, where):
+    """Checks each link of `doc` to VG's Lean, and returns each linked file's
+    text and the lines its link lands on, lowercased (the whole file for a link
+    with no line)."""
+    texts = []
+    for url_rev, path, line in URL.findall(doc):
+        if url_rev != rev:
+            fail(f"{where} links VG at {url_rev[:12]}, not the pinned {rev[:12]}: {path}")
+        if not path.endswith(".lean"):
+            fail(f"{where} links {path}, which is no Lean proof")
+        file = vg / path
+        if not file.is_file():
+            fail(f"{where} links {path}, which VG's {rev[:12]} lacks")
+        text = file.read_text()
+        window = text
+        if line:
+            lines = text.splitlines()
+            n = int(line)
+            # The line is the declaration's, or an attribute or docstring
+            # line above it.
+            window = "\n".join(lines[max(n - 2, 0) : n + 8])
+            if not any(DECL.match(l) or ARTIFACT.search(l) for l in lines[n - 1 : n + 8]):
+                fail(f"{where} links {path}#L{n}, which is no theorem, definition, or registration")
+        texts.append((text, window.lower()))
+    return texts
+
+
+def main():
+    if len(sys.argv) != 2:
+        sys.exit("usage: admin/vg-binding <vg-checkout>")
+    vg = pathlib.Path(sys.argv[1]).resolve()
+    rev = pinned()
+
+    sorry = [
+        str(p.relative_to(vg))
+        for p in sorted((vg / "lean").rglob("*.lean"))
+        if re.search(r"\b(sorry|admit)\b|" + AXIOM.pattern, code_only(p.read_text()))
+    ]
+    if sorry:
+        fail(f"a sorry or an axiom in VG's {', '.join(sorry)}")
+
+    stale = GENERIC - {name for arch in ARCHS for name, _, _ in axioms(arch)}
+    if stale:
+        fail(f"GENERIC lists {', '.join(sorted(stale))}, which no axiom of Vg*.lean is")
+
+    named = 0
+    for arch in ARCHS:
+        calls = vg_text(vg, arch)
+        contracts, internal = vg_contracts(vg, arch)
+        found = axioms(arch)
+        by_name = {(file, name): doc for name, file, doc in found}
+        covered = set()
+        for name, file, doc in found:
+            where = f"{ARCHS[arch]}/{file}'s {name}"
+            ticked = re.findall(r"`(vg_[a-z0-9_]+)`", doc)
+            # An axiom of the same file it names, as a variant of it, shares
+            # its links.
+            peers = [by_name[file, t] for t in ticked if (file, t) in by_name]
+            routines = sorted({t for t in ticked if (file, t) not in by_name})
+            if not routines:
+                fail(f"{where} names no VG routine in backticks")
+            linked = links(vg, rev, doc, where) + [t for d in peers for t in links(vg, rev, d, where)]
+            if not linked:
+                fail(f"{where} links no file of VG's theorem")
+            texts = [t for t, _ in linked]
+            sharing = {}
+            for r in routines:
+                if r not in calls:
+                    fail(f"{where} names {r}, which VG's {arch} text lacks")
+                if r not in internal and not contracts.get(r):
+                    fail(f"{where} covers {r}, whose Rust in VG's {arch} crate names no `Contract:`, so no check of its contract would run")
+                for c in contracts.get(r, []):
+                    short = c.split(".")[-1]
+                    if short not in doc + "".join(peers):
+                        fail(f"{where} covers {r} without naming its contract {c}")
+                    if not any(short in t for t in texts):
+                        fail(f"{where} covers {r}, whose contract {c} is in none of the files it links")
+                    sharing.setdefault(short, []).append(r)
+            # Variants of one contract (`_adx`, `_ifma`) each have a theorem
+            # or a registration of their own, and the contract's name is in
+            # all of them; so each variant's tag must be where a link lands in
+            # a file of that contract, or another variant's link, or another
+            # routine's, would stand in for it.
+            if name not in GENERIC:
+                for short, rs in sharing.items():
+                    for r in rs if len(rs) > 1 else []:
+                        tag = r.rsplit("_", 1)[1]
+                        if not any(short in t and tag in w for t, w in linked):
+                            fail(f"{where} covers {r}, but no link it gives lands on a {tag} proof of {short}")
+            covered.update(routines)
+            named += len(routines)
+
+        def reach(roots):
+            seen, stack = set(), list(roots)
+            while stack:
+                x = stack.pop()
+                if x not in seen:
+                    seen.add(x)
+                    stack += calls.get(x, ())
+            return seen
+
+        mine = vendored(arch)
+        proven = reach(covered)
+        for name in UNCOVERED[arch]:
+            if name not in mine:
+                fail(f"UNCOVERED lists {name}, which rind no longer vendors for {arch}")
+            if name in proven:
+                fail(f"UNCOVERED lists {name} for {arch}, which an axiom covers now; remove it")
+        unbound = sorted(set(mine) - proven - reach(UNCOVERED[arch]))
+        if unbound:
+            fail(
+                f"rind runs {', '.join(unbound)} on {arch}, which no axiom of "
+                f"proofs/Rind/{ARCHS[arch]}/Vg*.lean covers and UNCOVERED does not list"
+            )
+        print(
+            f"admin/vg-binding: {arch}: {len(mine)} routines of rind's, {len(set(mine) & proven)} covered by the "
+            f"{len(covered)} axioms name, {len((set(mine) & reach(UNCOVERED[arch])) - proven)} listed uncovered"
+        )
+    print(f"admin/vg-binding: {named} routines named by axioms, at VG {rev[:12]}")
+
+
+main()

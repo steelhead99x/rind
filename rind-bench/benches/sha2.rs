@@ -2,321 +2,193 @@
 fn main() {}
 
 #[cfg(not(target_arch = "xtensa"))]
-mod criterion;
-#[cfg(not(target_arch = "xtensa"))]
-use std::hint::black_box;
+mod common;
 
 #[cfg(not(target_arch = "xtensa"))]
-use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-#[cfg(not(target_arch = "xtensa"))]
-use sha2::Digest;
+use common::{Dit, HASH_SIZES, Size};
 
 #[cfg(not(target_arch = "xtensa"))]
-fn test_ring_sha256(data: &[u8]) {
-    let mut ctx = ring::digest::Context::new(&ring::digest::SHA256);
-    ctx.update(data);
-    black_box(ctx.finish());
+fn input(size: Size) -> Vec<u8> {
+    size.zeros()
 }
 
 #[cfg(not(target_arch = "xtensa"))]
-fn test_ring_sha512(data: &[u8]) {
-    let mut ctx = ring::digest::Context::new(&ring::digest::SHA512);
-    ctx.update(data);
-    black_box(ctx.finish());
+fn rind_input(size: Size) -> Dit<Vec<u8>> {
+    Dit::hold(size.zeros())
+}
+
+/// The rows every SHA-2 hash has: each library's streaming context, fed the
+/// whole message in one update.
+macro_rules! rows {
+    ($ring:ident, $rustcrypto:ty, $rind:ident, $vg:ty) => {
+        #[bench(args = HASH_SIZES, setup = input)]
+        fn ring(input: &[u8]) -> ring::digest::Digest {
+            let mut ctx = ring::digest::Context::new(&ring::digest::$ring);
+            ctx.update(input);
+            ctx.finish()
+        }
+
+        #[bench(args = HASH_SIZES, setup = input)]
+        fn aws_lc_rs(input: &[u8]) -> aws_lc_rs::digest::Digest {
+            let mut ctx = aws_lc_rs::digest::Context::new(&aws_lc_rs::digest::$ring);
+            ctx.update(input);
+            ctx.finish()
+        }
+
+        #[bench(args = HASH_SIZES, setup = input)]
+        fn rustcrypto(input: &[u8]) -> impl Sized + use<> {
+            use sha2::Digest;
+            let mut ctx = <$rustcrypto>::new();
+            ctx.update(input);
+            ctx.finalize()
+        }
+
+        #[bench(args = HASH_SIZES, setup = rind_input)]
+        fn rind(input: &Dit<Vec<u8>>) -> rind::digest::Digest {
+            let mut ctx = rind::digest::Context::new(&rind::digest::$rind);
+            ctx.update(input);
+            ctx.finish()
+        }
+
+        /// The message, after checking verified-garbage's digest of it
+        /// matches rind's.
+        fn vg_input(size: Size) -> Vec<u8> {
+            let input = size.zeros();
+            assert_eq!(
+                verified_garbage(&input).as_ref(),
+                rind::digest::digest(&rind::digest::$rind, &input).as_ref()
+            );
+            input
+        }
+
+        #[bench(args = HASH_SIZES, setup = vg_input)]
+        fn verified_garbage(input: &[u8]) -> impl AsRef<[u8]> + use<> {
+            let mut ctx = <$vg>::new();
+            ctx.update(input);
+            ctx.finalize()
+        }
+    };
 }
 
 #[cfg(not(target_arch = "xtensa"))]
-fn test_ring_sha512_256(data: &[u8]) {
-    let mut ctx = ring::digest::Context::new(&ring::digest::SHA512_256);
-    ctx.update(data);
-    black_box(ctx.finish());
-}
+mod sha256 {
+    use swole::bench;
 
-#[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
-#[cfg(not(target_arch = "xtensa"))]
-fn test_aws_sha256(data: &[u8]) {
-    let mut ctx = aws_lc_rs::digest::Context::new(&aws_lc_rs::digest::SHA256);
-    ctx.update(data);
-    black_box(ctx.finish());
-}
+    use super::*;
 
-#[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
-#[cfg(not(target_arch = "xtensa"))]
-fn test_aws_sha512(data: &[u8]) {
-    let mut ctx = aws_lc_rs::digest::Context::new(&aws_lc_rs::digest::SHA512);
-    ctx.update(data);
-    black_box(ctx.finish());
-}
-
-#[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
-#[cfg(not(target_arch = "xtensa"))]
-fn test_aws_sha512_256(data: &[u8]) {
-    let mut ctx = aws_lc_rs::digest::Context::new(&aws_lc_rs::digest::SHA512_256);
-    ctx.update(data);
-    black_box(ctx.finish());
-}
-
-#[cfg(not(target_arch = "xtensa"))]
-fn test_rc_sha256(data: &[u8]) {
-    let mut ctx = sha2::Sha256::new();
-    ctx.update(data);
-    black_box(ctx.finalize());
-}
-
-#[cfg(not(target_arch = "xtensa"))]
-fn test_rc_sha512(data: &[u8]) {
-    let mut ctx = sha2::Sha512::new();
-    ctx.update(data);
-    black_box(ctx.finalize());
-}
-
-#[cfg(not(target_arch = "xtensa"))]
-fn test_rc_sha512_256(data: &[u8]) {
-    let mut ctx = sha2::Sha512_256::new();
-    ctx.update(data);
-    black_box(ctx.finalize());
-}
-
-#[cfg(not(target_arch = "xtensa"))]
-fn test_rind_sha256(data: &[u8]) {
-    let mut ctx = rind::digest::Context::new(&rind::digest::SHA256);
-    ctx.update(data);
-    black_box(ctx.finish());
-}
-
-#[cfg(not(target_arch = "xtensa"))]
-fn test_rind_sha512(data: &[u8]) {
-    let mut ctx = rind::digest::Context::new(&rind::digest::SHA512);
-    ctx.update(data);
-    black_box(ctx.finish());
-}
-
-#[cfg(not(target_arch = "xtensa"))]
-fn test_rind_sha512_256(data: &[u8]) {
-    let mut ctx = rind::digest::Context::new(&rind::digest::SHA512_256);
-    ctx.update(data);
-    black_box(ctx.finish());
-}
-
-#[cfg(not(target_arch = "xtensa"))]
-fn test_vg<H: verified_garbage::hashes::HashFunction>(data: &[u8]) {
-    let mut ctx = H::new();
-    ctx.update(data);
-    black_box(ctx.finalize());
-}
-
-// verified-garbage's row, after checking its digest matches rind's.
-#[cfg(not(target_arch = "xtensa"))]
-fn vg_row<H: verified_garbage::hashes::HashFunction>(
-    group: &mut criterion::BenchmarkGroup<'_, criterion::measurement::WallTime>,
-    ours: &'static rind::digest::Algorithm,
-    size_name: &str,
-    input: &[u8],
-) {
-    let mut ctx = H::new();
-    ctx.update(input);
-    assert_eq!(
-        ctx.finalize().as_ref(),
-        rind::digest::digest(ours, input).as_ref()
+    rows!(
+        SHA256,
+        sha2::Sha256,
+        SHA256,
+        verified_garbage::hashes::sha256::Sha256
     );
-    group.bench_with_input(
-        BenchmarkId::new("verified-garbage", size_name),
-        input,
-        |b, input| b.iter(|| test_vg::<H>(input)),
+
+    #[cfg(graviola)]
+    #[bench(args = HASH_SIZES, setup = input)]
+    fn graviola(input: &[u8]) -> impl Sized + use<> {
+        let mut ctx = graviola::hashing::sha2::Sha256Context::new();
+        ctx.update(input);
+        ctx.finish()
+    }
+
+    #[bench(args = HASH_SIZES, setup = input)]
+    fn libcrux(input: &[u8]) -> [u8; 32] {
+        libcrux_sha2::sha256(input)
+    }
+
+    #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+    #[bench(args = HASH_SIZES, setup = input)]
+    fn openssl(input: &[u8]) -> [u8; 32] {
+        openssl::sha::sha256(input)
+    }
+}
+
+#[cfg(not(target_arch = "xtensa"))]
+mod sha512 {
+    use swole::bench;
+
+    use super::*;
+
+    rows!(
+        SHA512,
+        sha2::Sha512,
+        SHA512,
+        verified_garbage::hashes::sha512::Sha512
+    );
+
+    #[cfg(graviola)]
+    #[bench(args = HASH_SIZES, setup = input)]
+    fn graviola(input: &[u8]) -> impl Sized + use<> {
+        let mut ctx = graviola::hashing::sha2::Sha512Context::new();
+        ctx.update(input);
+        ctx.finish()
+    }
+
+    #[bench(args = HASH_SIZES, setup = input)]
+    fn libcrux(input: &[u8]) -> [u8; 64] {
+        libcrux_sha2::sha512(input)
+    }
+
+    #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+    #[bench(args = HASH_SIZES, setup = input)]
+    fn openssl(input: &[u8]) -> [u8; 64] {
+        openssl::sha::sha512(input)
+    }
+}
+
+#[cfg(not(target_arch = "xtensa"))]
+mod sha512_256 {
+    use swole::bench;
+
+    use super::*;
+
+    rows!(
+        SHA512_256,
+        sha2::Sha512_256,
+        SHA512_256,
+        verified_garbage::hashes::sha512_256::Sha512_256
     );
 }
 
+/// Many small updates show the cost of dispatching each one on the algorithm.
 #[cfg(not(target_arch = "xtensa"))]
-fn sha256(c: &mut Criterion) {
-    let mut group = c.benchmark_group("sha256");
-    for (size, size_name) in criterion::HASH_SIZES {
-        let input = vec![0u8; size];
-        group.throughput(Throughput::Bytes(size as u64));
+mod sha256_updates {
+    use swole::bench;
 
-        group.bench_with_input(BenchmarkId::new("ring", size_name), &input, |b, input| {
-            b.iter(|| test_ring_sha256(input))
-        });
-        #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
-        group.bench_with_input(
-            BenchmarkId::new("aws-lc-rs", size_name),
-            &input,
-            |b, input| b.iter(|| test_aws_sha256(input)),
-        );
-        group.bench_with_input(
-            BenchmarkId::new("rustcrypto", size_name),
-            &input,
-            |b, input| b.iter(|| test_rc_sha256(input)),
-        );
-        group.bench_with_input(BenchmarkId::new("rind", size_name), &input, |b, input| {
-            let _dit = criterion::rind_dit();
-            b.iter(|| test_rind_sha256(input))
-        });
-        vg_row::<verified_garbage::hashes::sha256::Sha256>(
-            &mut group,
-            &rind::digest::SHA256,
-            size_name,
-            &input,
-        );
-        #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-        group.bench_with_input(
-            BenchmarkId::new("graviola", size_name),
-            &input,
-            |b, input| {
-                b.iter(|| {
-                    let mut ctx = graviola::hashing::sha2::Sha256Context::new();
-                    ctx.update(input);
-                    black_box(ctx.finish())
-                })
-            },
-        );
-        group.bench_with_input(
-            BenchmarkId::new("libcrux", size_name),
-            &input,
-            |b, input| b.iter(|| black_box(libcrux_sha2::sha256(input))),
-        );
-        #[cfg(all(
-            feature = "__bench_openssl",
-            target_family = "unix",
-            not(target_arch = "xtensa")
-        ))]
-        group.bench_with_input(
-            BenchmarkId::new("openssl", size_name),
-            &input,
-            |b, input| b.iter(|| black_box(openssl::sha::sha256(input))),
-        );
+    use super::*;
+
+    const CHUNKS: [Size; 2] = [Size::new(1, "1B"), Size::new(16, "16B")];
+
+    /// A 4 KB message, fed in `chunk`-byte updates.
+    fn message(chunk: Size) -> (Vec<u8>, usize) {
+        (vec![0; 4096], chunk.len)
+    }
+
+    fn rind_message(chunk: Size) -> Dit<(Vec<u8>, usize)> {
+        Dit::hold(message(chunk))
+    }
+
+    #[bench(args = CHUNKS, setup = message)]
+    fn aws_lc_rs((input, chunk): &(Vec<u8>, usize)) -> aws_lc_rs::digest::Digest {
+        let mut ctx = aws_lc_rs::digest::Context::new(&aws_lc_rs::digest::SHA256);
+        for part in input.chunks(*chunk) {
+            ctx.update(part);
+        }
+        ctx.finish()
+    }
+
+    #[bench(args = CHUNKS, setup = rind_message)]
+    fn rind(message: &Dit<(Vec<u8>, usize)>) -> rind::digest::Digest {
+        let (input, chunk) = &**message;
+        let mut ctx = rind::digest::Context::new(&rind::digest::SHA256);
+        for part in input.chunks(*chunk) {
+            ctx.update(part);
+        }
+        ctx.finish()
     }
 }
 
 #[cfg(not(target_arch = "xtensa"))]
-fn sha512(c: &mut Criterion) {
-    let mut group = c.benchmark_group("sha512");
-    for (size, size_name) in criterion::HASH_SIZES {
-        let input = vec![0u8; size];
-        group.throughput(Throughput::Bytes(size as u64));
-
-        group.bench_with_input(BenchmarkId::new("ring", size_name), &input, |b, input| {
-            b.iter(|| test_ring_sha512(input))
-        });
-        #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
-        group.bench_with_input(
-            BenchmarkId::new("aws-lc-rs", size_name),
-            &input,
-            |b, input| b.iter(|| test_aws_sha512(input)),
-        );
-        group.bench_with_input(
-            BenchmarkId::new("rustcrypto", size_name),
-            &input,
-            |b, input| b.iter(|| test_rc_sha512(input)),
-        );
-        group.bench_with_input(BenchmarkId::new("rind", size_name), &input, |b, input| {
-            let _dit = criterion::rind_dit();
-            b.iter(|| test_rind_sha512(input))
-        });
-        vg_row::<verified_garbage::hashes::sha512::Sha512>(
-            &mut group,
-            &rind::digest::SHA512,
-            size_name,
-            &input,
-        );
-        #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-        group.bench_with_input(
-            BenchmarkId::new("graviola", size_name),
-            &input,
-            |b, input| {
-                b.iter(|| {
-                    let mut ctx = graviola::hashing::sha2::Sha512Context::new();
-                    ctx.update(input);
-                    black_box(ctx.finish())
-                })
-            },
-        );
-        group.bench_with_input(
-            BenchmarkId::new("libcrux", size_name),
-            &input,
-            |b, input| b.iter(|| black_box(libcrux_sha2::sha512(input))),
-        );
-        #[cfg(all(
-            feature = "__bench_openssl",
-            target_family = "unix",
-            not(target_arch = "xtensa")
-        ))]
-        group.bench_with_input(
-            BenchmarkId::new("openssl", size_name),
-            &input,
-            |b, input| b.iter(|| black_box(openssl::sha::sha512(input))),
-        );
-    }
+fn main() {
+    swole::main();
 }
-
-#[cfg(not(target_arch = "xtensa"))]
-fn sha512_256(c: &mut Criterion) {
-    let mut group = c.benchmark_group("sha512-256");
-    for (size, size_name) in criterion::HASH_SIZES {
-        let input = vec![0u8; size];
-        group.throughput(Throughput::Bytes(size as u64));
-
-        group.bench_with_input(BenchmarkId::new("ring", size_name), &input, |b, input| {
-            b.iter(|| test_ring_sha512_256(input))
-        });
-        #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
-        group.bench_with_input(
-            BenchmarkId::new("aws-lc-rs", size_name),
-            &input,
-            |b, input| b.iter(|| test_aws_sha512_256(input)),
-        );
-        group.bench_with_input(
-            BenchmarkId::new("rustcrypto", size_name),
-            &input,
-            |b, input| b.iter(|| test_rc_sha512_256(input)),
-        );
-        group.bench_with_input(BenchmarkId::new("rind", size_name), &input, |b, input| {
-            let _dit = criterion::rind_dit();
-            b.iter(|| test_rind_sha512_256(input))
-        });
-        vg_row::<verified_garbage::hashes::sha512_256::Sha512_256>(
-            &mut group,
-            &rind::digest::SHA512_256,
-            size_name,
-            &input,
-        );
-    }
-}
-
-// Many small updates show the cost of dispatching each one on the algorithm.
-#[cfg(not(target_arch = "xtensa"))]
-fn sha256_updates(c: &mut Criterion) {
-    let mut group = c.benchmark_group("sha256-updates");
-    let input = vec![0u8; 4096];
-    group.throughput(Throughput::Bytes(input.len() as u64));
-    for (chunk, chunk_name) in [(1, "1B"), (16, "16B")] {
-        #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
-        group.bench_with_input(
-            BenchmarkId::new("aws-lc-rs", chunk_name),
-            &input,
-            |b, input| {
-                b.iter(|| {
-                    let mut ctx = aws_lc_rs::digest::Context::new(&aws_lc_rs::digest::SHA256);
-                    for part in input.chunks(chunk) {
-                        ctx.update(part);
-                    }
-                    black_box(ctx.finish());
-                })
-            },
-        );
-        group.bench_with_input(BenchmarkId::new("rind", chunk_name), &input, |b, input| {
-            let _dit = criterion::rind_dit();
-            b.iter(|| {
-                let mut ctx = rind::digest::Context::new(&rind::digest::SHA256);
-                for part in input.chunks(chunk) {
-                    ctx.update(part);
-                }
-                black_box(ctx.finish());
-            })
-        });
-    }
-}
-
-#[cfg(not(target_arch = "xtensa"))]
-criterion_group!(benches, sha256, sha512, sha512_256, sha256_updates);
-#[cfg(not(target_arch = "xtensa"))]
-criterion_main!(benches);

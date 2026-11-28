@@ -14,16 +14,6 @@ what each theorem takes as a hypothesis.
 
 namespace rind.portable
 
-/-! The SHA-256 and SHA-512 block functions, whose contracts
-`Rind.Portable.ShaBlocks` and `Rind.Portable.Sha512Entry` state as
-hypotheses. -/
-
-opaque low.generic.sha256.sha256_compress_blocks
-  : Array Std.U32 8#usize → Slice Std.U8 → Result (Array Std.U32 8#usize)
-
-opaque low.generic.sha512.sha512_compress_blocks
-  : Array Std.U64 8#usize → Slice Std.U8 → Result (Array Std.U64 8#usize)
-
 /-! SHA-1's block function, whose contract `Rind.Portable.ShaBlocks` states as
 a hypothesis. -/
 
@@ -36,6 +26,8 @@ opaque low.entry.Entry.new_secret : Result low.entry.Entry
 
 /-- Whether an entry guard is held, which a debug build asserts. -/
 opaque low.entry.Entry.assert_held : Result Unit
+
+opaque low.entry.Entry.new_public : Result low.entry.Entry
 
 /-! AES, which no proof covers on this backend. -/
 
@@ -76,6 +68,18 @@ opaque mid.sha3.Sha3Context.finish {R : Std.Usize} {OUT : Std.Usize}
 
 opaque mid.sha3.Sha3Context.Insts.CoreCloneClone.clone {R : Std.Usize} {OUT : Std.Usize}
   : mid.sha3.Sha3Context R OUT → Result (mid.sha3.Sha3Context R OUT)
+
+/-! RSA's DER parsing and encoding, which the ✓ leaves out. -/
+
+opaque high.rsa.pkcs1_components
+  : Slice Std.U8 → Result (core.result.Result ((Slice Std.U8) × (Slice Std.U8)) error.Error)
+
+opaque high.rsa.spki_components
+  : Slice Std.U8 → Result (core.result.Result ((Slice Std.U8) × (Slice Std.U8)) error.Error)
+
+opaque high.rsa.VerifyingKey.to_pkcs1_der
+  : high.rsa.VerifyingKey → Slice Std.U8 →
+    Result ((core.result.Result (Slice Std.U8) error.Error) × (Slice Std.U8))
 
 /-- `ZeroableRef::new`: its value, as `low.generic.zeroise.ZeroableRef` models
 it. -/

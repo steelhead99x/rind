@@ -706,7 +706,17 @@ fn rsa_private(
     use rsa::pkcs1::EncodeRsaPublicKey;
     use rsa::pkcs8::DecodePrivateKey;
     let (ours, theirs) = (ours(input), theirs(input));
-    agree(&ours, &theirs, expect);
+    // rind loads a 2047-bit modulus, as ring does, which aws-lc refuses.
+    let two_047 = ours.as_ref().is_ok_and(|key| {
+        their_rsa::PublicKey::from_der(key.public_key().as_ref())
+            .is_ok_and(|public| modulus_bits(&public) == 2047)
+    });
+    if two_047 {
+        assert!(expect != Expect::Refused, "rind took an input it refuses");
+        assert!(theirs.is_err(), "aws-lc-rs took a 2047-bit key");
+    } else {
+        agree(&ours, &theirs, expect);
+    }
     let Ok(ours) = ours else {
         return;
     };
@@ -718,12 +728,14 @@ fn rsa_private(
     let pkcs8 = ours.to_pkcs8();
     let again = our_rsa::KeyPair::from_pkcs8(pkcs8.as_ref()).unwrap();
     assert_eq!(again.public_key().as_ref(), public.as_ref());
-    let theirs = their_rsa::KeyPair::from_pkcs8(pkcs8.as_ref()).unwrap();
-    assert_eq!(theirs.public_key().as_ref(), public.as_ref());
-    assert_eq!(
-        ours.public_key().to_spki().as_ref(),
-        theirs.public_key().as_der().unwrap().as_ref()
-    );
+    if !two_047 {
+        let theirs = their_rsa::KeyPair::from_pkcs8(pkcs8.as_ref()).unwrap();
+        assert_eq!(theirs.public_key().as_ref(), public.as_ref());
+        assert_eq!(
+            ours.public_key().to_spki().as_ref(),
+            theirs.public_key().as_der().unwrap().as_ref()
+        );
+    }
 
     // RustCrypto reads the same key, unless its primes are of such unequal
     // size as it refuses, and signs as rind does.
@@ -740,10 +752,10 @@ fn rsa_private(
 }
 
 /// aws-lc-rs's key, if it takes `der` and its modulus is in rind's range,
-/// 1024 to 8192 bits.
+/// 1017 to 8192 bits.
 fn their_rsa_public(der: &[u8]) -> Result<their_rsa::PublicKey, &'static str> {
     let key = their_rsa::PublicKey::from_der(der).map_err(|_| "refused")?;
-    match (1024..=8192).contains(&modulus_bits(&key)) {
+    match (1017..=8192).contains(&modulus_bits(&key)) {
         true => Ok(key),
         false => Err("modulus out of range"),
     }
@@ -807,10 +819,24 @@ fn rsa_reencode(rsa: &Rsa, key: &our_rsa::PublicKey) {
     use rsa::pkcs8::DecodePublicKey;
     let again = our_rsa::PublicKey::new(key.as_ref()).unwrap();
     assert_eq!(again.as_ref(), key.as_ref());
-    let independent = rsa::PublicKey::from_pkcs1_der(key.as_ref()).unwrap();
-    assert_eq!(independent.to_pkcs1_der().unwrap().as_bytes(), key.as_ref());
-    let independent = rsa::PublicKey::from_public_key_der(key.to_spki().as_ref()).unwrap();
-    assert_eq!(independent.to_pkcs1_der().unwrap().as_bytes(), key.as_ref());
+    // RustCrypto's decoders refuse a modulus under 1024 bits, so it reads
+    // one of 1017 to 1023 bits, which rind loads, from its components.
+    if key.modulus_bits() >= 1024 {
+        let independent = rsa::PublicKey::from_pkcs1_der(key.as_ref()).unwrap();
+        assert_eq!(independent.to_pkcs1_der().unwrap().as_bytes(), key.as_ref());
+        let independent = rsa::PublicKey::from_public_key_der(key.to_spki().as_ref()).unwrap();
+        assert_eq!(independent.to_pkcs1_der().unwrap().as_bytes(), key.as_ref());
+    } else {
+        let components = their_rsa::PublicKey::from_der(key.as_ref()).unwrap();
+        let int = |x: &[u8]| rsa::BoxedUint::from_be_slice_vartime(x);
+        let independent = rsa::PublicKey::new_with_size_limits(
+            int(components.modulus().big_endian_without_leading_zero()),
+            int(components.exponent().big_endian_without_leading_zero()),
+            1017..=8192,
+        )
+        .unwrap();
+        assert_eq!(independent.to_pkcs1_der().unwrap().as_bytes(), key.as_ref());
+    }
     theirs::ParsedPublicKey::new(rsa.theirs, key.as_ref()).unwrap();
 
     let theirs = their_rsa::PublicKey::from_der(key.as_ref()).unwrap();
@@ -1187,7 +1213,7 @@ fn agree_ml_dsa<P: ParameterSet>(
     }
 
     let message = b"rind";
-    let signature = ours.sign(message).unwrap();
+    let signature = ours.sign(&[], message).unwrap();
     theirs::UnparsedPublicKey::new(set.theirs_verify, public.as_ref())
         .verify(message, signature.as_ref())
         .unwrap();
@@ -1195,7 +1221,7 @@ fn agree_ml_dsa<P: ParameterSet>(
     assert!(independent.verify(public.as_ref(), message, signature.as_ref()));
     let mut signature = [0; 4627];
     let len = theirs.sign(message, &mut signature).unwrap();
-    public.verify(message, &signature[..len]).unwrap();
+    public.verify(&[], message, &signature[..len]).unwrap();
 
     // RustCrypto derives the same key from the seed, if rind holds it, and
     // rind verifies what it signs.
@@ -1203,7 +1229,7 @@ fn agree_ml_dsa<P: ParameterSet>(
         let seed = seed.as_ref().try_into().unwrap();
         let (independent_public, signature) = independent.sign_with_seed(seed, message);
         assert_eq!(public.as_ref(), independent_public);
-        public.verify(message, &signature).unwrap();
+        public.verify(&[], message, &signature).unwrap();
     }
 
     ml_dsa_public::<P>(set, public.as_ref());

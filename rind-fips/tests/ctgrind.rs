@@ -329,17 +329,17 @@ fn signatures() {
     let seed = [0x44u8; 32];
     secret(&seed);
     let ml_dsa = MlDsaKeyPair::<MlDsa65>::from_seed(&seed).unwrap();
-    let signature = ml_dsa.sign(MESSAGE).unwrap();
+    let signature = ml_dsa.sign(b"", MESSAGE).unwrap();
     public(signature.as_ref());
     assert!(
         ml_dsa
             .public_key()
-            .verify(MESSAGE, signature.as_ref())
+            .verify(b"", MESSAGE, signature.as_ref())
             .is_ok()
     );
     let signature = MlDsaKeyPair::<MlDsa65>::generate()
         .unwrap()
-        .sign(MESSAGE)
+        .sign(b"", MESSAGE)
         .unwrap();
     public(signature.as_ref());
 

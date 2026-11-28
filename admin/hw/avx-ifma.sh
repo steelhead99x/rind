@@ -11,7 +11,7 @@
 #   and variants/<name>/<host>.json (bench-report's shape).
 #
 # Variants, interleaved with their order rotated each round:
-#   main    the fork's main
+#   main    the fork's main at its last Criterion commit ($HW_CRITERION_MAIN)
 #   pr      the PR's head
 #   pr-off  the PR's head with the tier denied (built with --cfg
 #           rind_cpu_disable, run with RIND_CPU_DISABLE_avxifma=1), which
@@ -47,7 +47,7 @@ hw_check_idle
 hw_preflight_done
 
 hw_setup
-main=$(hw_rev refs/heads/main "${HW_MAIN_REV:-}")
+main=$(hw_rev refs/heads/main "${HW_MAIN_REV:-$HW_CRITERION_MAIN}")
 pr=$(hw_rev refs/pull/178/head "${HW_PR_REV:-}")
 hw_say "main $main, PR $pr, pinned to CPU $HW_PIN"
 wt_main=$(hw_worktree main "$main")

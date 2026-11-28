@@ -14,6 +14,7 @@ use core::mem;
 
 use super::aes_gcm_avx::AvxKernel;
 use super::aes_gcm_vaes::VaesKernel;
+use super::aes_gcm_vg::LazyVgKey;
 use super::cpu::{
     HaveAesHardware, HaveAvx512ForAesGcm, HaveAvxMovbeForAesGcm, HaveSsse3, HaveVaesAvx2ForAesGcm,
 };
@@ -98,8 +99,20 @@ impl GhashTable {
     }
 }
 
+impl GhashTable {
+    /// Wipes and frees what the table keeps on the heap, VG's key context:
+    /// a whole-value wipe of a key holding this table, which skips its drop,
+    /// must call this first.
+    pub(crate) fn release(&mut self) {
+        if let Self::Avx512(GhashTableAvx512 { vg: Some(vg), .. }) = self {
+            vg.wipe();
+        }
+    }
+}
+
 impl Drop for GhashTable {
     fn drop(&mut self) {
+        self.release();
         low::zeroise_value(self);
     }
 }
@@ -232,6 +245,9 @@ pub(crate) struct GhashTableAvx512 {
     /// BoringSSL's 512-bit kernel, for long messages, whose table also holds
     /// the powers the 512-bit multiplies here take.
     pub(crate) vaes: VaesKernel,
+    /// pyca/verified-garbage's key context, made on first use, for the
+    /// messages its AES-GCM is faster at, on the CPUs where it is.
+    pub(crate) vg: Option<LazyVgKey>,
     pub(crate) token: HaveAvx512ForAesGcm,
 }
 
@@ -239,7 +255,13 @@ impl GhashTableAvx512 {
     pub(crate) fn new(h: u128, hw: HaveAesHardware, token: HaveAvx512ForAesGcm) -> Self {
         let vaes = VaesKernel::avx512(h, token);
         let clmul = ClmulTable::from_powers(vaes.powers(), hw);
-        Self { clmul, vaes, token }
+        let vg = LazyVgKey::new(token);
+        Self {
+            clmul,
+            vaes,
+            vg,
+            token,
+        }
     }
 
     /// H^16, H^15, ... H^1: descending, so a tail of `n` blocks multiplies

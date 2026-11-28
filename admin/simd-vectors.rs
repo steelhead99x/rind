@@ -231,7 +231,7 @@ fn main() {
 
     // Each 256-bit binary on pairs of 128-bit halves from `pairs`, and on a
     // vector against itself, where every lane compares equal.
-    let binary256: [(&str, Binary256); 6] = [
+    let binary256: [(&str, Binary256); 8] = [
         ("avx2._mm256_or_si256", |a, b| unsafe {
             _mm256_or_si256(a, b)
         }),
@@ -249,6 +249,12 @@ fn main() {
         }),
         ("avx2._mm256_xor_si256", |a, b| unsafe {
             _mm256_xor_si256(a, b)
+        }),
+        ("avx2._mm256_cmpeq_epi64", |a, b| unsafe {
+            _mm256_cmpeq_epi64(a, b)
+        }),
+        ("avx2._mm256_add_epi64", |a, b| unsafe {
+            _mm256_add_epi64(a, b)
         }),
     ];
     for (name, f) in binary256 {
@@ -277,6 +283,14 @@ fn main() {
         guard(
             format!("core.core_arch.x86.avx._mm256_set1_epi32 ⟨{}#32⟩", x as u32),
             q256(unsafe { _mm256_set1_epi32(x) }),
+        );
+        let x = w[0] as i64;
+        guard(
+            format!(
+                "core.core_arch.x86.avx._mm256_set1_epi64x ⟨{}#64⟩",
+                x as u64
+            ),
+            q256(unsafe { _mm256_set1_epi64x(x) }),
         );
     }
 
@@ -329,6 +343,23 @@ fn main() {
                     q256(a)
                 ),
                 format!("{}#32", *x as u32),
+            );
+        }
+        let x = unsafe {
+            [
+                _mm256_extract_epi64::<0>(a),
+                _mm256_extract_epi64::<1>(a),
+                _mm256_extract_epi64::<2>(a),
+                _mm256_extract_epi64::<3>(a),
+            ]
+        };
+        for (i, x) in x.iter().enumerate() {
+            guard(
+                format!(
+                    "((·.bv) <$> core.core_arch.x86_64.avx._mm256_extract_epi64 ⟨{i}#32⟩ {})",
+                    q256(a)
+                ),
+                format!("{}#64", *x as u64),
             );
         }
         let d: [i32; 8] = unsafe { transmute(a) };

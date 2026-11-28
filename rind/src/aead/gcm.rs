@@ -88,10 +88,12 @@ pub struct Key {
 }
 
 // All-zero is an `aead::Key` of zeroes and a full tag, as `Zeroable`
-// requires. The key owns no memory beyond itself, so its own drop would only
-// wipe what this one does; `ManuallyDrop` skips that second pass.
+// requires. Once released, the key owns no memory beyond itself, so its own
+// drop would only wipe what this one does; `ManuallyDrop` skips that second
+// pass.
 impl Drop for Key {
     fn drop(&mut self) {
+        self.key.release();
         // Wipes the padding too, not only the key.
         zeroise_value(self);
     }

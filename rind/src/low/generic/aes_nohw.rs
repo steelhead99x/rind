@@ -4,17 +4,20 @@
 //! Bitsliced AES for CPUs without AES instructions: aws-lc's
 //! `crypto/fipsmodule/aes/aes_nohw.c` at commit
 //! 5ed12cce0fd4453f2f63300d44325ed14f845d6f, in Rust. It bitslices eight
-//! blocks into 128-bit SSE2 words on x86_64 CPUs without SSSE3, and in the
-//! portable backend, which armv7 without the crypto extension runs, four
-//! blocks into 64-bit words on 64-bit targets and two into 32-bit words
-//! otherwise, as aws-lc's configurations do.
+//! blocks into 128-bit SSE2 words wherever the target enables SSE2 at compile
+//! time: on x86_64 CPUs without SSSE3, and in the portable backend on x86 and
+//! x86_64, since AGENTS.md lets a backend require the CPU features its target
+//! enables at compile time. Elsewhere in the portable backend, which armv7
+//! without the crypto extension runs, it bitslices four blocks into 64-bit
+//! words on 64-bit targets and two into 32-bit words otherwise, as aws-lc's
+//! configurations do.
 //!
 //! The S-box is a circuit of ANDs and XORs, so no branch or memory index
-//! depends on the key or data. Its encryption rounds in 32-bit words are
-//! proven in Lean, in `proofs/Rind/Armv7/AesNohw*.lean`; the rest, the key
-//! schedule and the wider words among it, rests on its use and testing in
-//! BoringSSL and aws-lc, and on rind's tests of it against FIPS-197,
-//! Wycheproof, aws-lc-rs, and each CPU's faster AES.
+//! depends on the key or data. In 32-bit words, its key schedule, rounds,
+//! and counter mode are proven in Lean, in `proofs/Rind/Armv7/AesNohw*.lean`;
+//! the wider words rest on its use and testing in BoringSSL and aws-lc, and
+//! on rind's tests of it against FIPS-197, Wycheproof, aws-lc-rs, and each
+//! CPU's faster AES.
 //! It follows <https://bearssl.org/constanttime.html#aes>,
 //! <https://eprint.iacr.org/2009/129.pdf>, and
 //! <https://eprint.iacr.org/2009/191.pdf>.
@@ -31,8 +34,14 @@
 
 use word::*;
 
-#[cfg(rind_backend = "x86_64")]
+// Every x86_64 target the x86_64 backend builds for enables SSE2, and so do
+// the x86 and x86_64 targets that run the portable backend with it, so its
+// intrinsics need no run-time check.
+#[cfg(rind_sse2)]
 mod word {
+    #[cfg(target_arch = "x86")]
+    use core::arch::x86::*;
+    #[cfg(target_arch = "x86_64")]
     use core::arch::x86_64::*;
 
     pub(super) type Word = __m128i;
@@ -56,53 +65,53 @@ mod word {
 
     #[inline(always)]
     pub(super) fn and(a: Word, b: Word) -> Word {
-        // SAFETY: every x86_64 CPU has SSE2.
+        // SAFETY: the target enables SSE2.
         unsafe { _mm_and_si128(a, b) }
     }
 
     #[inline(always)]
     pub(super) fn or(a: Word, b: Word) -> Word {
-        // SAFETY: every x86_64 CPU has SSE2.
+        // SAFETY: the target enables SSE2.
         unsafe { _mm_or_si128(a, b) }
     }
 
     #[inline(always)]
     pub(super) fn xor(a: Word, b: Word) -> Word {
-        // SAFETY: every x86_64 CPU has SSE2.
+        // SAFETY: the target enables SSE2.
         unsafe { _mm_xor_si128(a, b) }
     }
 
     #[inline(always)]
     pub(super) fn not(a: Word) -> Word {
-        // SAFETY: every x86_64 CPU has SSE2.
+        // SAFETY: the target enables SSE2.
         unsafe { _mm_xor_si128(a, _mm_set1_epi32(-1)) }
     }
 
     /// Shifts left by `N` logical bytes.
     #[inline(always)]
     pub(super) fn shift_left<const N: i32>(a: Word) -> Word {
-        // SAFETY: every x86_64 CPU has SSE2.
+        // SAFETY: the target enables SSE2.
         unsafe { _mm_slli_si128::<N>(a) }
     }
 
     /// Shifts right by `N` logical bytes.
     #[inline(always)]
     pub(super) fn shift_right<const N: i32>(a: Word) -> Word {
-        // SAFETY: every x86_64 CPU has SSE2.
+        // SAFETY: the target enables SSE2.
         unsafe { _mm_srli_si128::<N>(a) }
     }
 
     /// Rotates the rows in each column down by one.
     #[inline(always)]
     pub(super) fn rotate_rows_down(v: Word) -> Word {
-        // SAFETY: every x86_64 CPU has SSE2.
+        // SAFETY: the target enables SSE2.
         unsafe { or(_mm_srli_epi32::<8>(v), _mm_slli_epi32::<24>(v)) }
     }
 
     /// Rotates the rows in each column by two.
     #[inline(always)]
     pub(super) fn rotate_rows_twice(v: Word) -> Word {
-        // SAFETY: every x86_64 CPU has SSE2.
+        // SAFETY: the target enables SSE2.
         unsafe { or(_mm_srli_epi32::<16>(v), _mm_slli_epi32::<16>(v)) }
     }
 
@@ -111,7 +120,7 @@ mod word {
     /// not overlap.
     #[inline(always)]
     pub(super) fn swap_bits<const SHIFT: i32>(a: Word, b: Word, mask: u32) -> (Word, Word) {
-        // SAFETY: every x86_64 CPU has SSE2.
+        // SAFETY: the target enables SSE2.
         unsafe {
             let swap = and(
                 xor(_mm_srli_epi32::<SHIFT>(a), b),
@@ -125,28 +134,27 @@ mod word {
     /// all of it, in the first logical byte.
     #[inline(always)]
     pub(super) fn rcon_slice(rcon: u8, _i: usize) -> Word {
-        // SAFETY: every x86_64 CPU has SSE2.
+        // SAFETY: the target enables SSE2.
         unsafe { _mm_set_epi32(0, 0, 0, rcon.into()) }
     }
 
     /// A block in compact form, which with 128-bit words is its bytes.
     #[inline(always)]
     pub(super) fn compact_block(input: &[u8; 16]) -> [Word; 1] {
-        // SAFETY: `input` is 16 readable bytes, and every x86_64 CPU has
-        // SSE2.
+        // SAFETY: `input` is 16 readable bytes, and the target enables SSE2.
         [unsafe { _mm_loadu_si128(input.as_ptr().cast()) }]
     }
 
     #[inline(always)]
     pub(super) fn uncompact_block(out: &mut [u8; 16], input: &[Word; 1]) {
-        // SAFETY: `out` is 16 writable bytes, and every x86_64 CPU has SSE2.
+        // SAFETY: `out` is 16 writable bytes, and the target enables SSE2.
         unsafe { _mm_storeu_si128(out.as_mut_ptr().cast(), input[0]) }
     }
 }
 
 /// Plain integer words, whose operations are Rust's own; the masks and
 /// shifts then differ by width.
-#[cfg(not(rind_backend = "x86_64"))]
+#[cfg(not(rind_sse2))]
 macro_rules! integer_word_ops {
     () => {
         pub(super) const ZERO: Word = 0;
@@ -210,7 +218,7 @@ macro_rules! integer_word_ops {
     };
 }
 
-#[cfg(all(not(rind_backend = "x86_64"), target_pointer_width = "64"))]
+#[cfg(all(not(rind_sse2), target_pointer_width = "64"))]
 mod word {
     pub(super) type Word = u64;
     pub(super) const BATCH_SIZE: usize = 4;
@@ -274,7 +282,7 @@ mod word {
     }
 }
 
-#[cfg(all(not(rind_backend = "x86_64"), not(target_pointer_width = "64")))]
+#[cfg(all(not(rind_sse2), not(target_pointer_width = "64")))]
 mod word {
     pub(super) type Word = u32;
     pub(super) const BATCH_SIZE: usize = 2;
@@ -1272,6 +1280,55 @@ mod tests {
                 }
             }
         }
+    }
+
+    // Every word configuration, SSE2's eight blocks, 64-bit words' four, and
+    // 32-bit words' two, must give these outputs, so each target's run of
+    // this test checks its configuration against the others': CTR for
+    // every key size from counters whose 32-bit wrap lands at each block of
+    // a pass, over lengths around each batch size with partial final
+    // blocks, and CBC both ways around them. The digest is FNV-1a's, over
+    // the outputs in order.
+    #[test]
+    fn configurations_agree() {
+        let bytes = |n: usize, seed: u32| -> Vec<u8> {
+            (0..n as u32)
+                .map(|i| (i.wrapping_add(seed).wrapping_mul(0x9e3779b9) >> 24) as u8)
+                .collect()
+        };
+        let mut digest = 0xcbf29ce484222325u64;
+        let mut fold = |out: &[u8]| {
+            for b in out {
+                digest = (digest ^ u64::from(*b)).wrapping_mul(0x100000001b3);
+            }
+        };
+        for (key_len, seed) in [16, 24, 32].into_iter().zip(1..) {
+            let schedule = NohwKey::new(&bytes(key_len, seed)).schedule();
+            let iv: [u8; 16] = bytes(16, seed + 7).try_into().unwrap();
+            for counter in (0..=8).map(|k| u32::MAX - k).chain([0]) {
+                let mut ivec = iv;
+                ivec[12..].copy_from_slice(&counter.to_be_bytes());
+                for len in [
+                    0, 1, 15, 16, 17, 31, 32, 33, 63, 64, 65, 127, 128, 129, 143, 255, 256, 257,
+                    1200,
+                ] {
+                    let mut buf = bytes(len, seed + len as u32);
+                    schedule.ctr32(&ivec, &mut buf);
+                    fold(&buf);
+                }
+            }
+            for blocks in [0, 1, 2, 3, 4, 5, 7, 8, 9, 16, 17, 75] {
+                let mut buf: Vec<[u8; 16]> = bytes(16 * blocks, seed).as_chunks().0.to_vec();
+                schedule.cbc_encrypt(&iv, &mut buf);
+                fold(buf.as_flattened());
+                schedule.cbc_decrypt(&iv, &mut buf);
+                fold(buf.as_flattened());
+                buf.iter_mut().for_each(|b| b[0] ^= 0x5a);
+                schedule.cbc_decrypt(&iv, &mut buf);
+                fold(buf.as_flattened());
+            }
+        }
+        assert_eq!(digest, 0xaf710d0533059451, "{digest:#018x}");
     }
 
     // FIPS-197 Appendix C.1 to C.3, which hold the circuit to AES itself

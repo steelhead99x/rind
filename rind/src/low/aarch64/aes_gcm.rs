@@ -265,69 +265,113 @@ fn cipher<const ENC: bool>(
 
     let (blocks, remainder) = cipher_inout.as_chunks_mut::<16>();
 
-    if !blocks.is_empty() {
-        let mut tag = ghash.state();
-        let htable = &table.htable;
-        let [htable4 @ .., _, _, _, _, _, _] = htable;
-        let (inout, len) = (blocks.as_mut_ptr(), blocks.len());
-        // SAFETY: only a `HaveCryptoExt` token builds a `HwKey`, proving the
-        // `aes` cpu feature, `eight_way` proves `sha3`, and `inout` is valid
-        // for reads and writes of `len` blocks. s2n-bignum's kernels' theorems
-        // (`AES*_GCM_*_NOIBT_SUBROUTINE_{CORRECT,SAFE}`) take the input and
-        // output either equal, as here, or disjoint, and every other buffer
-        // is a separate borrow. aws-lc runs its AES-192 routines in place too.
-        unsafe {
-            match (hw_key, ENC, table.eight_way) {
-                (HwKey::Aes128(k), true, None) => {
-                    aes128_gcm_enc(inout, len, &mut tag, &mut counter, k.round_keys(), htable4)
-                }
-                (HwKey::Aes128(k), false, None) => {
-                    aes128_gcm_dec(inout, len, &mut tag, &mut counter, k.round_keys(), htable4)
-                }
-                (HwKey::Aes128(k), true, Some(_)) => {
-                    aes128_gcm_enc_alt(inout, len, &mut tag, &mut counter, k.round_keys(), htable)
-                }
-                (HwKey::Aes128(k), false, Some(_)) => {
-                    aes128_gcm_dec_alt(inout, len, &mut tag, &mut counter, k.round_keys(), htable)
-                }
-                (HwKey::Aes256(k), true, None) => {
-                    aes256_gcm_enc(inout, len, &mut tag, &mut counter, k.round_keys(), htable4)
-                }
-                (HwKey::Aes256(k), false, None) => {
-                    aes256_gcm_dec(inout, len, &mut tag, &mut counter, k.round_keys(), htable4)
-                }
-                (HwKey::Aes256(k), true, Some(_)) => {
-                    aes256_gcm_enc_alt(inout, len, &mut tag, &mut counter, k.round_keys(), htable)
-                }
-                (HwKey::Aes256(k), false, Some(_)) => {
-                    aes256_gcm_dec_alt(inout, len, &mut tag, &mut counter, k.round_keys(), htable)
-                }
-                (HwKey::Aes192(k), true, Some(_)) => {
-                    let (key, ivec, xi) = (k.round_keys(), &mut counter, &mut tag);
-                    asm_call!(unsafe extern "C" aesv8_gcm_8x_enc_192(inout, len * 128, inout, xi, ivec, key, htable));
-                }
-                (HwKey::Aes192(k), false, Some(_)) => {
-                    let (key, ivec, xi) = (k.round_keys(), &mut counter, &mut tag);
-                    asm_call!(unsafe extern "C" aesv8_gcm_8x_dec_192(inout, len * 128, inout, xi, ivec, key, htable));
-                }
-                (HwKey::Aes192(_), _, None) => unreachable!("composed above"),
-            }
-        }
+    let mut tag = ghash.state();
+    stitched::<ENC>(hw_key, table, &mut tag, &mut counter, blocks);
+    ghash.set_state(tag);
 
-        ghash.set_state(tag);
+    partial::<ENC>(key, ghash, &counter, remainder);
+}
+
+/// Encrypts (if `ENC`) or decrypts `remainder`, shorter than a block, with
+/// the counter block `counter`, and hashes its ciphertext.
+///
+/// Its own function, as Aeneas cannot join the branches of an `if` in
+/// `cipher`, past its borrow of the table out of `ghash`.
+#[inline(always)]
+fn partial<const ENC: bool>(
+    key: &AesKey,
+    ghash: &mut Ghash<'_>,
+    counter: &[u8; 16],
+    remainder: &mut [u8],
+) {
+    if remainder.is_empty() {
+        return;
     }
 
-    if !remainder.is_empty() {
-        if !ENC {
-            ghash.add(remainder);
-        }
+    if !ENC {
+        ghash.add(remainder);
+    }
 
-        for (c, k) in remainder.iter_mut().zip(key.encrypt_block(&counter)) {
-            *c ^= k;
-        }
+    let keystream = key.encrypt_block(counter);
+    // By index: Aeneas translates no loop that writes through an iterator's
+    // references.
+    for i in 0..remainder.len() {
+        remainder[i] ^= keystream[i];
+    }
 
-        if ENC {
-            ghash.add(remainder);
+    if ENC {
+        ghash.add(remainder);
+    }
+}
+
+/// Runs the stitched kernel for `key` and `table` over `blocks`, if any, from
+/// the counter block `counter` and the running GHASH `tag`, in
+/// `Ghash::state`'s byte order, and advances both past them. Checking for no
+/// blocks here, not in `cipher`, keeps that `if` out of `cipher`, as
+/// `partial` says.
+#[inline(always)]
+fn stitched<const ENC: bool>(
+    key: &HwKey,
+    table: &PmullTable,
+    tag: &mut [u8; 16],
+    counter: &mut [u8; 16],
+    blocks: &mut [[u8; 16]],
+) {
+    if blocks.is_empty() {
+        return;
+    }
+    let htable = &table.htable;
+    let [htable4 @ .., _, _, _, _, _, _] = htable;
+    let (inout, len) = (blocks.as_mut_ptr(), blocks.len());
+    // s2n-bignum's `_alt` kernels' theorems require `inout` plus its length
+    // to be below 2^63, since the kernels compare their pointers as signed
+    // integers. A pointer tag setting bit 63, as Android's heap tags (`0xB4`
+    // in the top byte) do, breaks that, and the four-way kernels, whose
+    // theorems don't, run instead. A slice is at most `isize::MAX` bytes, so
+    // the subtraction can't wrap.
+    let low = inout.addr() < (1 << 63) - size_of_val(blocks);
+    // SAFETY: only a `HaveCryptoExt` token builds a `HwKey`, proving the
+    // `aes` cpu feature, `eight_way` proves `sha3`, and `inout` is valid
+    // for reads and writes of `len` blocks. s2n-bignum's kernels' theorems
+    // (`AES*_GCM_*_NOIBT_SUBROUTINE_{CORRECT,SAFE}`) take the input and
+    // output either equal, as here, or disjoint, and every other buffer
+    // is a separate borrow; `low` meets the `_alt` ones' address bound.
+    // aws-lc runs its AES-192 routines in place too.
+    unsafe {
+        match (key, ENC, table.eight_way) {
+            (HwKey::Aes128(k), true, Some(_)) if low => {
+                aes128_gcm_enc_alt(inout, len, tag, counter, k.round_keys(), htable)
+            }
+            (HwKey::Aes128(k), false, Some(_)) if low => {
+                aes128_gcm_dec_alt(inout, len, tag, counter, k.round_keys(), htable)
+            }
+            (HwKey::Aes128(k), true, _) => {
+                aes128_gcm_enc(inout, len, tag, counter, k.round_keys(), htable4)
+            }
+            (HwKey::Aes128(k), false, _) => {
+                aes128_gcm_dec(inout, len, tag, counter, k.round_keys(), htable4)
+            }
+            (HwKey::Aes256(k), true, Some(_)) if low => {
+                aes256_gcm_enc_alt(inout, len, tag, counter, k.round_keys(), htable)
+            }
+            (HwKey::Aes256(k), false, Some(_)) if low => {
+                aes256_gcm_dec_alt(inout, len, tag, counter, k.round_keys(), htable)
+            }
+            (HwKey::Aes256(k), true, _) => {
+                aes256_gcm_enc(inout, len, tag, counter, k.round_keys(), htable4)
+            }
+            (HwKey::Aes256(k), false, _) => {
+                aes256_gcm_dec(inout, len, tag, counter, k.round_keys(), htable4)
+            }
+            (HwKey::Aes192(k), true, Some(_)) => {
+                let (key, ivec, xi) = (k.round_keys(), counter, tag);
+                asm_call!(unsafe extern "C" aesv8_gcm_8x_enc_192(inout, len * 128, inout, xi, ivec, key, htable));
+            }
+            (HwKey::Aes192(k), false, Some(_)) => {
+                let (key, ivec, xi) = (k.round_keys(), counter, tag);
+                asm_call!(unsafe extern "C" aesv8_gcm_8x_dec_192(inout, len * 128, inout, xi, ivec, key, htable));
+            }
+            (HwKey::Aes192(_), _, None) => unreachable!("composed above"),
         }
     }
 }
@@ -375,6 +419,7 @@ gcm_8x!(aesv8_gcm_8x_dec_192);
 
 /// AES-CTR and GHASH in separate passes over each eight blocks, for keys
 /// without the stitched kernels, as aws-lc composes vpaes and NEON GHASH.
+#[allow(clippy::needless_range_loop)]
 fn composed<const ENC: bool>(
     key: &AesKey,
     ghash: &mut Ghash<'_>,
@@ -386,13 +431,14 @@ fn composed<const ENC: bool>(
     let mut ctr = u32::from_be_bytes(ctr.try_into().unwrap());
 
     let (chunks, remainder) = cipher_inout.as_chunks_mut::<128>();
-    for chunk in chunks {
+    // By index, as in `partial`.
+    for i in 0..chunks.len() {
         if !ENC {
-            ghash.add(chunk);
+            ghash.add(&chunks[i]);
         }
-        aes_ctr::apply(key, nonce, ctr, chunk);
+        aes_ctr::apply(key, nonce, ctr, &mut chunks[i]);
         if ENC {
-            ghash.add(chunk);
+            ghash.add(&chunks[i]);
         }
         ctr = ctr.wrapping_add(8);
     }

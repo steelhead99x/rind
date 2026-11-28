@@ -513,12 +513,14 @@ impl AffineMontPoint {
             return Err(KeyFormatError::NotOnCurve.into());
         }
 
+        // Always negate and select, so the parity of a key, which OPAQUE's
+        // server decodes for a real and a fake record alike, takes no branch.
         let y = y.demont();
-        let y = match y.0[0] & 1 == u64::from(tag & 1) {
-            true => y,
-            false => y.negate_mod_p(),
-        };
-        Ok(Self::from_xy(x, y.as_mont()))
+        let negated = y.negate_mod_p();
+        let flip = (y.0[0] ^ u64::from(tag)) & 1;
+        let mut limbs = [0u64; 4];
+        low::bignum_mux(flip, &mut limbs, &negated.0, &y.0);
+        Ok(Self::from_xy(x, FieldElement(limbs).as_mont()))
     }
 
     fn x_scalar(&self) -> Scalar {
@@ -966,21 +968,24 @@ impl JacobianMontPoint {
 
     /// `self + p`, for any points, including at infinity, equal, or opposite.
     ///
-    /// `p256_montjmixadd` is proven only for unequal points, so points with
-    /// the same x never reach it.
+    /// `p256_montjmixadd` is proven to add unequal points, and to leave z
+    /// zero when the points are equal or opposite, so it adds first, and
+    /// only a zero z, a sum at infinity or of equal points, needs the check
+    /// that tells the two apart.
     fn public_add_affine(&self, p: &AffineMontPoint) -> Self {
         if self.public_is_infinity() {
             return Self::from_affine(p);
         }
 
-        // `p` scaled to this point's z.
-        let z2 = self.z().mont_sqr();
-        if !p.x().mont_mul(&z2).public_eq(&self.x()) {
-            let mut sum = *self;
-            sum.add_inplace_affine(p);
+        let mut sum = *self;
+        sum.add_inplace_affine(p);
+        if !sum.public_is_infinity() {
             return sum;
         }
-        match p.y().mont_mul(&z2.mont_mul(&self.z())).public_eq(&self.y()) {
+        // The points have the same x, so they are equal if their y's are,
+        // with `p`'s scaled to this point's z.
+        let z3 = self.z().mont_sqr().mont_mul(&self.z());
+        match p.y().mont_mul(&z3).public_eq(&self.y()) {
             true => self.double(),
             false => Self::infinity(),
         }
@@ -1427,10 +1432,10 @@ impl Scalar {
     }
 
     /// The width-`W` non-adjacent form of this scalar, by
-    /// [`util::public_naf`].
+    /// [`low::public_naf`].
     fn public_naf<const W: u32>(&self) -> [i8; 257] {
         let mut digits = [0; 257];
-        util::public_naf::<W>(&self.0, &mut digits);
+        low::public_naf::<W>(&self.0, &mut digits);
         digits
     }
 }
@@ -1987,6 +1992,46 @@ mod tests {
             assert_eq!(BN_bn2binpad(rem.0, out.as_mut_ptr(), 32), 32);
             out
         }
+    }
+
+    /// The sum of equal or opposite points, which `public_add_affine` finds
+    /// by the zero z the mixed addition leaves, with a z other than one.
+    #[test]
+    fn public_add_affine_edges() {
+        let g = JacobianMontPoint::from_affine(&CURVE_GENERATOR);
+        let g2 = g.double();
+        let negate = |p: &JacobianMontPoint| {
+            let mut r = *p;
+            r.xyz[JacobianMontPoint::Y].copy_from_slice(&p.y().negate_mod_p().0);
+            r
+        };
+        // 2G again, as 4G - 2G, with another z.
+        let g2_again = g2.double().add(&negate(&g2));
+        assert_ne!(g2_again.z().0, g2.z().0);
+        let infinity = JacobianMontPoint::infinity();
+        let mut neg_g = CURVE_GENERATOR;
+        neg_g.negate_y();
+
+        assert_eq!(
+            g.public_add_affine(&CURVE_GENERATOR).as_affine().xy,
+            g2.as_affine().xy
+        );
+        assert_eq!(
+            g2_again.public_add_affine(&g2.as_affine()).as_affine().xy,
+            g2.double().as_affine().xy
+        );
+        assert!(
+            negate(&g2_again)
+                .public_add_affine(&g2.as_affine())
+                .public_is_infinity()
+        );
+        assert!(g.public_add_affine(&neg_g).public_is_infinity());
+        assert_eq!(infinity.public_add_affine(&CURVE_GENERATOR).xyz, g.xyz);
+        // Unequal points, one with a z other than one.
+        assert_eq!(
+            g2_again.public_add_affine(&CURVE_GENERATOR).as_affine().xy,
+            g2.add(&g).as_affine().xy
+        );
     }
 
     /// `p256_montjadd` is unspecified for equal or opposite points. Addition

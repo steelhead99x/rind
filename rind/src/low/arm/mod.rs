@@ -6,8 +6,9 @@
 //! where the CPU has it, and OpenSSL's for Keccak-f and P-256's field
 //! multiplication.
 
-/// The symbol for an aws-lc routine, qualified by rind's version so two
-/// semver-incompatible copies of rind can link into one binary.
+/// The symbol for an assembly routine, aws-lc's or rind's own, qualified by
+/// rind's version so two semver-incompatible copies of rind can link into
+/// one binary.
 macro_rules! aws_lc_symbol {
     ($name:literal) => {
         concat!(

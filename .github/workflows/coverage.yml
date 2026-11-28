@@ -33,6 +33,8 @@ jobs:
           # but for its Cortex-A15 tier.
           - os: ubuntu-24.04-arm
             tier: armv7
+          # Hosted: the Mac mini has no third macOS VM slot for a nightly runner
+          # (see admin/mac-mini-runners).
           - os: macos-latest
             tier: native
 
