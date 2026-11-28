@@ -30,6 +30,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 
 ADMIN = os.path.dirname(os.path.abspath(__file__))
 with open(os.path.join(ADMIN, "import-vg")) as f:
@@ -205,15 +206,27 @@ def path_of(module):
 def main():
     args = sys.argv[1:]
     if args == ["--tables"]:
+        # Each table is written whole to a file of its own in Lake's ignored
+        # build directory, on the same filesystem but outside the tree
+        # `--check` scans, then moved into place: a Lean build alongside never
+        # reads half a table, two runs at once never share a file, and an
+        # interrupted one leaves nothing `--check` would call stale.
+        staging = os.path.join(DEST, ".lake", "tables")
+        os.makedirs(staging, exist_ok=True)
         for module, table in TABLES.items():
             dest = os.path.join(DEST, path_of(module))
             os.makedirs(os.path.dirname(dest), exist_ok=True)
-            # UTF-8 whatever the locale, as `--check` compares, and replaced
-            # whole, so a Lean build alongside never reads half a table.
-            tmp = dest + ".tmp"
-            with open(tmp, "wb") as f:
-                f.write(table().encode())
-            os.replace(tmp, dest)
+            fd, tmp = tempfile.mkstemp(dir=staging, suffix=".lean")
+            try:
+                # UTF-8 whatever the locale, as `--check` compares.
+                with os.fdopen(fd, "wb") as f:
+                    f.write(table().encode())
+                os.chmod(tmp, 0o644)
+                os.replace(tmp, dest)
+            except BaseException:
+                if os.path.exists(tmp):
+                    os.unlink(tmp)
+                raise
         return
     check = args[:1] == ["--check"]
     if check:

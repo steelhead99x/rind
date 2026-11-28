@@ -252,7 +252,8 @@ both against hardware. `verified-garbage/` holds the models, which
 `admin/import-vg` pins for VG's code, but for P-256's `CombTable7` and
 `GTable9`, which Git ignores: `admin/import-vg-models --tables` writes them
 from P-256's arithmetic before any Lean build, and `--check` fails unless
-they are VG's byte for byte,
+that generator's output is VG's byte for byte (it compares what the
+generator computes, not the files in the worktree),
 and the cosimulation over them, a Lake package of its own, since the models
 import only Lean core. `nix develop .#vg --command admin/prove vg` checks,
 for this CPU's target:
