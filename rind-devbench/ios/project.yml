@@ -1,6 +1,6 @@
 name: RindBenchAll
 options:
-  bundleIdPrefix: io.github.steelhead99x.rindbench
+  bundleIdPrefix: ai.kixel
   projectFormat: xcode15_3
 targets:
   RindBenchAll:
@@ -16,7 +16,7 @@ targets:
     info:
       path: Info.plist
       properties:
-        CFBundleDisplayName: RindBench All
+        CFBundleDisplayName: RindBench
         CFBundleShortVersionString: "15.0"
         CFBundleVersion: "17"
         UILaunchScreen: {}
@@ -32,7 +32,7 @@ targets:
         UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: io.github.steelhead99x.rindbench.all
+        PRODUCT_BUNDLE_IDENTIFIER: ai.kixel.rindbench
         CODE_SIGN_STYLE: Automatic
         TARGETED_DEVICE_FAMILY: "1,2"
         OTHER_LDFLAGS: ["$(RIND_DEVBENCH_LIB)", "-framework", "Security", "-lc++"]

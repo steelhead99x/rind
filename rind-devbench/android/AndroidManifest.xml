@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="io.github.steelhead99x.rindbench"
+    package="ai.kixel.rindbench"
     android:versionCode="19"
     android:versionName="14.5-main-7c3158d5">
     <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="35" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
-    <application android:label="rind-bench"
+    <application android:label="RindBench"
         android:icon="@mipmap/ic_launcher"
         android:extractNativeLibs="true"
         android:usesCleartextTraffic="true"

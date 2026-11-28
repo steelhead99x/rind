@@ -41,7 +41,7 @@ CAPTURE --out DIR` splits a collector capture into one JSON per run.
 - iOS (Mac, Xcode, rustup 1.98.1 + aarch64-apple-ios): `ios/build-ipa.sh PORT [HOST]`
   (e.g. 9101 for one iPad, 9102 for another; HOST is the collector's LAN address, left out = results stay on the iPad)
   → `ios/out/RindBenchAll-v15.0-<port>.ipa`, **unsigned**.
-  Bundle id `io.github.steelhead99x.rindbench.all` (installs next to v13, not over it).
+  Bundle id `ai.kixel.rindbench`, the same as the Android package. It replaced `io.github.steelhead99x.rindbench(.all)`, so a build from before the kixel.ai rebrand installs beside it, not under it: delete the old app.
   OpenSSL is vendored (built from source) by default; `CARGO_FEATURES= ios/build-ipa.sh` leaves it out.
 - Android (Linux, SDK build-tools 35 + platform 35 + NDK, JDK 17+, rustup aarch64-linux-android):
   `JAVA_HOME=… CARGO_FEATURES="--features __bench_openssl" [COLLECTOR_HOST=<LAN address>] android/build-apk.sh` →
@@ -50,14 +50,14 @@ CAPTURE --out DIR` splits a collector capture into one JSON per run.
 
 ## Run
 - iPad: sign + install with your own Apple developer account (e.g. plumesign), start `tools/listen-devbench.sh`
-  on the collector computer, open "RindBench All", agree, Start.
+  on the collector computer, open "RindBench", agree, Start.
 - Android: `adb install -r RindBench-android.apk`;
   the collector fills itself in (127.0.0.1:9103 via `adb reverse`, else the LAN address given to build-apk.sh as `COLLECTOR_HOST`); headless, from an APK built with
   `DEVICE_RUNNER=1 android/build-apk.sh` (a normal build ignores `autostart`, `host` and `port`, since any app on the phone can start the launcher):
-  `adb shell am start -n io.github.steelhead99x.rindbench/.MainActivity --es preset quick --es libraries rind,ring --es sections AEADs --ez autostart true`;
-  results also in `/sdcard/Android/data/io.github.steelhead99x.rindbench/files/`.
+  `adb shell am start -n ai.kixel.rindbench/.MainActivity --es preset quick --es libraries rind,ring --es sections AEADs --ez autostart true`;
+  results also in `/sdcard/Android/data/ai.kixel.rindbench/files/`.
 - iPad/iPhone headless (the same choices as Android's extras, as launch arguments):
-  `xcrun devicectl device process launch --console --device UDID io.github.steelhead99x.rindbench.all -preset quick -libraries rind,ring -sections AEADs -autostart YES [-host H -port P]`.
+  `xcrun devicectl device process launch --console --device UDID ai.kixel.rindbench -preset quick -libraries rind,ring -sections AEADs -autostart YES [-host H -port P]`.
   `-host`/`-port` override the collector baked in at build time.
 
 ## Device runners

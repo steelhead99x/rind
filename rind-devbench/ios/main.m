@@ -1,4 +1,4 @@
-// RindBench v15 (all libraries): one screen, no scrolling. A data-driven
+// RindBench by kixel.ai, v15 (all libraries): one screen, no scrolling. A data-driven
 // picker of every library x operation this build of rind-devbench can time,
 // and a live summary of the run.
 // The catalog (rows, libraries, sections) comes from the Rust core; nothing
@@ -44,7 +44,7 @@ static BOOL Reachable(NSString *host, int port, int ms) {
   freeaddrinfo(res); return ok;
 }
 // Launch arguments, the iOS twin of Android's adb extras, for a device runner:
-//   xcrun devicectl device process launch --device UDID io.github.steelhead99x.rindbench.all \
+//   xcrun devicectl device process launch --device UDID ai.kixel.rindbench \
 //     -preset quick -libraries rind,ring -sections AEADs -autostart YES [-host H -port P]
 // Read from the argument domain only, so nothing carries over to a later launch.
 static NSString *Arg(NSString *k) {
@@ -66,13 +66,14 @@ static NSSet<NSString *> *ArgList(NSString *k) {
 }
 
 #define RGB(r, g, b) [UIColor colorWithRed:(r) / 255.0 green:(g) / 255.0 blue:(b) / 255.0 alpha:1]
-#define C_BG RGB(13, 15, 20)
-#define C_CARD RGB(24, 27, 34)
-#define C_LINE RGB(44, 48, 58)
-#define C_CHIP RGB(36, 40, 50)
-#define C_MUTED RGB(150, 156, 170)
-#define C_TEXT RGB(236, 238, 243)
-#define C_ACCENT RGB(250, 191, 51)
+// Kixel's palette: graphite surfaces and Kixel amber (android/BRANDING.md).
+#define C_BG RGB(7, 9, 13)
+#define C_CARD RGB(13, 17, 24)
+#define C_LINE RGB(42, 51, 64)
+#define C_CHIP RGB(27, 36, 48)
+#define C_MUTED RGB(139, 150, 165)
+#define C_TEXT RGB(231, 236, 242)
+#define C_ACCENT RGB(255, 176, 32)
 #define C_GOOD RGB(84, 214, 146)
 #define C_BAD RGB(255, 120, 110)
 
@@ -208,7 +209,7 @@ static void SetTitle(UIButton *b, NSString *t) {
 
   // Header: name, device, where results go.
   UILabel *title = [self label:@"RindBench" size:28 weight:UIFontWeightHeavy color:nil];
-  UILabel *tag = [self label:@"every library" size:15 weight:UIFontWeightSemibold color:C_ACCENT];
+  UILabel *tag = [self label:@"by kixel.ai" size:15 weight:UIFontWeightSemibold color:C_MUTED];
   UIStackView *titleRow = [[UIStackView alloc] initWithArrangedSubviews:@[title, tag, [UIView new]]];
   titleRow.spacing = 10; titleRow.alignment = UIStackViewAlignmentLastBaseline;
   deviceLbl = [self label:@"Reading the list of tests…" size:13 weight:UIFontWeightMedium color:C_MUTED];

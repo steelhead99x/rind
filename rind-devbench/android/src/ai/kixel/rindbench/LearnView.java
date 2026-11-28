@@ -1,4 +1,4 @@
-package io.github.steelhead99x.rindbench;
+package ai.kixel.rindbench;
 
 import android.content.Context;
 import android.view.Gravity;
