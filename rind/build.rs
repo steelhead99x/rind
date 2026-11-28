@@ -102,9 +102,13 @@ fn main() {
 
     // `rind_sse2`: an x86 or x86_64 target that enables SSE2 at compile time,
     // where the bitsliced AES in `low/generic/aes_nohw.rs` takes eight blocks
-    // a pass in SSE2 words whatever the backend.
+    // a pass in SSE2 words whatever the backend. `--cfg rind_no_sse2` keeps
+    // the integer words instead, so the forced-portable CI jobs on x86_64
+    // check what the other portable architectures ship; it is for testing.
     println!("cargo::rustc-check-cfg=cfg(rind_sse2)");
-    if matches!(arch.as_str(), "x86" | "x86_64") && enabled("sse2") {
+    println!("cargo::rustc-check-cfg=cfg(rind_no_sse2)");
+    let no_sse2 = env::var_os("CARGO_CFG_RIND_NO_SSE2").is_some();
+    if matches!(arch.as_str(), "x86" | "x86_64") && enabled("sse2") && !no_sse2 {
         println!("cargo::rustc-cfg=rind_sse2");
     }
 

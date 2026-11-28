@@ -1178,11 +1178,12 @@ configuration, which bitslices two blocks into 32-bit words, and for AES-GCM a
 port of aws-lc's `gcm_nohw.c` in its 32-bit configuration, composed the same
 way. A key expands both once, when it is made, holding its round keys
 bitsliced, and seals and opens in place. The portable backend always takes the
-paths without NEON and the extension. On x86 and x86_64 it runs the AES port
-in the SSE2 configuration x86_64 runs without SSSE3, eight blocks a pass,
-since every such target but the soft-float `x86_64-unknown-none` enables SSE2
-at compile time, and AGENTS.md lets a backend require the CPU features its
-target enables at compile time. Its round keys then take 1.9 KiB. Elsewhere
+paths without NEON and the extension. On an x86 or x86_64 target that enables
+SSE2 at compile time, which is all of them but the soft-float
+`x86_64-unknown-none`, the UEFI targets, and i586, it runs the AES port in
+the SSE2 configuration x86_64 runs without SSSE3, eight blocks a pass, since
+AGENTS.md lets a backend require the CPU features its target enables at
+compile time. Its round keys then take 1.9 KiB. Elsewhere
 it runs both ports in their 64-bit configurations on 64-bit targets, four
 blocks into 64-bit words. Eight blocks in two `u64` lanes without
 intrinsics measured slower there: LLVM vectorizes none of the circuit, so it

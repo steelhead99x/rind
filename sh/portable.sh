@@ -19,7 +19,9 @@ packages=(-p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p ri
 # The explicit target keeps these builds apart from the host's, whose flags
 # differ.
 target=x86_64-unknown-linux-gnu
-export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS='--cfg rind_portable --cfg curve25519_dalek_backend="serial"'
+# `rind_no_sse2` keeps AES on the integer words the architectures without SSE2
+# ship; the x86_64 backend's tests and `just qemu i686` run its SSE2 words.
+export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS='--cfg rind_portable --cfg rind_no_sse2 --cfg curve25519_dalek_backend="serial"'
 cargo clippy "${packages[@]}" --locked --target "$target" --all-targets -- --deny warnings
 
 # Optimised, as the armv7 run is, but keeping the checks a debug build has.

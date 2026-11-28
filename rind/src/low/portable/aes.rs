@@ -2,8 +2,9 @@
 
 //! AES for the portable backend and armv7 without the crypto extension:
 //! aws-lc's bitsliced AES, several blocks a pass, with the round keys held
-//! bitsliced so each call skips that step: eight blocks in SSE2 words on x86
-//! and x86_64, whose 1.9 KiB of round keys is twice the other words'.
+//! bitsliced so each call skips that step: eight blocks in SSE2 words where
+//! the target enables SSE2 at compile time, whose 1.9 KiB of round keys is
+//! twice the 64-bit words' and four times the 32-bit words'.
 
 use super::aes_nohw::{NohwKey, Schedule};
 use crate::low;
