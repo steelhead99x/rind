@@ -177,16 +177,17 @@ final class BenchView extends LinearLayout {
         // A restored activity gets its old intent again: only a fresh launch asks for a run, but a restored
         // runner launch still sets the collector it gave, so runs by hand keep going there.
         if (restored) {
-            // The collector runs went to before, whichever launch set it (MainActivity keeps only the latest
-            // intent), from the saved state, which outlives the process; and the restored intent's
-            // preselection. A restored activity never queues a run.
+            // The collector runs went to before, from the saved state, which outlives the process and is the
+            // only word on it (MainActivity keeps only the latest intent, which may be one turned away); and the
+            // restored intent's preselection, unless that launch was turned away. Never a run.
             if (saved.getBoolean(KEY_COLLECTOR_SET)) useCollector(saved.getString(KEY_HOST), saved.getInt(KEY_PORT, Collector.PORT));
-            else if (isRunnerLaunch(intent)) { Launch l = new Launch(intent, null, Collector.PORT); if (l.setsCollector) useCollector(l.host, l.port); }
-            preselect(intent);
+            intentRefused = saved.getBoolean(KEY_REFUSED);
+            if (!intentRefused) preselect(intent);
         } else if (isRunnerLaunch(intent)) {
             // A run that outlived the last activity turns the launch away now, changing nothing.
             if (nativeStatus().optBoolean("running")) {
                 notStarted("a run is going");
+                intentRefused = true;
             } else {
                 Launch l = new Launch(intent, null, Collector.PORT);
                 if (l.setsCollector) useCollector(l.host, l.port);
@@ -328,7 +329,7 @@ final class BenchView extends LinearLayout {
         onChromeRelayout();
         presetChanged();
         // A collector from the saved state is newer than the restored intent's: the intent then only preselects.
-        applyIntent(intent, !(restored && saved.getBoolean(KEY_COLLECTOR_SET)));
+        applyIntent(intent, !restored);
         findCollector();
         ui.postDelayed(() -> { if (!running && !collectorOK) findCollector(); }, 4000);
         new Thread(() -> {
@@ -429,16 +430,15 @@ final class BenchView extends LinearLayout {
     }
 
     private static final String KEY_HOST = "rindbench.collector_host", KEY_PORT = "rindbench.collector_port",
-            KEY_COLLECTOR_SET = "rindbench.collector_set";
-    /**
-     * Whether an intent has set the collector (runnerHost and runnerPort): the activity's saved state keeps
-     * it, so a recreated view, even in a new process, keeps sending there whichever intent it comes back with.
-     */
-    private boolean collectorSet;
-
+            KEY_COLLECTOR_SET = "rindbench.collector_set", KEY_REFUSED = "rindbench.intent_refused";
+    /** The activity's current intent is a runner launch that was turned away: a restored view takes nothing from it. */
+    private boolean intentRefused;
     /** The activity's onSaveInstanceState. */
     void saveState(Bundle out) {
-        out.putBoolean(KEY_COLLECTOR_SET, collectorSet);
+        // Saved always: the collector as it is (runnerHost and runnerPort, default included) is what a restored
+        // view sends to, even in a new process, whichever intent it comes back with.
+        out.putBoolean(KEY_COLLECTOR_SET, true);
+        out.putBoolean(KEY_REFUSED, intentRefused);
         out.putString(KEY_HOST, runnerHost);
         out.putInt(KEY_PORT, runnerPort);
     }
@@ -448,7 +448,6 @@ final class BenchView extends LinearLayout {
      * it if it changed; an unchanged one keeps the collector the last probe found.
      */
     private boolean useCollector(String h, int p) {
-        collectorSet = true;
         boolean changed = h == null ? runnerHost != null : !h.equals(runnerHost) || p != runnerPort;
         if (!changed) return false;
         runnerHost = h;
@@ -586,8 +585,10 @@ final class BenchView extends LinearLayout {
             // a run that outlived its activity yet, so the library is asked.
             if (running || nativeStatus().optBoolean("running")) {
                 notStarted("a run is going");
+                intentRefused = true;
                 return;
             }
+            intentRefused = false;
             // Its collector applies now, for the screen and for runs by hand; its own run takes it as resolved here.
             Launch l = new Launch(it, runnerHost, runnerPort);
             if (l.setsCollector) useCollector(l.host, l.port);
@@ -596,6 +597,7 @@ final class BenchView extends LinearLayout {
             if (loadedOnce) scheduleAutostart();
             return;
         }
+        intentRefused = false;
         applyIntent(it);
         if (!it.hasExtra("libraries") && !it.hasExtra("sections")) return;
         if (!loadedOnce) preselect(it);
