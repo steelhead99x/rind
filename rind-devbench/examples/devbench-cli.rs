@@ -7,7 +7,10 @@ fn main() {
     match a.get(1).map(|s| s.as_str()) {
         Some("catalog") => println!("{}", rind_devbench::catalog()),
         Some("run") => {
-            rind_devbench::start(a.get(2).map(|s| s.as_str()).unwrap_or("{}")).unwrap();
+            if let Err(e) = rind_devbench::start(a.get(2).map(|s| s.as_str()).unwrap_or("{}")) {
+                eprintln!("devbench-cli: not started: {e}");
+                std::process::exit(1);
+            }
             std::thread::sleep(std::time::Duration::from_millis(200));
             while rind_devbench::status()["running"] == true {
                 std::thread::sleep(std::time::Duration::from_millis(500));

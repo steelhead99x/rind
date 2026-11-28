@@ -376,6 +376,9 @@ final class BenchView extends LinearLayout {
             catalog = null; catalogReady = false;
             detailsText = "Could not load test list.";
             agreeChanged();
+            // A later launch is then scheduled, not left waiting on a list that won't come, and refused.
+            laterLaunches.clear();
+            loadedOnce = true;
             // A runner's launch waiting on the list gets an outcome too, not silence.
             if (launchPending) {
                 launchPending = false;
@@ -717,7 +720,9 @@ final class BenchView extends LinearLayout {
     }
 
     private void startTapped() {
-        // Any start, the person's or the runner's own, takes the place of a queued autostart.
+        // Any start, the person's or the runner's own, takes the place of a queued autostart. The
+        // autostart's own start clears it first, so one still queued here is replaced by hand: say so.
+        if (autostart != null) notStarted("a start by hand took its place");
         cancelAutostart();
         if (running) return;
         if (!agree.isChecked() || !catalogReady) {
@@ -753,9 +758,10 @@ final class BenchView extends LinearLayout {
             env.put("RIND_BENCH_KEYS_DIR", keysDir);
             cfg.put("env", env);
             if (Native.start(cfg.toString()) != 0) {
-                notStarted("the native start failed");
+                String why = new JSONObject(Native.status()).optString("start_error");
+                notStarted("the native start refused it: " + why);
                 statusTitle.setText("Could not start");
-                setBody(new JSONObject(Native.status()).optString("start_error"));
+                setBody(why);
                 return;
             }
             // What the run takes, for a device runner checking a launch's selection without a person:
