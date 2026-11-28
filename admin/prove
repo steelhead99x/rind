@@ -1790,9 +1790,8 @@ only_quoted rind/src/aead.rs "$out/AeadDispatch.rs" '= Algorithm \{'
 # its polynomial routines in `low`, which are opaque. The sets' `Params`
 # impls are not translated, so the translation takes a set's impl as a
 # parameter: see UPSTREAM.md, "Aeneas cannot translate an auto trait's
-# built-in impl". x86_64's eight-way matrix sampler and eight-way CBD
-# sampler, which only ML-KEM-1024 runs and which pass function pointers, are
-# opaque.
+# built-in impl". x86_64's eight-way matrix sampler, which only ML-KEM-1024
+# runs and which passes function pointers, is opaque.
 # See UPSTREAM.md, "Aeneas cannot translate several kinds of Rust".
 # The hash, HMAC, and header-protection paths, which every target translates,
 # and the curves', signatures', SHA-3 sponge's, and AES modes', which only the
@@ -2293,8 +2292,7 @@ extract x86_64 X86_64 "${hashes[@]}" "${assembly[@]}" \
     --start-from crate::low::x86_64::mlkem768_vg::Encaps::encaps \
     --start-from crate::low::x86_64::mlkem768_vg::KeyPair::keygen \
     --start-from crate::low::x86_64::mlkem768_vg::KeyPair::decaps \
-    --opaque crate::mid::mlkem::sample_ntt::sample_ntt_8x \
-    --opaque crate::mid::mlkem::sample_poly_cbd2_8x
+    --opaque crate::mid::mlkem::sample_ntt::sample_ntt_8x
 extract aarch64 Aarch64 "${hashes[@]}" "${assembly[@]}" \
     --include crate::low::aarch64::sha512::sha512_compress_blocks \
     --start-from crate::mid::p256::PrivateKey::from_bytes \

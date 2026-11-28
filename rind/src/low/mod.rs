@@ -506,6 +506,9 @@ cfg_if::cfg_if! {
         pub(crate) use x86_64::adx_mux::edwards25519_pdouble;
         pub(crate) use x86_64::adx_mux::edwards25519_scalarmulbase;
         pub(crate) use x86_64::adx_mux::edwards25519_msm;
+        pub(crate) use x86_64::adx_mux::edwards25519_mul_avx2;
+        #[cfg(test)]
+        pub(crate) use x86_64::adx_mux::edwards25519_mul_avx2_any;
         pub(crate) use x86_64::ghash;
         #[cfg(feature = "ml-dsa")]
         pub(crate) use x86_64::mldsa::{
@@ -544,7 +547,6 @@ cfg_if::cfg_if! {
         pub(crate) use x86_64::rsaz_avx512::{Operands, RsazAvx512};
         pub(crate) use x86_64::rsa_ifma::{IfmaCrt, RsaIfma};
         pub(crate) use x86_64::mlkem_sample_poly_ntt_8x::mlkem_sample_poly_ntt_8x;
-        pub(crate) use x86_64::mlkem_shake256_8x::mlkem_shake256_8x;
 
         pub(crate) use x86_64::adx_mux::p256_montjadd;
         pub(crate) use x86_64::adx_mux::p256_montjdouble;

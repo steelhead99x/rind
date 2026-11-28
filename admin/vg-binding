@@ -65,8 +65,10 @@ UNCOVERED = {
 
 # Axioms whose one theorem is generic over the variants of a routine, so no
 # link lands on a variant's own: VG's wipe wrapper takes the variant as an
-# argument (`Proof.MlKem.<Arch>.Wipe.suffix`).
-GENERIC = {"vg_mlkem768_encaps_spec"}
+# argument (`Proof.MlKem.<Arch>.Wipe.suffix`), and its ChaCha20-Poly1305
+# registrations `sealReg` and `openReg` (`Proof.ChaCha20Poly1305.X86_64.Scrub`)
+# cover the IFMA and AVX2 pairs alike.
+GENERIC = {"vg_mlkem768_encaps_spec", "vg_chacha20_poly1305_seal_spec", "vg_chacha20_poly1305_open_spec"}
 
 
 def fail(msg):
