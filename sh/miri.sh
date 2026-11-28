@@ -162,6 +162,7 @@ slow=(
     mid::sha2::tests::sha512_all_lengths
     mid::sha3::tests::cavp_shake
     mid::sha3::tests::sha3_256_all_lengths
+    low::portable::aes_nohw::tests::configurations_agree
     mid::sha3::tests::sha3_512_all_lengths
     mid::slhdsa::tests::sign_verify_round_trip
     mid::x25519::tests::rfc7748_3
@@ -190,6 +191,9 @@ args=(-p rind --locked --target "$target" --lib --test cpu --test debug)
 if [[ $(rustc --print cfg --target "$target") == *'target_pointer_width="32"'* ]]; then
     filter="$filter and not (test(/^high::/) and not test(/^high::(asn1|pkcs1|pkcs8|sec1|spki)::/))"
     MIRIFLAGS+=" -Zmiri-address-reuse-rate=1"
+    # i686 enables SSE2, which would take AES off the 32-bit words only this
+    # run checks under Miri.
+    RUSTFLAGS+=' --cfg rind_no_sse2'
 fi
 
 # A slow entry that names no test, such as one a rename left behind, would let

@@ -1217,12 +1217,23 @@ configuration, which bitslices two blocks into 32-bit words, and for AES-GCM a
 port of aws-lc's `gcm_nohw.c` in its 32-bit configuration, composed the same
 way. A key expands both once, when it is made, holding its round keys
 bitsliced, and seals and opens in place. The portable backend always takes the
-paths without NEON and the extension, and runs both ports in their 64-bit
-configurations on 64-bit targets, four blocks into 64-bit words. On x86_64
-under `--cfg rind_portable` they measured 0.18x the time of the libcrux
-bitsliced block cipher they replaced for AES-GCM from 1200 bytes, and
-0.93-1.03x aws-lc's time there, whose C bitslices eight blocks into SSE2
-registers on that row; AES-CTR and CBC decryption measured 1.08-1.23x it.
+paths without NEON and the extension. On an x86 or x86_64 target that enables
+SSE2 at compile time, which is all of them but the soft-float
+`x86_64-unknown-none`, the UEFI targets, and i586, it runs the AES port in
+the SSE2 configuration x86_64 runs without SSSE3, eight blocks a pass, since
+AGENTS.md lets a backend require the CPU features its target enables at
+compile time. Its round keys then take 1.9 KiB. Elsewhere
+it runs both ports in their 64-bit configurations on 64-bit targets, four
+blocks into 64-bit words. Eight blocks in two `u64` lanes without
+intrinsics measured slower there: LLVM vectorizes none of the circuit, so it
+ran 95 instructions per CTR byte to four blocks' 88. Under `--cfg
+rind_portable` on x86_64, the four-block port measured 0.18x the time of the
+libcrux bitsliced block cipher it replaced for AES-GCM from 1200 bytes. On a
+shared 2-core VM the SSE2 one took 0.49-0.77x the four-block port's time for
+AES-GCM, AES-CTR, and CBC decryption at 1200 bytes and 16 KB, and 0.67-1.05x
+the time of aws-lc's C, which bitslices eight blocks into SSE2 registers on
+that row. NEON on aarch64, VSX on powerpc64le, and wasm's simd128 wait on
+measurements on their own targets (`quest/m2/speed/portable-aes-vectors`).
 
 AES-192 takes each of these paths with 12 rounds, but for three sources with
 no AES-192: Vale's AES-GCM, so x86_64 runs the by-8 code where Vale would
