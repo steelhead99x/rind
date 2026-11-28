@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
 import android.graphics.Typeface;
+import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.Gravity;
@@ -169,16 +170,17 @@ final class BenchView extends LinearLayout {
      * again; the native run state alone can't tell, since process death
      * clears it.
      */
-    BenchView(Activity host, Intent intent, boolean restored) {
+    BenchView(Activity host, Intent intent, Bundle saved) {
         super(host);
         this.host = host;
-        this.restored = restored;
+        this.restored = saved != null;
         // A restored activity gets its old intent again: only a fresh launch asks for a run, but a restored
         // runner launch still sets the collector it gave, so runs by hand keep going there.
         if (restored) {
             // The collector runs went to before, whichever launch set it (MainActivity keeps only the latest
-            // intent), and the restored intent's preselection; a restored activity never queues a run.
-            if (collectorSet) useCollector(savedHost, savedPort);
+            // intent), from the saved state, which outlives the process; and the restored intent's
+            // preselection. A restored activity never queues a run.
+            if (saved.getBoolean(KEY_COLLECTOR_SET)) useCollector(saved.getString(KEY_HOST), saved.getInt(KEY_PORT, Collector.PORT));
             else if (isRunnerLaunch(intent)) { Launch l = new Launch(intent, null, Collector.PORT); if (l.setsCollector) useCollector(l.host, l.port); }
             preselect(intent);
         } else if (isRunnerLaunch(intent)) {
@@ -414,21 +416,26 @@ final class BenchView extends LinearLayout {
         else if ("quick".equals(preset)) { fullPreset = false; presetChanged(); }
     }
 
+    private static final String KEY_HOST = "rindbench.collector_host", KEY_PORT = "rindbench.collector_port",
+            KEY_COLLECTOR_SET = "rindbench.collector_set";
     /**
-     * The collector an intent last set, per process, so a recreated view keeps sending there whichever intent
-     * the activity comes back with; {@code collectorSet} once any intent has set one.
+     * Whether an intent has set the collector (runnerHost and runnerPort): the activity's saved state keeps
+     * it, so a recreated view, even in a new process, keeps sending there whichever intent it comes back with.
      */
-    private static String savedHost;
-    private static int savedPort = Collector.PORT;
-    private static boolean collectorSet;
+    private boolean collectorSet;
+
+    /** The activity's onSaveInstanceState. */
+    void saveState(Bundle out) {
+        out.putBoolean(KEY_COLLECTOR_SET, collectorSet);
+        out.putString(KEY_HOST, runnerHost);
+        out.putInt(KEY_PORT, runnerPort);
+    }
 
     /**
      * Sends runs to {@code h}:{@code p}, or with a null {@code h} to the USB or built-in collector, and probes
      * it if it changed; an unchanged one keeps the collector the last probe found.
      */
     private boolean useCollector(String h, int p) {
-        savedHost = h;
-        savedPort = h == null ? Collector.PORT : p;
         collectorSet = true;
         boolean changed = h == null ? runnerHost != null : !h.equals(runnerHost) || p != runnerPort;
         if (!changed) return false;

@@ -58,7 +58,7 @@ public class MainActivity extends Activity {
             return insets;
         });
 
-        bench = new BenchView(this, getIntent(), b != null);
+        bench = new BenchView(this, getIntent(), b);
         LearnView learn = new LearnView(this);
         contender = new ContenderView(this);
         pages[0] = bench; pages[1] = learn; pages[2] = contender;
@@ -208,6 +208,11 @@ public class MainActivity extends Activity {
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         }
         if (bench != null) bench.onChromeRelayout();
+    }
+
+    @Override protected void onSaveInstanceState(Bundle out) {
+        super.onSaveInstanceState(out);
+        if (bench != null) bench.saveState(out);
     }
 
     @Override protected void onStart() {
