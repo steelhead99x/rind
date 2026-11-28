@@ -528,15 +528,7 @@ final class BenchView extends LinearLayout {
             return;
         }
         autostart = new Runnable() {
-            private boolean cleared;
-
             @Override public void run() {
-                // A finished run's results are cleared once, as the Clear button does, so Start can run;
-                // Clear probes the collector again.
-                if (!cleared && onScreen && tabShown && !running) {
-                    cleared = true;
-                    if (!nativeStatus().optString("run_id", "").isEmpty()) clearTapped();
-                }
                 // Until the collector probe answers, the run's collector isn't known: wait for it, still queued.
                 if (probing) { ui.postDelayed(this, 250); return; }
                 autostart = null;
@@ -544,6 +536,9 @@ final class BenchView extends LinearLayout {
                     notStarted(running ? "a run is going" : "the app or the Bench tab was left");
                     return;
                 }
+                // A finished run's results are cleared only now, right before Start, so a launch dropped
+                // while it waited leaves them shown; the collector was just probed, so no new probe.
+                if (!nativeStatus().optString("run_id", "").isEmpty()) clearResults(false);
                 agree.setChecked(true);
                 startTapped();
             }
@@ -873,6 +868,11 @@ final class BenchView extends LinearLayout {
     }
 
     private void clearTapped() {
+        clearResults(true);
+    }
+
+    /** Clears a finished run's results, as Clear does; {@code probe} also probes the collector again. */
+    private void clearResults(boolean probe) {
         if (running) return;
         JSONObject cleared = nativeStatus();
         clearedRun = cleared.optString("run_id", "");
@@ -892,7 +892,7 @@ final class BenchView extends LinearLayout {
         statusTitle.setText("Ready");
         setBody("");
         agreeChanged();
-        findCollector();
+        if (probe) findCollector();
     }
 
     private static JSONObject nativeStatus() {
