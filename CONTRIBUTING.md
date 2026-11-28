@@ -40,9 +40,11 @@ scheduled workflows' tools are in [TESTING.md](TESTING.md#running-the-tools).
 
 Both build their tests under the `test-fast` profile in `Cargo.toml`, a lightly
 optimized dev build with assertions and overflow checks on, since the slowest
-tests run minutes at `opt-level = 0`. For a bare test run, pass it as
-`cargo nextest run --cargo-profile test-fast`; `admin/ctgrind` and the other
-dev builds stay unoptimized.
+tests run minutes at `opt-level = 0`; `rind` itself takes `opt-level = 2`
+there, for its AVX2 field arithmetic. For a bare test run, pass it as
+`cargo nextest run --cargo-profile test-fast`, as `build.yml`'s CPU tiers do
+with `cargo test --profile test-fast`; `admin/ctgrind` and the other dev
+builds stay unoptimized.
 
 `cargo vet --locked` fails when the published rind crate's dependencies gain
 a crate or version no audit covers, as [SECURITY.md](SECURITY.md#supply-chain)

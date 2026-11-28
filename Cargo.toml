@@ -46,6 +46,14 @@ debug = "line-tables-only"
 inherits = "test"
 opt-level = 1
 
+# `edwards25519_msm_avx2`'s field arithmetic is thousands of SIMD operations
+# per scalar, which opt-level 1 does not inline, so VOPRF's 65536-element
+# batch on the no-ADX tier (`build.yml`'s `sh/cpu-tiers.sh` run, under this
+# profile) would take minutes. Only this profile takes opt-level 2: dev and
+# test stay unoptimized for ctgrind's debug rows.
+[profile.test-fast.package.rind]
+opt-level = 2
+
 [profile.dev.build-override]
 # Left unset, cargo gives a build dependency debuginfo only when the same
 # build also compiles it for runtime, which `cargo test` does and clippy does
@@ -77,16 +85,3 @@ opt-level = 3
 
 [profile.dev.package.subtle]
 debug-assertions = false
-
-# `edwards25519_msm_avx2`'s field arithmetic is thousands of SIMD operations
-# per scalar. A debug build does not inline them, so VOPRF's 65536-element
-# batch, which the no-ADX tier of `cargo test --workspace` runs, takes
-# minutes (about 50x the s2n-bignum path, which is already assembly).
-# opt-level 2 inlines that code. Overflow checks stay on, unlike the
-# curve25519-dalek override above, which needs release's level to fold a
-# secret-dependent iterator.
-[profile.dev.package.rind]
-opt-level = 2
-
-[profile.test.package.rind]
-opt-level = 2
