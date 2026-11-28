@@ -21,12 +21,12 @@
 [[gap]]
 operations = ["chacha20poly1305/*/16KB", "chacha20poly1305-open/*/16KB", "xchacha20poly1305/*/16KB"]
 on = ["no AES-NI", "SSE2"]
-reason = "Without SSE4.1 rind runs Graviola's scalar Poly1305 rather than port BoringSSL's SSE2 `poly1305_vec.c` for CPUs older than Westmere, as ALGORITHMS.md records."
+quest = "/quest/m2/speed/sse2-poly1305.md"
 
 [[gap]]
 operations = ["quic-header-protection/aes128", "quic-header-protection/aes256"]
 on = ["kixtop"]
-quest = "/quest/m2/speed/aarch64-quic-hp-direct.md"
+reason = "AES header protection on aarch64 reaches the key's cipher through an indirect call, as ALGORITHMS.md notes, which costs 3.75 ns against aws-lc-rs's 2.89 ns for one AES-128 block, and 3.72 against 3.13 for AES-256."
 
 [[gap]]
 operations = ["aes*-gcm*", "rustls-bulk/*", "aes*-ctr/*", "aes*-cbc-*"]

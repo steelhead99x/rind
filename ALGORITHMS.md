@@ -221,6 +221,12 @@ with portable Rust in place of the assembly armv7 runs regardless.
   1.04 and 1.72. RustCrypto's `sha2` and Graviola's portable SHA-256 measured slower
   still. [`proofs/`](proofs/README.md) proves the port in Lean against
   FIPS 180-4.
+- portable: SHA-1 is rind's own compression in `generic::sha1`, with all
+  80 rounds written out so every index into its 16-word schedule window is
+  a constant, the shape of aws-lc's integer `sha1_block_data_order_nohw`.
+  On x86_64 it ran about 6% fewer instructions a block than aws-lc's C and
+  took 0.95-0.98 of its time from 1200 B to 16 KB on a shared VM, where the
+  loop it replaced, which LLVM left partly rolled, took 1.01-1.11.
 - portable, 32-bit microcontrollers (ESP-IDF or no OS): SHA-384/512 is
   rind's rolled loop in `generic::sha512_rolled`, a few kilobytes of code
   for a small instruction cache. On a Seeed XIAO ESP32-S3 it took about

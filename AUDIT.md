@@ -337,10 +337,7 @@ Functions no test runs: the nightly `coverage` workflow fails on a
 published function that no tier runs, unless `admin/coverage.allow` gives
 a reason. It allows the unpublished rind-fips and rind-openssl and rind's
 FIPS code, which only rind-fips runs; the decryption keys' wipes that drop
-glue never reaches; error arms for failures no test can cause; and pyrind's
-and rind-dart's functions their 0.4 reshapes rewrite, which
-[Every published function runs under a test](/quest/m2/confidence/uncovered-functions.md)
-then tests.
+glue never reaches; and error arms for failures no test can cause.
 
 ## `unsafe`
 
