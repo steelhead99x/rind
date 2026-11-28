@@ -28,6 +28,21 @@ ml-dsa = []
 slh-dsa = []
 # zeroize's `ZeroizeOnDrop` on every type that wipes itself on drop.
 zeroize = ["dep:zeroize"]
+# Caches each ECDSA public key's eight-point verification table on targets
+# without compare-and-swap but with 8- and 32-bit atomics: from Rust 1.97 as
+# rustc reports them for the target, built-in or custom, and before it the
+# built-in `thumbv6m-none-eabi`, RISC-V `riscv32{e,em,emc,i,im,imc,imfc}`
+# targets, and `xtensa-esp32s2-none-elf`. Those otherwise
+# rebuild it on every verification. Repeated P-256 verification with one key
+# was about 10% faster on a Cortex-M0 model, for about 1.2 KiB more in every
+# ECDSA public key (P-256 too: the key is sized for P-521) and about 3.4 KiB
+# more stack. Targets with compare-and-swap always cache the table and ignore
+# this; any other target without it never caches, and the build warns. Before
+# Rust 1.97, Cargo gives the build script only a custom specification's file
+# stem, so a custom target named exactly like a listed built-in one, kept
+# outside the paths build.rs searches and without atomics, is taken for it
+# and fails to compile on the missing `AtomicU32`.
+no-cas-ecdsa-cache = []
 # Runs the unrolled SHA-512 body on the ESP32-S3 instead of the rolled loop
 # every 32-bit microcontroller runs by default. The unrolled body is about 18 KiB of
 # code against the rolled loop's 1.4 KiB. On `xtensa-esp32s3-espidf` it is

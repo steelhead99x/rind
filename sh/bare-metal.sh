@@ -170,7 +170,9 @@ if [[ ${1:-} == xtensa ]]; then
 fi
 
 # ARMv6-M (Cortex-M0+, the RP2040) and RV32IMC (the ESP32-C3) have no
-# compare-and-swap, so they build `reuse_cache_without_cas`. ARMv7E-M
+# compare-and-swap, so they build `reuse_cache_without_cas`; with
+# `no-cas-ecdsa-cache` they cache public ECDSA tables through atomic loads and
+# stores instead, and ML-DSA's expansion still rebuilds. ARMv7E-M
 # (Cortex-M4 and M7, such as the nRF52840) has it, on the portable backend.
 # A-profile `armv7a-none-eabi`, R-profile `armv7r-none-eabihf`, and
 # `aarch64-unknown-none` are on the portable backend too: their assembly makes
@@ -192,6 +194,28 @@ for target in \
     aarch64-unknown-none-softfloat \
     x86_64-unknown-none; do
     lint "$target"
+done
+# The opt-in ECDSA table cache of the two targets without compare-and-swap,
+# with ML-DSA's uncached expansion and without it.
+for target in thumbv6m-none-eabi riscv32imc-unknown-none-elf; do
+    lint "$target" --features no-cas-ecdsa-cache
+    lint "$target" --no-default-features --features no-cas-ecdsa-cache
+done
+# Clippy generates no code, so each is also built once, in release as
+# firmware would be, compiling the table's 32-bit atomic loads and stores.
+# rind's build script decides from the target's atomics whether the feature
+# takes effect, and only warns when it does not, so the build's messages must
+# show it set `rind_no_cas_cache`.
+for target in thumbv6m-none-eabi riscv32imc-unknown-none-elf; do
+    json=$(mktemp)
+    run_cargo "$target" "$(required_flags "$target")" "${cargo[@]}" build -p rind --lib --locked \
+        --target "$target" --release --features no-cas-ecdsa-cache --message-format=json >"$json"
+    if ! grep '"reason":"build-script-executed"' "$json" | grep -q '"rind_no_cas_cache"'; then
+        rm -f "$json"
+        echo "error: no-cas-ecdsa-cache did not set rind_no_cas_cache for $target" >&2
+        exit 1
+    fi
+    rm -f "$json"
 done
 assemble x86_64-unknown-none
 # The rlib this cargo invocation wrote. A `find` of the shared debug

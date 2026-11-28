@@ -198,6 +198,8 @@ mod generic {
     // Where there is no compare-and-swap, and in tests to test it.
     #[cfg(any(not(target_has_atomic = "8"), test))]
     pub(super) mod reuse_cache_without_cas;
+    #[cfg(any(rind_no_cas_cache, test))]
+    pub(super) mod verification_table;
     // The portable backend's SHA-1 and SHA-256 (but ESP-IDF Xtensa's
     // SHA-256, in `portable::sha`), and both in armv7 and x86_64 tests to
     // check the assembly against.
@@ -328,6 +330,8 @@ pub(crate) use generic::poly1305;
 pub(crate) use generic::reuse_cache::ReuseCache;
 #[cfg(not(target_has_atomic = "8"))]
 pub(crate) use generic::reuse_cache_without_cas::ReuseCache;
+#[cfg(rind_no_cas_cache)]
+pub(crate) use generic::verification_table::VerificationTable;
 pub(crate) use generic::zeroise::{Zeroable, ZeroableRef, zeroise, zeroise_value};
 pub(crate) use mcdt::Mcdt;
 #[cfg(rind_backend = "portable")]
