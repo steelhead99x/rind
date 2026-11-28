@@ -288,9 +288,7 @@ pyca/verified-garbage <https://github.com/pyca/verified-garbage>
   P256r1, P384r1, and P512r1 with their ECDH, ECDSA, and key specs); the
   code under Impl that the cosimulation's programs import (bignum,
   ChaCha20, ChaCha20-Poly1305, Poly1305, ECDH, ECDSA, Montgomery, P-256,
-  RSA, scrub, stack-scratch, Weierstrass, and X25519); and the x86_64
-  scrub's proof framework under Proof/Framework, whose functions compute
-  that clearing's arguments. admin/import-vg-models copies them byte for
+  RSA, scrub, stack-scratch, Weierstrass, and X25519). admin/import-vg-models copies them byte for
   byte from verified-garbage at the same commit into
   proofs/verified-garbage/VerifiedGarbage, but for P-256's CombTable7 and
   GTable9, which admin/import-vg-models --tables writes, byte for byte as

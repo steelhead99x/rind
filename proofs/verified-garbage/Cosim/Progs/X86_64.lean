@@ -1,6 +1,5 @@
 import VerifiedGarbage.Impl.Ecdh.P256.X86_64.Ifma
 import VerifiedGarbage.Impl.Scrub.X86_64
-import VerifiedGarbage.Proof.Framework.X86_64.ScrubOr
 
 /-!
 # The code of VG's x86_64 routines that rind states leakage axioms about
@@ -14,22 +13,17 @@ assembly text and rind's machine code.
 
 namespace Cosim.Progs
 
-open VG VG.Impl VG.Impl.Scrub.X86_64
+open VG VG.Impl
 
 /-- `Artifacts/EcdhP256/X86_64.lean`'s `vg_ecdh_p256_ifma`, with AVX512_IFMA:
-`exchangeP256Ifma`, then the clearing `withScrubAllM` adds. Where its side
-conditions hold, as `vg-print` finds they do for this code (it prints VG's
-assembly), that is `withScrubAllF`'s `scrubRegF`, whose arguments are
-computed here by VG's own functions from the code and its 16 bytes of
-stack, as `withScrubAllF` computes them (`Proof/Framework/X86_64/ScrubOr.lean`):
-the level `levelForE`, every granule of the stack (`Scrub.allKs`), and the
-registers `xsOf`, `psOf` and `gsOf Taint.clobbers`, with MXCSR's flags left
-(`f := .avx`). The result width, 32 bits, is `exchangeApi`'s. -/
+`exchangeP256Ifma`, then the clearing `withScrubAllM` adds, whose arguments
+`withScrubAllF` computes for this code (`Proof/Framework/X86_64/ScrubOr.lean`):
+at level `evex`, a 32-bit result, every SSE register (the code writes vector
+registers), `r11` and every scratch register, and its 16 bytes of stack, in one
+store at offset 0, with MXCSR's flags left (`f := .avx`), as its code leaves the
+same MXCSR in two runs. `vg-print` checks it prints as VG's assembly. -/
 def ecdhP256Ifma : Prog X86_64.isa :=
-  let code := Ecdh.X86_64.exchangeP256Ifma
-  let cs := chunks 16
-  let ks := X86_64.Scrub.allKs cs
-  scrub (X86_64.RScrub.levelForE code) 32 (xsOf code ks) (psOf ks)
-    (gsOf X86_64.Taint.clobbers code) ks cs code (f := .avx)
+  Scrub.X86_64.scrub .evex 32 Scrub.X86_64.xregs [.r11] Scrub.X86_64.scratchRegs [0] [16]
+    Ecdh.X86_64.exchangeP256Ifma (f := .avx)
 
 end Cosim.Progs

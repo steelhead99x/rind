@@ -255,9 +255,7 @@ from P-256's arithmetic before any Lean build, and `--check` fails unless
 that generator's output is VG's byte for byte (it compares what the
 generator computes, not the files in the worktree),
 and the cosimulation over them, a Lake package of its own, since the models
-import only Lean core and, in the scrub's `Proof/` closure that
-`Cosim/Progs/X86_64.lean` computes its clearing's arguments with, Batteries,
-at the revision Mathlib pins. `nix develop .#vg --command admin/prove vg` checks,
+import only Lean core. `nix develop .#vg --command admin/prove vg` checks,
 for this CPU's target:
 
 - that every instruction of VG's compiled naked functions, and of each `vg_*`
@@ -1824,7 +1822,6 @@ proof after those.
 - `Rind/X86_64/VgP256Ct.lean`: the axiom that pyca/verified-garbage's
   `vg_ecdh_p256_ifma` is constant time under its contract, over
   `Cosim.Progs.ecdhP256Ifma` (`verified-garbage/Cosim/Progs/X86_64.lean`),
-  whose clearing's arguments VG's own `withScrubAllF` functions compute, and
   which `vg-print x86_64` prints.
 - `Rind/Rsa.lean` and `Rind/RsaLemmas.lean`: RFC 8017's verification,
   transliterated, and its lemmas; `Rind/X86_64/{RsaBytes,RsaMont,RsaPublic,RsaKey,RsaVerify,RsaPss}.lean`:

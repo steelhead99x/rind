@@ -26,13 +26,11 @@ that pin fails `--check` until the models move with it.
 `admin/upstream verified-garbage` checks out VG at REV.
 """
 
-import json
 import os
 import re
 import subprocess
 import sys
 import tempfile
-import tomllib
 
 ADMIN = os.path.dirname(os.path.abspath(__file__))
 with open(os.path.join(ADMIN, "import-vg")) as f:
@@ -87,12 +85,6 @@ ROOTS = [
     # proofs/Rind/X86_64/VgP256Ct.lean states `ConstantTime` of.
     "VerifiedGarbage.Impl.Ecdh.P256.X86_64.Ifma",
     "VerifiedGarbage.Impl.Scrub.X86_64",
-    # The functions VG's registration computes that clearing's arguments
-    # with (`withScrubAllF`: `levelForE`, `allKs`, `Taint.clobbers`), so
-    # `Cosim.Progs.X86_64` takes them from VG's code, not a restatement.
-    # Its closure imports Batteries, which proofs/verified-garbage requires
-    # at the revision Mathlib's manifest pins.
-    "VerifiedGarbage.Proof.Framework.X86_64.ScrubOr",
 ]
 
 # P-256 over its prime field, `y^2 = x^3 - 3x + b`, and its generator, for
@@ -207,14 +199,6 @@ TABLES = {
 IMPORT = re.compile(r"^(?:public )?(?:meta )?import (VerifiedGarbage\.[A-Za-z0-9_.]+)\b", re.M)
 
 
-def batteries_rev(manifest, where):
-    """The revision a Lake manifest pins Batteries at."""
-    revs = [p["rev"] for p in json.loads(manifest)["packages"] if p["name"] == "batteries"]
-    if len(revs) != 1:
-        sys.exit(f"admin/import-vg-models: {where} pins no Batteries")
-    return revs[0]
-
-
 def path_of(module):
     return os.path.join(*module.split(".")) + ".lean"
 
@@ -262,24 +246,6 @@ def main():
             check=True, stdout=subprocess.PIPE,
         ).stdout
         todo += IMPORT.findall(want[module].decode())
-
-    # The scrub framework's closure imports Batteries. proofs/verified-garbage
-    # pins it by hand, and builds alone (`admin/prove vg`) at that pin, but
-    # within proofs/ (`admin/prove lean`) at the one proofs/lake-manifest.json
-    # inherits through Mathlib; both must be the one VG builds against at REV.
-    vg_batteries = batteries_rev(subprocess.run(
-        ["git", "--no-replace-objects", "-C", clone, "show", f"{REV}:lean/lake-manifest.json"],
-        check=True, stdout=subprocess.PIPE,
-    ).stdout.decode(), f"VG's lean/lake-manifest.json at {REV}")
-    for rel in ["proofs/lake-manifest.json", "proofs/verified-garbage/lake-manifest.json"]:
-        with open(os.path.join(ADMIN, "..", rel)) as f:
-            rev = batteries_rev(f.read(), rel)
-        if rev != vg_batteries:
-            sys.exit(f"admin/import-vg-models: {rel} pins Batteries at {rev}, not VG's {vg_batteries}")
-    with open(os.path.join(DEST, "lakefile.toml"), "rb") as f:
-        revs = [r.get("rev") for r in tomllib.load(f).get("require", []) if r.get("name") == "batteries"]
-    if revs != [vg_batteries]:
-        sys.exit(f"admin/import-vg-models: proofs/verified-garbage/lakefile.toml requires Batteries at {revs}, not VG's {vg_batteries}")
 
     if missing := sorted(set(TABLES) - set(want)):
         sys.exit(f"admin/import-vg-models: no root imports {', '.join(missing)}: drop it from TABLES")

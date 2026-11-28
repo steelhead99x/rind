@@ -16,10 +16,8 @@ nothing about rind's Rust wrapper.
 
 The code is `Cosim.Progs.ecdhP256Ifma`: VG's `Impl.Ecdh.X86_64.exchangeP256Ifma`
 with the clearing `Impl.Scrub.X86_64.scrub` that VG's registration
-(`Artifacts/EcdhP256/X86_64.lean`, `withScrubAllM`) adds, with its arguments
-computed by the functions `withScrubAllF` computes them with, which
-`admin/import-vg-models` vendors from VG's `Proof/Framework/X86_64/ScrubOr.lean`
-(`Cosim/Progs/X86_64.lean`). `vg-print x86_64` and
+(`Artifacts/EcdhP256/X86_64.lean`, `withScrubAllM`) adds, written out with the
+arguments its `withScrubAllF` computes for this code (`Cosim/Progs/X86_64.lean`). `vg-print x86_64` and
 `admin/vg-bytes --progs` check that its text, and that of the two functions it
 calls, is VG's assembly of `vg_ecdh_p256_ifma` line for line, and rind's
 machine code is checked against that text, so the link from `Prog` to bytes
