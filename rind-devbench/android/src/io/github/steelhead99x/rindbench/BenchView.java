@@ -184,11 +184,15 @@ final class BenchView extends LinearLayout {
             else if (isRunnerLaunch(intent)) { Launch l = new Launch(intent, null, Collector.PORT); if (l.setsCollector) useCollector(l.host, l.port); }
             preselect(intent);
         } else if (isRunnerLaunch(intent)) {
-            Launch l = new Launch(intent, null, Collector.PORT);
-            if (l.setsCollector) useCollector(l.host, l.port);
-            // A launch that a run going will turn away leaves the picker as it is.
-            if (!nativeStatus().optBoolean("running")) showLaunch(l);
-            pending = l;
+            // A run that outlived the last activity turns the launch away now, changing nothing.
+            if (nativeStatus().optBoolean("running")) {
+                notStarted("a run is going");
+            } else {
+                Launch l = new Launch(intent, null, Collector.PORT);
+                if (l.setsCollector) useCollector(l.host, l.port);
+                showLaunch(l);
+                pending = l;
+            }
         } else {
             preselect(intent);
         }
@@ -578,12 +582,16 @@ final class BenchView extends LinearLayout {
         if (it == null) return;
         if (isRunnerLaunch(it)) {
             dropLaunch("a later launch replaced it");
+            // A run going turns it away now, changing nothing; before the list loads, the view doesn't know of
+            // a run that outlived its activity yet, so the library is asked.
+            if (running || nativeStatus().optBoolean("running")) {
+                notStarted("a run is going");
+                return;
+            }
             // Its collector applies now, for the screen and for runs by hand; its own run takes it as resolved here.
             Launch l = new Launch(it, runnerHost, runnerPort);
             if (l.setsCollector) useCollector(l.host, l.port);
-            // A launch that a run going will turn away leaves the picker as it is; before the list loads, the
-            // view doesn't know of a run that outlived its activity yet, so the library is asked.
-            if (!running && !nativeStatus().optBoolean("running")) showLaunch(l);
+            showLaunch(l);
             pending = l;
             if (loadedOnce) scheduleAutostart();
             return;
@@ -883,6 +891,8 @@ final class BenchView extends LinearLayout {
     }
 
     private void agreeChanged() {
+        // Consent withdrawn: a run by hand waiting for the collector won't start, so the screen stops saying so.
+        if (!agree.isChecked()) cancelDeferredStart();
         boolean on = agree.isChecked() && catalogReady && !running;
         startBtn.setEnabled(on);
         if (!catalogReady) startBtn.setContentDescription("Start, loading tests");
