@@ -389,15 +389,29 @@ fn select(cfg: &Config, rows: &[Value]) -> Vec<(String, String)> {
     selected
 }
 
-/// `cat` is the catalog `start()` checked the selection against.
-/// Whether `rows` has a row for every id, library and group `cfg` names.
-fn covers(cfg: &Config, rows: &[Value]) -> bool {
-    let has = |field: &str, v: &str| rows.iter().any(|r| r[field] == v);
-    cfg.ids.iter().all(|v| has("id", v))
-        && cfg.libraries.iter().all(|v| has("library", v))
-        && cfg.sections.iter().all(|v| has("section", v))
+/// A catalog's rows, borrowed.
+fn rows_of(c: &Value) -> &[Value] {
+    c["rows"].as_array().map_or(&[][..], |r| r.as_slice())
 }
 
+/// Whether `rows` has a row for every name `cfg` selects by: its ids when it names ids, as [`select`] goes
+/// by them alone, otherwise its libraries and groups.
+fn covers(cfg: &Config, rows: &[Value]) -> bool {
+    let has = |field: &str, v: &str| rows.iter().any(|r| r[field] == v);
+    if !cfg.ids.is_empty() {
+        return cfg.ids.iter().all(|v| has("id", v));
+    }
+    cfg.libraries.iter().all(|v| has("library", v)) && cfg.sections.iter().all(|v| has("section", v))
+}
+
+/// The catalog a run uses after its thread listed again: the relisted one when it still selects rows,
+/// otherwise the one start() checked, so a relist that failed outright can't leave the run with nothing.
+fn after_relist(cfg: &Config, checked: Arc<Value>, relisted: Arc<Value>) -> Arc<Value> {
+    if select(cfg, rows_of(&relisted)).is_empty() { checked } else { relisted }
+}
+
+/// `cat` is the catalog `start()` checked the selection against, or the one the run's thread listed again
+/// when that one failed in part (see [`after_relist`]).
 fn run(cfg: Config, cat: Arc<Value>) {
     let selected = select(&cfg, cat["rows"].as_array().unwrap());
     let rounds = cfg.rounds.unwrap_or(3).max(1);
@@ -604,8 +618,7 @@ pub fn start(config_json: &str) -> Result<(), String> {
     // start() runs on the apps' UI thread, so it reuses a catalog that failed in part for the rows it does
     // list. It lists again here only when those rows select nothing and the catalog came from the cache, as
     // when the keys directory has been filled in since; a fresh listing isn't repeated.
-    let rows_of = |c: &Value| c["rows"].as_array().cloned().unwrap_or_default();
-    let picks_none = |c: &Value| select(&cfg, &rows_of(c)).is_empty();
+    let picks_none = |c: &Value| select(&cfg, rows_of(c)).is_empty();
     let was_cached = cache.iter().any(|(k, _)| *k == listing_env());
     let mut cat = catalog_in(&mut cache, false);
     if picks_none(&cat) && listing_failure(&cat).is_some() && was_cached {
@@ -620,13 +633,13 @@ pub fn start(config_json: &str) -> Result<(), String> {
     // A partly failed catalog that selects some rows but lacks others the run names (an id, library or group
     // with no row in it) is listed again on the run's thread before the run, so a row that lists now is not
     // silently left out.
-    let refresh = listing_failure(&cat).is_some() && !covers(&cfg, &rows_of(&cat));
+    let refresh = listing_failure(&cat).is_some() && !covers(&cfg, rows_of(&cat));
     drop(cache);
     std::thread::Builder::new()
         .name("devbench".into())
         .stack_size(64 << 20)
         .spawn(move || {
-            let cat = if refresh { catalog() } else { cat };
+            let cat = if refresh { after_relist(&cfg, cat.clone(), catalog()) } else { cat };
             let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(cfg, cat)));
             if r.is_err() {
                 set_status(|s| {
@@ -748,6 +761,22 @@ mod tests {
         assert!(!covers(&cfg(json!({"ids": ["a", "tls"]})), &rows()));
         assert!(!covers(&cfg(json!({"libraries": ["rind", "rustls"]})), &rows()));
         assert!(!covers(&cfg(json!({"sections": ["AEADs", "TLS"]})), &rows()));
+        // Ids alone decide what runs, so a group with no row doesn't matter beside listed ids.
+        assert!(covers(&cfg(json!({"ids": ["a"], "sections": ["TLS"]})), &rows()));
+    }
+
+    #[test]
+    fn a_relist_that_selects_nothing_keeps_the_checked_catalog() {
+        let checked = Arc::new(json!({"rows": rows(), "files_failed_to_list": ["rustls"]}));
+        let c = cfg(json!({"ids": ["a", "tls"]}));
+        // The relist failed outright, as when its thread can't spawn: the run keeps the rows it was started on.
+        let failed = Arc::new(json!({"error": "listing panicked", "rows": []}));
+        assert!(Arc::ptr_eq(&after_relist(&c, checked.clone(), failed), &checked));
+        // The relist found more rows: the run takes them.
+        let mut more = rows();
+        more.push(json!({"id": "tls", "file": "rustls", "library": "rind", "section": "TLS", "extra": false}));
+        let relisted = Arc::new(json!({"rows": more, "files_failed_to_list": []}));
+        assert!(Arc::ptr_eq(&after_relist(&c, checked, relisted.clone()), &relisted));
     }
 
     #[test]
