@@ -1,24 +1,35 @@
+#[cfg(target_arch = "xtensa")]
+fn main() {}
+
+#[cfg(not(target_arch = "xtensa"))]
 mod common;
 
+#[cfg(not(target_arch = "xtensa"))]
 use std::hint::black_box;
 
+#[cfg(not(target_arch = "xtensa"))]
 use common::{Dit, dit};
 
+#[cfg(not(target_arch = "xtensa"))]
 const PUBLIC_KEY: &[u8; 32] = b"\xe6\xdb\x68\x67\x58\x30\x30\xdb\x35\x94\xc1\xa4\x24\xb1\x5f\x7c\x72\x66\x24\xec\x26\xb3\x35\x3b\x10\xa9\x03\xa6\xd0\xab\x1c\x4c";
 
 /// The scalar the stored-key rows load.
+#[cfg(not(target_arch = "xtensa"))]
 const SCALAR: [u8; 32] = [1; 32];
 
+#[cfg(not(target_arch = "xtensa"))]
 fn ring_rng() -> ring::rand::SystemRandom {
     ring::rand::SystemRandom::new()
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn aws_rng() -> aws_lc_rs::rand::SystemRandom {
     aws_lc_rs::rand::SystemRandom::new()
 }
 
 // Checks verified-garbage's public key and exchange against rind's, from a
 // fixed scalar, before any of its rows times them.
+#[cfg(not(target_arch = "xtensa"))]
 fn vg_agrees_with_rind() {
     use verified_garbage::x25519::{PrivateKey, PublicKey};
     let key = PrivateKey::from_bytes(&SCALAR);
@@ -35,6 +46,7 @@ fn vg_agrees_with_rind() {
 }
 
 /// Generates a key, encodes its public key, and agrees with a fixed peer.
+#[cfg(not(target_arch = "xtensa"))]
 fn rind_ecdh() {
     use rind::agreement::*;
     let our_private_key = PrivateKey::generate(&X25519).unwrap();
@@ -42,6 +54,7 @@ fn rind_ecdh() {
     black_box(our_private_key.agree(PUBLIC_KEY).unwrap());
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 mod x25519_ecdh {
     use swole::bench;
 
@@ -154,6 +167,7 @@ mod x25519_ecdh {
 }
 
 #[cfg(target_arch = "aarch64")]
+#[cfg(not(target_arch = "xtensa"))]
 mod dit_per_call {
     mod x25519_ecdh {
         use swole::bench;
@@ -169,6 +183,7 @@ mod dit_per_call {
 
 // Generate a key and its public key: the fixed-base multiplication alone,
 // where `x25519-ecdh` adds the variable-base one.
+#[cfg(not(target_arch = "xtensa"))]
 mod x25519_keygen {
     use swole::bench;
 
@@ -233,6 +248,7 @@ mod x25519_keygen {
 
 // Agree with a stored key, loaded once, as WebCrypto's `deriveBits` and
 // node's `ECDH` do: the variable-base multiplication alone.
+#[cfg(not(target_arch = "xtensa"))]
 mod x25519_ecdh_stored {
     use swole::bench;
 
@@ -278,6 +294,7 @@ mod x25519_ecdh_stored {
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn main() {
     swole::main();
 }

@@ -79,8 +79,14 @@
               "x86_64-unknown-linux-gnu"
               # Targets with no `std`, one per architecture rind has assembly for.
               "aarch64-unknown-none"
+              "aarch64-unknown-none-softfloat"
               "armv7a-none-eabi"
+              "armv7r-none-eabihf"
               "x86_64-unknown-none"
+              # Microcontrollers: M-profile (Thumb only), two without compare-and-swap.
+              "riscv32imc-unknown-none-elf"
+              "thumbv6m-none-eabi"
+              "thumbv7em-none-eabihf"
             ];
           };
 
@@ -241,6 +247,21 @@
                 $(pkg-config --cflags glib-2.0) -o ct-qemu-plugin.so $src
             '';
             installPhase = "install -D ct-qemu-plugin.so $out/lib/ct-qemu-plugin.so";
+          };
+
+          # The plugin `admin/dit-qemu` loads into qemu-aarch64 to read
+          # PSTATE.DIT at every instruction, built like the tracer above.
+          dit-qemu-plugin = pkgs.stdenv.mkDerivation {
+            name = "dit-qemu-plugin";
+            src = ./admin/dit-qemu-plugin.c;
+            dontUnpack = true;
+            nativeBuildInputs = [ pkgs.pkg-config ];
+            buildInputs = [ pkgs.glib ];
+            buildPhase = ''
+              $CC -O2 -shared -fPIC -Wall -Werror -I${pkgs.qemu-user}/include \
+                $(pkg-config --cflags glib-2.0) -o dit-qemu-plugin.so $src
+            '';
+            installPhase = "install -D dit-qemu-plugin.so $out/lib/dit-qemu-plugin.so";
           };
 
           # OpenSSL's `evp_test` and its X25519, Ed25519, ML-KEM, and ML-DSA
@@ -596,6 +617,39 @@
           sde-certs = ''
             export SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt
           '';
+
+          # `msrv-<version>`, with `.` as `_`, for each rust-version a workspace
+          # member declares itself rather than inheriting rind's, such as
+          # rind-openmls's 1.91: `just ci`'s msrv module checks a published
+          # one there. Read from the manifests, so a new adapter with its own
+          # rust-version needs no edit here. Nix evaluates a shell only when
+          # it is entered, so an unpublished member's version costs nothing.
+          msrv-shells =
+            let
+              workspace = builtins.fromTOML (builtins.readFile ./Cargo.toml);
+              declared = map (
+                member:
+                (builtins.fromTOML (builtins.readFile (./. + "/${member}/Cargo.toml"))).package.rust-version or null
+              ) workspace.workspace.members;
+              versions = pkgs.lib.unique (
+                builtins.filter (
+                  version: builtins.isString version && version != workspace.workspace.package.rust-version
+                ) declared
+              );
+            in
+            builtins.listToAttrs (
+              map (version: {
+                name = "msrv-${builtins.replaceStrings [ "." ] [ "_" ] version}";
+                value = pkgs.mkShell {
+                  packages = [
+                    (pkgs.rust-bin.fromRustupToolchain {
+                      channel = version;
+                      profile = "minimal";
+                    })
+                  ];
+                };
+              }) versions
+            );
         in
         {
           devShells = {
@@ -724,9 +778,9 @@
               };
             };
 
-            # The nightly MSRV job builds in it. The workspace's rust-version
-            # names a minor release, which resolves to its latest patch, as
-            # rustup does. The extra targets let it check rind's other
+            # `just ci`'s msrv module builds in it. The workspace's
+            # rust-version names a minor release, which resolves to its latest
+            # patch, as rustup does. The extra targets let it check rind's other
             # backends and 32-bit x86, which `check` does without a C toolchain.
             msrv = mkDevShell {
               packages = [
@@ -817,6 +871,22 @@
               env.OPENSSL_EVP_TEST = openssl-evp-test;
             };
 
+            # `admin/dit-disasm` runs in it: llvm-objdump, and the standard
+            # library of the aarch64 targets whose barrier after setting DIT
+            # it reads, Apple's and one that is not.
+            dit-disasm = pkgs.mkShell {
+              packages = [
+                (rust-stable.minimal.override {
+                  extensions = [ "llvm-tools" ];
+                  targets = [
+                    "aarch64-unknown-linux-gnu"
+                    "aarch64-apple-darwin"
+                  ];
+                })
+                pkgs.python3
+              ];
+            };
+
             # `admin/prove` and the prove workflow run in it. Lake fetches the
             # Lean toolchain that `proofs/lean-toolchain` names, whose bundled
             # `leantar` reads Mathlib's cache, which nixpkgs' Lean cannot.
@@ -856,6 +926,12 @@
                     "aarch64-unknown-linux-gnu"
                     "armv7-unknown-linux-gnueabihf"
                     "arm-unknown-linux-gnueabihf"
+                    "thumbv6m-none-eabi"
+                    "thumbv7m-none-eabi"
+                    "thumbv8m.base-none-eabi"
+                    "armv5te-unknown-linux-gnueabi"
+                    "riscv32i-unknown-none-elf"
+                    "riscv32imac-unknown-none-elf"
                     "i686-unknown-linux-gnu"
                     "loongarch64-unknown-linux-gnu"
                     "powerpc-unknown-linux-gnu"
@@ -991,6 +1067,23 @@
               target = "aarch64-unknown-linux-gnu";
               cross = pkgs.pkgsCross.aarch64-multiplatform;
             };
+
+            # `admin/dit-qemu` runs the aarch64 tests in it under qemu's `max`
+            # CPU, which has FEAT_DIT, and the plugin that reads PSTATE.DIT at
+            # every instruction.
+            dit-qemu =
+              (qemu-shell {
+                target = "aarch64-unknown-linux-gnu";
+                cross = pkgs.pkgsCross.aarch64-multiplatform;
+                cpu = "max";
+              }).overrideAttrs
+                (old: {
+                  nativeBuildInputs = old.nativeBuildInputs ++ [
+                    pkgs.python3
+                    pkgs.qemu-user
+                  ];
+                  RIND_DIT_QEMU_PLUGIN = "${dit-qemu-plugin}/lib/dit-qemu-plugin.so";
+                });
 
             # `just qemu s390x` tests the portable backend on big-endian
             # s390x in it.
@@ -1161,7 +1254,8 @@
                 fi
               '';
             };
-          };
+          }
+          // msrv-shells;
 
           # The swole the bench shell counts with, which times anywhere: the
           # weekly bench's native rows and `admin/bench-report` build it.

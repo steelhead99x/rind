@@ -374,17 +374,9 @@ pub(super) mod tests {
     }
 
     /// splitmix64, so failures reproduce.
-    pub(in super::super) struct Rng(pub(in super::super) u64);
+    pub(in super::super) use crate::low::generic::splitmix::Rng;
 
     impl Rng {
-        pub(in super::super) fn next(&mut self) -> u64 {
-            self.0 = self.0.wrapping_add(0x9e37_79b9_7f4a_7c15);
-            let mut z = self.0;
-            z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
-            z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
-            z ^ (z >> 31)
-        }
-
         /// `N` words holding a value below 2^`bits`.
         pub(in super::super) fn words<const N: usize>(&mut self, bits: u32) -> [u64; N] {
             core::array::from_fn(|i| {

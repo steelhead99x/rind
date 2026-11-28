@@ -1,10 +1,17 @@
+#[cfg(target_arch = "xtensa")]
+fn main() {}
+
+#[cfg(not(target_arch = "xtensa"))]
 mod common;
 
+#[cfg(not(target_arch = "xtensa"))]
 use std::hint::black_box;
 
+#[cfg(not(target_arch = "xtensa"))]
 use common::{Dit, dit};
 
 #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+#[cfg(not(target_arch = "xtensa"))]
 mod ossl {
     //! The openssl crate does not yet wrap ML-DSA key generation.
 
@@ -42,9 +49,11 @@ mod ossl {
 
 // The message every library signs. Each signature draws fresh randomness, so
 // the number of rejected attempts, and with it the time, varies alike.
+#[cfg(not(target_arch = "xtensa"))]
 const MESSAGE: &[u8] = b"rind ML-DSA benchmark message";
 
 // The longest signature, ML-DSA-87's.
+#[cfg(not(target_arch = "xtensa"))]
 const MAX_SIGNATURE_LEN: usize = 4627;
 
 // One parameter set's key generation, signing, and verification, each library
@@ -425,6 +434,7 @@ macro_rules! ml_dsa {
     };
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 ml_dsa!(
     mldsa44_keygen, mldsa44_sign, mldsa44_verify, mldsa44_load_verify,
     rind: MlDsa44,
@@ -435,6 +445,7 @@ ml_dsa!(
     openssl: c"ML-DSA-44", ML_DSA_44,
 );
 
+#[cfg(not(target_arch = "xtensa"))]
 ml_dsa!(
     mldsa65_keygen, mldsa65_sign, mldsa65_verify, mldsa65_load_verify,
     rind: MlDsa65,
@@ -445,6 +456,7 @@ ml_dsa!(
     openssl: c"ML-DSA-65", ML_DSA_65,
 );
 
+#[cfg(not(target_arch = "xtensa"))]
 ml_dsa!(
     mldsa87_keygen, mldsa87_sign, mldsa87_verify, mldsa87_load_verify,
     rind: MlDsa87,
@@ -455,6 +467,7 @@ ml_dsa!(
     openssl: c"ML-DSA-87", ML_DSA_87,
 );
 
+#[cfg(not(target_arch = "xtensa"))]
 fn main() {
     swole::main();
 }

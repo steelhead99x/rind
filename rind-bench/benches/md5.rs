@@ -1,16 +1,24 @@
+#[cfg(target_arch = "xtensa")]
+fn main() {}
+
+#[cfg(not(target_arch = "xtensa"))]
 mod common;
 
+#[cfg(not(target_arch = "xtensa"))]
 use common::{Dit, HASH_SIZES, Size};
 
+#[cfg(not(target_arch = "xtensa"))]
 fn input(size: Size) -> Vec<u8> {
     size.zeros()
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn rind_input(size: Size) -> Dit<Vec<u8>> {
     Dit::hold(size.zeros())
 }
 
 // A module named after the crate, so the crate is `::md5` inside it.
+#[cfg(not(target_arch = "xtensa"))]
 mod md5 {
     use swole::bench;
 
@@ -70,6 +78,7 @@ mod md5 {
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn main() {
     swole::main();
 }

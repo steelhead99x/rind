@@ -6,18 +6,18 @@ part of 'cryptography.dart';
 /// 65537, the only one rind uses.
 RsaKeyPairData _rsaGenerate(int modulusLength, List<int> publicExponent) {
   final size = switch (modulusLength) {
-    2048 => rind.RsaKeySize.rsa2048,
-    3072 => rind.RsaKeySize.rsa3072,
-    4096 => rind.RsaKeySize.rsa4096,
-    6144 => rind.RsaKeySize.rsa6144,
-    8192 => rind.RsaKeySize.rsa8192,
+    2048 => rsa.KeySize.rsa2048,
+    3072 => rsa.KeySize.rsa3072,
+    4096 => rsa.KeySize.rsa4096,
+    6144 => rsa.KeySize.rsa6144,
+    8192 => rsa.KeySize.rsa8192,
     _ => throw _unsupported('$modulusLength-bit RSA key generation'),
   };
   final exponent = publicExponent.skipWhile((b) => b == 0).toList();
   if (!_equal(exponent, const [1, 0, 1])) {
     throw _unsupported('RSA public exponents other than 65537');
   }
-  return _rsaPairFromPkcs8(rind.RsaKeyPair.generate(size).toPkcs8());
+  return _rsaPairFromPkcs8(rsa.KeyPair.generate(size).toPkcs8());
 }
 
 /// The package's key pair for rind's PKCS#8 export of one.
@@ -42,7 +42,7 @@ RsaKeyPairData _rsaPairFromPkcs8(Uint8List der) {
 }
 
 /// The rind key pair for the package's [keyPair].
-Future<({rind.RsaKeyPair key, RsaPublicKey publicKey})> _rsaKey(
+Future<({rsa.KeyPair key, RsaPublicKey publicKey})> _rsaKey(
   KeyPair keyPair,
 ) async {
   final data = await keyPair.extract();
@@ -59,18 +59,14 @@ Future<({rind.RsaKeyPair key, RsaPublicKey publicKey})> _rsaKey(
     for (final value in [data.n, data.e, data.d, data.p, data.q, dp, dq, qi])
       _derUnsigned(value),
   ]);
-  final key = _keyArgument(
-    'keyPair',
-    data,
-    () => rind.RsaKeyPair.fromPkcs1(pkcs1),
-  );
+  final key = _keyArgument('keyPair', data, () => rsa.KeyPair.fromPkcs1(pkcs1));
   return (key: key, publicKey: data.publicKey);
 }
 
 /// Whether [signature] verifies [message] under its RSA public key with
 /// [algorithm].
 bool _rsaVerify(
-  rind.RsaVerificationAlgorithm algorithm,
+  rsa.VerificationAlgorithm algorithm,
   List<int> message,
   Signature signature,
 ) {
@@ -85,8 +81,7 @@ bool _rsaVerify(
   final key = _keyArgument(
     'signature.publicKey',
     publicKey,
-    () => rind.PublicKey.fromComponents(
-      algorithm,
+    () => rsa.PublicKey.fromComponents(
       n: _bytes(publicKey.n),
       e: _bytes(publicKey.e),
     ),
@@ -95,23 +90,25 @@ bool _rsaVerify(
   return _keyArgument(
     'signature.publicKey',
     publicKey,
-    () => _verifies(key, message, signature.bytes),
+    () => _verifies(
+      () => key.verify(algorithm, _bytes(message), _bytes(signature.bytes)),
+    ),
   );
 }
 
 final class _RsaPkcs1 extends RsaSsaPkcs1v15 {
   _RsaPkcs1(this.hashAlgorithm)
     : _signing = switch (hashAlgorithm) {
-        Sha256() => rind.RsaSigningAlgorithm.pkcs1Sha256,
-        Sha384() => rind.RsaSigningAlgorithm.pkcs1Sha384,
-        Sha512() => rind.RsaSigningAlgorithm.pkcs1Sha512,
+        Sha256() => rsa.SigningAlgorithm.pkcs1Sha256,
+        Sha384() => rsa.SigningAlgorithm.pkcs1Sha384,
+        Sha512() => rsa.SigningAlgorithm.pkcs1Sha512,
         _ => null,
       },
       _verification = switch (hashAlgorithm) {
-        Sha1() => rind.rsaPkcs1Sha1,
-        Sha256() => rind.VerificationAlgorithm.rsaPkcs1Sha256,
-        Sha384() => rind.VerificationAlgorithm.rsaPkcs1Sha384,
-        Sha512() => rind.VerificationAlgorithm.rsaPkcs1Sha512,
+        Sha1() => rsa.pkcs1Sha1,
+        Sha256() => rsa.VerificationAlgorithm.pkcs1Sha256,
+        Sha384() => rsa.VerificationAlgorithm.pkcs1Sha384,
+        Sha512() => rsa.VerificationAlgorithm.pkcs1Sha512,
         _ => throw _unsupported('RSA PKCS#1 v1.5 with $hashAlgorithm'),
       },
       super.constructor();
@@ -120,8 +117,8 @@ final class _RsaPkcs1 extends RsaSsaPkcs1v15 {
   final HashAlgorithm hashAlgorithm;
 
   /// Null for SHA-1, which rind only verifies.
-  final rind.RsaSigningAlgorithm? _signing;
-  final rind.RsaVerificationAlgorithm _verification;
+  final rsa.SigningAlgorithm? _signing;
+  final rsa.VerificationAlgorithm _verification;
 
   @override
   Future<RsaKeyPair> newKeyPair({
@@ -160,15 +157,15 @@ final class _RsaPss extends RsaPss {
         'nonceLengthInBytes',
       ),
       _signing = switch (hashAlgorithm) {
-        Sha256() => rind.RsaPssSigningAlgorithm.sha256(nonceLengthInBytes),
-        Sha384() => rind.RsaPssSigningAlgorithm.sha384(nonceLengthInBytes),
-        Sha512() => rind.RsaPssSigningAlgorithm.sha512(nonceLengthInBytes),
+        Sha256() => rsa.PssSigningAlgorithm.sha256(nonceLengthInBytes),
+        Sha384() => rsa.PssSigningAlgorithm.sha384(nonceLengthInBytes),
+        Sha512() => rsa.PssSigningAlgorithm.sha512(nonceLengthInBytes),
         _ => throw _unsupported('RSA-PSS with $hashAlgorithm'),
       },
       _verification = switch (hashAlgorithm) {
-        Sha256() => rind.RsaVerificationAlgorithm.pssSha256(nonceLengthInBytes),
-        Sha384() => rind.RsaVerificationAlgorithm.pssSha384(nonceLengthInBytes),
-        _ => rind.RsaVerificationAlgorithm.pssSha512(nonceLengthInBytes),
+        Sha256() => rsa.PssVerificationAlgorithm.sha256(nonceLengthInBytes),
+        Sha384() => rsa.PssVerificationAlgorithm.sha384(nonceLengthInBytes),
+        _ => rsa.PssVerificationAlgorithm.sha512(nonceLengthInBytes),
       },
       super.constructor();
 
@@ -178,8 +175,8 @@ final class _RsaPss extends RsaPss {
   @override
   final int nonceLengthInBytes;
 
-  final rind.RsaPssSigningAlgorithm _signing;
-  final rind.RsaVerificationAlgorithm _verification;
+  final rsa.PssSigningAlgorithm _signing;
+  final rsa.VerificationAlgorithm _verification;
 
   @override
   Future<RsaKeyPair> newKeyPair({

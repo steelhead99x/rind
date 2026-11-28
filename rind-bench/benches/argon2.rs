@@ -1,8 +1,15 @@
+#[cfg(target_arch = "xtensa")]
+fn main() {}
+
+#[cfg(not(target_arch = "xtensa"))]
 mod common;
 
+#[cfg(not(target_arch = "xtensa"))]
 use common::Dit;
 
+#[cfg(not(target_arch = "xtensa"))]
 const PASSWORD: &[u8] = b"password";
+#[cfg(not(target_arch = "xtensa"))]
 const SALT: &[u8] = b"per-user salt";
 
 /// One cost's rows: `$memory_kib` KiB over `$passes` passes and `$lanes`
@@ -59,6 +66,7 @@ macro_rules! rows {
 // RFC 9106's second recommendation, the one cheap enough to sample, and one
 // lane of 16 MiB in one pass.
 #[allow(non_snake_case)]
+#[cfg(not(target_arch = "xtensa"))]
 mod argon2id_16MiB_t1_p1 {
     use swole::bench;
 
@@ -68,6 +76,7 @@ mod argon2id_16MiB_t1_p1 {
 }
 
 #[allow(non_snake_case)]
+#[cfg(not(target_arch = "xtensa"))]
 mod argon2id_64MiB_t3_p4 {
     use swole::bench;
 
@@ -76,6 +85,7 @@ mod argon2id_64MiB_t3_p4 {
     rows!(1 << 16, 3, 4);
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn main() {
     swole::main();
 }

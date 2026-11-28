@@ -10,6 +10,8 @@ use ours::signature::KeyPair as _;
 use proptest::collection::vec;
 use proptest::prelude::*;
 use rind_aws_lc_rs as ours;
+
+mod unbacked;
 use theirs::encoding::{AsBigEndian as _, AsDer as _};
 use theirs::signature::KeyPair as _;
 
@@ -563,6 +565,429 @@ fn refused() {
     }
 }
 
+/// ML-DSA refusal names aws-lc-rs 1.19.0 uses, beyond the `is_err` checks in
+/// `ml_dsa` and `refused`.
+#[cfg(not(any(miri, target_family = "wasm")))]
+#[test]
+fn ml_dsa_refusal_kind() {
+    use theirs::encoding::AsRawBytes;
+
+    fn same<T: core::fmt::Debug, U: core::fmt::Debug>(
+        ours: Result<T, ours::error::KeyRejected>,
+        theirs: Result<U, theirs::error::KeyRejected>,
+    ) {
+        assert_eq!(
+            ours.unwrap_err().description_(),
+            theirs.unwrap_err().description_()
+        );
+    }
+    let ours_sign = &ours::signature::ML_DSA_44_SIGNING;
+    let theirs_sign = &theirs::signature::ML_DSA_44_SIGNING;
+    let other =
+        theirs::signature::PqdsaKeyPair::from_seed(&theirs::signature::ML_DSA_65_SIGNING, &[4; 32])
+            .unwrap();
+    let pkcs8 = other.to_pkcs8v1().unwrap();
+    same(
+        ours::signature::PqdsaKeyPair::from_pkcs8(ours_sign, pkcs8.as_ref()),
+        theirs::signature::PqdsaKeyPair::from_pkcs8(theirs_sign, pkcs8.as_ref()),
+    );
+    let raw = AsRawBytes::as_raw_bytes(&other.private_key()).unwrap();
+    same(
+        ours::signature::PqdsaKeyPair::from_raw_private_key(ours_sign, raw.as_ref()),
+        theirs::signature::PqdsaKeyPair::from_raw_private_key(theirs_sign, raw.as_ref()),
+    );
+    let public = other.public_key().as_ref();
+    let short = &public[..public.len() - 1];
+    same(
+        ours::signature::ParsedPublicKey::new(&ours::signature::ML_DSA_65, short),
+        theirs::signature::ParsedPublicKey::new(&theirs::signature::ML_DSA_65, short),
+    );
+    let ed = theirs::signature::Ed25519KeyPair::from_seed_unchecked(&[3; 32])
+        .unwrap()
+        .to_pkcs8v1()
+        .unwrap();
+    same(
+        ours::signature::PqdsaKeyPair::from_pkcs8(ours_sign, ed.as_ref()),
+        theirs::signature::PqdsaKeyPair::from_pkcs8(theirs_sign, ed.as_ref()),
+    );
+    let oid65 = [0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x03, 0x12];
+    let short_seed = der(
+        0x30,
+        &[
+            der(0x02, &[0]),
+            der(0x30, &der(0x06, &oid65)),
+            der(0x04, &der(0x80, &[0; 31])),
+        ]
+        .concat(),
+    );
+    same(
+        ours::signature::PqdsaKeyPair::from_pkcs8(ours_sign, &short_seed),
+        theirs::signature::PqdsaKeyPair::from_pkcs8(theirs_sign, &short_seed),
+    );
+    let good = theirs::signature::PqdsaKeyPair::from_seed(theirs_sign, &[6; 32]).unwrap();
+    let good_raw = AsRawBytes::as_raw_bytes(&good.private_key()).unwrap();
+    let mut bad = good_raw.as_ref().to_vec();
+    bad[..32].fill(0);
+    same(
+        ours::signature::PqdsaKeyPair::from_raw_private_key(ours_sign, &bad),
+        theirs::signature::PqdsaKeyPair::from_raw_private_key(theirs_sign, &bad),
+    );
+    let mut trailed = pkcs8.as_ref().to_vec();
+    trailed.push(0);
+    // Bytes after the document are unread. The key is another parameter set,
+    // so both then report `Unspecified`.
+    same(
+        ours::signature::PqdsaKeyPair::from_pkcs8(ours_sign, &trailed),
+        theirs::signature::PqdsaKeyPair::from_pkcs8(theirs_sign, &trailed),
+    );
+    assert_eq!(
+        theirs::signature::PqdsaKeyPair::from_pkcs8(theirs_sign, &trailed)
+            .unwrap_err()
+            .description_(),
+        "Unspecified"
+    );
+}
+
+/// Every ML-DSA refusal aws-lc-rs 1.19.0 names for a key that is not the
+/// requested parameter set, including the cases that used to differ.
+#[cfg(not(any(miri, target_family = "wasm")))]
+#[test]
+fn ml_dsa_every_refusal() {
+    let ours44 = &ours::signature::ML_DSA_44_SIGNING;
+    let theirs44 = &theirs::signature::ML_DSA_44_SIGNING;
+    let ours65 = &ours::signature::ML_DSA_65_SIGNING;
+    let theirs65 = &theirs::signature::ML_DSA_65_SIGNING;
+    let seed = [9u8; 32];
+
+    let kind = |doc: &[u8], ours_alg, theirs_alg, expected: &str| {
+        let ours = ours::signature::PqdsaKeyPair::from_pkcs8(ours_alg, doc).unwrap_err();
+        let theirs = theirs::signature::PqdsaKeyPair::from_pkcs8(theirs_alg, doc).unwrap_err();
+        assert_eq!(theirs.description_(), expected, "aws-lc-rs");
+        assert_eq!(ours.description_(), expected, "rind");
+    };
+    // An RSA key of a size rind cannot back is refused from its modulus
+    // length, and an EC key on a curve rind cannot back without checking that
+    // its public key is the scalar's, so a malformed one is `WrongAlgorithm`
+    // where aws-lc-rs names a parse error.
+    let loaded = |doc: &[u8], ours_alg, theirs_alg| {
+        let ours = ours::signature::PqdsaKeyPair::from_pkcs8(ours_alg, doc).unwrap();
+        let theirs = theirs::signature::PqdsaKeyPair::from_pkcs8(theirs_alg, doc).unwrap();
+        assert_eq!(ours.public_key().as_ref(), theirs.public_key().as_ref());
+    };
+
+    // ML-DSA-65 seed plus a trailing byte. As its own set, aws-lc loads it.
+    // As ML-DSA-44, both report `Unspecified`.
+    let oid65 = [0x60u8, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x03, 0x12];
+    let trailed_seed = [der(0x80, &seed), vec![0x00]].concat();
+    let seed_tail = pkcs8_doc(0, &oid65, &[], &trailed_seed, None);
+    loaded(&seed_tail, ours65, theirs65);
+    kind(&seed_tail, ours44, theirs44, "Unspecified");
+    let mut after_doc = seed_tail.clone();
+    after_doc.push(0);
+    loaded(&after_doc, ours65, theirs65);
+    kind(&after_doc, ours44, theirs44, "Unspecified");
+
+    // A v2 public key is ignored, matched or not.
+    let v2 = pkcs8_doc(1, &oid65, &[], &der(0x80, &seed), Some(&[0x00, 0x01]));
+    loaded(&v2, ours65, theirs65);
+
+    // A byte after a SubjectPublicKeyInfo is unread.
+    let public = theirs::signature::PqdsaKeyPair::from_seed(theirs65, &seed)
+        .unwrap()
+        .public_key()
+        .as_ref()
+        .to_vec();
+    let mut spki = der(
+        0x30,
+        &[
+            der(0x30, &der(0x06, &oid65)),
+            der(0x03, &[&[0], public.as_slice()].concat()),
+        ]
+        .concat(),
+    );
+    spki.push(0);
+    ours::signature::ParsedPublicKey::new(&ours::signature::ML_DSA_65, &spki).unwrap();
+    theirs::signature::ParsedPublicKey::new(&theirs::signature::ML_DSA_65, &spki).unwrap();
+
+    // RSA-1024 from Wycheproof, below the 2048 bits rind can back. Consistent
+    // components are `WrongAlgorithm` in both. A corrupted coefficient is
+    // `InvalidEncoding` in both: `RSA_check_key` fails, which rind checks in
+    // constant time for a key it cannot back.
+    let rsa = rsa1024_pkcs8();
+    kind(&rsa, ours44, theirs44, "WrongAlgorithm");
+    let mut bad_rsa = pkcs1_of(&rsa);
+    let last = bad_rsa.len() - 1;
+    bad_rsa[last] ^= 0xff;
+    let bad_rsa = pkcs8_doc(
+        0,
+        &[0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01],
+        &[0x05, 0x00],
+        &bad_rsa,
+        None,
+    );
+    kind(&bad_rsa, ours44, theirs44, "InvalidEncoding");
+    let v2_rsa = pkcs8_doc(
+        1,
+        &[0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01],
+        &[0x05, 0x00],
+        &pkcs1_of(&rsa),
+        Some(&[0x00, 0xff]),
+    );
+    kind(&v2_rsa, ours44, theirs44, "InvalidEncoding");
+
+    // RSASSA-PSS. NULL parameters do not parse. An explicit SHA-256 does.
+    // A v2 public key is ignored. An inconsistent key does not parse in
+    // either.
+    let pss_oid = [0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x0a];
+    let pkcs1 = pkcs1_of(&rsa);
+    kind(
+        &pkcs8_doc(0, &pss_oid, &[0x05, 0x00], &pkcs1, None),
+        ours44,
+        theirs44,
+        "InvalidEncoding",
+    );
+    let sha256 = der(
+        0x30,
+        &[
+            der(
+                0x06,
+                &[0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01],
+            ),
+            der(0x05, &[]),
+        ]
+        .concat(),
+    );
+    let pss_params = der(0x30, &der(0xa0, &sha256));
+    kind(
+        &pkcs8_doc(0, &pss_oid, &pss_params, &pkcs1, None),
+        ours44,
+        theirs44,
+        "WrongAlgorithm",
+    );
+    kind(
+        &pkcs8_doc(1, &pss_oid, &pss_params, &pkcs1, Some(&[0x00, 0x01])),
+        ours44,
+        theirs44,
+        "WrongAlgorithm",
+    );
+    let mut bad_pss = pkcs1.clone();
+    let last = bad_pss.len() - 1;
+    bad_pss[last] ^= 0xff;
+    kind(
+        &pkcs8_doc(0, &pss_oid, &pss_params, &bad_pss, None),
+        ours44,
+        theirs44,
+        "InvalidEncoding",
+    );
+
+    // P-256. A 31-byte scalar is in range. The order is not. A public point
+    // other than scalar * G is not.
+    let p256 = [0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07];
+    kind(
+        &ec_pkcs8(&p256, &[0x01; 31], None),
+        ours44,
+        theirs44,
+        "WrongAlgorithm",
+    );
+    let order = [
+        0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+        0xff, 0xbc, 0xe6, 0xfa, 0xad, 0xa7, 0x17, 0x9e, 0x84, 0xf3, 0xb9, 0xca, 0xc2, 0xfc, 0x63,
+        0x25, 0x51,
+    ];
+    kind(
+        &ec_pkcs8(&p256, &order, None),
+        ours44,
+        theirs44,
+        "InvalidEncoding",
+    );
+    let generated = theirs::signature::EcdsaKeyPair::generate(
+        &theirs::signature::ECDSA_P256_SHA256_FIXED_SIGNING,
+    )
+    .unwrap()
+    .to_pkcs8v1()
+    .unwrap();
+    let mut mismatched = generated.as_ref().to_vec();
+    let last = mismatched.len() - 1;
+    mismatched[last] ^= 0xff;
+    kind(&mismatched, ours44, theirs44, "InvalidEncoding");
+
+    // Curves aws-lc parses and rind cannot back.
+    let k1_g = [
+        0x04, 0x79, 0xbe, 0x66, 0x7e, 0xf9, 0xdc, 0xbb, 0xac, 0x55, 0xa0, 0x62, 0x95, 0xce, 0x87,
+        0x0b, 0x07, 0x02, 0x9b, 0xfc, 0xdb, 0x2d, 0xce, 0x28, 0xd9, 0x59, 0xf2, 0x81, 0x5b, 0x16,
+        0xf8, 0x17, 0x98, 0x48, 0x3a, 0xda, 0x77, 0x26, 0xa3, 0xc4, 0x65, 0x5d, 0xa4, 0xfb, 0xfc,
+        0x0e, 0x11, 0x08, 0xa8, 0xfd, 0x17, 0xb4, 0x48, 0xa6, 0x85, 0x54, 0x19, 0x9c, 0x47, 0xd0,
+        0x8f, 0xfb, 0x10, 0xd4, 0xb8,
+    ];
+    kind(
+        &ec_pkcs8(&[0x2b, 0x81, 0x04, 0x00, 0x0a], &[1], Some(&k1_g)),
+        ours44,
+        theirs44,
+        "WrongAlgorithm",
+    );
+    let mut off = k1_g;
+    off[1] ^= 0xff;
+    kind(
+        &ec_pkcs8(&[0x2b, 0x81, 0x04, 0x00, 0x0a], &[1], Some(&off)),
+        ours44,
+        theirs44,
+        "InvalidEncoding",
+    );
+    kind(
+        &ec_pkcs8(&[0x2b, 0x81, 0x04, 0x00, 0x0a], &[2], Some(&k1_g)),
+        ours44,
+        theirs44,
+        "InvalidEncoding",
+    );
+    let mut compressed = vec![0x02];
+    compressed.extend_from_slice(&k1_g[1..33]);
+    kind(
+        &ec_pkcs8(&[0x2b, 0x81, 0x04, 0x00, 0x0a], &[1], Some(&compressed)),
+        ours44,
+        theirs44,
+        "WrongAlgorithm",
+    );
+    let p224_g = [
+        0x04, 0xb7, 0x0e, 0x0c, 0xbd, 0x6b, 0xb4, 0xbf, 0x7f, 0x32, 0x13, 0x90, 0xb9, 0x4a, 0x03,
+        0xc1, 0xd3, 0x56, 0xc2, 0x11, 0x22, 0x34, 0x32, 0x80, 0xd6, 0x11, 0x5c, 0x1d, 0x21, 0xbd,
+        0x37, 0x63, 0x88, 0xb5, 0xf7, 0x23, 0xfb, 0x4c, 0x22, 0xdf, 0xe6, 0xcd, 0x43, 0x75, 0xa0,
+        0x5a, 0x07, 0x47, 0x64, 0x44, 0xd5, 0x81, 0x99, 0x85, 0x00, 0x7e, 0x34,
+    ];
+    kind(
+        &ec_pkcs8(&[0x2b, 0x81, 0x04, 0x00, 0x21], &[1], Some(&p224_g)),
+        ours44,
+        theirs44,
+        "WrongAlgorithm",
+    );
+    let bp_g = [
+        0x04, 0x8b, 0xd2, 0xae, 0xb9, 0xcb, 0x7e, 0x57, 0xcb, 0x2c, 0x4b, 0x48, 0x2f, 0xfc, 0x81,
+        0xb7, 0xaf, 0xb9, 0xde, 0x27, 0xe1, 0xe3, 0xbd, 0x23, 0xc2, 0x3a, 0x44, 0x53, 0xbd, 0x9a,
+        0xce, 0x32, 0x62, 0x54, 0x7e, 0xf8, 0x35, 0xc3, 0xda, 0xc4, 0xfd, 0x97, 0xf8, 0x46, 0x1a,
+        0x14, 0x61, 0x1d, 0xc9, 0xc2, 0x77, 0x45, 0x13, 0x2d, 0xed, 0x8e, 0x54, 0x5c, 0x1d, 0x54,
+        0xc7, 0x2f, 0x04, 0x69, 0x97,
+    ];
+    kind(
+        &ec_pkcs8(
+            &[0x2b, 0x24, 0x03, 0x03, 0x02, 0x08, 0x01, 0x01, 0x07],
+            &[1],
+            Some(&bp_g),
+        ),
+        ours44,
+        theirs44,
+        "WrongAlgorithm",
+    );
+
+    // DSA, which rind cannot back. aws-lc checks bounds, not primality:
+    // x = 0 and x = q are out of range there.
+    kind(&dsa_pkcs8(&[1]), ours44, theirs44, "WrongAlgorithm");
+    kind(&dsa_pkcs8(&[0]), ours44, theirs44, "InvalidEncoding");
+    let mut q = vec![0x00, 0x80];
+    q.extend_from_slice(&[0; 18]);
+    q.push(0x01);
+    kind(&dsa_pkcs8(&q), ours44, theirs44, "InvalidEncoding");
+
+    // An Ed25519 document with a trailing byte still parses.
+    let ed = theirs::signature::Ed25519KeyPair::from_seed_unchecked(&[3; 32])
+        .unwrap()
+        .to_pkcs8v1()
+        .unwrap();
+    let mut ed = ed.as_ref().to_vec();
+    ed.push(0);
+    kind(&ed, ours44, theirs44, "WrongAlgorithm");
+}
+
+fn pkcs8_doc(
+    version: u8,
+    oid: &[u8],
+    parameters: &[u8],
+    private_key: &[u8],
+    public_key: Option<&[u8]>,
+) -> Vec<u8> {
+    let mut body = der(0x02, &[version]);
+    body.extend(der(0x30, &[der(0x06, oid), parameters.to_vec()].concat()));
+    body.extend(der(0x04, private_key));
+    if let Some(public_key) = public_key {
+        body.extend(der(0x81, public_key));
+    }
+    der(0x30, &body)
+}
+
+fn ec_pkcs8(curve: &[u8], scalar: &[u8], point: Option<&[u8]>) -> Vec<u8> {
+    let mut sec1 = der(0x02, &[1]);
+    sec1.extend(der(0x04, scalar));
+    if let Some(point) = point {
+        sec1.extend(der(0xa1, &der(0x03, &[&[0], point].concat())));
+    }
+    pkcs8_doc(
+        0,
+        &[0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01],
+        &der(0x06, curve),
+        &der(0x30, &sec1),
+        None,
+    )
+}
+
+fn dsa_pkcs8(x: &[u8]) -> Vec<u8> {
+    let mut p = vec![0u8; 128];
+    p[0] = 0x80;
+    p[127] = 0x01;
+    let mut q = vec![0u8; 20];
+    q[0] = 0x80;
+    q[19] = 0x01;
+    // A magnitude whose top bit is set needs a leading zero so the INTEGER
+    // is positive.
+    let params = der(
+        0x30,
+        &[
+            der(0x02, &[&[0], p.as_slice()].concat()),
+            der(0x02, &[&[0], q.as_slice()].concat()),
+            der(0x02, &[2]),
+        ]
+        .concat(),
+    );
+    pkcs8_doc(
+        0,
+        &[0x2a, 0x86, 0x48, 0xce, 0x38, 0x04, 0x01],
+        &params,
+        &der(0x02, x),
+        None,
+    )
+}
+
+fn rsa1024_pkcs8() -> Vec<u8> {
+    let path = format!(
+        "{}/../thirdparty/vectors/wycheproof/testvectors_v1/rsa_pkcs1_1024_sig_gen_test.json",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let value: serde_json::Value =
+        serde_json::from_reader(std::fs::File::open(path).unwrap()).unwrap();
+    hex::decode(value["testGroups"][0]["privateKeyPkcs8"].as_str().unwrap()).unwrap()
+}
+
+fn pkcs1_of(pkcs8: &[u8]) -> Vec<u8> {
+    let (_, body, _) = tlv(pkcs8).unwrap();
+    let (_, _, rest) = tlv(body).unwrap();
+    let (_, _, rest) = tlv(rest).unwrap();
+    let (tag, key, _) = tlv(rest).unwrap();
+    assert_eq!(tag, 0x04);
+    key.to_vec()
+}
+
+fn tlv(input: &[u8]) -> Option<(u8, &[u8], &[u8])> {
+    let tag = *input.first()?;
+    let (len, header): (usize, usize) = match *input.get(1)? {
+        len @ 0..=0x7f => (len as usize, 2),
+        0x81 => ((*input.get(2)?) as usize, 3),
+        0x82 => {
+            let bytes = input.get(2..4)?;
+            (u16::from_be_bytes([bytes[0], bytes[1]]) as usize, 4)
+        }
+        _ => return None,
+    };
+    let end = header.checked_add(len)?;
+    Some((tag, input.get(header..end)?, input.get(end..)?))
+}
+
 /// A DER element tagged `tag` holding `contents`.
 fn der(tag: u8, contents: &[u8]) -> Vec<u8> {
     let len = contents.len();
@@ -616,4 +1041,387 @@ fn rsa_public_keys() {
         ours::encoding::AsDer::<ours::encoding::PublicKeyX509Der<'static>>::as_der(&components)
             .is_err()
     );
+}
+
+/// An RSA public key's accessors match aws-lc-rs's, components with a
+/// leading zero byte are refused by both, and an OAEP output buffer larger
+/// than the minimum is fine.
+#[test]
+fn rsa_surfaces() {
+    let ours_pair = ours::rsa::KeyPair::from_pkcs8(rsa_pkcs8()).unwrap();
+    let theirs_pair = theirs::rsa::KeyPair::from_pkcs8(rsa_pkcs8()).unwrap();
+    #[cfg(feature = "ring-io")]
+    {
+        let (o, t) = (ours_pair.public_key(), theirs_pair.public_key());
+        assert_eq!(o.modulus_len(), t.modulus_len());
+        assert_eq!(o.modulus().first_byte(), t.modulus().first_byte());
+        assert_eq!(o.exponent().first_byte(), t.exponent().first_byte());
+    }
+
+    let message = b"message";
+    let mut signature = vec![0; ours_pair.public_modulus_len()];
+    ours_pair
+        .sign(
+            &ours::signature::RSA_PKCS1_SHA256,
+            &ours::rand::SystemRandom::new(),
+            message,
+            &mut signature,
+        )
+        .unwrap();
+    let components: ours::rsa::PublicKeyComponents<Vec<u8>> = ours_pair.public_key().into();
+    let (n, e) = (components.n.clone(), components.e.clone());
+    let padded = |v: &[u8]| [&[0][..], v].concat();
+    for (n, e, ok) in [
+        (n.clone(), e.clone(), true),
+        (padded(&n), e.clone(), false),
+        (n.clone(), padded(&e), false),
+    ] {
+        let ours = ours::signature::RsaPublicKeyComponents { n: &n, e: &e }.verify(
+            &ours::signature::RSA_PKCS1_2048_8192_SHA256,
+            message,
+            &signature,
+        );
+        let theirs = theirs::signature::RsaPublicKeyComponents { n: &n, e: &e }.verify(
+            &theirs::signature::RSA_PKCS1_2048_8192_SHA256,
+            message,
+            &signature,
+        );
+        assert_eq!(ours.is_ok(), ok);
+        assert_eq!(theirs.is_ok(), ok);
+    }
+
+    let private = ours::rsa::PrivateDecryptingKey::from_pkcs8(rsa_pkcs8()).unwrap();
+    let public = ours::rsa::OaepPublicEncryptingKey::new(private.public_key()).unwrap();
+    let private = ours::rsa::OaepPrivateDecryptingKey::new(private).unwrap();
+    let alg = &ours::rsa::OAEP_SHA256_MGF1SHA256;
+    let mut ciphertext = vec![0; public.ciphertext_size()];
+    let ciphertext = public.encrypt(alg, message, &mut ciphertext, None).unwrap();
+    let mut plaintext = vec![0; private.min_output_size() + 1];
+    assert_eq!(
+        private
+            .decrypt(alg, ciphertext, &mut plaintext, None)
+            .unwrap(),
+        message
+    );
+    let mut short = vec![0; private.min_output_size() - 1];
+    assert!(private.decrypt(alg, ciphertext, &mut short, None).is_err());
+}
+
+/// Wycheproof's first test group's DER field `field` in `file`.
+fn wycheproof_der(file: &str, field: &str) -> Vec<u8> {
+    let path = format!(
+        "{}/../thirdparty/vectors/wycheproof/testvectors_v1/{file}",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let value: serde_json::Value =
+        serde_json::from_reader(std::fs::File::open(path).unwrap()).unwrap();
+    hex::decode(value["testGroups"][0][field].as_str().unwrap()).unwrap()
+}
+
+// Public keys of types aws-lc parses and rind cannot back, from OpenSSL.
+const P224_SPKI: &str = concat!(
+    "304e301006072a8648ce3d020106052b81040021033a000450a75a47302a74ee6cda1c6060a3b4927de0acab",
+    "171f0c60a4d8392874539cb5e646377f8bb6354e02c5401f0cd974b0e676cf271fe6dd04",
+);
+const SECP256K1_SPKI: &str = concat!(
+    "3056301006072a8648ce3d020106052b8104000a03420004e102c24c49990577603b25d03364ff7d76c0b327",
+    "8795214d26cd5b9484fbc647b2f9b99b3134764db89eac2e4faa99f8e4992fc6b9cf3b6f2b1189de8bfcbf51",
+);
+const DSA_SPKI: &str = concat!(
+    "308201b63082012b06072a8648ce3804013082011e02818100f5b7e70b6016a21cee293f538ba2495c2e5e69",
+    "1c4e31d471fcfe3af669b7357f9baeafdd008fbe261c9f085b9136efb4aeee06a803a63db5663ecbc6f57a4a",
+    "4e265d7c297c3a805519c4bc6eae98d5e5d9f46e2d56bd06a8434e386bf3b6736df8667553e1be528b4b7c3d",
+    "fd149785cf4b29ead2cba702864252aab42da65a7d021500aa81c1fd4c3525af2dc022f0d4cdd375cad01d79",
+    "0281802be03f9422eefa5d8460e8ac8a2e572e036e8d18a2782ded641a9f0398389c98bc95f952f5b9c4f290",
+    "acc77dcc4a59b99719a2c64bcb18caffaf62d4def72dcad90e6dd6c48fcbc6f3c4e13307e1926514499e0f75",
+    "ab223c25b88a1677ae6874bfb851c87a5f39cbf010248d56058f1a91de0124e5e81601f6bfb6f2247ffede03",
+    "818400028180714d276ebec41a6d6032c1ecc3b45461059653953d33eaa74718e49318200669a127b478433f",
+    "88c8932b51af90dcc15bc7c4afbc0292496d373422b80888b7a6b92ad33f8b9be9aa1a734c5ac0dc2e0b3229",
+    "6eec804b690e3c45ef461d806d6225b6c995427d34024c89491c2881feec343daf510bfeb293ea4c4a831366",
+    "31d4",
+);
+const DH_SPKI: &str = concat!(
+    "30819b305306092a864886f70d0103013046024100c7796f97f072bd4300ed7701aa2931edb183d88d562eb1",
+    "47dd57c8eb7f6ae8bcfc53221abfb1f238ec30b909470f70b40fa032f0f129b688144ef254fabda3cf020102",
+    "034400024100bb8d96c75eae6a889c98ec9aca05bbc7e12386f5faf19c30fa8a6a68c84439d2b771ec04e6b3",
+    "2696d23c89064bce6774101beec9266a55b3c74ee2fdb86b9a0f",
+);
+
+/// An RSA encryption key's `SubjectPublicKeyInfo` is refused as aws-lc-rs
+/// refuses it: the framing, the algorithm, and the key's encoding each pick
+/// their refusal before the modulus's size does.
+#[test]
+fn rsa_encrypting_key_refusals() {
+    let oid = |o: &[u8]| der(0x06, o);
+    let pkcs1_oid = |last: u8| oid(&[0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, last]);
+    let null = [0x05, 0x00];
+    let spki = |algorithm: &[u8], key: &[u8]| {
+        der(
+            0x30,
+            &[der(0x30, algorithm), der(0x03, &[&[0][..], key].concat())].concat(),
+        )
+    };
+    let rsa_key = |n: &[u8], e: &[u8]| der(0x30, &[der(0x02, n), der(0x02, e)].concat());
+    let pkcs1_of_spki = |spki: &[u8]| {
+        let (_, body, _) = tlv(spki).unwrap();
+        let (_, _, rest) = tlv(body).unwrap();
+        let (_, bits, _) = tlv(rest).unwrap();
+        bits[1..].to_vec()
+    };
+    let rsa1024 = pkcs1_of_spki(&wycheproof_der(
+        "rsa_pkcs1_1024_sig_gen_test.json",
+        "keyDer",
+    ));
+    let rsa2048 = pkcs1_of_spki(&wycheproof_der(
+        "rsa_pkcs1_2048_sig_gen_test.json",
+        "keyDer",
+    ));
+    // An odd modulus of 8200 bits, beyond aws-lc-rs's 8192.
+    let mut n8200 = vec![0xff; 1026];
+    n8200[0] = 0x7f;
+    let rsa8200 = rsa_key(&n8200, &[1, 0, 1]);
+    let p256 = wycheproof_der("ecdsa_secp256r1_sha256_test.json", "publicKeyDer");
+    let mut off_curve = p256.clone();
+    *off_curve.last_mut().unwrap() ^= 1;
+    let ec = oid(&[0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01]);
+    let ec_p256 = [
+        ec.clone(),
+        oid(&[0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07]),
+    ]
+    .concat();
+    // brainpoolP256r1's generator, a curve rind cannot back.
+    let bp_g = hex::decode(
+        "048bd2aeb9cb7e57cb2c4b482ffc81b7afb9de27e1e3bd23c23a4453bd9ace3262\
+         547ef835c3dac4fd97f8461a14611dc9c27745132ded8e545c1d54c72f046997",
+    )
+    .unwrap();
+    let brainpool = |point: &[u8]| {
+        let curve = oid(&[0x2b, 0x24, 0x03, 0x03, 0x02, 0x08, 0x01, 0x01, 0x07]);
+        spki(&[ec.clone(), curve].concat(), point)
+    };
+    let dsa = oid(&[0x2a, 0x86, 0x48, 0xce, 0x38, 0x04, 0x01]);
+    let dh = oid(&[0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x03, 0x01]);
+    let ml_dsa_44 = oid(&[0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x03, 0x11]);
+    let ml_kem_768 = oid(&[0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x04, 0x02]);
+    let trailing = |mut der: Vec<u8>| {
+        der.push(0);
+        der
+    };
+
+    let mut cases: Vec<(String, Vec<u8>, Option<&str>)> = vec![
+        ("p256".into(), p256.clone(), Some("WrongAlgorithm")),
+        ("p256 trailing".into(), trailing(p256.clone()), None),
+        ("p256 off curve".into(), off_curve, None),
+        (
+            "ed25519".into(),
+            wycheproof_der("ed25519_test.json", "publicKeyDer"),
+            Some("WrongAlgorithm"),
+        ),
+        (
+            "x25519".into(),
+            spki(&oid(&[0x2b, 0x65, 0x6e]), &[9; 32]),
+            None,
+        ),
+        ("ml-dsa-44".into(), spki(&ml_dsa_44, &[0; 1312]), None),
+        ("ml-dsa-44 short".into(), spki(&ml_dsa_44, &[0; 1311]), None),
+        ("ml-kem-768".into(), spki(&ml_kem_768, &[0; 1184]), None),
+        (
+            "p224".into(),
+            hex::decode(P224_SPKI).unwrap(),
+            Some("WrongAlgorithm"),
+        ),
+        (
+            "secp256k1".into(),
+            hex::decode(SECP256K1_SPKI).unwrap(),
+            Some("WrongAlgorithm"),
+        ),
+        (
+            "brainpoolP256r1".into(),
+            brainpool(&bp_g),
+            Some("WrongAlgorithm"),
+        ),
+        (
+            "dsa".into(),
+            hex::decode(DSA_SPKI).unwrap(),
+            Some("WrongAlgorithm"),
+        ),
+        (
+            "dh".into(),
+            hex::decode(DH_SPKI).unwrap(),
+            Some("WrongAlgorithm"),
+        ),
+        (
+            "dsa, no parameters".into(),
+            spki(&dsa, &der(0x02, &[5])),
+            Some("InvalidEncoding"),
+        ),
+        (
+            "dh, no parameters".into(),
+            spki(&dh, &der(0x02, &[5])),
+            Some("InvalidEncoding"),
+        ),
+        (
+            "p224, no point".into(),
+            spki(
+                &[ec.clone(), oid(&[0x2b, 0x81, 0x04, 0x00, 0x21])].concat(),
+                &[],
+            ),
+            Some("InvalidEncoding"),
+        ),
+        (
+            "ec, unknown curve".into(),
+            spki(&[ec.clone(), oid(&[0x2a, 0x03])].concat(), &[4; 65]),
+            Some("InvalidEncoding"),
+        ),
+        (
+            "x25519, parameters".into(),
+            spki(
+                &[oid(&[0x2b, 0x65, 0x6e]), null.to_vec()].concat(),
+                &[9; 32],
+            ),
+            Some("InvalidEncoding"),
+        ),
+        (
+            "e of 34 bits".into(),
+            spki(&pkcs1_oid(1), &rsa_key(&n8200[..256], &[3, 0, 0, 0, 1])),
+            None,
+        ),
+        (
+            "n of 16392 bits".into(),
+            spki(&pkcs1_oid(1), &rsa_key(&[0xff; 2049], &[3])),
+            Some("InvalidEncoding"),
+        ),
+        ("empty".into(), vec![], Some("InvalidEncoding")),
+        ("pkcs1".into(), rsa2048.clone(), Some("InvalidEncoding")),
+        (
+            "truncated".into(),
+            spki(&pkcs1_oid(1), &rsa2048)[..100].to_vec(),
+            Some("InvalidEncoding"),
+        ),
+        (
+            "unused bits".into(),
+            {
+                let mut der = spki(&pkcs1_oid(1), &rsa2048);
+                let at = der.len() - rsa2048.len() - 1;
+                der[at] = 1;
+                der
+            },
+            Some("InvalidEncoding"),
+        ),
+        (
+            "even e".into(),
+            spki(&pkcs1_oid(1), &rsa_key(&n8200[..256], &[1, 0, 0])),
+            None,
+        ),
+        (
+            "e = 1, 1024".into(),
+            spki(&pkcs1_oid(1), &rsa_key(&n8200[..128], &[1])),
+            None,
+        ),
+        (
+            "even n, 1024".into(),
+            spki(&pkcs1_oid(1), &rsa_key(&[0x7f; 128], &[3])),
+            None,
+        ),
+    ];
+    for (last, len) in [(0x11, 1312), (0x12, 1952), (0x13, 2592)] {
+        let algorithm = oid(&[0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x03, last]);
+        cases.push((
+            format!("ml-dsa {len}"),
+            spki(&algorithm, &vec![0; len]),
+            Some("WrongAlgorithm"),
+        ));
+        cases.push((
+            format!("ml-dsa {len} short"),
+            spki(&algorithm, &vec![0; len - 1]),
+            Some("InvalidEncoding"),
+        ));
+    }
+    for (last, len) in [(1, 800), (2, 1184), (3, 1568)] {
+        let algorithm = oid(&[0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x04, last]);
+        cases.push((
+            format!("ml-kem {len}"),
+            spki(&algorithm, &vec![0; len]),
+            Some("WrongAlgorithm"),
+        ));
+        cases.push((
+            format!("ml-kem {len} short"),
+            spki(&algorithm, &vec![0; len - 1]),
+            Some("InvalidEncoding"),
+        ));
+    }
+    for (file, name) in [
+        ("ecdsa_secp384r1_sha384_test.json", "p384"),
+        ("ecdsa_secp521r1_sha512_test.json", "p521"),
+    ] {
+        let der = wycheproof_der(file, "publicKeyDer");
+        let mut off_curve = der.clone();
+        *off_curve.last_mut().unwrap() ^= 1;
+        cases.push((name.into(), der, Some("WrongAlgorithm")));
+        cases.push((
+            format!("{name} off curve"),
+            off_curve,
+            Some("InvalidEncoding"),
+        ));
+    }
+    for (size, key, expected) in [
+        ("1024", &rsa1024, Some("TooSmall")),
+        ("2048", &rsa2048, None),
+        ("8200", &rsa8200, Some("TooLarge")),
+    ] {
+        let wrong = expected.map(|_| "InvalidEncoding");
+        for (name, algorithm, expected) in [
+            (
+                "rsaEncryption",
+                [pkcs1_oid(1), null.to_vec()].concat(),
+                expected,
+            ),
+            ("rsaEncryption, no NULL", pkcs1_oid(1), expected),
+            (
+                "rsaEncryption, INTEGER",
+                [pkcs1_oid(1), vec![2, 1, 0]].concat(),
+                expected,
+            ),
+            ("id-RSAES-OAEP", pkcs1_oid(7), expected),
+            ("id-RSASSA-PSS", pkcs1_oid(10), expected),
+            (
+                "id-RSASSA-PSS, bad parameters",
+                [pkcs1_oid(10), vec![2, 1, 0]].concat(),
+                wrong,
+            ),
+            (
+                "id-ea-rsa",
+                [oid(&[0x55, 0x08, 0x01, 0x01]), null.to_vec()].concat(),
+                expected,
+            ),
+            // The review's case: a non-RSA algorithm around an RSA key whose
+            // size aws-lc-rs would refuse.
+            ("id-ecPublicKey", ec_p256.clone(), wrong),
+            ("unknown", oid(&[0x2a, 0x03, 0x04]), wrong),
+        ] {
+            cases.push((format!("{size} {name}"), spki(&algorithm, key), expected));
+        }
+        let der = spki(&[pkcs1_oid(1), null.to_vec()].concat(), key);
+        cases.push((format!("{size} trailing"), trailing(der), expected));
+    }
+
+    cases.extend(unbacked::public_keys());
+
+    let mut failures = Vec::new();
+    for (name, input, expected) in cases {
+        let ours = ours::rsa::PublicEncryptingKey::from_der(&input)
+            .map(|key| key.key_size_bits())
+            .map_err(|e| e.description_());
+        let theirs = theirs::rsa::PublicEncryptingKey::from_der(&input)
+            .map(|key| key.key_size_bits())
+            .map_err(|e| e.description_());
+        if ours != theirs || expected.is_some_and(|expected| theirs != Err(expected)) {
+            failures.push(format!(
+                "{name}: rind {ours:?}, aws-lc-rs {theirs:?}, expected {expected:?}"
+            ));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+    let ours = ours::rsa::PublicEncryptingKey::from_der(&spki(&pkcs1_oid(1), &rsa2048));
+    assert_eq!(ours.unwrap().key_size_bits(), 2048);
 }

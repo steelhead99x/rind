@@ -1,14 +1,21 @@
 //! Each row keys HMAC per message, as a one-off MAC does; the `reused_key`
 //! rows sign with a long-lived key, such as a STUN or SRTP session's.
 
+#[cfg(target_arch = "xtensa")]
+fn main() {}
+
+#[cfg(not(target_arch = "xtensa"))]
 mod common;
 
+#[cfg(not(target_arch = "xtensa"))]
 use common::{Dit, HASH_SIZES, Size};
 
+#[cfg(not(target_arch = "xtensa"))]
 fn input(size: Size) -> Vec<u8> {
     size.zeros()
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn rind_input(size: Size) -> Dit<Vec<u8>> {
     Dit::hold(size.zeros())
 }
@@ -66,6 +73,15 @@ macro_rules! rows {
             let mut ctx = ::verified_garbage::hmac::Hmac::<$vg>::new(&KEY);
             ctx.update(input);
             ctx.finalize()
+        }
+
+        #[cfg(target_arch = "aarch64")]
+        #[bench(args = HASH_SIZES, setup = vg_input)]
+        fn verified_garbage_dit_held(
+            input: &[u8],
+            iterations: swole::Iterations,
+        ) -> std::time::Duration {
+            common::vg_dit_held(iterations, || verified_garbage(input))
         }
 
         mod ring {
@@ -187,6 +203,7 @@ macro_rules! libcrux {
     };
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 mod hmac_sha1 {
     use swole::bench;
 
@@ -203,6 +220,7 @@ mod hmac_sha1 {
     openssl!(sha1);
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 mod hmac_sha256 {
     use swole::bench;
 
@@ -222,6 +240,7 @@ mod hmac_sha256 {
     openssl!(sha256);
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 mod hmac_sha384 {
     use swole::bench;
 
@@ -241,6 +260,7 @@ mod hmac_sha384 {
     openssl!(sha384);
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn main() {
     swole::main();
 }

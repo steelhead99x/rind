@@ -3,22 +3,34 @@
 //! jsonwebtoken builds a signer or verifier from the key on every token, so
 //! `token` is what a caller pays, and `load` is the part spent on the key.
 
+#[cfg(target_arch = "xtensa")]
+fn main() {}
+
+#[cfg(not(target_arch = "xtensa"))]
 mod common;
 
+#[cfg(not(target_arch = "xtensa"))]
 use std::hint::black_box;
 
+#[cfg(not(target_arch = "xtensa"))]
 use aws_lc_rs::rand::SystemRandom;
+#[cfg(not(target_arch = "xtensa"))]
 use aws_lc_rs::signature::{
     ECDSA_P256_SHA256_FIXED_SIGNING, ECDSA_P384_SHA384_FIXED_SIGNING, EcdsaKeyPair,
     EcdsaSigningAlgorithm, Ed25519KeyPair, KeyPair,
 };
+#[cfg(not(target_arch = "xtensa"))]
 use common::Dit;
+#[cfg(not(target_arch = "xtensa"))]
 use jsonwebtoken::crypto::{CryptoProvider, aws_lc};
+#[cfg(not(target_arch = "xtensa"))]
 use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey};
 
 // The header and claims of a typical token, as jsonwebtoken signs them.
+#[cfg(not(target_arch = "xtensa"))]
 const MESSAGE: &[u8] = b"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb290IjoiZGVtbyIsInB1dCI6WyIiXSwiZ2V0IjpbIiJdLCJleHAiOjE3OTI4MTYwMDAsImlhdCI6MTc2MTI4MDAwMH0";
 
+#[cfg(not(target_arch = "xtensa"))]
 fn ecdsa(signing: &'static EcdsaSigningAlgorithm) -> (EncodingKey, DecodingKey) {
     let pkcs8 = EcdsaKeyPair::generate_pkcs8(signing, &SystemRandom::new()).unwrap();
     let pair = EcdsaKeyPair::from_pkcs8(signing, pkcs8.as_ref()).unwrap();
@@ -30,6 +42,7 @@ fn ecdsa(signing: &'static EcdsaSigningAlgorithm) -> (EncodingKey, DecodingKey) 
 
 // Keys in the forms a JWK becomes: PKCS#8 that carries the public key, and
 // RSA verified from its modulus and exponent.
+#[cfg(not(target_arch = "xtensa"))]
 fn keys(algorithm: Algorithm) -> (EncodingKey, DecodingKey) {
     match algorithm {
         Algorithm::HS256 => {
@@ -71,6 +84,7 @@ fn keys(algorithm: Algorithm) -> (EncodingKey, DecodingKey) {
 }
 
 /// A provider, a key pair under one algorithm, and a token's signature by it.
+#[cfg(not(target_arch = "xtensa"))]
 struct Input {
     provider: &'static CryptoProvider,
     algorithm: Algorithm,
@@ -79,6 +93,7 @@ struct Input {
     signature: Vec<u8>,
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 impl Input {
     fn new(algorithm: Algorithm, provider: &'static CryptoProvider) -> Self {
         let (encoding, decoding) = keys(algorithm);
@@ -168,17 +183,28 @@ macro_rules! rows {
     };
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 rows!(jwt_hs256_sign, HS256, sign_token, sign_load);
+#[cfg(not(target_arch = "xtensa"))]
 rows!(jwt_es256_sign, ES256, sign_token, sign_load);
+#[cfg(not(target_arch = "xtensa"))]
 rows!(jwt_es384_sign, ES384, sign_token, sign_load);
+#[cfg(not(target_arch = "xtensa"))]
 rows!(jwt_eddsa_sign, EdDSA, sign_token, sign_load);
+#[cfg(not(target_arch = "xtensa"))]
 rows!(jwt_rs256_sign, RS256, sign_token, sign_load);
+#[cfg(not(target_arch = "xtensa"))]
 rows!(jwt_hs256_verify, HS256, verify_token, verify_load);
+#[cfg(not(target_arch = "xtensa"))]
 rows!(jwt_es256_verify, ES256, verify_token, verify_load);
+#[cfg(not(target_arch = "xtensa"))]
 rows!(jwt_es384_verify, ES384, verify_token, verify_load);
+#[cfg(not(target_arch = "xtensa"))]
 rows!(jwt_eddsa_verify, EdDSA, verify_token, verify_load);
+#[cfg(not(target_arch = "xtensa"))]
 rows!(jwt_rs256_verify, RS256, verify_token, verify_load);
 
+#[cfg(not(target_arch = "xtensa"))]
 fn main() {
     swole::main();
 }

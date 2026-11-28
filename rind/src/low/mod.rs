@@ -88,8 +88,8 @@ mod generic {
     pub(super) mod ct_equal;
     pub(super) mod ctr;
     // Ed25519 verification's multi-scalar multiplication over s2n-bignum's
-    // point routines.
-    #[cfg(rind_backend = "x86_64")]
+    // point routines. x86_64 dispatches it; aarch64 runs this one.
+    #[cfg(any(rind_backend = "x86_64", rind_backend = "aarch64"))]
     pub(crate) mod edwards25519_msm;
     #[cfg(test)]
     pub(crate) mod ghash;
@@ -140,19 +140,63 @@ mod generic {
     // AVX2.
     #[cfg(not(rind_backend = "aarch64"))]
     pub(crate) mod mlkem_poly;
+    // The barrier Poly1305's 32-bit limbs and their 16-bit halves pass values
+    // through, so the compiler cannot branch on a mask or fuse the halves.
+    #[cfg(any(
+        all(
+            rind_backend = "portable",
+            any(target_pointer_width = "32", rind_limb = "32")
+        ),
+        test
+    ))]
+    pub(crate) mod hide;
+    // Poly1305's 32x32->64-bit products from 16-bit halves where that
+    // multiply ends early, is missing, or is a library call (see build.rs).
+    // Only Poly1305 calls it.
+    #[cfg(any(
+        all(
+            any(rind_mul16, rind_mul16_top, rind_mul16_soft),
+            rind_backend = "portable",
+            any(target_pointer_width = "32", rind_limb = "32")
+        ),
+        test
+    ))]
+    pub(crate) mod mul16;
+    // One SplitMix64 for the tests that need a reproducible stream.
+    #[cfg(test)]
+    pub(crate) mod splitmix;
     // The portable backend's group orders, picked from by modulus.
     #[cfg(any(rind_backend = "arm", rind_backend = "portable"))]
     pub(crate) mod order;
     // x86_64's separate-pass Poly1305 and the 64-bit portable backend's.
     // aarch64 runs Poly1305 only in aws-lc's one-pass ChaCha20-Poly1305,
-    // whose tests check it against this.
+    // whose tests check it against this, and every backend's tests check
+    // `poly1305_32` against it.
     #[cfg(any(
         rind_backend = "x86_64",
-        all(rind_backend = "portable", target_pointer_width = "64"),
-        all(rind_backend = "aarch64", test)
+        all(
+            rind_backend = "portable",
+            target_pointer_width = "64",
+            not(rind_limb = "32")
+        ),
+        test
     ))]
     pub(crate) mod poly1305;
+    // The portable backend's Poly1305 on 32-bit targets, in 26-bit limbs,
+    // and on 64-bit ones forced to 32-bit limbs, so CI checks it on x86_64.
+    #[cfg(any(
+        all(
+            rind_backend = "portable",
+            any(target_pointer_width = "32", rind_limb = "32")
+        ),
+        test
+    ))]
+    pub(crate) mod poly1305_32;
+    #[cfg(target_has_atomic = "8")]
     pub(super) mod reuse_cache;
+    // Where there is no compare-and-swap, and in tests to test it.
+    #[cfg(any(not(target_has_atomic = "8"), test))]
+    pub(super) mod reuse_cache_without_cas;
     // The portable backend's SHA-1 and SHA-256 (but ESP-IDF Xtensa's
     // SHA-256, in `portable::sha`), and both in armv7 and x86_64 tests to
     // check the assembly against.
@@ -189,17 +233,23 @@ mod generic {
     #[cfg(any(rind_backend = "portable", test))]
     pub(super) mod sha512;
     // Rolled SHA-512 on 32-bit microcontrollers (ESP-IDF or no OS), whose
-    // small instruction cache the unrolled body would crowd. Tests compile
+    // small instruction cache the unrolled body would crowd, unless the
+    // ESP32-S3 asks for its unrolled body. Tests compile
     // it everywhere and check it against FIPS 180-4.
     #[cfg(any(
         all(
             rind_backend = "portable",
             not(target_pointer_width = "64"),
-            any(target_os = "espidf", target_os = "none")
+            any(target_os = "espidf", target_os = "none"),
+            not(all(rind_esp32s3, feature = "esp32s3-sha512-unrolled"))
         ),
         test
     ))]
     pub(super) mod sha512_rolled;
+    // The ESP32-S3's SHA-512: the rolled loop, or the unrolled IRAM body with
+    // `esp32s3-sha512-unrolled`. Tests compile it everywhere.
+    #[cfg(any(all(rind_backend = "portable", rind_esp32s3), test))]
+    pub(super) mod sha512_esp32s3;
     pub(super) mod zeroise;
 }
 
@@ -243,8 +293,11 @@ pub(crate) const fn cpu_enabled(deniable: bool, enabled: u32, wanted: u32) -> bo
     !deniable && wanted & !enabled == 0
 }
 
-// Intel's MXCSR mitigation, where the instructions it covers exist: on x86
-// and x86_64 targets with SSE2, outside Miri, which runs no assembly.
+// Intel's MXCSR mitigation, where `stmxcsr` exists: x86 and x86_64 with
+// SSE2, outside Miri, which runs no assembly. `x86_64-unknown-none` leaves
+// SSE2 off, and `stmxcsr` raises `#UD` there when `CR4.OSFXSR` is clear.
+// Enabling SSE2, including the bare-metal lint's `+sse,+sse2,-soft-float`
+// row, selects the real guard.
 #[cfg_attr(
     not(all(
         any(target_arch = "x86_64", target_arch = "x86"),
@@ -270,7 +323,10 @@ pub(crate) use generic::md5::md5_compress_blocks;
 pub(crate) use generic::naf::public_naf;
 #[cfg(any(rind_backend = "x86_64", all(rind_backend = "aarch64", test)))]
 pub(crate) use generic::poly1305;
+#[cfg(target_has_atomic = "8")]
 pub(crate) use generic::reuse_cache::ReuseCache;
+#[cfg(not(target_has_atomic = "8"))]
+pub(crate) use generic::reuse_cache_without_cas::ReuseCache;
 pub(crate) use generic::zeroise::{Zeroable, ZeroableRef, zeroise, zeroise_value};
 pub(crate) use mcdt::Mcdt;
 #[cfg(rind_backend = "portable")]
@@ -487,6 +543,7 @@ cfg_if::cfg_if! {
         pub(crate) use x86_64::rsaz_avx512::{Operands, RsazAvx512};
         pub(crate) use x86_64::rsa_ifma::{IfmaCrt, RsaIfma};
         pub(crate) use x86_64::mlkem_sample_poly_ntt_8x::mlkem_sample_poly_ntt_8x;
+        pub(crate) use x86_64::mlkem_shake256_8x::mlkem_shake256_8x;
 
         pub(crate) use x86_64::adx_mux::p256_montjadd;
         pub(crate) use x86_64::adx_mux::p256_montjdouble;
@@ -513,6 +570,8 @@ cfg_if::cfg_if! {
 
     } else if #[cfg(rind_backend = "aarch64")] {
         pub(in crate::low) use aarch64::cpu::{enter_cpu_state, zero_bytes, ct_compare_bytes, ct_compare_16, leave_cpu_state};
+        #[cfg(all(rind_dit, debug_assertions))]
+        pub(in crate::low) use aarch64::cpu::dit_on;
         #[cfg(rind_fips)]
         pub(crate) use aarch64::cpu::missing_cpu_feature;
         pub(crate) use aarch64::aes::{AesDecKey, AesKey};
@@ -541,8 +600,8 @@ cfg_if::cfg_if! {
         pub(crate) use aarch64::bignum_inv_p256::bignum_inv_p256;
         pub(crate) use aarch64::bignum_inv_p384::bignum_inv_p384;
         pub(crate) use aarch64::bignum_inv_p521::bignum_inv_p521;
-        pub(crate) use aarch64::bignum_invsqrt_p25519::bignum_invsqrt_p25519;
-        pub(crate) use aarch64::bignum_madd_n25519::bignum_madd_n25519;
+        pub(crate) use aarch64::wide_mux::bignum_invsqrt_p25519;
+        pub(crate) use aarch64::wide_mux::bignum_madd_n25519;
         pub(crate) use aarch64::bignum_mod_n25519::bignum_mod_n25519;
         pub(crate) use aarch64::bignum_mod_n256::bignum_mod_n256;
         pub(crate) use aarch64::bignum_mod_n384::bignum_mod_n384;
@@ -558,7 +617,7 @@ cfg_if::cfg_if! {
         pub(crate) use aarch64::bignum_montsqr_p256::bignum_montsqr_p256;
         pub(crate) use aarch64::bignum_montsqr_p384::bignum_montsqr_p384;
         pub(crate) use aarch64::bignum_mul::bignum_mul;
-        pub(crate) use aarch64::bignum_mul_p25519::bignum_mul_p25519;
+        pub(crate) use aarch64::wide_mux::bignum_mul_p25519;
         pub(crate) use aarch64::bignum_mul_p521::bignum_mul_p521;
         pub(crate) use aarch64::bignum_mux::bignum_mux;
         pub(crate) use aarch64::bignum_neg_p25519::bignum_neg_p25519;
@@ -567,20 +626,20 @@ cfg_if::cfg_if! {
         pub(crate) use aarch64::bignum_neg_p521::bignum_neg_p521;
         pub(crate) use aarch64::bignum_negmodinv::bignum_negmodinv;
         pub(crate) use aarch64::bignum_optsub::bignum_optsub;
-        pub(crate) use aarch64::bignum_sqr_p25519::bignum_sqr_p25519;
+        pub(crate) use aarch64::wide_mux::bignum_sqr_p25519;
         pub(crate) use aarch64::bignum_sqr_p521::bignum_sqr_p521;
         pub(crate) use aarch64::bignum_sub_p25519::bignum_sub_p25519;
         pub(crate) use aarch64::bignum_tomont_p256::bignum_tomont_p256;
         pub(crate) use aarch64::bignum_tomont_p384::bignum_tomont_p384;
-        pub(crate) use aarch64::curve25519_x25519::curve25519_x25519;
-        pub(crate) use aarch64::curve25519_x25519base::curve25519_x25519base;
+        pub(crate) use aarch64::wide_mux::curve25519_x25519;
+        pub(crate) use aarch64::wide_mux::curve25519_x25519base;
         pub(crate) use aarch64::curve25519_ifma::Curve25519Ifma;
-        pub(crate) use aarch64::edwards25519_decode::edwards25519_decode;
-        pub(crate) use aarch64::edwards25519_epadd::edwards25519_epadd;
-        pub(crate) use aarch64::edwards25519_epdouble::edwards25519_epdouble;
-        pub(crate) use aarch64::edwards25519_pdouble::edwards25519_pdouble;
-        pub(crate) use aarch64::edwards25519_scalarmulbase::edwards25519_scalarmulbase;
-        pub(crate) use aarch64::edwards25519_scalarmuldouble::edwards25519_scalarmuldouble;
+        pub(crate) use aarch64::wide_mux::edwards25519_decode;
+        pub(crate) use aarch64::wide_mux::edwards25519_epadd;
+        pub(crate) use aarch64::wide_mux::edwards25519_epdouble;
+        pub(crate) use aarch64::wide_mux::edwards25519_pdouble;
+        pub(crate) use aarch64::wide_mux::edwards25519_scalarmulbase;
+        pub(crate) use generic::edwards25519_msm::edwards25519_msm;
         #[cfg(feature = "ml-dsa")]
         pub(crate) use aarch64::mldsa::{
             mldsa_ntt, mldsa_intt, mldsa_nttunpack, mldsa_pointwise, mldsa_pointwise_acc,
@@ -610,17 +669,17 @@ cfg_if::cfg_if! {
         pub(crate) use aarch64::ghash;
         pub(crate) use aarch64::p256_montjadd::p256_montjadd;
         pub(crate) use aarch64::p256_montjdouble::p256_montjdouble;
-        pub(crate) use aarch64::p256_montjmixadd::p256_montjmixadd;
-        pub(crate) use aarch64::p256_scalarmul::p256_scalarmul;
-        pub(crate) use aarch64::p256_scalarmulbase::p256_scalarmulbase;
+        pub(crate) use aarch64::wide_mux::p256_montjmixadd;
+        pub(crate) use aarch64::wide_mux::p256_scalarmul;
+        pub(crate) use aarch64::wide_mux::p256_scalarmulbase;
         pub(crate) use aarch64::p384_montjadd::p384_montjadd;
-        pub(crate) use aarch64::p384_montjmixadd::p384_montjmixadd;
+        pub(crate) use aarch64::wide_mux::p384_montjmixadd;
         pub(crate) use aarch64::p384_montjdouble::p384_montjdouble;
-        pub(crate) use aarch64::p384_montjscalarmul::p384_montjscalarmul;
-        pub(crate) use aarch64::p521_jadd::p521_jadd;
-        pub(crate) use aarch64::p521_jdouble::p521_jdouble;
-        pub(crate) use aarch64::p521_jmixadd::p521_jmixadd;
-        pub(crate) use aarch64::p521_jscalarmul::p521_jscalarmul;
+        pub(crate) use aarch64::wide_mux::p384_montjscalarmul;
+        pub(crate) use aarch64::wide_mux::p521_jadd;
+        pub(crate) use aarch64::wide_mux::p521_jdouble;
+        pub(crate) use aarch64::wide_mux::p521_jmixadd;
+        pub(crate) use aarch64::wide_mux::p521_jscalarmul;
         pub(crate) use aarch64::sha1::{sha1_compress_blocks, sha1_compress_padded};
         pub(crate) use aarch64::sha256::{sha256_compress_blocks, sha256_finish};
         #[cfg(feature = "slh-dsa")]

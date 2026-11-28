@@ -1,10 +1,17 @@
+#[cfg(target_arch = "xtensa")]
+fn main() {}
+
+#[cfg(not(target_arch = "xtensa"))]
 mod common;
 
+#[cfg(not(target_arch = "xtensa"))]
 use std::hint::black_box;
 
+#[cfg(not(target_arch = "xtensa"))]
 use common::{Dit, dit};
 
 #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+#[cfg(not(target_arch = "xtensa"))]
 mod ossl {
     //! The openssl crate does not yet wrap SLH-DSA key generation.
 
@@ -42,10 +49,12 @@ mod ossl {
 
 // The message every library signs. SLH-DSA signs without rejection, so its
 // time does not depend on the randomness each signature draws.
+#[cfg(not(target_arch = "xtensa"))]
 const MESSAGE: &[u8] = b"rind SLH-DSA benchmark message";
 
 /// A RustCrypto key from `N`-byte seeds: its `SigningKey::new` wants a
 /// rand_core 0.10 RNG too.
+#[cfg(not(target_arch = "xtensa"))]
 fn rustcrypto_key<P: slh_dsa::ParameterSet, const N: usize>() -> slh_dsa::SigningKey<P> {
     let mut seeds = [[0u8; N]; 3];
     getrandom::fill(seeds.as_flattened_mut()).unwrap();
@@ -244,6 +253,7 @@ macro_rules! slh_dsa {
     };
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 slh_dsa!(
     slhdsa_sha2_128s_keygen, slhdsa_sha2_128s_sign, slhdsa_sha2_128s_verify, n: 16,
     rind: SlhDsaSha2_128s,
@@ -252,6 +262,7 @@ slh_dsa!(
     openssl: c"SLH-DSA-SHA2-128s",
 );
 
+#[cfg(not(target_arch = "xtensa"))]
 slh_dsa!(
     slhdsa_sha2_128f_keygen, slhdsa_sha2_128f_sign, slhdsa_sha2_128f_verify, n: 16,
     rind: SlhDsaSha2_128f,
@@ -260,6 +271,7 @@ slh_dsa!(
     openssl: c"SLH-DSA-SHA2-128f",
 );
 
+#[cfg(not(target_arch = "xtensa"))]
 slh_dsa!(
     slhdsa_shake_128s_keygen, slhdsa_shake_128s_sign, slhdsa_shake_128s_verify, n: 16,
     rind: SlhDsaShake128s,
@@ -268,6 +280,7 @@ slh_dsa!(
     openssl: c"SLH-DSA-SHAKE-128s",
 );
 
+#[cfg(not(target_arch = "xtensa"))]
 slh_dsa!(
     slhdsa_shake_128f_keygen, slhdsa_shake_128f_sign, slhdsa_shake_128f_verify, n: 16,
     rind: SlhDsaShake128f,
@@ -276,6 +289,7 @@ slh_dsa!(
     openssl: c"SLH-DSA-SHAKE-128f",
 );
 
+#[cfg(not(target_arch = "xtensa"))]
 slh_dsa!(
     slhdsa_sha2_256f_keygen, slhdsa_sha2_256f_sign, slhdsa_sha2_256f_verify, n: 32,
     rind: SlhDsaSha2_256f,
@@ -284,6 +298,7 @@ slh_dsa!(
     openssl: c"SLH-DSA-SHA2-256f",
 );
 
+#[cfg(not(target_arch = "xtensa"))]
 slh_dsa!(
     slhdsa_shake_256f_keygen, slhdsa_shake_256f_sign, slhdsa_shake_256f_verify, n: 32,
     rind: SlhDsaShake256f,
@@ -292,6 +307,7 @@ slh_dsa!(
     openssl: c"SLH-DSA-SHAKE-256f",
 );
 
+#[cfg(not(target_arch = "xtensa"))]
 fn main() {
     swole::main();
 }

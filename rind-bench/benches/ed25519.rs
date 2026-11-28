@@ -1,33 +1,48 @@
+#[cfg(target_arch = "xtensa")]
+fn main() {}
+
+#[cfg(not(target_arch = "xtensa"))]
 mod common;
 
+#[cfg(not(target_arch = "xtensa"))]
 use std::hint::black_box;
 
+#[cfg(not(target_arch = "xtensa"))]
 use common::{Dit, dit};
 
+#[cfg(not(target_arch = "xtensa"))]
 const PUBLIC_KEY: &[u8; 32] = b"\x7d\x4d\x0e\x7f\x61\x53\xa6\x9b\x62\x42\xb5\x22\xab\xbe\xe6\x85\xfd\xa4\x42\x0f\x88\x34\xb1\x08\xc3\xbd\xae\x36\x9e\xf5\x49\xfa";
+#[cfg(not(target_arch = "xtensa"))]
 const MESSAGE: &[u8] = b"\x54\x65\x73\x74";
+#[cfg(not(target_arch = "xtensa"))]
 const SIGNATURE: &[u8; 64] = b"\x7c\x38\xe0\x26\xf2\x9e\x14\xaa\xbd\x05\x9a\x0f\x2d\xb8\xb0\xcd\x78\x30\x40\x60\x9a\x8b\xe6\x84\xdb\x12\xf8\x2a\x27\x77\x4a\xb0\x7a\x91\x55\x71\x1e\xcf\xaf\x7f\x99\xf2\x77\xba\xd0\xc6\xae\x7e\x39\xd4\xee\xf6\x76\x57\x33\x36\xa5\xc5\x1e\xb6\xf9\x46\xb3\x0d";
 
 /// The message the signing rows sign.
+#[cfg(not(target_arch = "xtensa"))]
 const SIGNED: &[u8] = b"\x31\x32\x33\x34\x30\x30";
 
+#[cfg(not(target_arch = "xtensa"))]
 fn rind_public_key() -> rind::ed25519::PublicKey {
     rind::ed25519::PublicKey::new(PUBLIC_KEY).unwrap()
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn rind_verify(public_key: &rind::ed25519::PublicKey) {
     public_key.verify(MESSAGE, SIGNATURE).unwrap();
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn rind_signing_key() -> rind::ed25519::KeyPair {
     rind::ed25519::KeyPair::generate().unwrap()
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn rind_sign(signing_key: &rind::ed25519::KeyPair) {
     black_box(signing_key.sign(SIGNED));
 }
 
 // Generate a fresh key and make a PKCS8 document of it.
+#[cfg(not(target_arch = "xtensa"))]
 mod ed25519_keygen {
     use swole::bench;
 
@@ -126,6 +141,7 @@ mod ed25519_keygen {
 
 // Each library parses the key once, outside the timed call, where its API
 // allows.
+#[cfg(not(target_arch = "xtensa"))]
 mod ed25519_verify {
     use swole::bench;
 
@@ -212,6 +228,7 @@ mod ed25519_verify {
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 mod ed25519_sign {
     use swole::bench;
 
@@ -320,6 +337,7 @@ mod ed25519_sign {
 }
 
 #[cfg(target_arch = "aarch64")]
+#[cfg(not(target_arch = "xtensa"))]
 mod dit_per_call {
     mod ed25519_verify {
         use swole::bench;
@@ -344,6 +362,7 @@ mod dit_per_call {
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn main() {
     swole::main();
 }

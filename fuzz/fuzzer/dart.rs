@@ -290,30 +290,35 @@ fn rsa_verification_algorithm(id: u8) -> Option<&'static rsa::VerificationAlgori
     })
 }
 
-enum Verification {
-    Ecdsa(&'static ecdsa::VerificationAlgorithm),
-    Ed25519,
-    Rsa(&'static rsa::VerificationAlgorithm),
-}
-
-fn verification_algorithm(id: u8) -> Option<Verification> {
+/// An ECDSA public key's verification algorithm, as
+/// `rind-dart/lib/src/ecdsa.dart` numbers them.
+fn ecdsa_verification_algorithm(id: u8) -> Option<&'static ecdsa::VerificationAlgorithm> {
     use ecdsa::verify::*;
     Some(match id {
-        20 => Verification::Ecdsa(&P256_SHA256_ASN1),
-        21 => Verification::Ecdsa(&P256_SHA384_ASN1),
-        22 => Verification::Ecdsa(&P256_SHA512_ASN1),
-        23 => Verification::Ecdsa(&P384_SHA256_ASN1),
-        24 => Verification::Ecdsa(&P384_SHA384_ASN1),
-        25 => Verification::Ecdsa(&P384_SHA512_ASN1),
-        26 => Verification::Ecdsa(&P521_SHA256_ASN1),
-        27 => Verification::Ecdsa(&P521_SHA384_ASN1),
-        28 => Verification::Ecdsa(&P521_SHA512_ASN1),
-        29 => Verification::Ecdsa(&P256_SHA256_FIXED),
-        30 => Verification::Ecdsa(&P384_SHA384_FIXED),
-        31 => Verification::Ecdsa(&P521_SHA512_FIXED),
-        32 => Verification::Ed25519,
-        _ => Verification::Rsa(rsa_verification_algorithm(id)?),
+        0 => &P256_SHA256_ASN1,
+        1 => &P256_SHA384_ASN1,
+        2 => &P256_SHA512_ASN1,
+        3 => &P384_SHA256_ASN1,
+        4 => &P384_SHA384_ASN1,
+        5 => &P384_SHA512_ASN1,
+        6 => &P521_SHA256_ASN1,
+        7 => &P521_SHA384_ASN1,
+        8 => &P521_SHA512_ASN1,
+        9 => &P256_SHA256_FIXED,
+        10 => &P384_SHA384_FIXED,
+        11 => &P521_SHA512_FIXED,
+        _ => return None,
     })
+}
+
+/// The binding's 0 for an algorithm's own encoding and 1 for a
+/// `SubjectPublicKeyInfo`; any other selector is `Misuse`.
+fn own_or_spki(selector: u8) -> Result<bool, isize> {
+    match selector {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(MISUSE),
+    }
 }
 
 fn oaep_algorithm(id: u8) -> Option<&'static rsa::OaepAlgorithm> {
@@ -324,35 +329,6 @@ fn oaep_algorithm(id: u8) -> Option<&'static rsa::OaepAlgorithm> {
         100 => &rsa::legacy::OAEP_SHA1,
         _ => return None,
     })
-}
-
-/// rind's twin of a `PublicKey` handle.
-#[allow(clippy::large_enum_variant)]
-enum Public {
-    Ecdsa(ecdsa::PublicKey),
-    Ed25519(ed25519::PublicKey),
-    Rsa(rsa::PublicKey, &'static rsa::VerificationAlgorithm),
-}
-
-impl Public {
-    fn verify(&self, message: &[u8], signature: &[u8]) -> Result<(), Error> {
-        match self {
-            Self::Ecdsa(key) => key.verify(message, signature),
-            Self::Ed25519(key) => key.verify(message, signature),
-            Self::Rsa(key, algorithm) => key.verify(algorithm, message, signature),
-        }
-    }
-
-    fn export(&self, spki: bool) -> Vec<u8> {
-        match (self, spki) {
-            (Self::Ecdsa(key), false) => key.as_ref().to_vec(),
-            (Self::Ed25519(key), false) => key.as_ref().to_vec(),
-            (Self::Rsa(key, _), false) => key.as_ref().to_vec(),
-            (Self::Ecdsa(key), true) => key.to_spki().as_ref().to_vec(),
-            (Self::Ed25519(key), true) => key.to_spki().as_ref().to_vec(),
-            (Self::Rsa(key, _), true) => key.to_spki().as_ref().to_vec(),
-        }
-    }
 }
 
 type Decapsulation = kem::DecapsulationKey<kem::MlKem768>;
@@ -587,23 +563,27 @@ enum Op {
         what: u8,
         cap: u16,
     },
+    /// `kind` 0 is ECDSA, 1 Ed25519, and 2 RSA, each with its own handles.
     KeyPairPublicKey {
         kind: u8,
         pair: u8,
-        algorithm: u8,
     },
     PublicKeyNew {
+        kind: u8,
         algorithm: u8,
         source: u8,
         bytes: Material,
         exponent: Vec<u8>,
     },
     PublicKeyVerify {
+        kind: u8,
         key: u8,
+        algorithm: u8,
         message: Vec<u8>,
         signature: Vec<u8>,
     },
     PublicKeyExport {
+        kind: u8,
         key: u8,
         spki: u8,
         cap: u16,
@@ -698,7 +678,9 @@ struct State {
     ecdsa: Slots<EcdsaKeyPair, (EcdsaKeyPair, u8)>,
     ed25519: Slots<Ed25519KeyPair, Ed25519KeyPair>,
     rsa: Slots<RsaKeyPair, RsaKeyPair>,
-    public: Slots<PublicKey, Public>,
+    ecdsa_public: Slots<ecdsa::PublicKey, ecdsa::PublicKey>,
+    ed25519_public: Slots<ed25519::PublicKey, ed25519::PublicKey>,
+    rsa_public: Slots<rsa::PublicKey, rsa::PublicKey>,
     decapsulation: Slots<Decapsulation, ()>,
     encapsulation: Slots<Encapsulation, ()>,
     decrypting: Slots<rsa::DecryptingKey, (rsa::DecryptingKey, &'static rsa::OaepAlgorithm)>,
@@ -724,7 +706,9 @@ fuzz_target!(|ops: Vec<Op>| {
         ecdsa: Slots::new(rind_dart_ecdsa_key_pair_free),
         ed25519: Slots::new(rind_dart_ed25519_key_pair_free),
         rsa: Slots::new(rind_dart_rsa_key_pair_free),
-        public: Slots::new(rind_dart_public_key_free),
+        ecdsa_public: Slots::new(rind_dart_ecdsa_public_key_free),
+        ed25519_public: Slots::new(rind_dart_ed25519_public_key_free),
+        rsa_public: Slots::new(rind_dart_rsa_public_key_free),
         decapsulation: Slots::new(rind_dart_decapsulation_key_free),
         encapsulation: Slots::new(rind_dart_encapsulation_key_free),
         decrypting: Slots::new(rind_dart_decrypting_key_free),
@@ -1389,14 +1373,18 @@ unsafe fn run(s: &mut State, op: &Op) {
             use agreement::PublicKey;
             let bytes = bytes.bytes();
             let expected = agreement_algorithm(*algorithm).ok_or(MISUSE).and_then(|a| {
-                let key = match spki {
-                    0 => PublicKey::new(a, &bytes),
-                    _ => PublicKey::from_spki(a, &bytes),
+                let from_spki = own_or_spki(*spki)?;
+                let as_spki = own_or_spki(*export)?;
+                let key = if from_spki {
+                    PublicKey::from_spki(a, &bytes)
+                } else {
+                    PublicKey::new(a, &bytes)
                 }
                 .map_err(code)?;
-                Ok(match export {
-                    0 => key.as_ref().to_vec(),
-                    _ => key.to_spki().as_ref().to_vec(),
+                Ok(if as_spki {
+                    key.to_spki().as_ref().to_vec()
+                } else {
+                    key.as_ref().to_vec()
                 })
             });
             let mut out = vec![0; usize::from(*cap)];
@@ -1485,7 +1473,6 @@ unsafe fn run(s: &mut State, op: &Op) {
                 1 => Ok(twin.to_pkcs8().as_ref().to_vec()),
                 2 => Ok(twin.to_sec1().as_ref().to_vec()),
                 3 => Ok(twin.to_scalar().as_ref().to_vec()),
-                4 => Ok(twin.public_key().to_spki().as_ref().to_vec()),
                 _ => Err(MISUSE),
             };
             let mut out = vec![0; usize::from(*cap)];
@@ -1554,7 +1541,6 @@ unsafe fn run(s: &mut State, op: &Op) {
                 1 => Ok(twin.to_pkcs8().as_ref().to_vec()),
                 2 => Ok(twin.to_pkcs8v1().as_ref().to_vec()),
                 3 => Ok(twin.to_seed().as_ref().to_vec()),
-                4 => Ok(twin.public_key().to_spki().as_ref().to_vec()),
                 _ => Err(MISUSE),
             };
             let mut out = vec![0; usize::from(*cap)];
@@ -1632,7 +1618,6 @@ unsafe fn run(s: &mut State, op: &Op) {
             };
             let expected = match what {
                 1 => Ok(twin.to_pkcs8().as_ref().to_vec()),
-                4 => Ok(twin.public_key().to_spki().as_ref().to_vec()),
                 _ => Err(MISUSE),
             };
             let mut out = vec![0; usize::from(*cap)];
@@ -1644,127 +1629,225 @@ unsafe fn run(s: &mut State, op: &Op) {
             );
             check_write(got, &out, expected);
         }
-        Op::KeyPairPublicKey {
-            kind,
-            pair,
-            algorithm,
-        } => {
-            let (pair, twin) = match kind {
-                0 => {
-                    let Some(&(handle, (ref twin, _))) = s.ecdsa.get(*pair) else {
-                        return;
-                    };
-                    (
-                        handle.cast_const().cast::<u8>(),
-                        Ok(Public::Ecdsa(twin.public_key().clone())),
-                    )
-                }
-                1 => {
-                    let Some(&(handle, ref twin)) = s.ed25519.get(*pair) else {
-                        return;
-                    };
-                    (
-                        handle.cast_const().cast(),
-                        Ok(Public::Ed25519(twin.public_key().clone())),
-                    )
-                }
-                2 => {
-                    let Some(&(handle, ref twin)) = s.rsa.get(*pair) else {
-                        return;
-                    };
-                    let twin = match rsa_signing_algorithm(*algorithm) {
-                        None => Err(MISUSE),
-                        Some(_) => Ok(Public::Rsa(
-                            twin.public_key().clone(),
-                            rsa_verification_algorithm(*algorithm).unwrap(),
-                        )),
-                    };
-                    (handle.cast_const().cast(), twin)
-                }
-                // The binding refuses the kind before it reads the handle.
-                _ => (ptr::null(), Err(MISUSE)),
-            };
-            create(&mut s.public, twin, |out| {
-                rind_dart_key_pair_public_key(u32::from(*kind), pair, u32::from(*algorithm), out)
-            });
-        }
+        Op::KeyPairPublicKey { kind, pair } => match kind {
+            0 => {
+                let Some(&(handle, (ref twin, _))) = s.ecdsa.get(*pair) else {
+                    return;
+                };
+                create(&mut s.ecdsa_public, Ok(twin.public_key().clone()), |out| {
+                    rind_dart_ecdsa_key_pair_public_key(handle, out)
+                });
+            }
+            1 => {
+                let Some(&(handle, ref twin)) = s.ed25519.get(*pair) else {
+                    return;
+                };
+                create(
+                    &mut s.ed25519_public,
+                    Ok(twin.public_key().clone()),
+                    |out| rind_dart_ed25519_key_pair_public_key(handle, out),
+                );
+            }
+            _ => {
+                let Some(&(handle, ref twin)) = s.rsa.get(*pair) else {
+                    return;
+                };
+                create(&mut s.rsa_public, Ok(twin.public_key().clone()), |out| {
+                    rind_dart_rsa_key_pair_public_key(handle, out)
+                });
+            }
+        },
         Op::PublicKeyNew {
+            kind,
             algorithm,
             source,
             bytes,
             exponent,
         } => {
             let bytes = bytes.bytes();
-            let twin = match (source, verification_algorithm(*algorithm)) {
-                (_, None) => Err(MISUSE),
-                (0, Some(Verification::Ecdsa(a))) => {
-                    twin(ecdsa::PublicKey::new(a, &bytes).map(Public::Ecdsa))
+            match kind {
+                0 => {
+                    let twin = ecdsa_verification_algorithm(*algorithm)
+                        .ok_or(MISUSE)
+                        .and_then(|a| {
+                            if own_or_spki(*source)? {
+                                twin(ecdsa::PublicKey::from_spki(a, &bytes))
+                            } else {
+                                twin(ecdsa::PublicKey::new(a, &bytes))
+                            }
+                        });
+                    create(&mut s.ecdsa_public, twin, |out| {
+                        rind_dart_ecdsa_public_key_new(
+                            u32::from(*algorithm),
+                            u32::from(*source),
+                            input(&bytes),
+                            bytes.len(),
+                            out,
+                        )
+                    });
                 }
-                (1, Some(Verification::Ecdsa(a))) => {
-                    twin(ecdsa::PublicKey::from_spki(a, &bytes).map(Public::Ecdsa))
+                1 => {
+                    let twin = own_or_spki(*source).and_then(|spki| {
+                        if spki {
+                            twin(ed25519::PublicKey::from_spki(&bytes))
+                        } else {
+                            twin(ed25519::PublicKey::new(&bytes))
+                        }
+                    });
+                    create(&mut s.ed25519_public, twin, |out| {
+                        rind_dart_ed25519_public_key_new(
+                            u32::from(*source),
+                            input(&bytes),
+                            bytes.len(),
+                            out,
+                        )
+                    });
                 }
-                (0, Some(Verification::Ed25519)) => {
-                    twin(ed25519::PublicKey::new(&bytes).map(Public::Ed25519))
+                _ => {
+                    let twin = match source {
+                        0 => twin(rsa::PublicKey::new(&bytes)),
+                        1 => twin(rsa::PublicKey::from_spki(&bytes)),
+                        2 => twin(rsa::PublicKey::from_components(&rsa::PublicKeyComponents {
+                            n: &bytes[..],
+                            e: &exponent[..],
+                        })),
+                        _ => Err(MISUSE),
+                    };
+                    create(&mut s.rsa_public, twin, |out| {
+                        rind_dart_rsa_public_key_new(
+                            u32::from(*source),
+                            input(&bytes),
+                            bytes.len(),
+                            input(exponent),
+                            exponent.len(),
+                            out,
+                        )
+                    });
                 }
-                (1, Some(Verification::Ed25519)) => {
-                    twin(ed25519::PublicKey::from_spki(&bytes).map(Public::Ed25519))
-                }
-                (0, Some(Verification::Rsa(a))) => twin(
-                    rsa::PublicKey::new(&bytes)
-                        .or_else(|_| rsa::PublicKey::from_spki(&bytes))
-                        .map(|k| Public::Rsa(k, a)),
-                ),
-                (1, Some(Verification::Rsa(a))) => {
-                    twin(rsa::PublicKey::from_spki(&bytes).map(|k| Public::Rsa(k, a)))
-                }
-                (2, Some(Verification::Rsa(a))) => twin(
-                    rsa::PublicKey::from_components(&rsa::PublicKeyComponents {
-                        n: &bytes[..],
-                        e: &exponent[..],
-                    })
-                    .map(|k| Public::Rsa(k, a)),
-                ),
-                _ => Err(MISUSE),
-            };
-            create(&mut s.public, twin, |out| {
-                rind_dart_public_key_new(
-                    u32::from(*algorithm),
-                    u32::from(*source),
-                    input(&bytes),
-                    bytes.len(),
-                    input(exponent),
-                    exponent.len(),
-                    out,
-                )
-            });
+            }
         }
         Op::PublicKeyVerify {
+            kind,
             key,
+            algorithm,
             message,
             signature,
         } => {
-            let Some(&(handle, ref twin)) = s.public.get(*key) else {
-                return;
+            let (got, expected) = match kind {
+                0 => {
+                    let Some(&(handle, ref twin)) = s.ecdsa_public.get(*key) else {
+                        return;
+                    };
+                    let got = rind_dart_ecdsa_public_key_verify(
+                        handle,
+                        input(message),
+                        message.len(),
+                        input(signature),
+                        signature.len(),
+                    );
+                    (got, status(&twin.verify(message, signature), 0))
+                }
+                1 => {
+                    let Some(&(handle, ref twin)) = s.ed25519_public.get(*key) else {
+                        return;
+                    };
+                    let got = rind_dart_ed25519_public_key_verify(
+                        handle,
+                        input(message),
+                        message.len(),
+                        input(signature),
+                        signature.len(),
+                    );
+                    (got, status(&twin.verify(message, signature), 0))
+                }
+                _ => {
+                    let Some(&(handle, ref twin)) = s.rsa_public.get(*key) else {
+                        return;
+                    };
+                    let got = rind_dart_rsa_public_key_verify(
+                        handle,
+                        u32::from(*algorithm),
+                        input(message),
+                        message.len(),
+                        input(signature),
+                        signature.len(),
+                    );
+                    let expected = match rsa_verification_algorithm(*algorithm) {
+                        None => MISUSE,
+                        Some(a) => status(&twin.verify(a, message, signature), 0),
+                    };
+                    (got, expected)
+                }
             };
-            let expected = status(&twin.verify(message, signature), 0);
-            let got = rind_dart_public_key_verify(
-                handle,
-                input(message),
-                message.len(),
-                input(signature),
-                signature.len(),
-            );
             assert_eq!(got, expected);
         }
-        Op::PublicKeyExport { key, spki, cap } => {
-            let Some(&(handle, ref twin)) = s.public.get(*key) else {
-                return;
-            };
-            let expected = twin.export(*spki != 0);
+        Op::PublicKeyExport {
+            kind,
+            key,
+            spki,
+            cap,
+        } => {
             let mut out = vec![0; usize::from(*cap)];
-            let got =
-                rind_dart_public_key_export(handle, u32::from(*spki), output(&mut out), out.len());
-            check_write(got, &out, Ok(&expected));
+            let (got, expected) = match kind {
+                0 => {
+                    let Some(&(handle, ref twin)) = s.ecdsa_public.get(*key) else {
+                        return;
+                    };
+                    let got = rind_dart_ecdsa_public_key_export(
+                        handle,
+                        u32::from(*spki),
+                        output(&mut out),
+                        out.len(),
+                    );
+                    let expected = own_or_spki(*spki).map(|spki| {
+                        if spki {
+                            twin.to_spki().as_ref().to_vec()
+                        } else {
+                            twin.as_ref().to_vec()
+                        }
+                    });
+                    (got, expected)
+                }
+                1 => {
+                    let Some(&(handle, ref twin)) = s.ed25519_public.get(*key) else {
+                        return;
+                    };
+                    let got = rind_dart_ed25519_public_key_export(
+                        handle,
+                        u32::from(*spki),
+                        output(&mut out),
+                        out.len(),
+                    );
+                    let expected = own_or_spki(*spki).map(|spki| {
+                        if spki {
+                            twin.to_spki().as_ref().to_vec()
+                        } else {
+                            twin.as_ref().to_vec()
+                        }
+                    });
+                    (got, expected)
+                }
+                _ => {
+                    let Some(&(handle, ref twin)) = s.rsa_public.get(*key) else {
+                        return;
+                    };
+                    let got = rind_dart_rsa_public_key_export(
+                        handle,
+                        u32::from(*spki),
+                        output(&mut out),
+                        out.len(),
+                    );
+                    let expected = own_or_spki(*spki).map(|spki| {
+                        if spki {
+                            twin.to_spki().as_ref().to_vec()
+                        } else {
+                            twin.as_ref().to_vec()
+                        }
+                    });
+                    (got, expected)
+                }
+            };
+            check_write(got, &out, expected);
         }
 
         Op::DecapsulationKeyGenerate { algorithm } => {
@@ -1972,7 +2055,6 @@ unsafe fn run(s: &mut State, op: &Op) {
             };
             let expected = match what {
                 1 => Ok(twin.to_pkcs8().as_ref().to_vec()),
-                4 => Ok(twin.public_key().to_spki().as_ref().to_vec()),
                 _ => Err(MISUSE),
             };
             let mut out = vec![0; usize::from(*cap)];
@@ -1994,9 +2076,8 @@ unsafe fn run(s: &mut State, op: &Op) {
             let bytes = bytes.bytes();
             let twin = match (oaep_algorithm(*algorithm), source) {
                 (None, _) => Err(MISUSE),
-                (Some(a), 0) => twin(
-                    EncryptingKey::new(a, &bytes).or_else(|_| EncryptingKey::from_spki(a, &bytes)),
-                ),
+                (Some(a), 0) => twin(EncryptingKey::new(a, &bytes)),
+                (Some(a), 1) => twin(EncryptingKey::from_spki(a, &bytes)),
                 (Some(a), 2) => twin(EncryptingKey::from_components(
                     a,
                     &rsa::PublicKeyComponents {
@@ -2056,10 +2137,13 @@ unsafe fn run(s: &mut State, op: &Op) {
             let Some(&(handle, (ref twin, _))) = s.encrypting.get(*key) else {
                 return;
             };
-            let expected = match spki {
-                0 => twin.as_ref().to_vec(),
-                _ => twin.to_spki().as_ref().to_vec(),
-            };
+            let expected = own_or_spki(*spki).map(|spki| {
+                if spki {
+                    twin.to_spki().as_ref().to_vec()
+                } else {
+                    twin.as_ref().to_vec()
+                }
+            });
             let mut out = vec![0; usize::from(*cap)];
             let got = rind_dart_encrypting_key_export(
                 handle,
@@ -2067,7 +2151,7 @@ unsafe fn run(s: &mut State, op: &Op) {
                 output(&mut out),
                 out.len(),
             );
-            check_write(got, &out, Ok(&expected));
+            check_write(got, &out, expected);
         }
         Op::EncryptingKeyMaxMessageLen { key } => {
             let Some(&(handle, (ref twin, _))) = s.encrypting.get(*key) else {

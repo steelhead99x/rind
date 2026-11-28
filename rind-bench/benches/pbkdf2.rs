@@ -1,11 +1,18 @@
+#[cfg(target_arch = "xtensa")]
+fn main() {}
+
+#[cfg(not(target_arch = "xtensa"))]
 mod common;
 
+#[cfg(not(target_arch = "xtensa"))]
 use std::num::NonZeroU32;
 
+#[cfg(not(target_arch = "xtensa"))]
 use common::Dit;
 
 // One key the length of the hash, as password storage derives. The cost is
 // all in the iterations.
+#[cfg(not(target_arch = "xtensa"))]
 const ITERATIONS: NonZeroU32 = NonZeroU32::new(1000).unwrap();
 
 /// Each PBKDF2 hash's rows, deriving a `$len`-byte key.
@@ -67,6 +74,7 @@ macro_rules! rows {
     };
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 mod pbkdf2_sha1 {
     use swole::bench;
 
@@ -80,6 +88,7 @@ mod pbkdf2_sha1 {
     );
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 mod pbkdf2_sha256 {
     use swole::bench;
 
@@ -93,6 +102,7 @@ mod pbkdf2_sha256 {
     );
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 mod pbkdf2_sha384 {
     use swole::bench;
 
@@ -106,6 +116,7 @@ mod pbkdf2_sha384 {
     );
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 mod pbkdf2_sha512 {
     use swole::bench;
 
@@ -119,6 +130,7 @@ mod pbkdf2_sha512 {
     );
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn main() {
     swole::main();
 }

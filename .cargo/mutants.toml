@@ -71,6 +71,7 @@ exclude_re = [
   'rind/src/low/generic/p384_mul32\.rs:\d+:\d+: replace \| with \^ in sqr_wide$',
   'rind/src/low/generic/p521\.rs:\d+:\d+: replace \| with \^ in (booth_w5|nonzero_u8|select_words)$',
   'rind/src/low/generic/poly1305\.rs:\d+:\d+: replace \| with \^ in (add|full_reduce|mul)$',
+  'rind/src/low/generic/poly1305_32\.rs:\d+:\d+: replace \| with \^ in (Poly1305::finish|Blocks::block|add_s_split)$',
   'rind/src/low/posint\.rs:\d+:\d+: replace \| with \^ in (PosInt<N>::from_bytes|PosInt<N>::pub_montifier|mul_word_mod)$',
   'rind/src/low/(portable|x86_64)/\.\./generic/aes_nohw\.rs:\d+:\d+: replace \| with \^ in word::(compact_block|rotate_rows_down|rotate_rows_twice|uncompact_block)$',
   'rind/src/low/(portable|x86_64)/\.\./generic/ghash_nohw\.rs:\d+:\d+: replace \| with \^ in (NohwTable::ghash|gcm_mul32_nohw)$',
@@ -110,6 +111,8 @@ exclude_re = [
   'rind/src/high/rsa\.rs:\d+:74: replace \+ with \*$',
   'rind/src/high/sec1\.rs:\d+:\d+: replace \+ with \*$',
   'rind/src/high/signature\.rs:\d+:48: replace \+ with \*$',
+  # `sign`'s scratch bound, not its SEQUENCE length at column 15, which is caught.
+  'rind-openmls/src/provider\.rs:\d+:32: replace \+ with \* in <impl OpenMlsCrypto for RustCrypto>::sign$',
   # Pinned to its line: the next line's `+`, at the same column, is caught.
   'rind/src/low/generic/mont\.rs:179:\d+: replace \+ with \* in mont_mul$',
   'rind/src/low/x86_64/mlkem_sample_poly_ntt_8x\.rs:\d+:\d+: replace \+ with \* in _squeeze_rate_and_reject$',
@@ -117,7 +120,6 @@ exclude_re = [
   'rind/src/mid/rsa_priv\.rs:\d+:44: replace \+ with \*$',
   'rind/src/mid/rsa_priv\.rs:\d+:15: replace \+ with \*$',
   'rind/src/mid/rsa_priv/exponents\.rs:\d+:56: replace \* with \+ in Exponents::derive$',
-  'rind-openmls/src/provider\.rs:\d+:15: replace \+ with \* in <impl OpenMlsCrypto for RustCrypto>::sign$',
   # Equivalent: a comparison whose two forms differ only where both branches
   # give the same result, or a step that computes the same value another way,
   # such as squaring rather than multiplying to the same power.
@@ -205,7 +207,7 @@ exclude_re = [
   'rind/src/low/aarch64/cpu\.rs:\d+:\d+: replace prefetch_ro with \(\)$',
   # Invisible to a test: whether the speculation barrier after setting DIT
   # runs, and which one.
-  'rind/src/low/aarch64/cpu\.rs:\d+:\d+: (replace dit::speculation_barrier with \(\)|replace (!= with ==|& with [|^]) in dit::write)$',
+  'rind/src/low/aarch64/cpu\.rs:\d+:\d+: (replace dit::(speculation_barrier|barrier_after_set|apple_barrier) with \(\)|replace (!= with ==|& with [|^]) in dit::apple_barrier)$',
   'rind/src/low/aarch64/mont\.rs:\d+:\d+: replace match guard k >= 2 with false in (mont_mul|mont_sqr)$',
   'rind/src/low/generic/order\.rs:\d+:\d+: replace (order -> Option<Order> with None|== with != in order)$',
   'rind/src/low/generic/blockwise\.rs:\d+:\d+: replace > with >= in Blockwise<N>::complete_blocks$',
@@ -268,6 +270,12 @@ exclude_re = [
   # x86-cpu.yml's SDE tiers test them.
   'rind/src/low/x86_64/(aes|aes_gcm|aes_gcm_vaes|cpu|ghash)\.rs:\d+:\d+: (replace (HwKey::round_keys_512|RoundKeys512::split|_cipher_avx512|Counter512::\w+|VaesKernel::avx512|HaveAvx512(For\w+|Vl)::check|GhashTableAvx512::\w+|_mul16|_mul_tail)( -> .*)? with .*|.* in (_cipher_avx512|HaveAvx512(For\w+|Vl)::check|_mul_tail))$',
   'rind/src/low/x86_64/aes_gcm\.rs:\d+:45: replace \* with (\+|/)$',
+  # Equivalent: each batch of ML-KEM's PRF only adds outputs no polynomial
+  # reads, so taking eight at once for four or fewer, for ML-KEM-768, or
+  # never, four for one to three, or the second four again, yields the same
+  # samples; only the time differs. `sample_poly_cbd`'s `&&`, `==`, and `>`
+  # are its eight-way gate's alone.
+  'rind/src/mid/mlkem\.rs:\d+:\d+: (replace (&& with \|\||== with !=|> with (==|<|>=)) in sample_poly_cbd|delete match arm [0-3] in shake256_fours|replace \* with / in shake256_fours)$',
   'rind/src/low/posint\.rs:\d+:\d+: (replace PosInt<N>::rsaz_pair -> .*|.* in PosInt<N>::rsaz_pair)$',
   # Compiled only for armv7, which no campaign runs: the portable AES-GCM's
   # crypto-extension and NEON halves.
@@ -290,6 +298,10 @@ exclude_re = [
   # which tests never are, or only off Linux.
   'rind/src/low/aarch64/cpu\.rs:\d+:\d+: replace && with \|\| in detect$',
   'rind/src/low/aarch64/cpu\.rs:\d+:24: replace << with >>$',
+  # Pinned to its line: the `cpu_forced` of a release build, one without an
+  # OS, or the FIPS module, which mutation runs never are. The debug build's,
+  # under the same name, is caught.
+  'rind/src/low/aarch64/cpu\.rs:679:\d+: replace cpu_forced -> bool with true$',
   # The portable backend has no CPU state to save, so `leave_cpu_state`
   # ignores it.
   'rind/src/low/portable/cpu\.rs:\d+:\d+: replace enter_cpu_state -> u32 with 1$',
@@ -306,7 +318,7 @@ exclude_re = [
   # Pinned to its line: the `cpu_denied` of a release build or one without
   # an OS, which tests never are. The debug build's, under the same name, is
   # caught.
-  'rind/src/low/mod\.rs:229:\d+: replace cpu_denied -> bool with true$',
+  'rind/src/low/mod\.rs:279:\d+: replace cpu_denied -> bool with true$',
   # The FIPS module's `SystemRandom`, compiled only under `--cfg rind_fips`,
   # which no mutation run sets; `fips_rng`'s tests cover what it calls.
   # Pinned to its line: the other `fill`, under the same name, is caught.
@@ -350,7 +362,7 @@ exclude_re = [
   'rind/src/low/entry\.rs:\d+:\d+: replace - with \+ in <impl Drop for Entry>::drop$',
   'rind/src/low/entry\.rs:\d+:\d+: replace Entry::assert_held with \(\)$',
   # Pinned to its line: the other branch's `*`, at the same column, is caught.
-  'rind/src/low/generic/blockwise\.rs:195:24: replace \* with / in pad$',
+  'rind/src/low/generic/blockwise\.rs:181:24: replace \* with / in pad$',
   'rind/src/mid/rsa_priv/exponents\.rs:\d+:\d+: replace >= with < in Exponents::derive$',
   'rind/src/mid/rsa_priv/exponents\.rs:\d+:36: replace \* with \+ in Exponents::derive$',
   'rind/src/mid/rsa_priv/generate\.rs:\d+:\d+: delete ! in MillerRabinParams<\x27a>::check_base$',
@@ -379,6 +391,24 @@ exclude_re = [
   'rind-rustls/src/sign\.rs:\d+:\d+: replace <impl fmt::Debug for RsaSigningKey>::fmt -> Result<\(\), fmt::Error> with Ok\(\(\)\)$',
   'rind-rustls/src/sign\.rs:\d+:\d+: replace <impl fmt::Debug for RsaSigner>::fmt -> Result<\(\), fmt::Error> with Ok\(\(\)\)$',
   'rind-rustls/src/ticketer\.rs:\d+:\d+: replace <impl fmt::Debug for XChaCha20Ticketer>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
+  'rind-aws-lc-rs/src/aead\.rs:\d+:\d+: replace <impl fmt::Debug for RandomizedNonceKey>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
+  'rind-aws-lc-rs/src/aead/quic\.rs:\d+:\d+: replace <impl fmt::Debug for Algorithm>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
+  'rind-aws-lc-rs/src/aead/tls\.rs:\d+:\d+: replace <impl fmt::Debug for TlsRecordSealingKey>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
+  'rind-aws-lc-rs/src/aead/tls\.rs:\d+:\d+: replace <impl fmt::Debug for TlsRecordOpeningKey>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
+  'rind-aws-lc-rs/src/buffer\.rs:\d+:\d+: replace <impl fmt::Debug for Buffer<\x27_, T>>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
+  'rind-aws-lc-rs/src/error\.rs:\d+:\d+: replace <impl fmt::Display for KeyRejected>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
+  'rind-aws-lc-rs/src/kem\.rs:\d+:\d+: replace <impl fmt::Debug for DecapsulationKey<Id>>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
+  'rind-aws-lc-rs/src/kem\.rs:\d+:\d+: replace <impl fmt::Debug for EncapsulationKey<Id>>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
+  'rind-aws-lc-rs/src/kem\.rs:\d+:\d+: replace <impl fmt::Debug for Algorithm<Id>>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
+  # rind refuses a leading zero byte in either component too, so `&&` still
+  # refuses each case `rsa_surfaces` tries.
+  'rind-aws-lc-rs/src/rsa\.rs:\d+:\d+: replace \|\| with && in PublicKeyComponents<B>::rind$',
+  # 0x02 has no low bit, so `|` and `^` with the parity bit agree.
+  'rind-aws-lc-rs/src/agreement\.rs:\d+:\d+: replace \| with \^ in compress$',
+  # Compiled only with the `dev-tests-only` and `unstable` features, which
+  # campaigns, like aws-lc-rs's default build, leave off.
+  'rind-aws-lc-rs/src/rand\.rs:\d+:\d+: replace <impl SecureRandom for T>::mut_fill -> Result<\(\), error::Unspecified> with Ok\(\(\)\)$',
+  'rind-aws-lc-rs/src/pqdsa\.rs:\d+:\d+: replace PqdsaKeyPair::to_pkcs8 -> Result<pkcs8::Document, Unspecified> with Ok\(Default::default\(\)\)$',
   'rind-str0m/src/dtls\.rs:\d+:\d+: replace <impl std::fmt::Debug for Dtls>::fmt -> std::fmt::Result with Ok\(Default::default\(\)\)$',
   'rind-str0m/src/srtp\.rs:\d+:\d+: replace <impl fmt::Debug for Cm>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
   'rind-str0m/src/srtp\.rs:\d+:\d+: replace <impl fmt::Debug for Gcm>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',

@@ -20,8 +20,9 @@ import _rind
 
 ALLOWED = (_rind.Error, TypeError, ValueError, OverflowError)
 
-# RSA key generation takes seconds, so it is left out.
-SLOW = {"RsaKeyPair.generate", "DecryptingKey.generate"}
+# RSA key generation takes seconds, so it is left out. The names carry their
+# module, since `ecdsa`, `ed25519`, and `rsa` each have a `KeyPair`.
+SLOW = {"pyrind.rsa.KeyPair.generate", "pyrind.rsa.DecryptingKey.generate"}
 
 
 def _exports(module, seen):
@@ -45,7 +46,7 @@ CALLABLES = [(None, v) for v in EXPORTS if callable(v) and not isinstance(v, typ
 for cls in CLASSES:
     CALLABLES.append((None, cls))
     for name, member in sorted(vars(cls).items()):
-        if name.startswith("_") or f"{cls.__name__}.{name}" in SLOW:
+        if name.startswith("_") or f"{cls.__module__}.{cls.__name__}.{name}" in SLOW:
             continue
         if isinstance(member, (staticmethod, classmethod)):
             CALLABLES.append((None, getattr(cls, name)))

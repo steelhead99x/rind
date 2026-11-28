@@ -1,22 +1,33 @@
 //! RFC 9381's ECVRF try-and-increment suites: a proof of one key
 //! transparency label, and its verification from the encoded proof against a
 //! parsed public key.
+#[cfg(target_arch = "xtensa")]
+fn main() {}
+
+#[cfg(not(target_arch = "xtensa"))]
 mod common;
 
+#[cfg(not(target_arch = "xtensa"))]
 use std::hint::black_box;
+#[cfg(not(target_arch = "xtensa"))]
 use std::sync::Once;
 
+#[cfg(not(target_arch = "xtensa"))]
 use common::Dit;
 
+#[cfg(not(target_arch = "xtensa"))]
 const ALPHA: &[u8] = b"alice@example.com";
+#[cfg(not(target_arch = "xtensa"))]
 const SEED: [u8; 32] = [0x42; 32];
 
 // rind's `prove` returns the proof and its output together, so the other
 // library's rows encode both too.
+#[cfg(not(target_arch = "xtensa"))]
 fn edwards() -> vrf_rfc9381::Ciphersuite {
     vrf_rfc9381::Ciphersuite::ECVRF_EDWARDS25519_SHA512_TAI
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn p256() -> vrf_rfc9381::Ciphersuite {
     vrf_rfc9381::Ciphersuite::ECVRF_P256_SHA256_TAI
 }
@@ -24,11 +35,13 @@ fn p256() -> vrf_rfc9381::Ciphersuite {
 /// Checks, once a process, that both libraries prove the same output from
 /// the same seed, and each verifies the other's proof, so the rows time the
 /// same suites. Every row's setup runs it.
+#[cfg(not(target_arch = "xtensa"))]
 fn check_interop() {
     static CHECKED: Once = Once::new();
     CHECKED.call_once(interop);
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn interop() {
     use rind::vrf::{ECVRF_EDWARDS25519_SHA512_TAI, ECVRF_P256_SHA256_TAI, KeyPair, PublicKey};
     use vrf_rfc9381::ec::edwards25519::tai::{EdVrfEdwards25519Tai, EdVrfEdwards25519TaiSecretKey};
@@ -60,12 +73,14 @@ fn interop() {
 }
 
 /// rind's key pair for `suite`, from the seed.
+#[cfg(not(target_arch = "xtensa"))]
 fn rind_key(suite: &'static rind::vrf::Algorithm) -> Dit<rind::vrf::KeyPair> {
     check_interop();
     Dit::hold(rind::vrf::KeyPair::from_seed(suite, &SEED).unwrap())
 }
 
 /// rind's proof under `suite`, and the public key that verifies it.
+#[cfg(not(target_arch = "xtensa"))]
 fn rind_proof(
     suite: &'static rind::vrf::Algorithm,
 ) -> Dit<(rind::vrf::PublicKey, rind::vrf::Proof)> {
@@ -76,6 +91,7 @@ fn rind_proof(
     Dit::hold((public_key, proof))
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 mod vrf_edwards25519_prove {
     use swole::bench;
     use vrf_rfc9381::ec::edwards25519::tai::EdVrfEdwards25519TaiSecretKey;
@@ -108,6 +124,7 @@ mod vrf_edwards25519_prove {
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 mod vrf_p256_prove {
     use swole::bench;
     use vrf_rfc9381::ec::p256::tai::EcVrfP256TaiSecretKey;
@@ -137,6 +154,7 @@ mod vrf_p256_prove {
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 mod vrf_edwards25519_verify {
     use swole::bench;
     use vrf_rfc9381::ec::edwards25519::tai::{
@@ -174,6 +192,7 @@ mod vrf_edwards25519_verify {
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 mod vrf_p256_verify {
     use swole::bench;
     use vrf_rfc9381::ec::p256::tai::{EcVrfP256Tai, EcVrfP256TaiPublicKey, EcVrfP256TaiSecretKey};
@@ -209,6 +228,7 @@ mod vrf_p256_verify {
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn main() {
     swole::main();
 }

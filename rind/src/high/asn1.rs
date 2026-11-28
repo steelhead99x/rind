@@ -493,6 +493,9 @@ impl<'a> Integer<'a> {
         }
     }
 
+    /// Whether the sign bit is set, computed without branching on it, since
+    /// `rsa::SigningKey::from_pkcs1_der` asks of secret integers and only
+    /// then declassifies the answer.
     pub(crate) fn is_negative(&self) -> bool {
         // Not through an `Option<bool>`, whose `None` a debug build tests
         // with a compare on the secret bit: here the `Option` holds the byte

@@ -1,12 +1,20 @@
+#[cfg(target_arch = "xtensa")]
+fn main() {}
+
+#[cfg(not(target_arch = "xtensa"))]
 mod common;
 #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+#[cfg(not(target_arch = "xtensa"))]
 mod ossl_ec;
+#[cfg(not(target_arch = "xtensa"))]
 use std::hint::black_box;
 
+#[cfg(not(target_arch = "xtensa"))]
 use common::{Dit, dit};
 
 // verified-garbage has no key generation: a random scalar, drawn again until
 // it is in range, and its public key.
+#[cfg(not(target_arch = "xtensa"))]
 fn vg_generate() -> (
     verified_garbage::ec::PrivateKey<verified_garbage::ec::P521>,
     verified_garbage::ec::PublicKey<verified_garbage::ec::P521>,
@@ -24,31 +32,40 @@ fn vg_generate() -> (
 }
 
 // RFC6979 A.2.7's public key, and its SHA-512 signature over "sample".
+#[cfg(not(target_arch = "xtensa"))]
 const PUBLIC_KEY: &str = "0401894550d0785932e00eaa23b694f213f8c3121f86dc97a04e5a7167db4e5bcd371123d46e45db6b5d5370a7f20fb633155d38ffa16d2bd761dcac474b9a2f5023a400493101c962cd4d2fddf782285e64584139c2f91b47f87ff82354d6630f746a28a0db25741b5b34a828008b22acc23f924faafbd4d33f81ea66956dfeaa2bfdfcf5";
+#[cfg(not(target_arch = "xtensa"))]
 const MESSAGE: &[u8] = b"sample";
+#[cfg(not(target_arch = "xtensa"))]
 const SIGNATURE: &str = "00c328fafcbd79dd77850370c46325d987cb525569fb63c5d3bc53950e6d4c5f174e25a1ee9017b5d450606add152b534931d7d4e8455cc91f9b15bf05ec36e377fa00617cce7cf5064806c467f678d3b4080d6f1cc50af26ca209417308281b68af282623eaa63e5b5c0723d8b8c37ff0777b1a20f8ccb1dccc43997f1ee0e44da4a67a";
 
 // The stored-key rows' scalar.
+#[cfg(not(target_arch = "xtensa"))]
 const SCALAR: [u8; 66] = [1; 66];
 
+#[cfg(not(target_arch = "xtensa"))]
 fn public_key() -> Vec<u8> {
     hex::decode(PUBLIC_KEY).unwrap()
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn signature() -> Vec<u8> {
     hex::decode(SIGNATURE).unwrap()
 }
 
 /// The public key and the signature over [`MESSAGE`] the verification rows check.
+#[cfg(not(target_arch = "xtensa"))]
 fn signed() -> (Vec<u8>, Vec<u8>) {
     (public_key(), signature())
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn rind_signed() -> Dit<(Vec<u8>, Vec<u8>)> {
     Dit::hold(signed())
 }
 
 #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+#[cfg(not(target_arch = "xtensa"))]
 fn openssl_curve() -> ossl_ec::Curve {
     ossl_ec::Curve::new(
         openssl::nid::Nid::SECP521R1,
@@ -56,10 +73,12 @@ fn openssl_curve() -> ossl_ec::Curve {
     )
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn aws_rng() -> aws_lc_rs::rand::SystemRandom {
     aws_lc_rs::rand::SystemRandom::new()
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn aws_signing_key() -> aws_lc_rs::signature::EcdsaKeyPair {
     use aws_lc_rs::signature;
     let private_key = signature::EcdsaKeyPair::generate_pkcs8(
@@ -74,21 +93,25 @@ fn aws_signing_key() -> aws_lc_rs::signature::EcdsaKeyPair {
     .unwrap()
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn aws_verify_key() -> aws_lc_rs::signature::ParsedPublicKey {
     use aws_lc_rs::signature;
     signature::ParsedPublicKey::new(&signature::ECDSA_P521_SHA512_FIXED, public_key()).unwrap()
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn rind_ecdsa_key() -> rind::ecdsa::KeyPair {
     rind::ecdsa::KeyPair::generate(&rind::ecdsa::sign::P521_SHA512_FIXED).unwrap()
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn rind_verify_key() -> rind::ecdsa::PublicKey {
     use rind::ecdsa::{PublicKey, verify};
     PublicKey::new(&verify::P521_SHA512_FIXED, &public_key()).unwrap()
 }
 
 /// A verified-garbage signing key, after rind verifies its signature.
+#[cfg(not(target_arch = "xtensa"))]
 fn vg_signing_key() -> verified_garbage::ec::PrivateKey<verified_garbage::ec::P521> {
     use rind::ecdsa::{PublicKey, verify};
     use verified_garbage::hashes::sha512::Sha512;
@@ -100,6 +123,7 @@ fn vg_signing_key() -> verified_garbage::ec::PrivateKey<verified_garbage::ec::P5
 }
 
 /// verified-garbage's public key and the signature, as it takes them.
+#[cfg(not(target_arch = "xtensa"))]
 fn vg_signed() -> (
     verified_garbage::ec::PublicKey<verified_garbage::ec::P521>,
     [u8; 132],
@@ -109,14 +133,17 @@ fn vg_signed() -> (
     (public_key, signature()[..].try_into().unwrap())
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn rind_digest() -> rind::digest::Digest {
     rind::digest::digest(&rind::digest::SHA512, MESSAGE)
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn vg_digest() -> [u8; 64] {
     rind_digest().as_ref().try_into().unwrap()
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 mod p521_ecdh {
     use swole::bench;
 
@@ -204,6 +231,7 @@ mod p521_ecdh {
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 mod p521_keygen {
     use swole::bench;
 
@@ -230,6 +258,7 @@ mod p521_keygen {
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 mod p521_ecdsa_verify {
     use swole::bench;
 
@@ -301,6 +330,7 @@ mod p521_ecdsa_verify {
 }
 
 // A key parsed once, as a JWT verifier holds it, keeps its multiplication table.
+#[cfg(not(target_arch = "xtensa"))]
 mod p521_ecdsa_verify_parsed {
     use swole::bench;
 
@@ -327,6 +357,7 @@ mod p521_ecdsa_verify_parsed {
 }
 
 // A digest the caller computed, as node's `createVerify` holds it.
+#[cfg(not(target_arch = "xtensa"))]
 mod p521_ecdsa_verify_digest {
     use swole::bench;
 
@@ -392,6 +423,7 @@ mod p521_ecdsa_verify_digest {
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 mod p521_ecdsa_sign {
     use swole::bench;
 
@@ -463,6 +495,7 @@ mod p521_ecdsa_sign {
 }
 
 // A digest the caller computed, as node's `createSign` holds it.
+#[cfg(not(target_arch = "xtensa"))]
 mod p521_ecdsa_sign_digest {
     use swole::bench;
 
@@ -519,6 +552,7 @@ mod p521_ecdsa_sign_digest {
 
 // Agree with a stored key, loaded once, as WebCrypto's `deriveBits` and
 // node's `ECDH` do: the variable-base multiplication alone.
+#[cfg(not(target_arch = "xtensa"))]
 mod p521_ecdh_stored {
     use swole::bench;
 
@@ -581,6 +615,7 @@ mod p521_ecdh_stored {
 
 // Checks verified-garbage's public key and exchange against rind's, from a
 // fixed scalar, before any of its rows times them.
+#[cfg(not(target_arch = "xtensa"))]
 fn vg_agrees_with_rind() {
     use rind::agreement::{self, ECDH_P521};
     use verified_garbage::ec::{PrivateKey, PublicKey};
@@ -598,6 +633,7 @@ fn vg_agrees_with_rind() {
     );
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn main() {
     swole::main();
 }

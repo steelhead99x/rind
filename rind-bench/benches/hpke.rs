@@ -1,24 +1,39 @@
 //! HPKE's base mode with DHKEM(X25519, HKDF-SHA256), HKDF-SHA256, and
 //! AES-128-GCM, the suite MLS and ECH default to: each side's setup, then
 //! one QUIC-datagram-sized message sealed and opened.
+#[cfg(target_arch = "xtensa")]
+fn main() {}
+
+#[cfg(not(target_arch = "xtensa"))]
 mod common;
 
+#[cfg(not(target_arch = "xtensa"))]
 use std::hint::black_box;
+#[cfg(not(target_arch = "xtensa"))]
 use std::sync::Once;
 
+#[cfg(not(target_arch = "xtensa"))]
 use common::{Dit, Size};
 
+#[cfg(not(target_arch = "xtensa"))]
 const INFO: &[u8] = b"rind-bench info";
+#[cfg(not(target_arch = "xtensa"))]
 const AAD: &[u8] = b"rind-bench aad";
+#[cfg(not(target_arch = "xtensa"))]
 const MESSAGE: [u8; 1350] = [0x5a; 1350];
 
 /// The message's one size, which the seal and open rows are named by.
+#[cfg(not(target_arch = "xtensa"))]
 const SIZE: [Size; 1] = [Size::new(MESSAGE.len(), "1350B")];
 
+#[cfg(not(target_arch = "xtensa"))]
 type RcKem = hpke::kem::X25519HkdfSha256;
+#[cfg(not(target_arch = "xtensa"))]
 type RcKdf = hpke::kdf::HkdfSha256;
+#[cfg(not(target_arch = "xtensa"))]
 type RcAead = hpke::aead::AesGcm128;
 
+#[cfg(not(target_arch = "xtensa"))]
 fn rind_suite() -> rind::hpke::Suite {
     rind::hpke::Suite {
         kdf: &rind::hpke::HKDF_SHA256,
@@ -26,6 +41,7 @@ fn rind_suite() -> rind::hpke::Suite {
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn libcrux_hpke() -> hpke_rs::Hpke<hpke_rs::libcrux::HpkeLibcrux> {
     use hpke_rs::hpke_types::{AeadAlgorithm, KdfAlgorithm, KemAlgorithm};
     hpke_rs::Hpke::new(
@@ -36,6 +52,7 @@ fn libcrux_hpke() -> hpke_rs::Hpke<hpke_rs::libcrux::HpkeLibcrux> {
     )
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 const AWS_LC_RS: &dyn rustls::crypto::hpke::Hpke =
     rustls::crypto::aws_lc_rs::hpke::DH_KEM_X25519_HKDF_SHA256_AES_128;
 
@@ -43,11 +60,13 @@ const AWS_LC_RS: &dyn rustls::crypto::hpke::Hpke =
 /// rind: each opens a message rind sealed to it, and rind opens one each
 /// sealed to rind. Every row's setup runs it, so a row never times a library
 /// that disagrees.
+#[cfg(not(target_arch = "xtensa"))]
 fn check_interop() {
     static CHECKED: Once = Once::new();
     CHECKED.call_once(interop);
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn interop() {
     use hpke::{Deserializable, Kem, OpModeR, OpModeS, Serializable};
     use rind::hpke::{DHKEM_X25519_HKDF_SHA256, PrivateKey, PublicKey, Recipient, Sender};
@@ -116,11 +135,13 @@ fn interop() {
     rind_open(&enc, sender.seal(AAD, &MESSAGE).unwrap());
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn rind_key() -> rind::hpke::PrivateKey {
     check_interop();
     rind::hpke::PrivateKey::generate(&rind::hpke::DHKEM_X25519_HKDF_SHA256).unwrap()
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn aws_lc_rs_key() -> (
     rustls::crypto::hpke::HpkePublicKey,
     rustls::crypto::hpke::HpkePrivateKey,
@@ -129,6 +150,7 @@ fn aws_lc_rs_key() -> (
     AWS_LC_RS.generate_key_pair().unwrap()
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn rustcrypto_key() -> (
     <RcKem as hpke::Kem>::PrivateKey,
     <RcKem as hpke::Kem>::PublicKey,
@@ -138,6 +160,7 @@ fn rustcrypto_key() -> (
     RcKem::gen_keypair()
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn libcrux_key() -> (
     hpke_rs::Hpke<hpke_rs::libcrux::HpkeLibcrux>,
     hpke_rs::HpkeKeyPair,
@@ -149,6 +172,7 @@ fn libcrux_key() -> (
 }
 
 /// Encapsulate to the recipient's parsed public key and derive the context.
+#[cfg(not(target_arch = "xtensa"))]
 mod hpke_x25519_setup_sender {
     use swole::bench;
 
@@ -199,6 +223,7 @@ mod hpke_x25519_setup_sender {
 }
 
 /// Decapsulate the sender's key and derive the same context.
+#[cfg(not(target_arch = "xtensa"))]
 mod hpke_x25519_setup_recipient {
     use swole::bench;
 
@@ -293,6 +318,7 @@ mod hpke_x25519_setup_recipient {
 /// Seal the next message of an established context. rind and `hpke` seal in
 /// place into a reused buffer; aws-lc-rs (through rustls) and hpke-rs only
 /// return a new one.
+#[cfg(not(target_arch = "xtensa"))]
 mod hpke_x25519_aes128_gcm_seal {
     use swole::bench;
 
@@ -366,6 +392,7 @@ mod hpke_x25519_aes128_gcm_seal {
 /// Open a context's first message. A context opens each sequence number
 /// once, so each call gets a fresh context and ciphertext, made untimed, and
 /// returns them to be dropped untimed too.
+#[cfg(not(target_arch = "xtensa"))]
 mod hpke_x25519_aes128_gcm_open {
     use swole::bench;
 
@@ -468,6 +495,7 @@ mod hpke_x25519_aes128_gcm_open {
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn main() {
     swole::main();
 }

@@ -1,3 +1,8 @@
+## Unreleased
+
+- Depends on rind 0.2.0, whose signature keys it moves to; its own API is
+  unchanged.
+
 ## 0.1.0
 
 - The cryptography package's `Cryptography` on rind 0.1.1: SHA-1 and

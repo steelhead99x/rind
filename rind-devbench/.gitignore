@@ -1,0 +1,6 @@
+ios/out/
+ios/build/
+ios/Resources/keys/
+ios/RindBenchAll.xcodeproj/
+ios/Info.plist
+android/out/

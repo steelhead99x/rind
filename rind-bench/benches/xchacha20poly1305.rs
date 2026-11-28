@@ -1,13 +1,21 @@
+#[cfg(target_arch = "xtensa")]
+fn main() {}
+
+#[cfg(not(target_arch = "xtensa"))]
 mod common;
 
+#[cfg(not(target_arch = "xtensa"))]
 use common::{AEAD_ROWS, Aead, Dit};
 
 /// Each seal draws a fresh random nonce, as a randomized-nonce key must.
+#[cfg(not(target_arch = "xtensa"))]
 const KEY: [u8; 32] = [0; 32];
 
 /// aws-lc's XChaCha20-Poly1305, which aws-lc-rs does not expose.
+#[cfg(not(target_arch = "xtensa"))]
 struct AwsXChaCha(*mut aws_lc_sys::EVP_AEAD_CTX);
 
+#[cfg(not(target_arch = "xtensa"))]
 impl AwsXChaCha {
     fn new(key: &[u8; 32]) -> Self {
         // SAFETY: the key pointer and length describe `key`, and aws-lc copies it.
@@ -51,6 +59,7 @@ impl AwsXChaCha {
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 impl Drop for AwsXChaCha {
     fn drop(&mut self) {
         // SAFETY: `self.0` came from `EVP_AEAD_CTX_new` and is freed once.
@@ -58,6 +67,7 @@ impl Drop for AwsXChaCha {
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn test_rc_chacha(key: &chacha20poly1305::XChaCha20Poly1305, aad: &[u8], buf: &mut [u8]) {
     use chacha20poly1305::AeadInOut;
     let mut nonce = [0u8; 24];
@@ -68,6 +78,7 @@ fn test_rc_chacha(key: &chacha20poly1305::XChaCha20Poly1305, aad: &[u8], buf: &m
         .unwrap();
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn test_rind_chacha(
     key: &rind::aead::RandomizedNonceKey,
     aad: &[u8],
@@ -82,12 +93,14 @@ fn test_rind_chacha(
 /// A key and the buffer it seals in place each call: the same buffer, so a
 /// call times the cipher alone, without an allocation or a copy of the
 /// input. Its room for rind's appended tag keeps sealing from reallocating.
+#[cfg(not(target_arch = "xtensa"))]
 struct Seal<K> {
     key: K,
     aad: &'static [u8],
     buf: Vec<u8>,
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 impl<K> Seal<K> {
     fn new(key: K, row: Aead) -> Self {
         let mut buf = Vec::with_capacity(row.len() + 16);
@@ -100,6 +113,7 @@ impl<K> Seal<K> {
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 mod xchacha20poly1305 {
     use swole::bench;
 
@@ -166,6 +180,7 @@ mod xchacha20poly1305 {
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn main() {
     swole::main();
 }

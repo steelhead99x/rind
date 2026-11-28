@@ -137,7 +137,13 @@ Future<Uri> _buildFromSource(
 ) async {
   final code = input.config.code;
   final manifest = input.packageRoot.resolve('Cargo.toml');
-  final targetDir = input.outputDirectoryShared.resolve('target/');
+  // The `cargo_target_dir` user-define shares one cargo target directory
+  // between builds whose hook output folders differ, so the later ones
+  // rebuild nothing; cargo locks it against concurrent builds.
+  final sharedTargetDir = input.userDefines.path('cargo_target_dir');
+  final targetDir = sharedTargetDir == null
+      ? input.outputDirectoryShared.resolve('target/')
+      : Directory.fromUri(sharedTargetDir).uri;
   final env = <String, String>{};
   final linkArgs = <String>[];
 
@@ -219,7 +225,7 @@ Future<Uri> _buildFromSource(
     ..add(manifest)
     ..add(workspaceManifest)
     ..add(workspaceManifest.resolve('Cargo.lock'))
-    ..addAll(_parseDepInfo(File.fromUri(depInfo).readAsStringSync()));
+    ..addAll(_parseDepInfo(await _readDepInfo(File.fromUri(depInfo))));
   return library;
 }
 
@@ -273,11 +279,36 @@ Future<void> _checkTargetInstalled(String target) async {
   }
 }
 
+/// [file]'s text once it holds a whole rule. Every cargo run rewrites the
+/// dep-info beside the library, and outside cargo's lock, so a build that
+/// shares the target directory through `cargo_target_dir` can read it while
+/// another build has it truncated, or has removed it to write it afresh, so
+/// a missing file waits as a truncated one does.
+Future<String> _readDepInfo(File file) async {
+  for (var attempt = 0; ; attempt++) {
+    String text;
+    try {
+      text = file.readAsStringSync();
+    } on PathNotFoundException {
+      text = '';
+    }
+    if (text.split('\n').first.contains(': ') && text.endsWith('\n')) {
+      return text;
+    }
+    if (attempt == 50) {
+      throw FormatException('cargo left no dependency rule in ${file.path}');
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+  }
+}
+
 /// The files a Makefile-style dep-info file lists, in which a backslash
 /// escapes a space in a path.
 Iterable<Uri> _parseDepInfo(String depInfo) sync* {
   final rule = depInfo.split('\n').first;
-  final deps = rule.substring(rule.indexOf(': ') + 2);
+  final colon = rule.indexOf(': ');
+  if (colon < 0) throw FormatException('no dependency rule', rule);
+  final deps = rule.substring(colon + 2);
   for (final path in deps.split(RegExp(r'(?<!\\) '))) {
     if (path.isNotEmpty) yield Uri.file(path.replaceAll(r'\ ', ' '));
   }

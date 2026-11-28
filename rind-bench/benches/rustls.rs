@@ -4,29 +4,48 @@
 //! `aes128-gcm/rind/64B`: its IDs put the provider before a records row's
 //! size, and which rows a provider has depends on what it offers.
 
+#[cfg(target_arch = "xtensa")]
+fn main() {}
+
+#[cfg(not(target_arch = "xtensa"))]
 mod common;
 
+#[cfg(not(target_arch = "xtensa"))]
 use std::fmt;
+#[cfg(not(target_arch = "xtensa"))]
 use std::hint::black_box;
+#[cfg(not(target_arch = "xtensa"))]
 use std::io::{Read, Write};
+#[cfg(not(target_arch = "xtensa"))]
 use std::panic::{self, AssertUnwindSafe};
+#[cfg(not(target_arch = "xtensa"))]
 use std::sync::{Arc, mpsc};
+#[cfg(not(target_arch = "xtensa"))]
 use std::thread;
+#[cfg(not(target_arch = "xtensa"))]
 use std::time::{Duration, Instant};
 
+#[cfg(not(target_arch = "xtensa"))]
 use common::Size;
+#[cfg(not(target_arch = "xtensa"))]
 use rustls::client::Resumption;
+#[cfg(not(target_arch = "xtensa"))]
 use rustls::crypto::CryptoProvider;
+#[cfg(not(target_arch = "xtensa"))]
 use rustls::pki_types::pem::PemObject;
+#[cfg(not(target_arch = "xtensa"))]
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+#[cfg(not(target_arch = "xtensa"))]
 use rustls::{
     CipherSuite, ClientConfig, ClientConnection, Connection, HandshakeKind, NamedGroup,
     RootCertStore, ServerConfig, ServerConnection,
 };
+#[cfg(not(target_arch = "xtensa"))]
 use swole::{Iterations, bench};
 
 /// A rustls crypto provider, shown as its rows name it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg(not(target_arch = "xtensa"))]
 enum Provider {
     Ring,
     AwsLcRs,
@@ -37,6 +56,7 @@ enum Provider {
     Openssl,
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 impl fmt::Display for Provider {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
@@ -54,17 +74,20 @@ impl fmt::Display for Provider {
 /// Whether Graviola runs here: it panics on a CPU without the features its
 /// `verify_cpu_features` asserts.
 #[cfg(all(graviola, target_arch = "x86_64"))]
+#[cfg(not(target_arch = "xtensa"))]
 fn graviola_runs() -> bool {
     use std::arch::is_x86_feature_detected as has;
     has!("aes") && has!("pclmulqdq") && has!("bmi1") && has!("adx") && has!("avx") && has!("avx2")
 }
 
 #[cfg(all(graviola, target_arch = "aarch64"))]
+#[cfg(not(target_arch = "xtensa"))]
 fn graviola_runs() -> bool {
     use std::arch::is_aarch64_feature_detected as has;
     has!("neon") && has!("aes") && has!("pmull") && has!("sha2")
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 impl Provider {
     /// The providers this build has that run on this CPU. Graviola asserts
     /// its CPU features when it builds a provider, and swole builds every
@@ -136,15 +159,18 @@ impl Provider {
 
 /// A key in `rind-rustls/tests/keys`, and the client and server configs for
 /// it, or `None` where the provider cannot sign with it.
+#[cfg(not(target_arch = "xtensa"))]
 fn configs(
     provider: CryptoProvider,
     key: &str,
     resumption: bool,
 ) -> Option<(Arc<ClientConfig>, Arc<ServerConfig>)> {
-    let dir = format!(
-        "{}/../rind-rustls/tests/keys/{key}",
-        env!("CARGO_MANIFEST_DIR")
-    );
+    // `RIND_BENCH_KEYS_DIR`, read at run time, names a copy of
+    // `rind-rustls/tests/keys`, for a binary run on a device where the
+    // build-time checkout path does not exist.
+    let keys = std::env::var("RIND_BENCH_KEYS_DIR")
+        .unwrap_or_else(|_| format!("{}/../rind-rustls/tests/keys", env!("CARGO_MANIFEST_DIR")));
+    let dir = format!("{keys}/{key}");
     let chain = CertificateDer::pem_file_iter(format!("{dir}/end.fullchain"))
         .unwrap()
         .collect::<Result<Vec<_>, _>>()
@@ -174,6 +200,7 @@ fn configs(
 }
 
 /// Moves every record `from` has queued into `to`.
+#[cfg(not(target_arch = "xtensa"))]
 fn transfer(from: &mut Connection, to: &mut Connection, buf: &mut Vec<u8>) {
     while from.wants_write() {
         buf.clear();
@@ -187,6 +214,7 @@ fn transfer(from: &mut Connection, to: &mut Connection, buf: &mut Vec<u8>) {
 }
 
 /// Runs a handshake to completion, including the server's session tickets.
+#[cfg(not(target_arch = "xtensa"))]
 fn handshake(client: &Arc<ClientConfig>, server: &Arc<ServerConfig>) -> (Connection, Connection) {
     let mut client = Connection::Client(
         ClientConnection::new(client.clone(), "localhost".try_into().unwrap()).unwrap(),
@@ -200,6 +228,7 @@ fn handshake(client: &Arc<ClientConfig>, server: &Arc<ServerConfig>) -> (Connect
     (client, server)
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn handshake_kind(server: &Connection) -> HandshakeKind {
     match server {
         Connection::Server(server) => server.handshake_kind().unwrap(),
@@ -208,6 +237,7 @@ fn handshake_kind(server: &Connection) -> HandshakeKind {
 }
 
 /// A client and server config, with the DIT guard rind's rows hold.
+#[cfg(not(target_arch = "xtensa"))]
 struct Configs {
     client: Arc<ClientConfig>,
     server: Arc<ServerConfig>,
@@ -217,6 +247,7 @@ struct Configs {
 /// A handshake row's argument, shown as `{group or key}/{provider}`: a
 /// provider offering one key exchange group, with a certificate of one key.
 #[derive(Clone, Copy)]
+#[cfg(not(target_arch = "xtensa"))]
 struct Handshake {
     provider: Provider,
     group: (&'static str, NamedGroup),
@@ -225,6 +256,7 @@ struct Handshake {
     by_key: bool,
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 impl fmt::Display for Handshake {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let name = if self.by_key { self.key } else { self.group.0 };
@@ -232,6 +264,7 @@ impl fmt::Display for Handshake {
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 const GROUPS: [(&str, NamedGroup); 5] = [
     ("x25519mlkem768", NamedGroup::X25519MLKEM768),
     ("x25519", NamedGroup::X25519),
@@ -240,6 +273,7 @@ const GROUPS: [(&str, NamedGroup); 5] = [
     ("secp521r1", NamedGroup::secp521r1),
 ];
 
+#[cfg(not(target_arch = "xtensa"))]
 const KEYS: [&str; 7] = [
     "ecdsa-p256",
     "ecdsa-p384",
@@ -250,6 +284,7 @@ const KEYS: [&str; 7] = [
     "rsa-4096",
 ];
 
+#[cfg(not(target_arch = "xtensa"))]
 impl Handshake {
     /// Each provider over each group, with an ECDSA P-256 certificate, where
     /// the provider offers the group.
@@ -320,12 +355,14 @@ impl Handshake {
 /// A full TLS 1.3 handshake per key exchange group, with an ECDSA P-256
 /// certificate.
 #[bench(args = Handshake::by_group(), setup = Handshake::full)]
+#[cfg(not(target_arch = "xtensa"))]
 fn rustls_full_handshake_group(configs: &Configs) {
     black_box(handshake(&configs.client, &configs.server));
 }
 
 /// A full TLS 1.3 handshake per certificate key, over X25519.
 #[bench(args = Handshake::by_key(), setup = Handshake::full)]
+#[cfg(not(target_arch = "xtensa"))]
 fn rustls_full_handshake_key(configs: &Configs) {
     black_box(handshake(&configs.client, &configs.server));
 }
@@ -333,6 +370,7 @@ fn rustls_full_handshake_key(configs: &Configs) {
 /// A TLS 1.3 handshake resumed from a ticket, per key exchange group: each
 /// resumption takes one ticket and the server sends more.
 #[bench(args = Handshake::by_group(), setup = Handshake::resumed)]
+#[cfg(not(target_arch = "xtensa"))]
 fn rustls_resumed_handshake(configs: &Configs) {
     black_box(handshake(&configs.client, &configs.server));
 }
@@ -340,17 +378,20 @@ fn rustls_resumed_handshake(configs: &Configs) {
 /// A threaded row's argument, shown as `x25519/{provider}`: a provider
 /// running handshakes of one kind over X25519.
 #[derive(Clone, Copy)]
+#[cfg(not(target_arch = "xtensa"))]
 struct Threaded {
     provider: Provider,
     kind: HandshakeKind,
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 impl fmt::Display for Threaded {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "x25519/{}", self.provider)
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 impl Threaded {
     fn each(kind: HandshakeKind) -> Vec<Self> {
         let each = |provider| Self { provider, kind };
@@ -366,6 +407,7 @@ impl Threaded {
 /// oldest, so a thread that falls behind finds its ticket gone and runs a full
 /// handshake. The threads live as long as the pool, so per-thread state a
 /// provider sets up on first use, such as aws-lc's, is not timed.
+#[cfg(not(target_arch = "xtensa"))]
 struct Pool {
     /// Each thread's queue of handshake counts to run.
     work: Vec<mpsc::Sender<u64>>,
@@ -376,6 +418,7 @@ struct Pool {
     what: String,
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 impl Pool {
     /// The pool, past each thread's first handshake, which seeds a resuming
     /// client's tickets.
@@ -457,6 +500,7 @@ impl Pool {
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 impl Drop for Pool {
     fn drop(&mut self) {
         // Closing each queue ends its thread.
@@ -473,6 +517,7 @@ impl Drop for Pool {
 /// row is how throughput scales. The weekly instruction count leaves these
 /// rows out: what each thread runs while the others wait is the scheduler's.
 #[bench(args = Threaded::each(HandshakeKind::Full), setup = Pool::new)]
+#[cfg(not(target_arch = "xtensa"))]
 fn rustls_full_handshake_threads(pool: &mut Pool, iterations: Iterations) -> Duration {
     pool.run(iterations)
 }
@@ -480,12 +525,14 @@ fn rustls_full_handshake_threads(pool: &mut Pool, iterations: Iterations) -> Dur
 /// Resumed TLS 1.3 handshakes, as `rustls_full_handshake_threads` runs full
 /// ones.
 #[bench(args = Threaded::each(HandshakeKind::Resumed), setup = Pool::new)]
+#[cfg(not(target_arch = "xtensa"))]
 fn rustls_resumed_handshake_threads(pool: &mut Pool, iterations: Iterations) -> Duration {
     pool.run(iterations)
 }
 
 /// A connected pair, past its handshake, with a buffer for the records
 /// between them, and the data to send and room to read it.
+#[cfg(not(target_arch = "xtensa"))]
 struct Pair {
     client: Connection,
     server: Connection,
@@ -495,6 +542,7 @@ struct Pair {
     _dit: Option<rind::cpu::Dit>,
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 impl Pair {
     /// Sends the data from the server to the client in one record, which the
     /// client reads back.
@@ -505,6 +553,7 @@ impl Pair {
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 const SUITES: [(&str, CipherSuite); 3] = [
     ("aes128-gcm", CipherSuite::TLS13_AES_128_GCM_SHA256),
     ("aes256-gcm", CipherSuite::TLS13_AES_256_GCM_SHA384),
@@ -518,6 +567,7 @@ const SUITES: [(&str, CipherSuite); 3] = [
 /// where the row has several: a provider offering only one TLS 1.3 suite,
 /// sending records of one size.
 #[derive(Clone, Copy)]
+#[cfg(not(target_arch = "xtensa"))]
 struct Records {
     provider: Provider,
     suite: (&'static str, CipherSuite),
@@ -526,6 +576,7 @@ struct Records {
     sized: bool,
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 impl fmt::Display for Records {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}/{}", self.suite.0, self.provider)?;
@@ -536,6 +587,7 @@ impl fmt::Display for Records {
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 impl Records {
     /// A pair past its handshake.
     fn pair(self) -> Pair {
@@ -554,9 +606,11 @@ impl Records {
 }
 
 /// A full record.
+#[cfg(not(target_arch = "xtensa"))]
 const RECORD: usize = 16384;
 
 /// The bulk rows: each provider over each suite, in full records.
+#[cfg(not(target_arch = "xtensa"))]
 fn bulk_rows() -> Vec<Records> {
     let rows = SUITES.into_iter().flat_map(|suite| {
         Provider::all().into_iter().map(move |provider| Records {
@@ -572,6 +626,7 @@ fn bulk_rows() -> Vec<Records> {
 /// 1 MB from server to client in full records, per TLS 1.3 cipher suite:
 /// each byte is sealed once and opened once.
 #[bench(args = bulk_rows(), setup = Records::pair)]
+#[cfg(not(target_arch = "xtensa"))]
 fn rustls_bulk(pair: &mut Pair) {
     for _ in 0..(1 << 20) / RECORD {
         pair.record();
@@ -579,6 +634,7 @@ fn rustls_bulk(pair: &mut Pair) {
 }
 
 /// The small records' sizes.
+#[cfg(not(target_arch = "xtensa"))]
 const RECORD_SIZES: [Size; 3] = [
     Size::new(64, "64B"),
     Size::new(256, "256B"),
@@ -587,6 +643,7 @@ const RECORD_SIZES: [Size; 3] = [
 
 /// The records rows: each provider over AES-128-GCM and ChaCha20-Poly1305,
 /// in records of each size.
+#[cfg(not(target_arch = "xtensa"))]
 fn records_rows() -> Vec<Records> {
     let suites = [SUITES[0], SUITES[2]];
     let rows = suites.into_iter().flat_map(|suite| {
@@ -607,6 +664,7 @@ fn records_rows() -> Vec<Records> {
 /// what rustls and each provider add per record, which bulk's full records
 /// spread over 16 KB.
 #[bench(args = records_rows(), setup = Records::pair)]
+#[cfg(not(target_arch = "xtensa"))]
 fn rustls_records(pair: &mut Pair) {
     pair.record()
 }
@@ -614,6 +672,7 @@ fn rustls_records(pair: &mut Pair) {
 /// rind's smallest record again without its DIT guard, where the toggle is
 /// the largest share of a record. See `common::Dit`.
 #[cfg(target_arch = "aarch64")]
+#[cfg(not(target_arch = "xtensa"))]
 mod dit_per_call {
     use swole::bench;
 
@@ -639,6 +698,7 @@ mod dit_per_call {
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn main() {
     swole::main();
 }

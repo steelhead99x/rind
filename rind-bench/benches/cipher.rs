@@ -1,11 +1,19 @@
+#[cfg(target_arch = "xtensa")]
+fn main() {}
+
+#[cfg(not(target_arch = "xtensa"))]
 mod common;
 
+#[cfg(not(target_arch = "xtensa"))]
 use std::hint::black_box;
 
+#[cfg(not(target_arch = "xtensa"))]
 use common::{Dit, SIZES, Size, dit};
 
+#[cfg(not(target_arch = "xtensa"))]
 const IV: [u8; 16] = [0; 16];
 
+#[cfg(not(target_arch = "xtensa"))]
 fn rind_aes(key_len: usize) -> &'static rind::cipher::Algorithm {
     match key_len {
         16 => &rind::cipher::AES_128,
@@ -14,6 +22,7 @@ fn rind_aes(key_len: usize) -> &'static rind::cipher::Algorithm {
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn aws_aes(key_len: usize) -> &'static aws_lc_rs::cipher::Algorithm {
     use aws_lc_rs::cipher::{AES_128, AES_192, AES_256};
     match key_len {
@@ -26,6 +35,7 @@ fn aws_aes(key_len: usize) -> &'static aws_lc_rs::cipher::Algorithm {
 /// A key and the buffer it encrypts in place each call: the same buffer, so
 /// a call times the cipher alone, without an allocation or a copy of the
 /// input.
+#[cfg(not(target_arch = "xtensa"))]
 struct Cipher<K> {
     key: K,
     buf: Vec<u8>,
@@ -94,6 +104,7 @@ macro_rules! ctr {
     };
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 mod aes128_ctr {
     use swole::bench;
 
@@ -101,6 +112,7 @@ mod aes128_ctr {
     ctr!(16);
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 mod aes192_ctr {
     use swole::bench;
 
@@ -108,6 +120,7 @@ mod aes192_ctr {
     ctr!(24);
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 mod aes256_ctr {
     use swole::bench;
 
@@ -118,12 +131,14 @@ mod aes256_ctr {
 /// A key, the input each call copies into a buffer of kept capacity, since
 /// both directions work in place and decryption consumes its ciphertext, and
 /// that buffer: the copy is the same for every library.
+#[cfg(not(target_arch = "xtensa"))]
 struct Cbc<K> {
     key: K,
     input: Vec<u8>,
     buf: Vec<u8>,
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 impl<K> Cbc<K> {
     /// `key` and the plaintext of `size`, or its ciphertext under rind when
     /// decrypting.
@@ -145,6 +160,7 @@ impl<K> Cbc<K> {
 /// verified-garbage's CBC: it has no padding, so its row pads and unpads
 /// here, and takes the IV only with the key, so each message expands the key
 /// again.
+#[cfg(not(target_arch = "xtensa"))]
 fn vg_cbc(key: &[u8], encrypt: bool, input: &[u8], buf: &mut Vec<u8>) {
     use verified_garbage::cipher::aes::{AesCbcDecryptor, AesCbcEncryptor};
     buf.clear();
@@ -266,6 +282,7 @@ macro_rules! cbc {
     };
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 mod aes128_cbc_encrypt {
     use swole::bench;
 
@@ -273,6 +290,7 @@ mod aes128_cbc_encrypt {
     cbc!(16, true);
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 mod aes128_cbc_decrypt {
     use swole::bench;
 
@@ -280,6 +298,7 @@ mod aes128_cbc_decrypt {
     cbc!(16, false);
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 mod aes192_cbc_encrypt {
     use swole::bench;
 
@@ -287,6 +306,7 @@ mod aes192_cbc_encrypt {
     cbc!(24, true);
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 mod aes192_cbc_decrypt {
     use swole::bench;
 
@@ -294,6 +314,7 @@ mod aes192_cbc_decrypt {
     cbc!(24, false);
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 mod aes256_cbc_encrypt {
     use swole::bench;
 
@@ -301,6 +322,7 @@ mod aes256_cbc_encrypt {
     cbc!(32, true);
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 mod aes256_cbc_decrypt {
     use swole::bench;
 
@@ -344,16 +366,19 @@ macro_rules! cbc_key {
     };
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 mod aes128_cbc_key {
     use super::*;
     cbc_key!(16);
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 mod aes192_cbc_key {
     use super::*;
     cbc_key!(24);
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 mod aes256_cbc_key {
     use super::*;
     cbc_key!(32);
@@ -361,6 +386,7 @@ mod aes256_cbc_key {
 
 /// The bare ChaCha20 stream cipher, a fresh nonce per message. aws-lc-rs and
 /// ring expose no ChaCha20 without Poly1305.
+#[cfg(not(target_arch = "xtensa"))]
 mod chacha20 {
     use swole::bench;
 
@@ -415,6 +441,7 @@ mod chacha20 {
 }
 
 /// The QUIC header protection mask: one cipher call on a 16-byte sample.
+#[cfg(not(target_arch = "xtensa"))]
 mod quic_header_protection {
     use super::*;
 
@@ -504,6 +531,15 @@ mod quic_header_protection {
             fn verified_garbage(vg: &VgMask) -> [u8; 5] {
                 vg.mask()
             }
+
+            #[cfg(target_arch = "aarch64")]
+            #[bench(setup = vg_key)]
+            fn verified_garbage_dit_held(
+                vg: &VgMask,
+                iterations: swole::Iterations,
+            ) -> std::time::Duration {
+                common::vg_dit_held(iterations, || verified_garbage(vg))
+            }
         };
     }
 
@@ -529,6 +565,7 @@ mod quic_header_protection {
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn main() {
     swole::main();
 }

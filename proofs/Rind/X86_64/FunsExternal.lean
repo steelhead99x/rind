@@ -1092,6 +1092,12 @@ opaque mid.mlkem.sample_ntt.sample_ntt_8x
   : Array Std.U8 32#usize → Bool → Slice (Array Std.I16 256#usize) →
     Result (Slice (Array Std.I16 256#usize))
 
+/-- ML-KEM-1024's eight-way CBD sampler, which hands the eight-way SHAKE256
+a function pointer Aeneas cannot translate. No ✓ covers ML-KEM-1024. -/
+opaque mid.mlkem.sample_poly_cbd2_8x
+  : Array Std.U8 32#usize → Std.U8 → Std.Usize →
+    Result (Array (Array Std.I16 256#usize) 8#usize)
+
 /-! pyca/verified-garbage's ML-KEM-768 routines, behind their Rust wrappers,
 whose contracts `Rind.X86_64.VgMlKem` states, and the checks for the CPU
 features they need. -/

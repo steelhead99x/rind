@@ -28,7 +28,17 @@ qemu. iOS devices' code is only built.
   runs without DIT wherever the OS doesn't report it: Rust's detection finds
   it only on Linux, Android, and Apple's platforms, not on Windows or the
   BSDs, and a hypervisor may hide it, as that of GitHub's Neoverse N2
-  runners does.
+  runners does. On Linux, the public-key arithmetic
+  runs s2n-bignum's narrow-multiplier schedules when `MIDR_EL1` names
+  Cortex-A72, Cortex-A76, or Neoverse N1, and its `_alt` schedules
+  everywhere else, and Keccak-f runs a lone state on s2n-bignum's
+  `sha3_keccak_f1600_alt2` when it names Cortex-A72 (see
+  [ALGORITHMS.md](ALGORITHMS.md)). The register is read
+  on whichever core makes the first such call, and the choice is cached for
+  the process, as aws-lc does. On a chip that mixes core types, such as
+  Cortex-A76 with Cortex-A55, every core then runs the schedule that first
+  core picked: correct and constant time on each, only slower on the cores
+  it was not picked for.
 - `x86_64` runs on every x86_64 CPU. It needs a target that enables SSE2,
   as every one with an OS does; `x86_64-unknown-none` and
   `x86_64-unknown-uefi` disable it and run the portable backend. Without `aes` and `pclmulqdq`, as on
@@ -82,12 +92,56 @@ qemu. iOS devices' code is only built.
   SHA-512, and SHA-512/256 always run aws-lc's assembly, with NEON where the
   CPU has it, as do SHA-1 and SHA-256 without the crypto extension, and with
   NEON, X25519's shared secret runs [BoringSSL]'s assembly. SHA-3's, ML-KEM's,
-  and ML-DSA's Keccak-f runs [OpenSSL]'s assembly, on NEON where the CPU has it.
+  and ML-DSA's Keccak-f runs [OpenSSL]'s assembly, on NEON where the CPU has it,
+  and so do P-256's field multiplication, squaring, addition, and subtraction.
   That assembly, the constant-time compares' included, is A32 on every
   target, though `armv7-linux-androideabi` and the `thumbv7` targets build
   Rust as Thumb-2, so the compares' proofs (see
   [proofs/README.md](proofs/README.md)), which hold for a caller in either
   instruction set, cover every target.
+
+  On a Raspberry Pi 2 B's Cortex-A7 (900 MHz, NEON, no crypto extension),
+  `armv7-unknown-linux-gnueabihf`, rind runs the key-derivation and public-key
+  operations below in less time than aws-lc-rs, ring, RustCrypto, and libcrux
+  do, except Argon2id's smallest cost, 4 MiB in one pass, where RustCrypto's
+  crate, which never wipes its memory, is 6% faster; the wipe is 4 of that
+  6 points. Median of three runs on one pinned core with the governor on
+  `performance` and the other cores near idle, each library's native build,
+  release profile; time in microseconds, and the last column is rind's time over the
+  fastest other library's.
+
+  | Operation | rind | aws-lc-rs | ring | RustCrypto or libcrux | rind over fastest |
+  |---|---|---|---|---|---|
+  | HMAC-SHA256, 64 bytes | 7.1 | 11.3 | 8.8 | | 0.81 |
+  | HMAC-SHA256, 1 KiB | 37.7 | 41.5 | 39.3 | | 0.96 |
+  | PBKDF2-HMAC-SHA256, 1000 iterations | 5381 | 6052 | 7057 | | 0.89 |
+  | HKDF-SHA256, extract and 32-byte expand | 23.0 | 28.5 | 25.7 | | 0.90 |
+  | X25519, shared secret | 1039 | 2823 | | 1869 (dalek) | 0.56 |
+  | X25519, public key | 643 | 767 | | | 0.84 |
+  | Ed25519, key from seed | 656 | 774 | | | 0.85 |
+  | Ed25519, sign 64 bytes | 672 | 815 | | 753 (dalek) | 0.89 |
+  | Ed25519, verify | 1732 | 2476 | 1779 | 1788 (dalek) | 0.97 |
+  | ML-KEM-768, key generation | 573 | 1130 | | 1308 (libcrux) | 0.51 |
+  | ML-KEM-768, encapsulate | 315 | 1247 | | 1486 (libcrux) | 0.25 |
+  | ML-KEM-768, decapsulate | 501 | 1516 | | 1745 (libcrux) | 0.33 |
+  | Argon2id, 4 MiB, 1 pass, 1 lane | 94 ms | | | 89 ms (RustCrypto) | 1.06 |
+  | Argon2id, 8 MiB, 3 passes, 1 lane | 498 ms | | | 501 ms (RustCrypto) | 0.99 |
+
+  Argon2id's fill runs portable Rust here, as stable Rust has no 32-bit Arm NEON
+  intrinsics, and it matches RustCrypto's. The first row's
+  gap is the wipe of its 4 MiB, which `AGENTS.md` requires of memory derived
+  from a password; without it rind takes 90.6 ms, 1.02 times RustCrypto's. aws-lc-rs and ring have no
+  Argon2id, and neither library has BLAKE2 or BLAKE3, which rind does not
+  offer outside Argon2id. Built from `main` at 529ff5c0 with the Nix dev
+  shell's `armv7` target and measured by a harness outside the workspace,
+  since `rind-bench` does not build `openssl-sys` for it.
+
+- Thumb-only M-profile targets (`thumbv6m-none-eabi`, `thumbv7em-none-eabihf`)
+  and `riscv32imc-unknown-none-elf` build the portable backend; M-profile has
+  no A32 and no NEON for the arm assembly. Where the target has no
+  compare-and-swap (`thumbv6m`, `riscv32imc`), the reuse cache keeps nothing, so
+  each use builds its value again; that is correct on any number of cores and
+  interrupt handlers and needs no critical section.
 
 - Builds with `-Z cf-protection=branch` or `-Z branch-protection=bti`, both
   unstable, are unsupported: rind calls aws-lc's x86_64 and aarch64 routines
@@ -132,6 +186,48 @@ qemu. iOS devices' code is only built.
   vectors from files, which that target cannot open. Constant time is unchecked on
   wasm: ctgrind and the trace checks inspect native code, and a wasm engine
   compiles rind again, so its JIT may turn a select into a branch.
+  Bare-metal targets (`target_os = "none"`) build the library without std, on
+  `alloc`: the program supplies a global allocator and a getrandom backend.
+  `just ci` lints them in debug and release (`just bare-metal`) whenever a
+  change reaches the portable or x86_64 backend: `thumbv6m-none-eabi` and
+  `riscv32imc-unknown-none-elf`, which lack compare-and-swap and so keep no
+  reuse cache, `thumbv7em-none-eabihf`, `armv7a-none-eabi`,
+  `armv7r-none-eabihf`, `aarch64-unknown-none`,
+  `aarch64-unknown-none-softfloat`, and `x86_64-unknown-none`. Every one but
+  `x86_64-unknown-none` runs the portable backend: the aarch64 and 32-bit ARM
+  assembly loads and stores unaligned words, which these strict-align targets
+  fault on when the MMU is off or alignment checking is on.
+  `x86_64-unknown-none` is soft-float and does not enable SSE2, so it stays on
+  the portable backend, which leaves out `stmxcsr` (that raises `#UD` when
+  `CR4.OSFXSR` is clear), and needs `--cfg curve25519_dalek_backend="serial"`
+  or `"fiat"`, since dalek's default `simd` backend does not compile there.
+  Built with `-C target-feature=+sse,+sse2,-soft-float`, it runs the x86_64
+  backend, which reads CPUID; the lint builds that too, so its `global_asm`
+  is assembled. SSE2 alone leaves soft-float set, and LLVM then aborts while
+  splitting vector results; rustc warns that clearing soft-float this way
+  will become an error
+  ([rust-lang/rust#116344](https://github.com/rust-lang/rust/issues/116344)).
+  AVX, AVX2, SHA512, VAES, VPCLMULQDQ, and AVX-512 run only when the build
+  enables those target features, since XCR0 does not show that an interrupt
+  saves YMM or ZMM. curve25519-dalek follows the same opt-in: its default on
+  x86_64 is the simd backend, or avx512 when `avx512ifma` and `avx512vl` are
+  enabled, and cpufeatures reports AVX2 and AVX-512 on this os only when they
+  are target features. An explicit `simd` or `avx512` cfg selects the same
+  code. `Dit::hold` does nothing on these targets: there is no thread-local
+  count, and these backends set no CPU state there.
+  The ESP32's Xtensa targets are tier 3, on Espressif's toolchain, so they
+  are not part of that Nix lint. They use Espressif's 1.98.1.0, the release of
+  the dev shell's rustc, since 1.97's Clippy does not know every lint rind
+  names. `just xtensa` and `.github/workflows/xtensa.yml`
+  clippy `xtensa-esp32-none-elf`, `xtensa-esp32s2-none-elf` (no compare-and-swap),
+  and `xtensa-esp32s3-none-elf` the same four ways, check the ESP-IDF library
+  (`xtensa-esp32s3-espidf`, which has std and getrandom's own backend) the
+  same four ways, and check `rind-bench`'s bench targets there. Those
+  benches are empty programs on Xtensa: ring and OpenSSL have no Xtensa
+  port, and swole's harness is not checked there, so those paths are
+  `cfg`'d out. The check compiles the empty programs. A name inside that
+  `cfg` is not typechecked. None of these targets runs a test or a
+  constant-time check.
   RSA and the NIST curves run on 64-bit limbs on 64-bit targets and on
   `wasm32` built with `-C target-feature=+wide-arithmetic` (stable from Rust
   1.101), whose 128-bit products take one or two multiply instructions, and
@@ -202,8 +298,9 @@ own ACVP run ([rind-acvp](rind-acvp/README.md)) and no other path is in it.
 rind's secret-dependent code divides no secret and does no floating-point
 arithmetic on any architecture, as `admin/ct-vartime` checks, but it multiplies
 secrets, so it runs in constant time only where the integer multiplier does.
-rind has no masked multiply for the cores whose multiplier finishes early for
-some operands, so it is not constant-time on them:
+Poly1305 is the exception a bullet names. rind has no masked multiply for the
+other secret products on the cores whose multiplier finishes early for some
+operands, so it is not constant-time on them:
 
 - `aarch64`: Arm's Cortex-A53 (Raspberry Pi 3 and Zero 2 W), whose 64-bit
   multiply takes a cycle longer when both operands exceed 32 bits, as measured
@@ -217,6 +314,18 @@ some operands, so it is not constant-time on them:
   [MPC7410UM] Table 6-6, [MPC7450UM] Table 6-5, [e300coreRM] Table 7-4). The
   e300c2 through c4, e500v1 and v2, and e500mc multiply in fixed time
   ([e300coreRM] Table 7-4, [E500CORERM] Table 4-6, [E500MCRM] Table 10-2).
+  Poly1305 on 32-bit `powerpc` uses that widening multiply. On
+  `powerpc-unknown-linux-gnu` it lowers to `mulhwu` and `mullw`, and a
+  16-bit half lowers to `mullw` after the top half is cleared. `rind_mul16`
+  is not set: BearSSL records both that 32-bit product and the 64-bit
+  product as not constant time on the 603e and the 7xx ([BearSSL ctmul]),
+  and this tree has not checked a multiply that holds the early exit off.
+- 32-bit `mips`: the MIPS32 4Km's multiplier is 32-by-16 bits and finishes
+  early, so a 32x32 product varies by one cycle ([eprint 2009/538]).
+  Poly1305 uses the plain widening multiply. `rind_mul16` is not set. Rust
+  1.98.1 ships no prebuilt MIPS standard library, so the code a `mips`
+  target generates was not checked, and a 16-bit half was not assumed to
+  be one fixed-time digit on every core that implements `multu`.
 - 64-bit `powerpc64`: NXP's e6500, whose 64-bit `mulld` and `mulhd` take 4 to
   7 cycles by the width of their operands ([E6500RM] Table 10-2). Its
   predecessor the e5500 likely does too, but its manual is not public.
@@ -231,12 +340,44 @@ some operands, so it is not constant-time on them:
   with the Zkt extension, which the RVA22 and RVA23 profiles require, such as
   SpacemiT's X60, guarantees its multiplies' timing ([Zkt]), and SiFive's U54
   and U74 and T-Head's C910 and C920 document a fixed latency.
+- `riscv32` without a multiply instruction, such as
+  `riscv32i-unknown-none-elf` and `riscv32e-unknown-none-elf`: there is no
+  `mul`, so the compiler lowers a 32-bit `wrapping_mul` to `__mulsi3` and a
+  32x32->64 product to `__muldi3`, and those routines' iterations follow the
+  bits of an operand. Poly1305 builds each 16-bit half with sixteen masked
+  shifts and adds. Zmmul (`mul` and `mulhu`, no divide) is a multiplier:
+  Poly1305 keeps the widening multiply, and the shift-and-add does not run.
+  The rest of rind's secret arithmetic on a target with no multiply
+  instruction still calls `__mulsi3` or `__muldi3`.
+- `riscv64` without the M extension and without Zmmul: there is no `mul`.
+  Poly1305 stays on 64-bit limbs, so each 64x64->128 product is a call to
+  `__multi3` on the secret limbs. `rind_mul16` does not apply to that width.
+  The build warns. Zmmul is a multiplier, and then those products are `mul`
+  and `mulhu`. The rest of rind's secret arithmetic on a target with no
+  multiply instruction still calls `__multi3`.
 - `s390x`: IBM publishes no instruction timing for IBM Z, so rind cannot say.
 - 32-bit `arm` before ARMv7: Intel's XScale (ARMv5TE), whose `mul`, `umull`,
   and `smull` terminate early by the top bits of their second operand
   ([XScale] Table 10-6), and ARMv4T's ARM7TDMI and ARM9TDMI ([BearSSL ctmul]).
   ARMv6's ARM1176 does not terminate early ([ARM1176 TRM] Table 3-46), nor does
-  the ARM926EJ-S.
+  the ARM926EJ-S. On the ARMv4T and ARMv5TE triples, and on a custom target
+  whose triple, `llvm-target`, or features name `v4t` or `v5te`, Poly1305
+  sets bit 31 of each 16-bit half before multiplying, which misses every early-out row in
+  that table, so the long path is taken whatever the secret is and whichever
+  operand the compiler picks. The ARM926EJ-S shares those triples and does
+  not end early, so it pays that long path; its speed was not measured. The
+  rest of rind's secret arithmetic on 32-bit limbs still takes whole products.
+- 32-bit `arm` M-profile: Arm's Cortex-M3, whose `umull`, `smull`, `umlal`,
+  and `smlal` end early "depending on the size of the source values" ([Cortex-M3
+  TRM] Table 3-1), as when an operand fits in 16 bits, is
+  zero, or is a power of two ([BearSSL ctmul]). On its target,
+  `thumbv7m-none-eabi`, and on `thumbv6m-none-eabi` and
+  `thumbv8m.base-none-eabi`, whose cores have no `umull`, Poly1305 builds
+  each product from 32x32->32-bit multiplies of 16-bit halves, which those
+  cores do in one fixed time, so ChaCha20-Poly1305's MAC is constant time
+  there. The rest of rind's secret arithmetic on 32-bit limbs still takes
+  whole 32x32->64-bit products. The Cortex-M4's `umull` takes one cycle
+  ([Cortex-M4 TRM] Table 3-1).
 - `x86_64` and 32-bit `x86`: VIA's Nano 2000 series ([BearSSL ctmul]). Intel
   lists `mul` and `imul` as data-independent-time ([Intel DOIT]).
 
@@ -304,6 +445,9 @@ family since 2004, and of some AMD cores.
 [XScale]: https://download.intel.com/design/intelxscale/27347302.pdf
 [ARM1176 TRM]: https://developer.arm.com/documentation/ddi0301/h
 [BearSSL ctmul]: https://www.bearssl.org/ctmul.html
+[eprint 2009/538]: https://eprint.iacr.org/2009/538
+[Cortex-M3 TRM]: https://developer.arm.com/documentation/ddi0337/h
+[Cortex-M4 TRM]: https://developer.arm.com/documentation/ddi0439/b
 [Gu and Shacham]: https://arxiv.org/abs/2311.14246
 [Intel DOIT]: https://www.intel.com/content/www/us/en/developer/articles/technical/software-security-guidance/resources/data-operand-independent-timing-instructions.html
 [Intel DOITM]: https://www.intel.com/content/www/us/en/developer/articles/technical/software-security-guidance/best-practices/data-operand-independent-timing-isa-guidance.html

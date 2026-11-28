@@ -1,12 +1,21 @@
+#[cfg(target_arch = "xtensa")]
+fn main() {}
+
+#[cfg(not(target_arch = "xtensa"))]
 mod common;
 #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+#[cfg(not(target_arch = "xtensa"))]
 mod ossl_aead;
 
+#[cfg(not(target_arch = "xtensa"))]
 use common::{AEAD_ROWS, Aead, Dit};
 
+#[cfg(not(target_arch = "xtensa"))]
 const KEY: [u8; 32] = [0; 32];
+#[cfg(not(target_arch = "xtensa"))]
 const NONCE: [u8; 12] = [0; 12];
 
+#[cfg(not(target_arch = "xtensa"))]
 fn test_ring_chacha(key: &ring::aead::LessSafeKey, nonce: &[u8; 12], aad: &[u8], buf: &mut [u8]) {
     let _tag = key
         .seal_in_place_separate_tag(
@@ -17,6 +26,7 @@ fn test_ring_chacha(key: &ring::aead::LessSafeKey, nonce: &[u8; 12], aad: &[u8],
         .unwrap();
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn test_aws_chacha(
     key: &aws_lc_rs::aead::LessSafeKey,
     nonce: &[u8; 12],
@@ -28,6 +38,7 @@ fn test_aws_chacha(
         .unwrap();
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn test_rc_chacha(
     key: &::chacha20poly1305::ChaCha20Poly1305,
     nonce: &[u8; 12],
@@ -40,6 +51,7 @@ fn test_rc_chacha(
         .unwrap();
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn test_rind_chacha(key: &rind::aead::Key, nonce: &[u8; 12], aad: &[u8], buf: &mut [u8]) {
     let _tag = key
         .seal_in_place_separate_tag(rind::aead::Nonce::assume_unique_for_key(*nonce), aad, buf)
@@ -48,12 +60,14 @@ fn test_rind_chacha(key: &rind::aead::Key, nonce: &[u8; 12], aad: &[u8], buf: &m
 
 /// A key and the buffer it seals in place each call: the same buffer, so a
 /// call times the cipher alone, without an allocation or a copy of the input.
+#[cfg(not(target_arch = "xtensa"))]
 struct Seal<K> {
     key: K,
     aad: &'static [u8],
     buf: Vec<u8>,
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 impl<K> Seal<K> {
     fn new(key: K, row: Aead) -> Self {
         Self {
@@ -67,6 +81,7 @@ impl<K> Seal<K> {
 /// A key, with the tag it opens under, and a ciphertext rind sealed. As in
 /// `aes_gcm`, each call copies the ciphertext into a buffer a whole number
 /// of 4 KiB pages after it, so the copies do not share a page offset.
+#[cfg(not(target_arch = "xtensa"))]
 struct Open<K> {
     key: K,
     aad: &'static [u8],
@@ -74,6 +89,7 @@ struct Open<K> {
     stride: usize,
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 impl<K> Open<K> {
     /// Seals `row` with rind, then makes the row's key from the tag.
     fn new(row: Aead, make: impl FnOnce([u8; 16]) -> K) -> Self {
@@ -102,6 +118,7 @@ impl<K> Open<K> {
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 mod chacha20poly1305 {
     use swole::bench;
 
@@ -179,6 +196,15 @@ mod chacha20poly1305 {
         s.key.encrypt_in_place(&NONCE, s.aad, &mut s.buf).unwrap()
     }
 
+    #[cfg(target_arch = "aarch64")]
+    #[bench(args = AEAD_ROWS, setup = vg_seal)]
+    fn verified_garbage_dit_held(
+        s: &mut Seal<Vg>,
+        iterations: swole::Iterations,
+    ) -> std::time::Duration {
+        common::vg_dit_held(iterations, || verified_garbage(s))
+    }
+
     #[cfg(graviola)]
     fn graviola_seal(row: Aead) -> Seal<(graviola::aead::ChaCha20Poly1305, [u8; 16])> {
         Seal::new((graviola::aead::ChaCha20Poly1305::new(KEY), [0; 16]), row)
@@ -217,6 +243,7 @@ mod chacha20poly1305 {
 }
 
 /// Decrypting and verifying each size's ciphertext, as a receiver pays.
+#[cfg(not(target_arch = "xtensa"))]
 mod chacha20poly1305_open {
     use swole::bench;
 
@@ -331,6 +358,15 @@ mod chacha20poly1305_open {
         key.decrypt_in_place(&NONCE, aad, pt, tag).unwrap();
     }
 
+    #[cfg(target_arch = "aarch64")]
+    #[bench(args = AEAD_ROWS, setup = vg_open)]
+    fn verified_garbage_dit_held(
+        open: &mut Open<(Vg, [u8; 16])>,
+        iterations: swole::Iterations,
+    ) -> std::time::Duration {
+        common::vg_dit_held(iterations, || verified_garbage(open))
+    }
+
     #[cfg(graviola)]
     fn graviola_open(row: Aead) -> Open<(graviola::aead::ChaCha20Poly1305, [u8; 16])> {
         Open::new(row, |tag| (graviola::aead::ChaCha20Poly1305::new(KEY), tag))
@@ -376,6 +412,7 @@ mod chacha20poly1305_open {
 }
 
 #[cfg(target_arch = "aarch64")]
+#[cfg(not(target_arch = "xtensa"))]
 mod dit_per_call {
     use super::*;
 
@@ -396,6 +433,7 @@ mod dit_per_call {
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn main() {
     swole::main();
 }

@@ -3,21 +3,33 @@
 //! signature, the client's finalize, and anyone's verify. Both libraries use
 //! the same key, generated in each row's setup.
 
+#[cfg(target_arch = "xtensa")]
+fn main() {}
+
+#[cfg(not(target_arch = "xtensa"))]
 mod common;
 
+#[cfg(not(target_arch = "xtensa"))]
 use std::hint::black_box;
 
+#[cfg(not(target_arch = "xtensa"))]
 use blind_rsa_signatures::{
     BlindSignature, BlindingResult, DefaultRng, Deterministic, PSS, Sha384,
 };
+#[cfg(not(target_arch = "xtensa"))]
 use common::Dit;
+#[cfg(not(target_arch = "xtensa"))]
 use rind::blind_rsa::{KeyPair, PublicKey, RSABSSA_SHA384_PSS_DETERMINISTIC as ALGORITHM};
 
+#[cfg(not(target_arch = "xtensa"))]
 const MESSAGE: &[u8] = b"a Privacy Pass token input";
 
+#[cfg(not(target_arch = "xtensa"))]
 type RcSecretKey = blind_rsa_signatures::SecretKey<Sha384, PSS, Deterministic>;
+#[cfg(not(target_arch = "xtensa"))]
 type RcPublicKey = blind_rsa_signatures::PublicKey<Sha384, PSS, Deterministic>;
 
+#[cfg(not(target_arch = "xtensa"))]
 struct Keys {
     rind: KeyPair,
     rind_public: PublicKey,
@@ -25,6 +37,7 @@ struct Keys {
     rustcrypto_public: RcPublicKey,
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn keys() -> Keys {
     let rind = KeyPair::generate(&ALGORITHM, rind::rsa::KeySize::Rsa2048).unwrap();
     let rustcrypto = RcSecretKey::from_der(rind.to_pkcs8().as_ref()).unwrap();
@@ -63,10 +76,12 @@ fn keys() -> Keys {
     keys
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn rind_keys() -> Dit<Keys> {
     Dit::hold(keys())
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 mod blind_rsa2048_blind {
     use swole::bench;
 
@@ -87,6 +102,7 @@ mod blind_rsa2048_blind {
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 mod blind_rsa2048_sign {
     use swole::bench;
 
@@ -111,6 +127,7 @@ mod blind_rsa2048_sign {
 }
 
 /// The keys and a message they blinded.
+#[cfg(not(target_arch = "xtensa"))]
 fn rustcrypto_blinded() -> (Keys, BlindingResult) {
     let keys = keys();
     let blinded = keys
@@ -122,6 +139,7 @@ fn rustcrypto_blinded() -> (Keys, BlindingResult) {
 
 // rind's finalize consumes its blinding, so before each call a step blinds
 // afresh, untimed. Both check the unblinded signature, as RFC 9474 requires.
+#[cfg(not(target_arch = "xtensa"))]
 mod blind_rsa2048_finalize {
     use swole::bench;
 
@@ -167,6 +185,7 @@ mod blind_rsa2048_finalize {
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 mod blind_rsa2048_verify {
     use swole::bench;
 
@@ -205,6 +224,7 @@ mod blind_rsa2048_verify {
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn main() {
     swole::main();
 }

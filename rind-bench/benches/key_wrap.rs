@@ -2,15 +2,23 @@
 //! bytes, as pyca and JWE use a KEK: aws-lc-rs's `KeyWrap` consumes its key
 //! anyway.
 
+#[cfg(target_arch = "xtensa")]
+fn main() {}
+
+#[cfg(not(target_arch = "xtensa"))]
 mod common;
 
+#[cfg(not(target_arch = "xtensa"))]
 use common::{Dit, Size};
+#[cfg(not(target_arch = "xtensa"))]
 use rind::key_wrap::Mode;
 
+#[cfg(not(target_arch = "xtensa"))]
 const KEYS: [Size; 2] = [Size::new(16, "16B"), Size::new(32, "32B")];
 
 /// One row's KEK, the key it wraps, that key wrapped by rind, and the
 /// buffer each call writes.
+#[cfg(not(target_arch = "xtensa"))]
 struct Wrap {
     kek: &'static [u8],
     key: &'static [u8],
@@ -18,6 +26,7 @@ struct Wrap {
     out: Vec<u8>,
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 impl Wrap {
     fn new(mode: Mode, kek_len: usize, key: Size) -> Self {
         let kek = &[0x42u8; 32][..kek_len];
@@ -34,6 +43,7 @@ impl Wrap {
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn rind_kek(kek: &[u8]) -> rind::key_wrap::AesKek {
     let algorithm = if kek.len() == 16 {
         &rind::key_wrap::AES_128
@@ -82,6 +92,7 @@ macro_rules! rows {
     };
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 mod aes128_kw_wrap {
     use swole::bench;
 
@@ -89,6 +100,7 @@ mod aes128_kw_wrap {
     rows!(16, Kw, false, false);
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 mod aes128_kw_unwrap {
     use swole::bench;
 
@@ -96,6 +108,7 @@ mod aes128_kw_unwrap {
     rows!(16, Kw, false, true);
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 mod aes128_kwp_wrap {
     use swole::bench;
 
@@ -103,6 +116,7 @@ mod aes128_kwp_wrap {
     rows!(16, Kwp, true, false);
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 mod aes128_kwp_unwrap {
     use swole::bench;
 
@@ -110,6 +124,7 @@ mod aes128_kwp_unwrap {
     rows!(16, Kwp, true, true);
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 mod aes256_kw_wrap {
     use swole::bench;
 
@@ -117,6 +132,7 @@ mod aes256_kw_wrap {
     rows!(32, Kw, false, false);
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 mod aes256_kw_unwrap {
     use swole::bench;
 
@@ -124,6 +140,7 @@ mod aes256_kw_unwrap {
     rows!(32, Kw, false, true);
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 mod aes256_kwp_wrap {
     use swole::bench;
 
@@ -131,6 +148,7 @@ mod aes256_kwp_wrap {
     rows!(32, Kwp, true, false);
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 mod aes256_kwp_unwrap {
     use swole::bench;
 
@@ -138,6 +156,7 @@ mod aes256_kwp_unwrap {
     rows!(32, Kwp, true, true);
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn main() {
     swole::main();
 }

@@ -1,17 +1,26 @@
 //! RSA signing, OAEP decryption, and key loading, the private-key side.
 
+#[cfg(target_arch = "xtensa")]
+fn main() {}
+
+#[cfg(not(target_arch = "xtensa"))]
 mod common;
 
+#[cfg(not(target_arch = "xtensa"))]
 use std::hint::black_box;
 
+#[cfg(not(target_arch = "xtensa"))]
 use common::{Dit, dit};
 
+#[cfg(not(target_arch = "xtensa"))]
 const PRIVATE_KEY_2048: &[u8] = include_bytes!("../../rind/src/high/rsa/rsa2048.der");
 
+#[cfg(not(target_arch = "xtensa"))]
 const MESSAGE: &[u8] = &[0; 20];
 
 /// libcrux's RSA-PSS key, which holds the modulus and private exponent
 /// alone, so it signs without the CRT.
+#[cfg(not(target_arch = "xtensa"))]
 fn libcrux_key(private_key: &[u8]) -> libcrux_rsa::PrivateKey<256> {
     use rsa::pkcs1::DecodeRsaPrivateKey;
     use rsa::traits::{PrivateKeyParts, PublicKeyParts};
@@ -29,6 +38,7 @@ fn libcrux_key(private_key: &[u8]) -> libcrux_rsa::PrivateKey<256> {
 
 /// verified-garbage's key of a PKCS#1 or PKCS#8 private key's components,
 /// since it takes them in place of DER.
+#[cfg(not(target_arch = "xtensa"))]
 fn vg_key(private_key: &[u8]) -> verified_garbage::rsa::PrivateKey {
     use rsa::pkcs1::DecodeRsaPrivateKey;
     use rsa::pkcs8::DecodePrivateKey;
@@ -56,12 +66,14 @@ fn vg_key(private_key: &[u8]) -> verified_garbage::rsa::PrivateKey {
 }
 
 #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+#[cfg(not(target_arch = "xtensa"))]
 fn openssl_key() -> openssl::pkey::PKey<openssl::pkey::Private> {
     use openssl::pkey::PKey;
     use openssl::rsa::Rsa;
     PKey::from_rsa(Rsa::private_key_from_der(PRIVATE_KEY_2048).unwrap()).unwrap()
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn ring_key() -> (ring::rsa::KeyPair, ring::rand::SystemRandom) {
     (
         ring::rsa::KeyPair::from_der(PRIVATE_KEY_2048).unwrap(),
@@ -69,6 +81,7 @@ fn ring_key() -> (ring::rsa::KeyPair, ring::rand::SystemRandom) {
     )
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn aws_key() -> (aws_lc_rs::rsa::KeyPair, aws_lc_rs::rand::SystemRandom) {
     (
         aws_lc_rs::rsa::KeyPair::from_der(PRIVATE_KEY_2048).unwrap(),
@@ -76,15 +89,18 @@ fn aws_key() -> (aws_lc_rs::rsa::KeyPair, aws_lc_rs::rand::SystemRandom) {
     )
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn rind_key() -> Dit<rind::rsa::KeyPair> {
     Dit::hold(rind::rsa::KeyPair::from_pkcs1(PRIVATE_KEY_2048).unwrap())
 }
 
 #[cfg(graviola)]
+#[cfg(not(target_arch = "xtensa"))]
 fn graviola_key() -> graviola::signing::rsa::SigningKey {
     graviola::signing::rsa::SigningKey::from_pkcs1_der(PRIVATE_KEY_2048).unwrap()
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 mod rsa2048_pkcs1_sha256_sign {
     use swole::bench;
 
@@ -178,6 +194,7 @@ mod rsa2048_pkcs1_sha256_sign {
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 mod rsa2048_pss_sha256_sign {
     use swole::bench;
 
@@ -384,33 +401,40 @@ macro_rules! sign_size {
     };
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 sign_size!(
     rsa2056_pkcs1_sha256_sign,
     "../../rind/src/high/rsa/rsa2056.pkcs8.der"
 );
+#[cfg(not(target_arch = "xtensa"))]
 sign_size!(
     rsa2560_pkcs1_sha256_sign,
     "../../rind/src/high/rsa/rsa2560.pkcs8.der"
 );
+#[cfg(not(target_arch = "xtensa"))]
 sign_size!(
     rsa3072_pkcs1_sha256_sign,
     "../../rind/src/high/rsa/rsa3072.pkcs8.der",
     ring
 );
+#[cfg(not(target_arch = "xtensa"))]
 sign_size!(
     rsa4096_pkcs1_sha256_sign,
     "../../rind/src/high/rsa/rsa4096.pkcs8.der",
     ring
 );
+#[cfg(not(target_arch = "xtensa"))]
 sign_size!(
     rsa6144_pkcs1_sha256_sign,
     "../../rind/src/high/rsa/rsa6144.pkcs8.der"
 );
+#[cfg(not(target_arch = "xtensa"))]
 sign_size!(
     rsa8192_pkcs1_sha256_sign,
     "../../rind/src/high/rsa/rsa8192.pkcs8.der"
 );
 
+#[cfg(not(target_arch = "xtensa"))]
 mod rsa2048_oaep_sha256_decrypt {
     use rind::rsa::{DecryptingKey, OAEP_SHA256};
     use swole::bench;
@@ -572,9 +596,12 @@ macro_rules! load {
     };
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 load!(rsa2048_load, "../../rind/src/high/rsa/rsa2048.der");
+#[cfg(not(target_arch = "xtensa"))]
 load!(rsa8192_load, "../../rind/src/high/rsa/rsa8192.der");
 
+#[cfg(not(target_arch = "xtensa"))]
 fn main() {
     swole::main();
 }

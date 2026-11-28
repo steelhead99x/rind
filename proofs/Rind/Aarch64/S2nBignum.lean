@@ -73,20 +73,6 @@ axiom edwards25519_scalarmulbase_spec (res : Std.Array U64 8#usize)
     low.aarch64.edwards25519_scalarmulbase.edwards25519_scalarmulbase res scalar ⦃ r =>
       pairNat r.val = edModEncodePair (edPow edB (wordsNat scalar.val)) ⦄
 
-/-- `EDWARDS25519_SCALARMULDOUBLE_ALT_SUBROUTINE_CORRECT`, whose `tables`
-preconditions hold because rind links s2n-bignum's constant table, which the
-routine addresses PC-relative,
-https://github.com/awslabs/s2n-bignum/blob/3f01260ff1bd2577abf0117ce45aa008bc243a80/arm/proofs/edwards25519_scalarmuldouble_alt.ml#L8432 -/
-@[step]
-axiom edwards25519_scalarmuldouble_spec (res : Std.Array U64 8#usize)
-    (scalar : Std.Array U64 4#usize) (point : Std.Array U64 8#usize)
-    (bscalar : Std.Array U64 4#usize) :
-    low.aarch64.edwards25519_scalarmuldouble.edwards25519_scalarmuldouble res scalar point
-      bscalar ⦃ r =>
-      ∀ P, edOnCurve P → edModDecodePair (pairNat point.val) = P →
-        pairNat r.val =
-          edModEncodePair (edMul (edPow P (wordsNat scalar.val)) (edPow edB (wordsNat bscalar.val))) ⦄
-
 /-- `BIGNUM_MADD_N25519_ALT_SUBROUTINE_CORRECT`,
 https://github.com/awslabs/s2n-bignum/blob/3f01260ff1bd2577abf0117ce45aa008bc243a80/arm/proofs/bignum_madd_n25519_alt.ml#L829 -/
 @[step]
@@ -414,6 +400,13 @@ axiom sha3_keccak_f1600_alt_spec (a : Std.Array U64 25#usize) (rc : Std.Array U6
     low.aarch64.sha3_keccak_f1600_alt.sha3_keccak_f1600 a rc ⦃ r =>
       r.val.map (·.bv) = keccak 24 (a.val.map (·.bv)) ⦄
 
+/-- `SHA3_KECCAK_F1600_ALT2_SUBROUTINE_CORRECT`,
+https://github.com/awslabs/s2n-bignum/blob/3f01260ff1bd2577abf0117ce45aa008bc243a80/arm/proofs/sha3_keccak_f1600_alt2.ml#L283 -/
+axiom sha3_keccak_f1600_alt2_spec (a : Std.Array U64 25#usize) (rc : Std.Array U64 24#usize)
+    (hrc : rc.val.map (·.bv) = keccakRoundConstants) :
+    low.aarch64.sha3_keccak_f1600_alt2.sha3_keccak_f1600 a rc ⦃ r =>
+      r.val.map (·.bv) = keccak 24 (a.val.map (·.bv)) ⦄
+
 /-- `SHA3_KECCAK2_F1600_SUBROUTINE_CORRECT`, whose two states are consecutive,
 as an array of them is,
 https://github.com/awslabs/s2n-bignum/blob/3f01260ff1bd2577abf0117ce45aa008bc243a80/arm/proofs/sha3_keccak2_f1600.ml#L313 -/
@@ -582,10 +575,6 @@ axiom aes256_gcm_dec_alt_spec (blocks : Slice (Std.Array U8 16#usize)) (tag ivec
 reads an input. -/
 def Runs : Prop :=
   (∃ e, low.entry.Entry.new_secret = ok e) ∧ (∃ e, low.entry.Entry.new_public = ok e)
-
-/-- Ed25519 verification's double scalar multiplication runs s2n-bignum's
-routine, as it does on every aarch64 CPU. -/
-def RunsDouble : Prop := True
 
 /-- The check for x86_64's AVX-512 IFMA X25519 and Ed25519 returned `o`, as
 on x86_64; every aarch64 CPU runs s2n-bignum's routines whatever it returns. -/

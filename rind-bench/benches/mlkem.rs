@@ -1,10 +1,17 @@
+#[cfg(target_arch = "xtensa")]
+fn main() {}
+
+#[cfg(not(target_arch = "xtensa"))]
 mod common;
 
+#[cfg(not(target_arch = "xtensa"))]
 use std::hint::black_box;
 
+#[cfg(not(target_arch = "xtensa"))]
 use common::{Dit, dit};
 
 #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+#[cfg(not(target_arch = "xtensa"))]
 mod ossl {
     //! The openssl crate does not yet wrap ML-KEM keygen/encaps/decaps.
 
@@ -95,6 +102,7 @@ mod ossl {
 
 /// A verified-garbage ML-KEM-768 key, which it generates only from a seed:
 /// drawn here, as the other libraries draw theirs.
+#[cfg(not(target_arch = "xtensa"))]
 fn vg_generate() -> verified_garbage::mlkem768::DecapsulationKey768 {
     let mut seed = [0u8; 64];
     getrandom::fill(&mut seed).unwrap();
@@ -103,6 +111,7 @@ fn vg_generate() -> verified_garbage::mlkem768::DecapsulationKey768 {
 
 /// Checks that verified-garbage and rind each decapsulate the other's
 /// ciphertexts to the secret it encapsulated.
+#[cfg(not(target_arch = "xtensa"))]
 fn vg_agrees_with_rind() {
     use rind::kem::*;
     use verified_garbage::mlkem768::EncapsulationKey768;
@@ -271,6 +280,7 @@ macro_rules! decaps_rows {
     };
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 mod mlkem512_keygen {
     use swole::bench;
 
@@ -279,6 +289,7 @@ mod mlkem512_keygen {
     keygen_rows!(MlKem512, ML_KEM_512, mlkem512);
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 mod mlkem512_encaps {
     use swole::bench;
 
@@ -287,6 +298,7 @@ mod mlkem512_encaps {
     encaps_rows!(MlKem512, ML_KEM_512, mlkem512, MlKem512PublicKey);
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 mod mlkem512_decaps {
     use swole::bench;
 
@@ -301,6 +313,7 @@ mod mlkem512_decaps {
     );
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 mod mlkem1024_keygen {
     use swole::bench;
 
@@ -309,6 +322,7 @@ mod mlkem1024_keygen {
     keygen_rows!(MlKem1024, ML_KEM_1024, mlkem1024);
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 mod mlkem1024_encaps {
     use swole::bench;
 
@@ -317,6 +331,7 @@ mod mlkem1024_encaps {
     encaps_rows!(MlKem1024, ML_KEM_1024, mlkem1024, MlKem1024PublicKey);
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 mod mlkem1024_decaps {
     use swole::bench;
 
@@ -332,6 +347,7 @@ mod mlkem1024_decaps {
 }
 
 // client first operation
+#[cfg(not(target_arch = "xtensa"))]
 mod mlkem768_keygen {
     use swole::bench;
 
@@ -366,6 +382,7 @@ mod mlkem768_keygen {
 }
 
 // server operation
+#[cfg(not(target_arch = "xtensa"))]
 mod mlkem768_encaps {
     use swole::bench;
 
@@ -430,6 +447,7 @@ mod mlkem768_encaps {
 }
 
 // client second operation
+#[cfg(not(target_arch = "xtensa"))]
 mod mlkem768_decaps {
     use swole::bench;
 
@@ -518,6 +536,7 @@ mod mlkem768_decaps {
 }
 
 // combined operation: keygen, encaps-encode, encaps-decode, encaps, decaps
+#[cfg(not(target_arch = "xtensa"))]
 mod mlkem768_combined {
     use swole::bench;
 
@@ -605,6 +624,7 @@ mod mlkem768_combined {
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn main() {
     swole::main();
 }

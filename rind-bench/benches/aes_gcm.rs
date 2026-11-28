@@ -1,14 +1,23 @@
+#[cfg(target_arch = "xtensa")]
+fn main() {}
+
+#[cfg(not(target_arch = "xtensa"))]
 mod common;
 #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+#[cfg(not(target_arch = "xtensa"))]
 mod ossl_aead;
 
+#[cfg(not(target_arch = "xtensa"))]
 use std::hint::black_box;
 
+#[cfg(not(target_arch = "xtensa"))]
 use common::{AEAD_ROWS, Aead, Dit, QUIC_AAD, dit};
 
+#[cfg(not(target_arch = "xtensa"))]
 const NONCE: [u8; 12] = [0; 12];
 
 /// The AEAD rows, then QUIC's ACK-sized packets under its 13 B short header.
+#[cfg(not(target_arch = "xtensa"))]
 const ROWS: [Aead; 9] = [
     AEAD_ROWS[0],
     AEAD_ROWS[1],
@@ -21,6 +30,7 @@ const ROWS: [Aead; 9] = [
     Aead::new(64, "quic-64B", QUIC_AAD),
 ];
 
+#[cfg(not(target_arch = "xtensa"))]
 fn test_ring_aes_gcm(key: &ring::aead::LessSafeKey, nonce: &[u8; 12], aad: &[u8], buf: &mut [u8]) {
     let _tag = key
         .seal_in_place_separate_tag(
@@ -31,6 +41,7 @@ fn test_ring_aes_gcm(key: &ring::aead::LessSafeKey, nonce: &[u8; 12], aad: &[u8]
         .unwrap();
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn test_aws_aes_gcm(
     key: &aws_lc_rs::aead::LessSafeKey,
     nonce: &[u8; 12],
@@ -42,6 +53,7 @@ fn test_aws_aes_gcm(
         .unwrap();
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn test_rc_aes128_gcm(key: &aes_gcm::Aes128Gcm, nonce: &[u8; 12], aad: &[u8], buf: &mut [u8]) {
     use aes_gcm::AeadInOut;
     let _tag = key
@@ -49,6 +61,7 @@ fn test_rc_aes128_gcm(key: &aes_gcm::Aes128Gcm, nonce: &[u8; 12], aad: &[u8], bu
         .unwrap();
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn test_rc_aes256_gcm(key: &aes_gcm::Aes256Gcm, nonce: &[u8; 12], aad: &[u8], buf: &mut [u8]) {
     use aes_gcm::AeadInOut;
     let _tag = key
@@ -56,6 +69,7 @@ fn test_rc_aes256_gcm(key: &aes_gcm::Aes256Gcm, nonce: &[u8; 12], aad: &[u8], bu
         .unwrap();
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn test_rind_aes_gcm(key: &rind::aead::Key, nonce: &[u8; 12], aad: &[u8], buf: &mut [u8]) {
     let _tag = key
         .seal_in_place_separate_tag(rind::aead::Nonce::assume_unique_for_key(*nonce), aad, buf)
@@ -64,12 +78,14 @@ fn test_rind_aes_gcm(key: &rind::aead::Key, nonce: &[u8; 12], aad: &[u8], buf: &
 
 /// A key and the buffer it seals in place each call: the same buffer, so a
 /// call times the cipher alone, without an allocation or a copy of the input.
+#[cfg(not(target_arch = "xtensa"))]
 struct Seal<K> {
     key: K,
     aad: &'static [u8],
     buf: Vec<u8>,
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 impl<K> Seal<K> {
     fn new(key: K, row: Aead) -> Self {
         Self {
@@ -86,6 +102,7 @@ impl<K> Seal<K> {
 /// heap buffers can instead land with the destination just past the source
 /// in a page, where Zen 3 and 4 run the `rep movsb` that glibc's memcpy can
 /// pick for 16 KB about 30x slower.
+#[cfg(not(target_arch = "xtensa"))]
 struct Open<K> {
     key: K,
     aad: &'static [u8],
@@ -93,6 +110,7 @@ struct Open<K> {
     stride: usize,
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 impl<K> Open<K> {
     /// Seals `row` with rind under `alg` and `key`, then makes the row's key
     /// from the tag.
@@ -129,6 +147,7 @@ impl<K> Open<K> {
 
 /// verified-garbage's sealing key, after checking its ciphertext and tag
 /// match rind's.
+#[cfg(not(target_arch = "xtensa"))]
 fn vg_seal(
     key: &[u8],
     ours: &'static rind::aead::Algorithm,
@@ -154,6 +173,7 @@ fn vg_seal(
 }
 
 /// verified-garbage's opening key, after checking it opens what rind sealed.
+#[cfg(not(target_arch = "xtensa"))]
 fn vg_open(
     key: &[u8],
     ours: &'static rind::aead::Algorithm,
@@ -168,6 +188,7 @@ fn vg_open(
     open
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn verified_garbage_open(open: &mut Open<(verified_garbage::aead::aes_gcm::AesGcm, [u8; 16])>) {
     let aad = open.aad;
     let ((key, tag), ct, pt) = open.parts();
@@ -241,6 +262,20 @@ macro_rules! seal {
             }
         }
 
+        #[cfg(target_arch = "aarch64")]
+        pub mod verified_garbage_dit_held {
+            use swole::bench;
+
+            use super::*;
+
+            #[bench]
+            fn key(iterations: swole::Iterations) -> std::time::Duration {
+                common::vg_dit_held(iterations, || {
+                    ::verified_garbage::aead::aes_gcm::AesGcm::new(black_box(&KEY)).unwrap()
+                })
+            }
+        }
+
         fn ring_seal(row: Aead) -> Seal<::ring::aead::LessSafeKey> {
             let key = ::ring::aead::UnboundKey::new(&::ring::aead::$alg, &KEY).unwrap();
             Seal::new(::ring::aead::LessSafeKey::new(key), row)
@@ -289,6 +324,15 @@ macro_rules! seal {
         #[bench(args = ROWS, setup = verified_garbage_seal)]
         fn verified_garbage(s: &mut Seal<::verified_garbage::aead::aes_gcm::AesGcm>) -> [u8; 16] {
             s.key.encrypt_in_place(&NONCE, s.aad, &mut s.buf).unwrap()
+        }
+
+        #[cfg(target_arch = "aarch64")]
+        #[bench(args = ROWS, setup = verified_garbage_seal)]
+        fn verified_garbage_dit_held(
+            s: &mut Seal<::verified_garbage::aead::aes_gcm::AesGcm>,
+            iterations: swole::Iterations,
+        ) -> std::time::Duration {
+            common::vg_dit_held(iterations, || verified_garbage(s))
         }
 
         #[cfg(graviola)]
@@ -395,6 +439,15 @@ macro_rules! open {
         fn verified_garbage(open: &mut Open<(verified_garbage::aead::aes_gcm::AesGcm, [u8; 16])>) {
             verified_garbage_open(open);
         }
+
+        #[cfg(target_arch = "aarch64")]
+        #[bench(args = ROWS, setup = verified_garbage_setup)]
+        fn verified_garbage_dit_held(
+            open: &mut Open<(verified_garbage::aead::aes_gcm::AesGcm, [u8; 16])>,
+            iterations: swole::Iterations,
+        ) -> std::time::Duration {
+            common::vg_dit_held(iterations, || verified_garbage(open))
+        }
     };
 }
 
@@ -495,6 +548,7 @@ macro_rules! open_more {
     };
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 mod aes128_gcm {
     use swole::bench;
 
@@ -512,6 +566,7 @@ mod aes128_gcm {
     );
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 mod aes256_gcm {
     use swole::bench;
 
@@ -529,6 +584,7 @@ mod aes256_gcm {
     );
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 mod aes128_gcm_open {
     use swole::bench;
 
@@ -544,6 +600,7 @@ mod aes128_gcm_open {
     );
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 mod aes256_gcm_open {
     use swole::bench;
 
@@ -561,6 +618,7 @@ mod aes256_gcm_open {
 
 /// AES-192-GCM, which only aws-lc-rs of the other libraries offers, both
 /// ways: WebCrypto and pyca take 192-bit keys.
+#[cfg(not(target_arch = "xtensa"))]
 mod aes192_gcm {
     use swole::bench;
 
@@ -607,6 +665,20 @@ mod aes192_gcm {
         }
     }
 
+    #[cfg(target_arch = "aarch64")]
+    pub mod verified_garbage_dit_held {
+        use swole::bench;
+
+        use super::*;
+
+        #[bench]
+        fn key(iterations: swole::Iterations) -> std::time::Duration {
+            common::vg_dit_held(iterations, || {
+                ::verified_garbage::aead::aes_gcm::AesGcm::new(black_box(&KEY)).unwrap()
+            })
+        }
+    }
+
     fn aws_seal(row: Aead) -> Seal<::aws_lc_rs::aead::LessSafeKey> {
         let key =
             ::aws_lc_rs::aead::UnboundKey::new(&::aws_lc_rs::aead::AES_192_GCM, &KEY).unwrap();
@@ -637,8 +709,18 @@ mod aes192_gcm {
     fn verified_garbage(s: &mut Seal<::verified_garbage::aead::aes_gcm::AesGcm>) -> [u8; 16] {
         s.key.encrypt_in_place(&NONCE, s.aad, &mut s.buf).unwrap()
     }
+
+    #[cfg(target_arch = "aarch64")]
+    #[bench(args = ROWS, setup = verified_garbage_seal)]
+    fn verified_garbage_dit_held(
+        s: &mut Seal<::verified_garbage::aead::aes_gcm::AesGcm>,
+        iterations: swole::Iterations,
+    ) -> std::time::Duration {
+        common::vg_dit_held(iterations, || verified_garbage(s))
+    }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 mod aes192_gcm_open {
     use swole::bench;
 
@@ -648,6 +730,7 @@ mod aes192_gcm_open {
 }
 
 #[cfg(target_arch = "aarch64")]
+#[cfg(not(target_arch = "xtensa"))]
 mod dit_per_call {
     use super::*;
 
@@ -668,6 +751,7 @@ mod dit_per_call {
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn main() {
     swole::main();
 }

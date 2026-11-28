@@ -1,11 +1,18 @@
+#[cfg(target_arch = "xtensa")]
+fn main() {}
+
+#[cfg(not(target_arch = "xtensa"))]
 mod common;
 
+#[cfg(not(target_arch = "xtensa"))]
 use common::{Dit, HASH_SIZES, Size};
 
+#[cfg(not(target_arch = "xtensa"))]
 fn input(size: Size) -> Vec<u8> {
     size.zeros()
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn rind_input(size: Size) -> Dit<Vec<u8>> {
     Dit::hold(size.zeros())
 }
@@ -77,6 +84,7 @@ macro_rules! rows {
     };
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 mod sha3_256 {
     use swole::bench;
 
@@ -91,6 +99,7 @@ mod sha3_256 {
     );
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 mod sha3_384 {
     use swole::bench;
 
@@ -105,6 +114,7 @@ mod sha3_384 {
     );
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 mod sha3_512 {
     use swole::bench;
 
@@ -119,6 +129,7 @@ mod sha3_512 {
     );
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn main() {
     swole::main();
 }

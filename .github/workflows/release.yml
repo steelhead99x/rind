@@ -4,10 +4,12 @@ name: Release
 permissions:
   contents: read
 
-# Only one release job can run at a time.
+# Only one release job can run at a time. Later pushes queue rather than
+# replace a pending run, so no push cancels a release and alert.yml can post
+# every cancellation.
 concurrency:
   group: release
-  cancel-in-progress: false
+  queue: max
 
 # release-plz opens a release PR from `main` and publishes once that PR merges
 # (release_always = false in .release-plz.toml), so an ordinary merge never

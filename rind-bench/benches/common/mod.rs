@@ -149,3 +149,23 @@ impl<T> DerefMut for Dit<T> {
         &mut self.input
     }
 }
+
+/// Times `call`, `iterations` times, inside `verified_garbage::dit::scope`,
+/// which holds DIT across the calls as [`Dit`] does for rind's rows: a
+/// `verified_garbage_dit_held` row, beside a `verified_garbage` row whose call
+/// verified-garbage sets DIT around itself on an aarch64 CPU with DIT, as it
+/// does for its MACs, AEADs, and ciphers. Its unkeyed hashes never set DIT, so
+/// they take no pair. Where the CPU has no DIT the two rows time the same.
+#[cfg(target_arch = "aarch64")]
+pub fn vg_dit_held<O>(
+    iterations: swole::Iterations,
+    mut call: impl FnMut() -> O,
+) -> std::time::Duration {
+    verified_garbage::dit::scope(|| {
+        let start = std::time::Instant::now();
+        for _ in iterations {
+            std::hint::black_box(call());
+        }
+        start.elapsed()
+    })
+}

@@ -2,19 +2,33 @@
 //! of an exchange: the prover's share, the verifier's share and
 //! confirmation, the prover's confirmation and key, and the verifier's key.
 //! The steps before each run untimed.
+#[cfg(target_arch = "xtensa")]
+fn main() {}
+
+#[cfg(not(target_arch = "xtensa"))]
 mod common;
 
+#[cfg(not(target_arch = "xtensa"))]
 use std::hint::black_box;
+#[cfg(not(target_arch = "xtensa"))]
 use std::sync::Once;
 
+#[cfg(not(target_arch = "xtensa"))]
 use common::Dit;
+#[cfg(not(target_arch = "xtensa"))]
 use getrandom::{SysRng, rand_core::UnwrapErr};
+#[cfg(not(target_arch = "xtensa"))]
 use rind::spake2plus::{ProverSecrets, RFC9383, Rfc9383, Session, VerifierRecord};
+#[cfg(not(target_arch = "xtensa"))]
 use spake2plus::{Context, P256Sha256, Prover, ProverSecret, Verifier};
 
+#[cfg(not(target_arch = "xtensa"))]
 const CONTEXT: &[u8] = b"rind-bench";
+#[cfg(not(target_arch = "xtensa"))]
 const PROVER: &[u8] = b"client";
+#[cfg(not(target_arch = "xtensa"))]
 const VERIFIER: &[u8] = b"server";
+#[cfg(not(target_arch = "xtensa"))]
 const SESSION: Session<'static> = Session {
     context: CONTEXT,
     id_prover: PROVER,
@@ -23,9 +37,12 @@ const SESSION: Session<'static> = Session {
 
 // w0s and w1s, the password hash's output, which each library reduces into
 // the same w0 and w1.
+#[cfg(not(target_arch = "xtensa"))]
 const W0S: [u8; 40] = [0x11; 40];
+#[cfg(not(target_arch = "xtensa"))]
 const W1S: [u8; 40] = [0x22; 40];
 
+#[cfg(not(target_arch = "xtensa"))]
 fn context() -> Context<'static> {
     Context {
         context: CONTEXT,
@@ -34,10 +51,12 @@ fn context() -> Context<'static> {
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn rng() -> UnwrapErr<SysRng> {
     UnwrapErr(SysRng)
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn rustcrypto_secret() -> ProverSecret<P256Sha256> {
     ProverSecret::from_pbkdf_output(&[W0S, W1S].concat()).unwrap()
 }
@@ -45,11 +64,13 @@ fn rustcrypto_secret() -> ProverSecret<P256Sha256> {
 /// Checks, once a process, that a rind prover and the other library's
 /// verifier agree on a key, so the rows time the same protocol. Every row's
 /// setup runs it.
+#[cfg(not(target_arch = "xtensa"))]
 fn check_interop() {
     static CHECKED: Once = Once::new();
     CHECKED.call_once(interop);
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn interop() {
     let prover = ProverSecrets::new(&W0S, &W1S).unwrap();
     let record = rustcrypto_secret().verifier_record();
@@ -67,22 +88,26 @@ fn interop() {
     assert_eq!(prover_key.as_ref(), verifier_key.as_bytes().as_ref());
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn secrets() -> ProverSecrets {
     check_interop();
     ProverSecrets::new(&W0S, &W1S).unwrap()
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn record() -> VerifierRecord {
     VerifierRecord::from_w1(&W0S, &W1S).unwrap()
 }
 
 /// RustCrypto's prover secret and the verifier's record of it.
+#[cfg(not(target_arch = "xtensa"))]
 struct RustCrypto {
     secret: ProverSecret<P256Sha256>,
     record: spake2plus::VerifierRecord<P256Sha256>,
     context: Context<'static>,
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn rustcrypto() -> RustCrypto {
     check_interop();
     let secret = rustcrypto_secret();
@@ -94,6 +119,7 @@ fn rustcrypto() -> RustCrypto {
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 mod spake2plus_p256_prover_start {
     use swole::bench;
 
@@ -115,6 +141,7 @@ mod spake2plus_p256_prover_start {
 }
 
 /// The verifier's share and its confirmation of the prover's share.
+#[cfg(not(target_arch = "xtensa"))]
 mod spake2plus_p256_verifier_start {
     use swole::bench;
 
@@ -150,6 +177,7 @@ mod spake2plus_p256_verifier_start {
 
 /// Each side's finish consumes its state, so each call runs the steps before
 /// it untimed, and returns its output, which drops untimed.
+#[cfg(not(target_arch = "xtensa"))]
 mod spake2plus_p256_prover_finish {
     use swole::bench;
 
@@ -200,6 +228,7 @@ mod spake2plus_p256_prover_finish {
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 mod spake2plus_p256_verifier_finish {
     use swole::bench;
 
@@ -250,6 +279,7 @@ mod spake2plus_p256_verifier_finish {
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn main() {
     swole::main();
 }

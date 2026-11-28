@@ -1,21 +1,31 @@
 //! A 32-byte key for one label, from a PRK extracted once: what a QUIC token
 //! or an e2ee track key derives from a long-lived secret.
 
+#[cfg(target_arch = "xtensa")]
+fn main() {}
+
+#[cfg(not(target_arch = "xtensa"))]
 mod common;
 
+#[cfg(not(target_arch = "xtensa"))]
 use common::{Dit, dit};
 
+#[cfg(not(target_arch = "xtensa"))]
 const SECRET: [u8; 32] = [0x5a; 32];
+#[cfg(not(target_arch = "xtensa"))]
 const INFO: [&[u8]; 1] = [b"label"];
 
+#[cfg(not(target_arch = "xtensa"))]
 struct Len(usize);
 
+#[cfg(not(target_arch = "xtensa"))]
 impl aws_lc_rs::hkdf::KeyType for Len {
     fn len(&self) -> usize {
         self.0
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 impl ring::hkdf::KeyType for Len {
     fn len(&self) -> usize {
         self.0
@@ -24,6 +34,7 @@ impl ring::hkdf::KeyType for Len {
 
 // verified-garbage has no HKDF, so this is RFC 5869 over its HMAC, as rind's
 // glue would run it.
+#[cfg(not(target_arch = "xtensa"))]
 fn vg_expand<V: verified_garbage::hmac::HmacHash>(prk: &[u8], info: &[u8], out: &mut [u8]) {
     let mut previous: Option<V::Output> = None;
     for (counter, chunk) in (1u8..).zip(out.chunks_mut(V::OUTPUT_SIZE)) {
@@ -39,6 +50,7 @@ fn vg_expand<V: verified_garbage::hmac::HmacHash>(prk: &[u8], info: &[u8], out: 
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn vg_extract_expand<V: verified_garbage::hmac::HmacHash>(out: &mut [u8]) {
     let prk = verified_garbage::hmac::Hmac::<V>::mac(b"salt", &SECRET);
     vg_expand::<V>(prk.as_ref(), INFO[0], out);
@@ -47,6 +59,7 @@ fn vg_extract_expand<V: verified_garbage::hmac::HmacHash>(out: &mut [u8]) {
 /// OpenSSL's HKDF over `md`: it expands `key` as a PRK, or extracts from it
 /// with the salt first.
 #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+#[cfg(not(target_arch = "xtensa"))]
 fn openssl_derive(md: &openssl::md::MdRef, expand_only: bool, key: &[u8]) -> [u8; 32] {
     use openssl::pkey::Id;
     use openssl::pkey_ctx::{HkdfMode, PkeyCtx};
@@ -160,6 +173,12 @@ macro_rules! rows {
                 out
             }
 
+            #[cfg(target_arch = "aarch64")]
+            #[bench(setup = vg_checked)]
+            fn verified_garbage_dit_held(input: &(), iterations: swole::Iterations) -> std::time::Duration {
+                common::vg_dit_held(iterations, || verified_garbage(input))
+            }
+
             #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
             #[bench]
             fn openssl() -> [u8; 32] {
@@ -254,6 +273,12 @@ macro_rules! rows {
                 out
             }
 
+            #[cfg(target_arch = "aarch64")]
+            #[bench(setup = vg_prk)]
+            fn verified_garbage_dit_held(prk: &<$vg as verified_garbage::hashes::HashFunction>::Output, iterations: swole::Iterations) -> std::time::Duration {
+                common::vg_dit_held(iterations, || verified_garbage(prk))
+            }
+
             #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
             fn openssl_prk() -> aws_lc_rs::hmac::Tag {
                 aws_lc_rs::hmac::sign(
@@ -301,6 +326,7 @@ macro_rules! rows {
     };
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 mod hkdf_sha1 {
     use super::*;
 
@@ -314,6 +340,7 @@ mod hkdf_sha1 {
     );
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 mod hkdf_sha256 {
     use super::*;
 
@@ -328,6 +355,7 @@ mod hkdf_sha256 {
     );
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 mod hkdf_sha384 {
     use super::*;
 
@@ -342,6 +370,7 @@ mod hkdf_sha384 {
     );
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 mod hkdf_sha512 {
     use super::*;
 
@@ -356,6 +385,7 @@ mod hkdf_sha512 {
     );
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn main() {
     swole::main();
 }

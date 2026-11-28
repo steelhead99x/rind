@@ -105,7 +105,7 @@ Measured 2026-11-27 at [`c23c1a7e`](https://github.com/kixel-ai/rind/commit/c23c
 
 Timed on CPUs 14,15,30,31, two whole cores reserved for the run.
 
-Not timed on `nixos`: full handshake, X25519, every logical CPU, resumed handshake, X25519, every logical CPU.
+Not timed on `nixos`: full handshake, X25519, every logical CPU, resumed handshake, X25519, every logical CPU, SHA-1, 64 B, SHA-1, 1350 B, SHA-1, 16 KB, MD5, 64 B, MD5, 1350 B, MD5, 16 KB.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="benchmarks/nixos-dark.svg">
@@ -173,6 +173,12 @@ Not timed on `nixos`: full handshake, X25519, every logical CPU, resumed handsha
 | SHA3-512, 64 B | 249 ns ✓ | 295 ns | - | 299 ns | - | 294 ns | 456 ns | 252 ns |
 | SHA3-512, 1350 B | 4.18 µs ✓ | 4.27 µs | - | 5.28 µs | - | 5.23 µs | 4.33 µs | 4.35 µs |
 | SHA3-512, 16 KB | 49.99 µs ✓ | 50.21 µs | - | 63.41 µs | - | 62.05 µs | 49.04 µs | 51.57 µs |
+| SHA-1, 64 B | - | - | - | - | - | - | - | - |
+| SHA-1, 1350 B | - | - | - | - | - | - | - | - |
+| SHA-1, 16 KB | - | - | - | - | - | - | - | - |
+| MD5, 64 B | - | - | - | - | - | - | - | - |
+| MD5, 1350 B | - | - | - | - | - | - | - | - |
+| MD5, 16 KB | - | - | - | - | - | - | - | - |
 | HMAC-SHA256, 64 B | 146 ns ✓ | 288 ns | 232 ns | 189 ns | 215 ns | 946 ns ✓ | 2.69 µs | 169 ns |
 | HMAC-SHA256, 1350 B | 704 ns ✓ | 852 ns | 807 ns | 781 ns | 740 ns | 4.70 µs ✓ | 3.27 µs | 737 ns |
 | HKDF-SHA256 extract and expand | 280 ns ✓ | 395 ns | 441 ns | 338 ns | - | 1.46 µs ✓ | 2.92 µs | 297 ns |
@@ -242,7 +248,7 @@ Measured 2026-11-27 at [`a91db19e`](https://github.com/kixel-ai/rind/commit/a91d
 
 Timed on CPUs 6,7, two whole cores reserved for the run.
 
-Not timed on `desktop`: full handshake, X25519, every logical CPU, resumed handshake, X25519, every logical CPU.
+Not timed on `desktop`: full handshake, X25519, every logical CPU, resumed handshake, X25519, every logical CPU, SHA-1, 64 B, SHA-1, 1350 B, SHA-1, 16 KB, MD5, 64 B, MD5, 1350 B, MD5, 16 KB.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="benchmarks/desktop-dark.svg">
@@ -310,6 +316,12 @@ Not timed on `desktop`: full handshake, X25519, every logical CPU, resumed hands
 | SHA3-512, 64 B | 173 ns ✓ | 189 ns | - | 184 ns | - | 177 ns | 311 ns | 168 ns |
 | SHA3-512, 1350 B | 2.94 µs ✓ | 2.99 µs | - | 3.07 µs | - | 3.04 µs | 3.13 µs | 2.82 µs |
 | SHA3-512, 16 KB | 35.03 µs ✓ | 34.93 µs | - | 36.50 µs | - | 36.52 µs | 35.62 µs | 33.57 µs |
+| SHA-1, 64 B | - | - | - | - | - | - | - | - |
+| SHA-1, 1350 B | - | - | - | - | - | - | - | - |
+| SHA-1, 16 KB | - | - | - | - | - | - | - | - |
+| MD5, 64 B | - | - | - | - | - | - | - | - |
+| MD5, 1350 B | - | - | - | - | - | - | - | - |
+| MD5, 16 KB | - | - | - | - | - | - | - | - |
 | HMAC-SHA256, 64 B | 75 ns ✓ | 181 ns | 152 ns | 129 ns | 117 ns | 554 ns ✓ | 1.57 µs | 100 ns |
 | HMAC-SHA256, 1350 B | 328 ns ✓ | 436 ns | 402 ns | 384 ns | 366 ns | 2.82 µs ✓ | 1.82 µs | 358 ns |
 | HKDF-SHA256 extract and expand | 160 ns ✓ | 289 ns | 317 ns | 229 ns | - | 990 ns ✓ | 1.78 µs | 186 ns |
@@ -381,7 +393,7 @@ The maintainer's Fedora workstation and the report's only AVX-512 host, so the o
 
 Timed on CPUs 14,15,30,31, two whole cores reserved for the run.
 
-Not timed on `fedora`: full handshake, X25519, every logical CPU, resumed handshake, X25519, every logical CPU.
+Not timed on `fedora`: full handshake, X25519, every logical CPU, resumed handshake, X25519, every logical CPU, SHA-1, 64 B, SHA-1, 1350 B, SHA-1, 16 KB, MD5, 64 B, MD5, 1350 B, MD5, 16 KB.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="benchmarks/fedora-dark.svg">
@@ -449,6 +461,12 @@ Not timed on `fedora`: full handshake, X25519, every logical CPU, resumed handsh
 | SHA3-512, 64 B | 210 ns ✓ | 233 ns | - | 233 ns | - | 232 ns | 370 ns | 202 ns |
 | SHA3-512, 1350 B | 3.54 µs ✓ | 3.57 µs | - | 4.11 µs | - | 4.08 µs | 3.66 µs | 3.56 µs |
 | SHA3-512, 16 KB | 42.12 µs ✓ | 42.08 µs | - | 49.18 µs | - | 48.70 µs | 41.56 µs | 42.38 µs |
+| SHA-1, 64 B | - | - | - | - | - | - | - | - |
+| SHA-1, 1350 B | - | - | - | - | - | - | - | - |
+| SHA-1, 16 KB | - | - | - | - | - | - | - | - |
+| MD5, 64 B | - | - | - | - | - | - | - | - |
+| MD5, 1350 B | - | - | - | - | - | - | - | - |
+| MD5, 16 KB | - | - | - | - | - | - | - | - |
 | HMAC-SHA256, 64 B | 126 ns ✓ | 247 ns | 197 ns | 182 ns | 157 ns | 577 ns ✓ | 1.92 µs | 155 ns |
 | HMAC-SHA256, 1350 B | 641 ns ✓ | 755 ns | 704 ns | 697 ns | 674 ns | 2.78 µs ✓ | 2.47 µs | 674 ns |
 | HKDF-SHA256 extract and expand | 271 ns ✓ | 362 ns | 396 ns | 334 ns | - | 941 ns ✓ | 2.20 µs | 295 ns |
@@ -518,6 +536,8 @@ Measured 2026-11-26 at [`8656d89b`](https://github.com/kixel-ai/rind/commit/8656
 
 The maintainer's MacBook Air, in daily use. Its cores have DIT, and every rind row holds `rind::cpu::Dit::hold()` across calls, as MoQ does, so the rustls rows run rustls' own code with DIT on too. On every logical CPU, rind-rustls's handshakes gain less than aws-lc-rs's from the 6 efficiency cores: more of their time is multiplication-heavy assembly, which those cores run at 34-45% of a performance core's speed. The Air has no fan, so its performance cores slow within a minute there, giving those cores a larger share.
 
+Not timed on `kixtop`: SHA-1, 64 B, SHA-1, 1350 B, SHA-1, 16 KB, MD5, 64 B, MD5, 1350 B, MD5, 16 KB.
+
 rind-rustls on all 10 logical CPUs runs full handshakes at 5.1 times and resumed handshakes at 4.8 times its one-thread rate.
 
 Setting DIT around each call, as rind does for a caller holding no `rind::cpu::Dit::hold()` guard, takes rind 33 ns to 81 ns more a call than holding it, in the 3 rows timed both ways short enough to show it: 32 B AEAD calls and a 64 B rustls record.
@@ -570,10 +590,10 @@ Setting DIT around each call, as rind does for a caller holding no `rind::cpu::D
 | AES-128 header protection | 3 ns ✓ | 3 ns | 3 ns | - | - | - | - | 36 ns |
 | AES-256 header protection | 3 ns ✓ | 3 ns | 4 ns | - | - | - | - | 38 ns |
 | ChaCha20 header protection | 59 ns ✓ | 73 ns | 68 ns | - | - | - | - | 111 ns |
-| X25519 | 16.51 µs ✓ | 17.76 µs | 24.58 µs | 29.62 µs | 16.67 µs | 37.25 µs ✓ | 36.00 µs | 16.78 µs |
+| X25519 | 16.51 µs | 17.76 µs | 24.58 µs | 29.62 µs | 16.67 µs | 37.25 µs ✓ | 36.00 µs | 16.78 µs |
 | P-256 ECDH | 25.62 µs ✓ | 28.55 µs | 32.25 µs | 171.01 µs | 31.21 µs | 183.20 µs ✓ | 50.38 µs | 25.91 µs |
-| Ed25519 sign | 3.87 µs ✓ | 4.14 µs | 7.09 µs | 8.61 µs | 4.18 µs | 22.32 µs ✓ | 16.49 µs | 4.11 µs |
-| Ed25519 verify | 16.48 µs ✓ | 18.61 µs | 20.13 µs | 18.61 µs | 16.79 µs | 29.47 µs ✓ | 40.40 µs | 20.98 µs |
+| Ed25519 sign | 3.87 µs | 4.14 µs | 7.09 µs | 8.61 µs | 4.18 µs | 22.32 µs ✓ | 16.49 µs | 4.11 µs |
+| Ed25519 verify | 16.48 µs | 18.61 µs | 20.13 µs | 18.61 µs | 16.79 µs | 29.47 µs ✓ | 40.40 µs | 20.98 µs |
 | P-256 ECDSA sign | 6.87 µs ✓ | 11.32 µs | 11.01 µs | 36.93 µs | 8.80 µs | 67.38 µs ✓ | 12.45 µs | 6.65 µs |
 | P-256 ECDSA verify | 21.20 µs ✓ | 27.10 µs | 29.24 µs | 153.94 µs | 28.47 µs | 155.94 µs ✓ | 41.81 µs | 21.15 µs |
 | SHA-256, 64 B | 37 ns ✓ | 71 ns | 45 ns | 38 ns | 36 ns | 228 ns ✓ | 163 ns | 40 ns |
@@ -588,6 +608,12 @@ Setting DIT around each call, as rind does for a caller holding no `rind::cpu::D
 | SHA3-512, 64 B | 141 ns ✓ | 174 ns | - | 141 ns | - | 177 ns | - | 139 ns |
 | SHA3-512, 1350 B | 2.54 µs ✓ | 2.52 µs | - | 2.42 µs | - | 3.20 µs | - | 2.43 µs |
 | SHA3-512, 16 KB | 30.46 µs ✓ | 30.41 µs | - | 29.02 µs | - | 38.45 µs | - | 28.87 µs |
+| SHA-1, 64 B | - | - | - | - | - | - | - | - |
+| SHA-1, 1350 B | - | - | - | - | - | - | - | - |
+| SHA-1, 16 KB | - | - | - | - | - | - | - | - |
+| MD5, 64 B | - | - | - | - | - | - | - | - |
+| MD5, 1350 B | - | - | - | - | - | - | - | - |
+| MD5, 16 KB | - | - | - | - | - | - | - | - |
 | HMAC-SHA256, 64 B | 104 ns ✓ | 261 ns | 144 ns | 127 ns | 133 ns | 572 ns ✓ | 2.14 µs | 225 ns |
 | HMAC-SHA256, 1350 B | 479 ns ✓ | 623 ns | 510 ns | 566 ns | 579 ns | 2.88 µs ✓ | 2.44 µs | 605 ns |
 | HKDF-SHA256 extract and expand | 227 ns ✓ | 335 ns | 282 ns | 247 ns | - | 941 ns ✓ | 2.19 µs | 378 ns |
@@ -652,9 +678,9 @@ Setting DIT around each call, as rind does for a caller holding no `rind::cpu::D
 | AES-128-GCM seal, 1350 B, DIT set per call | 203 ns ✓ | - | - | - | - | - | - | - |
 | ChaCha20-Poly1305 seal, 32 B, DIT set per call | 187 ns | - | - | - | - | - | - | - |
 | ChaCha20-Poly1305 seal, 1350 B, DIT set per call | 750 ns | - | - | - | - | - | - | - |
-| X25519, DIT set per call | 16.56 µs ✓ | - | - | - | - | - | - | - |
-| Ed25519 sign, DIT set per call | 3.91 µs ✓ | - | - | - | - | - | - | - |
-| Ed25519 verify, DIT set per call | 16.60 µs ✓ | - | - | - | - | - | - | - |
+| X25519, DIT set per call | 16.56 µs | - | - | - | - | - | - | - |
+| Ed25519 sign, DIT set per call | 3.91 µs | - | - | - | - | - | - | - |
+| Ed25519 verify, DIT set per call | 16.60 µs | - | - | - | - | - | - | - |
 | P-256 ECDSA sign, DIT set per call | 6.92 µs ✓ | - | - | - | - | - | - | - |
 | P-256 ECDSA verify, DIT set per call | 21.03 µs ✓ | - | - | - | - | - | - | - |
 | one record, AES-128-GCM, 64 B, DIT set per call | 242 ns | - | - | - | - | - | - | - |
@@ -666,6 +692,8 @@ Setting DIT around each call, as rind does for a caller holding no `rind::cpu::D
 Measured 2026-11-27 at [`8656d89b`](https://github.com/kixel-ai/rind/commit/8656d89bd9ade57720e72802fd6096b8b2bcdc82), on NixOS 26.11 (Zokor) (Linux 6.18.40) with rustc 1.98.1 (48a229cea 2026-09-01).
 
 OVH VPS in Virginia, 4 shared vCPUs: other tenants add noise that a dedicated host's times lack.
+
+Not timed on `ovh-iad`: SHA-1, 64 B, SHA-1, 1350 B, SHA-1, 16 KB, MD5, 64 B, MD5, 1350 B, MD5, 16 KB.
 
 rind-rustls on all 4 logical CPUs runs full handshakes at 3.5 times and resumed handshakes at 3.4 times its one-thread rate.
 
@@ -737,6 +765,12 @@ graviola isn't timed on `ovh-iad`: it requires ADX, which this CPU lacks.
 | SHA3-512, 64 B | 519 ns ✓ | 648 ns | - | 644 ns | 667 ns | - | 493 ns |
 | SHA3-512, 1350 B | 9.13 µs ✓ | 9.13 µs | - | 11.61 µs | 12.15 µs | - | 8.83 µs |
 | SHA3-512, 16 KB | 101.66 µs ✓ | 107.81 µs | - | 140.16 µs | 140.56 µs | - | 105.38 µs |
+| SHA-1, 64 B | - | - | - | - | - | - | - |
+| SHA-1, 1350 B | - | - | - | - | - | - | - |
+| SHA-1, 16 KB | - | - | - | - | - | - | - |
+| MD5, 64 B | - | - | - | - | - | - | - |
+| MD5, 1350 B | - | - | - | - | - | - | - |
+| MD5, 16 KB | - | - | - | - | - | - | - |
 | HMAC-SHA256, 64 B | 1.02 µs ✓ | 1.30 µs | 1.14 µs | 1.97 µs | 1.91 µs ✓ | 5.94 µs | 1.11 µs |
 | HMAC-SHA256, 1350 B | 4.54 µs ✓ | 5.40 µs | 5.07 µs | 9.18 µs | 9.48 µs ✓ | 9.61 µs | 5.02 µs |
 | HKDF-SHA256 extract and expand | 1.74 µs ✓ | 2.28 µs | 1.98 µs | 3.18 µs | 3.21 µs ✓ | 7.30 µs | 1.82 µs |
@@ -805,6 +839,8 @@ graviola isn't timed on `ovh-iad`: it requires ADX, which this CPU lacks.
 Measured 2026-11-27 at [`8656d89b`](https://github.com/kixel-ai/rind/commit/8656d89bd9ade57720e72802fd6096b8b2bcdc82), on NixOS 26.11 (Zokor) (Linux 6.18.40) with rustc 1.98.1 (48a229cea 2026-09-01).
 
 OVH VPS in Oregon, 4 shared vCPUs: other tenants add noise that a dedicated host's times lack.
+
+Not timed on `ovh-sea`: SHA-1, 64 B, SHA-1, 1350 B, SHA-1, 16 KB, MD5, 64 B, MD5, 1350 B, MD5, 16 KB.
 
 rind-rustls on all 4 logical CPUs runs full handshakes at 3.8 times and resumed handshakes at 3.7 times its one-thread rate.
 
@@ -876,6 +912,12 @@ graviola isn't timed on `ovh-sea`: it requires ADX, which this CPU lacks.
 | SHA3-512, 64 B | 467 ns ✓ | 567 ns | - | 594 ns | 606 ns | - | 450 ns |
 | SHA3-512, 1350 B | 8.24 µs ✓ | 8.30 µs | - | 10.66 µs | 11.22 µs | - | 8.03 µs |
 | SHA3-512, 16 KB | 97.73 µs ✓ | 98.46 µs | - | 128.48 µs | 130.32 µs | - | 97.08 µs |
+| SHA-1, 64 B | - | - | - | - | - | - | - |
+| SHA-1, 1350 B | - | - | - | - | - | - | - |
+| SHA-1, 16 KB | - | - | - | - | - | - | - |
+| MD5, 64 B | - | - | - | - | - | - | - |
+| MD5, 1350 B | - | - | - | - | - | - | - |
+| MD5, 16 KB | - | - | - | - | - | - | - |
 | HMAC-SHA256, 64 B | 961 ns ✓ | 1.25 µs | 1.08 µs | 1.82 µs | 1.83 µs ✓ | 5.68 µs | 1.07 µs |
 | HMAC-SHA256, 1350 B | 4.26 µs ✓ | 5.07 µs | 4.91 µs | 8.72 µs | 9.07 µs ✓ | 8.90 µs | 4.50 µs |
 | HKDF-SHA256 extract and expand | 1.75 µs ✓ | 1.94 µs | 1.81 µs | 3.02 µs | 2.99 µs ✓ | 6.70 µs | 1.75 µs |
@@ -1420,7 +1462,7 @@ A ✓ means a published, machine-checked proof shows that all the code computing
 | rind | `rsa2048-pss-sha256-verify` | x86_64 with bmi2, adx, avx, avx2, bmi1, popcnt, ssse3 without sha on Linux | [rind's Lean proof, through Aeneas and a hand model of the function-pointer dispatch Aeneas cannot translate, of its signature API's RSASSA-PSS SHA-256 verification against RFC 8017, MGF1 and H' with SHA-256 and a 32-byte salt, key loading's checks, R^2 mod n, and -n^-1 mod 2^64 included, down to s2n-bignum's and pyca/verified-garbage's routines and its SHA-256 routines, composed with s2n-bignum's HOL Light proofs of bignum_kmul_16_32, bignum_kmul_32_64, bignum_ksqr_16_32, bignum_ksqr_32_64, bignum_emontredc_8n, bignum_optsub, bignum_cmp_lt, bignum_bitsize, and bignum_negmodinv, of s2n-bignum's own object code, which rind transliterates, pyca/verified-garbage's Lean proof of vg_rsa_public_precompute_adx and, with AVX-512 IFMA, of vg_rsa_public_precomputed_checked_ifma against its model of its own machine code, which rind vendors, and rind's HOL Light proofs of ct_compare_16, ct_compare_bytes, and of OpenSSL's sha256_block_data_order_avx2, its SHA-256 routine on CPUs with AVX2, BMI1, BMI2, POPCNT, and SSSE3 but not the SHA extensions, padding proven in Lean, of the object code rind's Linux build emits, on s2n-bignum's x86 model with the instructions rind adds to it, which rind cosimulates against the CPU, against s2n-bignum's FIPS 180-4 spec from awslabs/s2n-bignum#415, unmerged, which rind pins at 79120e64 and proves FIPS 180-4's](https://github.com/kixel-ai/rind/blob/main/proofs/Rind/X86_64/RsaDispatch.lean) |
 | rind | `sha256/*`, `hmac-sha256/*`, `hkdf-sha256/*` | x86_64 with sha, ssse3, sse4.1 | [rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch and of HKDF-Expand's loop over its info slices, which Aeneas cannot translate, of its digest, HMAC, and HKDF APIs' SHA-256, down to sha256_compress_blocks_shaext and sha256_finish_shaext, which rind runs with the SHA extensions, the finish's padding proven in Lean, composed with rind's HOL Light proofs of those routines, of the object code rind's build emits, on s2n-bignum's x86 model with the instructions awslabs/s2n-bignum#450, unmerged, adds to it at 7ef212f3, which rind cosimulates against the CPU, against s2n-bignum's FIPS 180-4 spec from awslabs/s2n-bignum#415, unmerged, which rind pins at 79120e64 and proves FIPS 180-4's](https://github.com/kixel-ai/rind/blob/main/proofs/Rind/X86_64/Sha256Shaext.lean) |
 | rind | `sha256/*`, `hmac-sha256/*`, `hkdf-sha256/*` | x86_64 with avx, avx2, bmi1, bmi2, popcnt, ssse3 without sha on Linux | [rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch and of HKDF-Expand's loop over its info slices, which Aeneas cannot translate, of its digest, HMAC, and HKDF APIs' SHA-256, padding included, down to OpenSSL's sha256_block_data_order_avx2, which rind runs on CPUs with AVX2, BMI1, BMI2, POPCNT, and SSSE3 but not the SHA extensions, composed with rind's HOL Light proof of that routine, of the object code rind's Linux build emits, on s2n-bignum's x86 model with the instructions rind adds to it, which rind cosimulates against the CPU, against s2n-bignum's FIPS 180-4 spec from awslabs/s2n-bignum#415, unmerged, which rind pins at 79120e64 and proves FIPS 180-4's](https://github.com/kixel-ai/rind/blob/main/proofs/Rind/X86_64/ShaBlocks.lean) |
-| rind | `x25519-ecdh` | aarch64 | [rind's Lean proof, through Aeneas and a hand model of the function-pointer dispatch Aeneas cannot translate, which assumes each key's dispatch table holds its own curve's functions, the only table rind builds, of its agreement API's X25519 down to s2n-bignum's routines, composed with s2n-bignum's HOL Light proofs of curve25519_x25519_byte_alt and curve25519_x25519base_byte_alt, of s2n-bignum's own object code, which rind transliterates, and rind's HOL Light proof of bignum_eq, of the object code rind's build emits](https://github.com/kixel-ai/rind/blob/main/proofs/Rind/X86_64/X25519.lean) |
+| rind | `x25519-ecdh` | aarch64 with wide_mul | [rind's Lean proof, through Aeneas and a hand model of the function-pointer dispatch Aeneas cannot translate, which assumes each key's dispatch table holds its own curve's functions, the only table rind builds, of its agreement API's X25519 down to s2n-bignum's routines, composed with s2n-bignum's HOL Light proofs of curve25519_x25519_byte_alt and curve25519_x25519base_byte_alt, which rind runs on a wide multiplier, of s2n-bignum's own object code, which rind transliterates, and rind's HOL Light proof of bignum_eq, of the object code rind's build emits](https://github.com/kixel-ai/rind/blob/main/proofs/Rind/X86_64/X25519.lean) |
 | rind | `sha512/*` | x86_64 with intel, avx, ssse3 without avx2 | [rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch Aeneas cannot translate, of its digest API's SHA-512, padding included, down to aws-lc's sha512_block_data_order_avx, which rind runs only on Intel's CPUs without AVX2, composed with aws-lc-verification's SAW proof of that routine, of aws-lc c21d40da, whose SHA-512 code rind's copy from 5ed12cce keeps](https://github.com/kixel-ai/rind/blob/main/proofs/Rind/X86_64/Sha512.lean) |
 | rind | `sha512/*` | x86_64 with avx, avx2, bmi1, bmi2, popcnt, ssse3 | [rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch Aeneas cannot translate, of its digest API's SHA-512, padding included, down to OpenSSL's sha512_block_data_order_avx2, which rind runs on CPUs with AVX2, BMI1, BMI2, POPCNT, and SSSE3, composed with rind's HOL Light proof of that routine, of the object code rind's build emits, on s2n-bignum's x86 model with the instructions rind adds to it, which rind cosimulates against the CPU, against s2n-bignum's FIPS 180-4 spec from awslabs/s2n-bignum#420, unmerged, which rind pins at 7ef7ba7c and proves FIPS 180-4's](https://github.com/kixel-ai/rind/blob/main/proofs/Rind/X86_64/Sha512.lean) |
 | rind | `sha512/*` | aarch64 | [rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch Aeneas cannot translate, of its digest API's SHA-512, padding included, down to pyca/verified-garbage's vg_sha512_compress_sha512, which rind runs with the SHA-512 instructions, and aws-lc's sha512_block_data_order_nohw, which it runs without them, composed with VG's Lean proof of the first, of the code VG prints at 0aa40d6c, which rind imports, over VG's model of the instructions, which rind cosimulates against the CPU, against VG's FIPS 180-4 spec, which rind proves its own, and aws-lc-verification's NSym proof of the second, with its ArmSpecGap caveat, of aws-lc c21d40da, whose SHA-512 code rind's copy from 5ed12cce keeps](https://github.com/kixel-ai/rind/blob/main/proofs/Rind/X86_64/Sha512.lean) |
@@ -1428,7 +1470,7 @@ A ✓ means a published, machine-checked proof shows that all the code computing
 | rind | `ed25519-sign` | x86_64 with avx, avx2, bmi1, bmi2, popcnt, ssse3 without avx512ifma | [rind's Lean proof, through Aeneas and a hand model of the function-pointer dispatch Aeneas cannot translate, of its signature API's Ed25519 key pair generation, loading, and signing, down to s2n-bignum's routines, which rind runs on CPUs without AVX-512 IFMA, and its SHA-512 down to OpenSSL's sha512_block_data_order_avx2, which rind runs on CPUs with AVX2, BMI1, BMI2, POPCNT, and SSSE3, composed with s2n-bignum's HOL Light proofs of edwards25519_scalarmulbase, bignum_madd_n25519, their _alt forms without BMI2 and ADX, and bignum_mod_n25519, of s2n-bignum's own object code, which rind transliterates, and rind's HOL Light proof of that SHA-512 routine, of the object code rind's build emits, on s2n-bignum's x86 model with the instructions rind adds to it, which rind cosimulates against the CPU, against s2n-bignum's FIPS 180-4 spec from awslabs/s2n-bignum#420, unmerged, which rind pins at 7ef7ba7c and proves FIPS 180-4's](https://github.com/kixel-ai/rind/blob/main/proofs/Rind/X86_64/Ed25519.lean) |
 | rind | `ed25519-sign`, `ed25519-verify` | x86_64 with avx, avx2, bmi1, bmi2, adx, avx512f, avx512vl, avx512ifma | [rind's Lean proof, through Aeneas, of its signature API's Ed25519 key pair generation, loading, signing, and verification, small-order key refusal included, down to pyca/verified-garbage's vg_ed25519_key_pair_avx2_ifma, vg_ed25519_sign_expanded_avx2_ifma, and vg_ed25519_verify_avx2_ifma, which rind runs on CPUs with AVX-512 IFMA, and s2n-bignum's point decoding, which key loading runs, composed with pyca/verified-garbage's Lean proofs of those routines, SHA-512 included, against its model of its own machine code, which rind vendors, each stated in that project's RFC 8032 spec rather than HOL Light's, and s2n-bignum's HOL Light proofs of edwards25519_decode, its _alt form, and bignum_eq, of s2n-bignum's own object code, which rind transliterates](https://github.com/kixel-ai/rind/blob/main/proofs/Rind/X86_64/Ed25519Ifma.lean) |
 | rind | `ed25519-verify` | x86_64 with avx, avx2, bmi1, bmi2, popcnt, ssse3, adx without avx512ifma | [rind's Lean proof, through Aeneas and a hand model of the function-pointer dispatch Aeneas cannot translate, of its signature API's Ed25519 key pair generation, loading, signing, and verification, small-order key refusal included, down to s2n-bignum's routines, which rind runs on CPUs without AVX-512 IFMA, and its SHA-512 down to OpenSSL's sha512_block_data_order_avx2, which rind runs on CPUs with AVX2, BMI1, BMI2, POPCNT, and SSSE3, composed with s2n-bignum's HOL Light proofs of edwards25519_decode, edwards25519_scalarmulbase, edwards25519_epadd, edwards25519_epdouble, edwards25519_pdouble, bignum_madd_n25519, bignum_mul_p25519, their _alt forms without BMI2 and ADX, bignum_mod_n25519, bignum_neg_p25519, bignum_cmp_lt, and bignum_eq, of s2n-bignum's own object code, which rind transliterates, and rind's HOL Light proof of that SHA-512 routine, of the object code rind's build emits, on s2n-bignum's x86 model with the instructions rind adds to it, which rind cosimulates against the CPU, against s2n-bignum's FIPS 180-4 spec from awslabs/s2n-bignum#420, unmerged, which rind pins at 7ef7ba7c and proves FIPS 180-4's](https://github.com/kixel-ai/rind/blob/main/proofs/Rind/X86_64/Ed25519Verify.lean) |
-| rind | `ed25519-sign`, `ed25519-verify` | aarch64 | [rind's Lean proof, through Aeneas and a hand model of the function-pointer dispatch Aeneas cannot translate, of its signature API's Ed25519 key loading, signing, and verification, small-order key refusal included, down to s2n-bignum's routines and its SHA-512 down to pyca/verified-garbage's vg_sha512_compress_sha512, which rind runs with the SHA-512 instructions, and aws-lc's sha512_block_data_order_nohw, which it runs without them, composed with s2n-bignum's HOL Light proofs of edwards25519_decode_alt, edwards25519_scalarmulbase_alt, edwards25519_scalarmuldouble_alt, bignum_madd_n25519_alt, bignum_mod_n25519, bignum_neg_p25519, and bignum_lt, of s2n-bignum's own object code, which rind transliterates, rind's HOL Light proof of bignum_eq, of the object code rind's build emits, VG's Lean proof of the first SHA-512 routine, of the code VG prints at 0aa40d6c, over VG's model of the instructions, which rind cosimulates against the CPU, against VG's FIPS 180-4 spec, which rind proves its own, and aws-lc-verification's NSym proof of the second, with its ArmSpecGap caveat](https://github.com/kixel-ai/rind/blob/main/proofs/Rind/X86_64/Ed25519.lean) |
+| rind | `ed25519-sign` | aarch64 with wide_mul | [rind's Lean proof, through Aeneas and a hand model of the function-pointer dispatch Aeneas cannot translate, of its signature API's Ed25519 key pair generation, loading, and signing, down to s2n-bignum's routines and its SHA-512 down to pyca/verified-garbage's vg_sha512_compress_sha512, which rind runs with the SHA-512 instructions, and aws-lc's sha512_block_data_order_nohw, which it runs without them, composed with s2n-bignum's HOL Light proofs of edwards25519_scalarmulbase_alt, bignum_madd_n25519_alt, and bignum_mod_n25519, of s2n-bignum's own object code, which rind transliterates, VG's Lean proof of the first SHA-512 routine, of the code VG prints at 0aa40d6c, over VG's model of the instructions, which rind cosimulates against the CPU, against VG's FIPS 180-4 spec, which rind proves its own, and aws-lc-verification's NSym proof of the second, with its ArmSpecGap caveat. Verification checks a multiple of RFC 8032's equation with half-size scalars, which nothing proves yet](https://github.com/kixel-ai/rind/blob/main/proofs/Rind/X86_64/Ed25519.lean) |
 | rind | `p256-ecdh` | aarch64 | [rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch and of key generation's draws through a dyn RandomSource, which Aeneas cannot translate, of its agreement API's P-256 key generation, public key, and agreement, for a key whose scalar is below n, as its generation and loading from a 32-byte scalar are proven to give, but its PKCS#8 and SEC 1 loading not yet, down to s2n-bignum's routines, composed with s2n-bignum's HOL Light proofs of p256_scalarmulbase_alt, p256_scalarmul_alt, bignum_tomont_p256, bignum_demont_p256, bignum_add_p256, bignum_montmul_p256, bignum_montsqr_p256, and bignum_mod_n256_4, of s2n-bignum's own object code, which rind transliterates, and rind's HOL Light proof of bignum_eq, of the object code rind's build emits, with rind's generator table proven to hold the multiples of G that s2n-bignum's proof assumes, and where it runs pyca/verified-garbage's vg_ec_p256_public_key, vg_ecdh_p256, and vg_ecdsa_p256_verify, as it does on every aarch64 CPU, composed with pyca/verified-garbage's Lean proofs of those routines, whose instructions rind cosimulates against its ISA models, and rind's Lean proof that its SEC 1 and FIPS 186-5 specs are HOL Light's](https://github.com/kixel-ai/rind/blob/main/proofs/Rind/X86_64/P256.lean) |
 | rind | `p256-ecdsa-sign`, `p256-ecdsa-verify` | aarch64 | [rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch and of the nonces' draws through a dyn RandomSource, which Aeneas cannot translate, of its signature API's P-256 ECDSA with SHA-256 and fixed-length signatures, key generation and loading, signing, and verification, down to s2n-bignum's routines, composed with s2n-bignum's HOL Light proofs of p256_scalarmulbase_alt, p256_montjadd_alt, p256_montjdouble_alt, p256_montjmixadd_alt, bignum_inv_p256, bignum_neg_p256, bignum_tomont_p256, bignum_demont_p256, bignum_add_p256, bignum_montmul_p256, bignum_montsqr_p256, bignum_mod_n256_4, bignum_modadd, bignum_montmul, bignum_demont, and bignum_modinv, of s2n-bignum's own object code, which rind transliterates, and rind's HOL Light proofs of bignum_eq and of p256_montjmixadd_alt leaving z zero for equal or opposite points, of the object code rind's build emits, with the group laws its twin multiplication relies on proven from Mathlib's, the generator's order n proven, and HOL Light's P256_GROUP_ELEMENT_ORDER, that every finite point has order n, proven by counting the curve's points, and proving a signature right when signing returns, as its nonce loop has no bound, and where it runs pyca/verified-garbage's vg_ec_p256_public_key, vg_ecdh_p256, and vg_ecdsa_p256_verify, as it does on every aarch64 CPU, composed with pyca/verified-garbage's Lean proofs of those routines, whose instructions rind cosimulates against its ISA models, and rind's Lean proof that its SEC 1 and FIPS 186-5 specs are HOL Light's](https://github.com/kixel-ai/rind/blob/main/proofs/Rind/X86_64/P256Signature.lean) |
 | rind | `p256-ecdh` | x86_64 on Linux | [rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch, of key generation's draws through a dyn RandomSource, and of the AVX2 and SSE2 table select, whose intrinsics' models rind tests against the CPU, which Aeneas cannot translate, of its agreement API's P-256 key generation, public key, and agreement, for a key whose scalar is below n, as its generation and loading from a 32-byte scalar are proven to give, but its PKCS#8 and SEC 1 loading not yet, down to s2n-bignum's routines and rind's port of aws-lc's Booth-recoded generator multiplication, its 37-row table proven to hold the multiples of G, composed with s2n-bignum's HOL Light proofs of p256_scalarmul, bignum_tomont_p256, bignum_demont_p256, bignum_montmul_p256, bignum_montsqr_p256, and their _alt forms without BMI2 and ADX, bignum_add_p256, bignum_inv_p256, bignum_neg_p256, bignum_mod_n256_4, bignum_mux, and bignum_eq, of s2n-bignum's own object code, which rind transliterates, and rind's HOL Light proofs of aws-lc's mixed additions ecp_nistz256_point_add_affine and its BMI2 and ADX form, of the object code rind's Linux build emits, which assume the ABI's 16-byte stack alignment at the call and the 16-byte alignment rind gives their constant table, and where it runs pyca/verified-garbage's vg_ec_p256_public_key_adx, vg_ecdh_p256_adx and _ifma, and vg_ecdsa_p256_verify_adx and _ifma, as it does with BMI2, ADX, AVX, and AVX2, composed with pyca/verified-garbage's Lean proofs of those routines, whose instructions rind cosimulates against its ISA models, and rind's Lean proof that its SEC 1 and FIPS 186-5 specs are HOL Light's](https://github.com/kixel-ai/rind/blob/main/proofs/Rind/X86_64/P256.lean) |
@@ -1439,7 +1481,7 @@ A ✓ means a published, machine-checked proof shows that all the code computing
 | rind | `p384-ecdsa-sign`, `p384-ecdsa-verify` | aarch64 | [rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch, of the nonces' draws through a dyn RandomSource, and of the NEON comb table select, whose intrinsics' models rind tests against the CPU, which Aeneas cannot translate, of its signature API's P-384 ECDSA with SHA-384 and fixed-length signatures, key generation and loading, signing, and verification, down to s2n-bignum's routines, its own comb for k·G and its tables included, composed with s2n-bignum's HOL Light proofs of p384_montjadd_alt, p384_montjdouble_alt, p384_montjmixadd_alt, bignum_tomont_p384, bignum_demont_p384, bignum_add_p384, bignum_montmul_p384_alt, bignum_montsqr_p384_alt, bignum_inv_p384, bignum_neg_p384, bignum_mod_n384_6, bignum_mux, bignum_modadd, bignum_montmul, bignum_demont, and bignum_modinv, of s2n-bignum's own object code, which rind transliterates, and rind's HOL Light proofs of bignum_eq and of p384_montjmixadd_alt leaving z zero for equal or opposite points, of the object code rind's build emits, with the group laws its twin multiplication relies on proven from Mathlib's, the generator's order n proven by Pratt certificates, every finite point's order n proven, and proving a signature right when signing returns, as its nonce loop has no bound, and pyca/verified-garbage's vg_ec_p384_public_key, which key generation and each signature's k·G run on every aarch64 CPU, and vg_ecdsa_p384_verify, which verification runs until a key's multiples are ready, composed with pyca/verified-garbage's Lean proofs of those routines, whose instructions rind cosimulates against its ISA models, and rind's Lean proof that its SEC 1 and FIPS 186-5 specs are HOL Light's](https://github.com/kixel-ai/rind/blob/main/proofs/Rind/X86_64/P384Signature.lean) |
 | rind | `sha256/*`, `hmac-sha256/*`, `hkdf-sha256/*` | aarch64 with aes, pmull, sha2 | [rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch and of HKDF-Expand's loop over its info slices, which Aeneas cannot translate, of its digest, HMAC, and HKDF APIs' SHA-256, padding included, down to aws-lc's sha256_block_data_order_hw, which rind runs with the crypto extension, composed with rind's Lean proof of that routine, its leakage contract included, of the object code rind's build emits, on its extension of pyca/verified-garbage's aarch64 model, which rind cosimulates against the CPU, against s2n-bignum's FIPS 180-4 spec from awslabs/s2n-bignum#415, unmerged, which rind pins at 79120e64 and proves FIPS 180-4's](https://github.com/kixel-ai/rind/blob/main/proofs/Rind/Aarch64/Sha256Hw.lean) |
 | rind | `sha3-256/*`, `sha3-512/*` | x86_64 | [rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch Aeneas cannot translate, of its digest API's SHA3-256, SHA3-384, and SHA3-512, padding included, down to s2n-bignum's sha3_keccak_f1600, against FIPS 202 as SymCrypt's Lean spec states it, composed with s2n-bignum's HOL Light proof of sha3_keccak_f1600, of s2n-bignum's own object code, which rind transliterates](https://github.com/kixel-ai/rind/blob/main/proofs/Rind/X86_64/Sha3.lean) |
-| rind | `sha3-256/*`, `sha3-512/*` | aarch64 | [rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch Aeneas cannot translate, of its digest API's SHA3-256, SHA3-384, and SHA3-512, padding included, down to s2n-bignum's sha3_keccak_f1600_alt, which rind runs on Apple targets, and sha3_keccak_f1600 otherwise, against FIPS 202 as SymCrypt's Lean spec states it, composed with s2n-bignum's HOL Light proofs of those routines, of s2n-bignum's own object code, which rind transliterates](https://github.com/kixel-ai/rind/blob/main/proofs/Rind/X86_64/Sha3.lean) |
+| rind | `sha3-256/*`, `sha3-512/*` | aarch64 | [rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch Aeneas cannot translate, of its digest API's SHA3-256, SHA3-384, and SHA3-512, padding included, down to s2n-bignum's sha3_keccak_f1600_alt, which rind runs on Apple targets, sha3_keccak_f1600_alt2, which it runs on Cortex-A72 for a lone state, and sha3_keccak_f1600 otherwise, against FIPS 202 as SymCrypt's Lean spec states it, composed with s2n-bignum's HOL Light proofs of those routines, of s2n-bignum's own object code, which rind transliterates](https://github.com/kixel-ai/rind/blob/main/proofs/Rind/X86_64/Sha3.lean) |
 | rind | `quic-header-protection/chacha20` | x86_64 | [rind's Lean proof, through Aeneas and a hand model of the function-pointer dispatch Aeneas cannot translate, which assumes each key's mask is its own cipher's, the only one rind builds, of its header-protection API's ChaCha20 against RFC 9001 and RFC 8439, HACL*'s rounds included](https://github.com/kixel-ai/rind/blob/main/proofs/Rind/X86_64/ChaCha20.lean) |
 | rind | `quic-header-protection/chacha20` | aarch64 | [rind's Lean proof, through Aeneas and a hand model of the function-pointer dispatch Aeneas cannot translate, which assumes each key's mask is its own cipher's, the only one rind builds, of its header-protection API's ChaCha20 against RFC 9001 and RFC 8439, HACL*'s rounds included](https://github.com/kixel-ai/rind/blob/main/proofs/Rind/X86_64/ChaCha20.lean) |
 | rind | `quic-header-protection/chacha20` | armv7 | [rind's Lean proof, through Aeneas and a hand model of the function-pointer dispatch Aeneas cannot translate, which assumes each key's mask is its own cipher's, the only one rind builds, of its header-protection API's ChaCha20 against RFC 9001 and RFC 8439, HACL*'s rounds included](https://github.com/kixel-ai/rind/blob/main/proofs/Rind/X86_64/ChaCha20.lean) |
@@ -1454,8 +1496,6 @@ A ✓ means a published, machine-checked proof shows that all the code computing
 | aws-lc-rs | `sha512/*` | x86_64 with intel, avx, ssse3 | [aws-lc-verification's SAW proof of SHA-512 through EVP_Digest, padding included, over sha512_block_data_order_avx, which aws-lc runs only on Intel; of aws-lc c21d40da, whose SHA-512 code 5.12.0 keeps](https://github.com/awslabs/aws-lc-verification/blob/797302470c1703cbb1a3a6fa98daffef0bfd3d80/SAW/proof/SHA512/verify-SHA512-x86.saw) |
 | rind | `sha256/*`, `sha512/*`, `hmac-sha256/*`, `hkdf-sha256/*` | portable | [rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch and of HKDF-Expand's loop over its info slices, which Aeneas cannot translate, of its digest, HMAC, and HKDF APIs' SHA-256 and SHA-512 against FIPS 180-4, RFC 2104, and RFC 5869, padding and the block functions low::generic::sha256 and low::generic::sha512 (aws-lc's C, ported to Rust) included; on 32-bit microcontrollers, the digest and HMAC APIs over the bodies those run, rind's rolled SHA-512 and ESP-IDF Xtensa's IRAM SHA-256, the latter trusting its asm rotates and block load to compute what their Rust fallbacks do, but not HKDF](https://github.com/kixel-ai/rind/blob/main/proofs/Rind/Portable/Sha256Compress.lean) |
 | rind | `quic-header-protection/chacha20` | portable | [rind's Lean proof, through Aeneas and a hand model of the function-pointer dispatch Aeneas cannot translate, which assumes each key's mask is its own cipher's, the only one rind builds, of its header-protection API's ChaCha20 against RFC 9001 and RFC 8439, HACL*'s rounds included](https://github.com/kixel-ai/rind/blob/main/proofs/Rind/X86_64/ChaCha20.lean) |
-| rind | `rsa2048-pkcs1-sha256-verify` | portable | [rind's Lean proof, through Aeneas and a hand model of the function-pointer dispatch Aeneas cannot translate, of its signature API's RSASSA-PKCS1-v1_5 SHA-256 verification against RFC 8017, key loading's checks, R^2 mod n, and -n^-1 mod 2^64 included, down to low::generic's word routines and Montgomery products, CIOS below 16 limbs and Karatsuba products with Montgomery reduction above, on 64-bit limbs; not builds on 32-bit limbs, which most 32-bit targets run](https://github.com/kixel-ai/rind/blob/main/proofs/Rind/Portable/RsaMont.lean) |
-| rind | `rsa2048-pss-sha256-verify` | portable | [rind's Lean proof, through Aeneas and a hand model of the function-pointer dispatch Aeneas cannot translate, of its signature API's RSASSA-PSS SHA-256 verification against RFC 8017, MGF1 and H' with SHA-256 and a 32-byte salt, key loading's checks, R^2 mod n, and -n^-1 mod 2^64 included, down to low::generic's word routines, Montgomery products, SHA-256 block function, and constant-time compare, on 64-bit limbs; not builds on 32-bit limbs, which most 32-bit targets run](https://github.com/kixel-ai/rind/blob/main/proofs/Rind/Portable/RsaMont.lean) |
 | libcrux | `sha256/*`, `sha512/*` | any architecture | [HACL*'s F* proof of Hacl.Streaming.SHA2's hash_256 and hash_512, compiled to Rust by an unverified step](https://github.com/hacl-star/hacl-star/blob/f557259007db9933442dde10aa995c1b00bd3446/code/streaming/Hacl.Streaming.SHA2.fst) |
 | libcrux | `hmac-sha256/*` | any architecture | [HACL*'s F* proof of Hacl.HMAC's compute_sha2_256, compiled to Rust by an unverified step](https://github.com/hacl-star/hacl-star/blob/f557259007db9933442dde10aa995c1b00bd3446/code/hmac/Hacl.HMAC.fst) |
 | libcrux | `hkdf-sha256/*` | any architecture | [HACL*'s F* proof of Hacl.HKDF's extract_sha2_256 and expand_sha2_256, compiled to Rust by an unverified step](https://github.com/hacl-star/hacl-star/blob/f557259007db9933442dde10aa995c1b00bd3446/code/hkdf/Hacl.HKDF.fst) |
@@ -1468,7 +1508,7 @@ A ✓ means a published, machine-checked proof shows that all the code computing
 ## Updating this report
 
 `admin/bench-report collect` runs the report's benchmarks, then
-`admin/build-cost`, on each benchmark host in turn over ssh, in the Nix dev
+`admin/build-cost`, on each machine in `COLLECT_HOSTS` in turn over ssh, in the Nix dev
 shell and under `quest gate`, which waits for the host to have room but
 shares it with other gated work, so its numbers are noisier than the weekly
 `bench` workflow's runners, which give the clean ones. On a host that CI runners
@@ -1477,9 +1517,37 @@ other work off for the run, and skips the build cost; this needs systemd and
 passwordless sudo there.
 It skips any other host that is still busy, and writes their results and the hosts' details as JSON under
 `.tmp/bench-report/`. `admin/bench-report weekly` saves the latest weekly
-`bench` run's results and binary sizes, and `admin/bench-report render --from DIR` copies a
-collection's measured hosts into `benchmarks/data/` and writes
+`bench` run's results and binary sizes, and `admin/bench-report render --from DIR` copies every
+measured host JSON from that directory into `benchmarks/data/` and writes
 `BENCHMARKS.md`, its SVGs, which the README shows too, the README's comparison table, and
 `benchmarks/verified.toml`, and
 `benchmarks/gaps.toml`, which must hold a quest or a reason for every gap
-over 10%.
+over 10%. `render --check` fails if those files are out of date and writes nothing,
+so it refuses `--from`: import first, then check.
+
+`admin/bench-report run` measures the machine it is on. Anyone can run it: there is
+no host list to edit. The result's name is a slug of the CPU model, such as
+`intel-core-ultra-9-275hx`, unless `--host` sets another filesystem-safe name, and
+the JSON records the raw CPU string, that slug, the core counts, and the OS.
+A slug that equals a nightly tier name gains a `-host` suffix, so a minimal aarch64
+Linux box is `aarch64-host` rather than the reserved name `aarch64`, and a host whose
+chosen name is that spelling is left as it is. A second machine
+that wants a slug already on disk is stored as `<slug>-<tag>`, or `<slug>-2` when that
+alias is taken, and a later import replaces that file. The tag is eight hex characters
+of HMAC-SHA256 over the OS machine id, under a fixed application key. An empty, all-zero,
+or uninitialized id is not a tag. A machine without one passes `--host`. A slug file
+this machine already has is refreshed, along with any second alias that carries its tag.
+A file without a tag may be any machine, so an import never replaces, reuses, or deletes
+one: a tagged result is stored beside it, and a result without a tag whose name is
+already on disk is not imported until it is rerun with a different `--host`.
+`render --from DIR --adopt NAME` is the one exception: it writes the tag of DIR's tagged
+`NAME.json` into the untagged `NAME.json` on disk, so that machine's file is refreshed in
+place from then on, and it refuses a missing or tagged file, an untagged or alias result,
+or one older than that file. No import replaces or deletes a file from the same machine
+that started later. Of one
+machine's results under one slug in a collection, only the newest is imported.
+`summary` and `render --from` read every readable measured `<host>.json` and name any
+file they skip, including one missing a field the report shows or with a time that is
+not a finite number above zero.
+`collect` reaches only the maintainer's machines. A gap's `on` may name any host with a
+result, or any nightly tier.

@@ -1790,8 +1790,9 @@ only_quoted rind/src/aead.rs "$out/AeadDispatch.rs" '= Algorithm \{'
 # its polynomial routines in `low`, which are opaque. The sets' `Params`
 # impls are not translated, so the translation takes a set's impl as a
 # parameter: see UPSTREAM.md, "Aeneas cannot translate an auto trait's
-# built-in impl". x86_64's eight-way matrix sampler, which only ML-KEM-1024
-# runs and which passes function pointers, is opaque.
+# built-in impl". x86_64's eight-way matrix sampler and eight-way CBD
+# sampler, which only ML-KEM-1024 runs and which pass function pointers, are
+# opaque.
 # See UPSTREAM.md, "Aeneas cannot translate several kinds of Rust".
 # The hash, HMAC, and header-protection paths, which every target translates,
 # and the curves', signatures', SHA-3 sponge's, and AES modes', which only the
@@ -2292,7 +2293,8 @@ extract x86_64 X86_64 "${hashes[@]}" "${assembly[@]}" \
     --start-from crate::low::x86_64::mlkem768_vg::Encaps::encaps \
     --start-from crate::low::x86_64::mlkem768_vg::KeyPair::keygen \
     --start-from crate::low::x86_64::mlkem768_vg::KeyPair::decaps \
-    --opaque crate::mid::mlkem::sample_ntt::sample_ntt_8x
+    --opaque crate::mid::mlkem::sample_ntt::sample_ntt_8x \
+    --opaque crate::mid::mlkem::sample_poly_cbd2_8x
 extract aarch64 Aarch64 "${hashes[@]}" "${assembly[@]}" \
     --include crate::low::aarch64::sha512::sha512_compress_blocks \
     --start-from crate::mid::p256::PrivateKey::from_bytes \
@@ -2513,16 +2515,12 @@ for file in QuicDispatch DigestAlgorithm DigestDispatch Sha512Context Sha512 Cha
     HmacApi DigestApi Compare CtEqual; do
     sed 's/Rind\.Portable/Rind.Mcu/g; s/rind\.portable/rind.mcu/g' "proofs/Rind/Portable/$file.lean" >"proofs/Rind/Mcu/$file.lean"
 done
-# So are RSA verification's, over its own `RsaMont.lean`, without the sections
-# marked as x86_64's alone, its AVX-512 IFMA public operation and
-# pyca/verified-garbage's R² mod n, and with the lines marked as the portable
-# backend's in their place. Without that IFMA path its theorems take no
-# `IfmaCheckReturns`.
-for file in RsaPublic RsaBytes RsaIfma RsaVerify RsaPss RsaKey SignatureBuffer RsaDispatch; do
-    sed -e '/-- BEGIN x86_64/,/-- END x86_64/d' -e 's/^\( *\)-- portable: /\1/' \
-        -e 's/ (hifma : IfmaCheckReturns)//; s/ hifma / /' -e 's/X86_64/Portable/g; s/x86_64/portable/g' \
-        "proofs/Rind/X86_64/$file.lean" >"proofs/Rind/Portable/$file.lean"
-done
+# RSA verification's portable proofs, which admin/prove wrote from x86_64's
+# over `RsaMont.lean`, are parked in `proofs/parked/`, outside the `Rind`
+# library's glob, until quest/m4/verified/rsa-verify-portable-four-product.md
+# reproves them over the four-product `mul_add`. Copies an earlier run wrote
+# would still match the glob, so they go.
+rm -f proofs/Rind/Portable/{RsaPublic,RsaBytes,RsaIfma,RsaVerify,RsaPss,RsaKey,SignatureBuffer,RsaDispatch}.lean
 # armv7's header-protection, agreement, AEAD, and compares' models and its
 # ChaCha20, X25519, AEAD, and SHA-512 context proofs are x86_64's with the
 # target renamed. X25519's are over `Rind.Armv7.Curve25519`'s dispatch where

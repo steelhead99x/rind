@@ -11,11 +11,14 @@
 //! Two exceptions are for small instruction caches. On 32-bit
 //! microcontrollers (ESP-IDF or no OS), SHA-384/512 is the rolled loop in
 //! `generic::sha512_rolled`, whose code 32-bit codegen keeps to a few
-//! kilobytes. On ESP-IDF Xtensa, SHA-256 is rind's own compression in
-//! `sha256_iram`, run from internal RAM, at about 0.65-0.74 of HACL*'s time
-//! from flash on a Seeed XIAO ESP32-S3 from 1200 B to 16 KB. Host tests call
-//! that body by name, on its Rust fallbacks. `proofs/Rind/Mcu/` proves both
-//! against FIPS 180-4, with this dispatch.
+//! kilobytes; the ESP32-S3 runs it through `generic::sha512_esp32s3`, whose
+//! `esp32s3-sha512-unrolled` feature swaps in an unrolled body in IRAM. On
+//! ESP-IDF Xtensa, SHA-256 is rind's own compression in `sha256_iram`, run
+//! from internal RAM, at about 0.65-0.74 of HACL*'s time from flash on a
+//! Seeed XIAO ESP32-S3 from 1200 B to 16 KB. Host tests call that body by
+//! name, on its Rust fallbacks. `proofs/Rind/Mcu/` proves both the rolled
+//! SHA-512 and the IRAM SHA-256 against FIPS 180-4, with this dispatch; the
+//! opt-in unrolled ESP32-S3 SHA-512 body is not proven.
 
 pub(crate) use crate::low::generic::sha1::sha1_compress_blocks;
 
@@ -61,7 +64,10 @@ pub(crate) fn sha512_compress_blocks(state: &mut [u64; 8], blocks: &[u8]) {
     // The rolled loop on 32-bit microcontrollers, as the module comment
     // says. The pointer width, not `rind_limb`, is the switch: the code size
     // is a property of the 32-bit codegen.
+    #[cfg(rind_esp32s3)]
+    crate::low::generic::sha512_esp32s3::sha512_compress_blocks(state, blocks);
     #[cfg(all(
+        not(rind_esp32s3),
         not(target_pointer_width = "64"),
         any(target_os = "espidf", target_os = "none")
     ))]
