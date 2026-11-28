@@ -164,6 +164,7 @@ static UIButtonConfiguration *ButtonConfig(NSString *title, NSDirectionalEdgeIns
   c.cornerStyle = UIButtonConfigurationCornerStyleFixed;
   return c;
 }
+static UIFont *ButtonFont(void) { return [UIFont systemFontOfSize:17 weight:UIFontWeightBold]; }
 static void SetButtonTitleStyle(UIButtonConfiguration *c, NSString *title, UIFont *font, UIColor *color) {
   c.baseForegroundColor = color;
   c.attributedTitle = [[NSAttributedString alloc] initWithString:title attributes:@{
@@ -194,7 +195,7 @@ static void SetButtonTitleStyle(UIButtonConfiguration *c, NSString *title, UIFon
   UIButtonConfiguration *c = ButtonConfig(t, NSDirectionalEdgeInsetsMake(11, 22, 11, 22), 12);
   c.background.backgroundColor = primary ? C_ACCENT : C_CHIP;
   UIColor *color = primary ? C_ON_ACCENT : C_TEXT;
-  SetButtonTitleStyle(c, t, [UIFont systemFontOfSize:17 weight:UIFontWeightBold], color);
+  SetButtonTitleStyle(c, t, ButtonFont(), color);
   UIButton *b = [UIButton buttonWithConfiguration:c primaryAction:nil];
   b.tintColor = color;
   b.automaticallyUpdatesConfiguration = NO;
@@ -203,8 +204,7 @@ static void SetButtonTitleStyle(UIButtonConfiguration *c, NSString *title, UIFon
 // A configured button's title lives in its configuration.
 static void SetTitle(UIButton *b, NSString *t) {
   UIButtonConfiguration *c = b.configuration;
-  NSDictionary *attributes = [c.attributedTitle attributesAtIndex:0 effectiveRange:nil];
-  c.attributedTitle = [[NSAttributedString alloc] initWithString:t attributes:attributes];
+  SetButtonTitleStyle(c, t, ButtonFont(), c.baseForegroundColor);
   b.configuration = c;
 }
 
@@ -229,10 +229,10 @@ static UIImageView *BrandMark(NSString *name, CGFloat size) {
   // Header: name, device, where results go.
   UILabel *title = [self label:@"RindBench" size:28 weight:UIFontWeightHeavy color:nil];
   title.accessibilityTraits |= UIAccessibilityTraitHeader;
-  UILabel *publisher = [self label:@"Kixel AI" size:13 weight:UIFontWeightSemibold color:C_MUTED];
+  UILabel *publisher = [self label:@"rind by Kixel AI" size:13 weight:UIFontWeightSemibold color:C_MUTED];
   UIStackView *credit = [[UIStackView alloc] initWithArrangedSubviews:@[BrandMark(@"kixel-mark", 21), publisher]];
   credit.spacing = 6; credit.alignment = UIStackViewAlignmentCenter;
-  credit.isAccessibilityElement = YES; credit.accessibilityLabel = @"Rind by Kixel AI";
+  credit.isAccessibilityElement = YES; credit.accessibilityLabel = @"rind by Kixel AI";
   UIStackView *titleRow = [[UIStackView alloc] initWithArrangedSubviews:@[
     BrandMark(@"rind-mark", 34), title, [UIView new], credit
   ]];
@@ -310,7 +310,7 @@ static UIImageView *BrandMark(NSString *name, CGFloat size) {
   [behindLbl setContentCompressionResistancePriority:UILayoutPriorityDefaultLow forAxis:UILayoutConstraintAxisVertical];
   UIView *spring = [UIView new];
   [spring setContentHuggingPriority:UILayoutPriorityDefaultLow forAxis:UILayoutConstraintAxisVertical];
-  UILabel *foot = [self label:@"RindBench is a community benchmark build." size:11 weight:UIFontWeightRegular color:C_MUTED];
+  UILabel *foot = [self label:@"An unofficial community tool, not run or endorsed by the rind maintainers." size:11 weight:UIFontWeightRegular color:C_MUTED];
   UIStackView *results = [self card:@[[self heading:@"Run"], picksLbl, statusLbl, progress, currentLbl, scoreLbl, behindLbl, spring, foot]];
   [results setContentHuggingPriority:UILayoutPriorityDefaultLow forAxis:UILayoutConstraintAxisVertical];
   [results setContentCompressionResistancePriority:UILayoutPriorityDefaultLow forAxis:UILayoutConstraintAxisVertical];
