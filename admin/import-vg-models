@@ -289,14 +289,17 @@ def main():
         for name in files:
             have.add(os.path.relpath(os.path.join(d, name), DEST))
 
+    # Before anything is written, so a mismatch leaves the copy as it was.
+    for module in TABLES:
+        if TABLES[module]().encode() != want[module]:
+            sys.exit(f"admin/import-vg-models: --tables does not write VG's {path_of(module)} at {REV}")
+
     stale = []
     for module, text in sorted(want.items()):
         rel = path_of(module)
         dest = os.path.join(DEST, rel)
         if module in TABLES:
-            if TABLES[module]().encode() != text:
-                sys.exit(f"admin/import-vg-models: --tables does not write VG's {rel} at {REV}")
-            # `--tables` writes it, and git ignores it.
+            # `--tables` writes it, and git ignores it; checked above.
             have.discard(rel)
             continue
         if rel in have:
