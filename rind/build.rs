@@ -460,40 +460,23 @@ fn target_has_cas() -> bool {
     env::var("CARGO_CFG_TARGET_HAS_ATOMIC").is_ok_and(|widths| widths.split(',').any(|w| w == "8"))
 }
 
-/// Whether the target is confirmed to have 8- and 32-bit atomic loads and
-/// stores (`AtomicBool` and `AtomicU32`), which the table is built of.
-/// Stable Cargo passes no cfg for them on a target without compare-and-swap
-/// (`target_has_atomic_load_store` is unstable), so this fails closed: a
-/// custom specification must state a `max-atomic-width` of at least 32, and
-/// a built-in target must be one rustc's specifications give 32-bit atomics
-/// without compare-and-swap, as checked against rustc 1.100's target list.
-/// Anything else, a specification this script cannot locate included, is
-/// unconfirmed and keeps the uncached path.
+/// Whether the target Cargo builds for, built-in or a custom specification,
+/// is confirmed to have 8- and 32-bit atomics (`AtomicBool` and
+/// `AtomicU32`), which the table is built of. Stable Cargo passes no
+/// `target_has_atomic_load_store` cfg (it is unstable), but rustc reports
+/// `target_has_atomic_primitive_alignment` for a width only when the target
+/// has atomics of that width at their primitive's alignment, as Cargo passes
+/// on from the actual specification. This fails closed: a target that lacks
+/// either width there, such as `armv4t-none-eabi` (no atomics) or the BPF
+/// targets (64-bit atomics only), keeps the uncached path. Under rustc 1.100
+/// it holds for every built-in target without compare-and-swap that has
+/// 32-bit atomics: `thumbv6m-none-eabi`, `xtensa-esp32s2-none-elf`, and the
+/// RISC-V targets without the A extension.
 fn target_has_atomic_u32() -> bool {
-    if let Some(text) = target_json_text() {
-        return text
-            .split_once("\"max-atomic-width\"")
-            .and_then(|(_, rest)| {
-                let digits = rest.trim_start().strip_prefix(':')?.trim_start();
-                let end = digits
-                    .find(|c: char| !c.is_ascii_digit())
-                    .unwrap_or(digits.len());
-                digits[..end].parse::<u32>().ok()
-            })
-            .is_some_and(|width| width >= 32);
-    }
-    let confirmed = [
-        "thumbv6m-none-eabi",
-        "riscv32e-unknown-none-elf",
-        "riscv32em-unknown-none-elf",
-        "riscv32emc-unknown-none-elf",
-        "riscv32i-unknown-none-elf",
-        "riscv32im-unknown-none-elf",
-        "riscv32imc-unknown-none-elf",
-        "riscv32imfc-unknown-none-elf",
-        "xtensa-esp32s2-none-elf",
-    ];
-    env::var("TARGET").is_ok_and(|target| confirmed.contains(&target.as_str()))
+    env::var("CARGO_CFG_TARGET_HAS_ATOMIC_PRIMITIVE_ALIGNMENT").is_ok_and(|widths| {
+        let widths: Vec<&str> = widths.split(',').collect();
+        widths.contains(&"8") && widths.contains(&"32")
+    })
 }
 
 fn target_json_text() -> Option<String> {

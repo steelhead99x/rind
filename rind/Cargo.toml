@@ -28,10 +28,10 @@ slh-dsa = []
 # zeroize's `ZeroizeOnDrop` on every type that wipes itself on drop.
 zeroize = ["dep:zeroize"]
 # Caches each ECDSA public key's eight-point verification table on targets
-# without compare-and-swap but with 32-bit atomic loads and stores:
-# `thumbv6m-none-eabi`, the RISC-V `riscv32{e,em,emc,i,im,imc,imfc}` targets,
-# `xtensa-esp32s2-none-elf`, and a custom target whose specification states a
-# `max-atomic-width` of at least 32. Those otherwise
+# without compare-and-swap but with 8- and 32-bit atomics, as rustc reports
+# them for the target, built-in or custom: `thumbv6m-none-eabi`, the RISC-V
+# `riscv32{e,em,emc,i,im,imc,imfc}` targets, and `xtensa-esp32s2-none-elf`
+# among the built-in ones. Those otherwise
 # rebuild it on every verification. Repeated P-256 verification with one key
 # was about 10% faster on a Cortex-M0 model, for about 1.2 KiB more in every
 # ECDSA public key (P-256 too: the key is sized for P-521) and about 3.4 KiB
