@@ -28,7 +28,7 @@ pub extern "system" fn Java_io_github_steelhead99x_rindbench_Native_start(mut en
     match crate::start(&cfg) {
         Ok(()) => 0,
         Err(e) => {
-            crate::set_status(|st| st["start_error"] = serde_json::json!(e));
+            crate::refused_now(&e);
             1
         }
     }

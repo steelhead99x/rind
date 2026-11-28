@@ -70,6 +70,8 @@ final class BenchView extends LinearLayout {
     private static String sharedKeysDir;
     /** The native run whose results the person cleared, so a recreated view doesn't bring them back. */
     private static String clearedRun = "";
+    /** The late refusal Clear dismissed, so a recreated view doesn't bring it back. */
+    private static long clearedRefusal;
     /** The collector a device-runner build was given by intent; a failed probe never forgets it. */
     private String runnerHost;
     private int runnerPort = Collector.PORT;
@@ -331,7 +333,7 @@ final class BenchView extends LinearLayout {
             colHow = "set by adb";
             // After setup, probe the new target; a probe of the old one still out is then ignored.
             if (changed && probeGen > 0) findCollector();
-        } else if (newHost == null && runnerHost != null && Collector.RUNNER && it.getBooleanExtra("autostart", false)) {
+        } else if (!it.hasExtra("host") && runnerHost != null && Collector.RUNNER && it.getBooleanExtra("autostart", false)) {
             // A runner launch without `host` goes to the USB or built-in collector, not the last launch's.
             runnerHost = null;
             runnerPort = Collector.PORT;
@@ -460,6 +462,9 @@ final class BenchView extends LinearLayout {
         String run = st.optString("run_id", "");
         if (!run.isEmpty()) {
             if (!run.equals(clearedRun)) showFinished(st, false);
+        } else if (lateRefusal(st) && st.optLong("refused_start") != clearedRefusal) {
+            // Refused while no view polled, as across a recreation: show it, and report it if nobody has.
+            showLateRefusal(st);
         } else {
             reportLayout("ready");
         }
@@ -557,11 +562,32 @@ final class BenchView extends LinearLayout {
         } catch (Exception ignored) {}
     }
 
+    /** Whether a finished status is a start the library refused after acknowledging it (on the run's thread). */
+    private static boolean lateRefusal(JSONObject s) {
+        return s.optString("run_id", "").isEmpty() && s.optLong("refused_start") > 0;
+    }
+
+    /** Shows a late refusal as a refused start, not as a finished run, and reports it to a device runner. */
+    private void showLateRefusal(JSONObject s) {
+        String why = s.optString("refused_reason");
+        showFinished(s, false);
+        progress.setVisibility(GONE);
+        setStatus("Could not start", Status.ERROR);
+        setBody(why);
+        refusedAfterStart(s.optLong("refused_start"), why);
+    }
+
+    /** The last late refusal reported, per process: a recreated view doesn't report it again. */
+    private static long refusalReported;
+
     /**
      * A start the library refused after acknowledging it, for a device runner: it ends the launch with
-     * RINDBENCH_RUN {"started":false,"reason":...,"after_start":true}, after its "started":true line.
+     * RINDBENCH_RUN {"started":false,"reason":...,"after_start":true}, after its "started":true line, once
+     * per refused start (`refused_start` in the native status), whichever view sees it first.
      */
-    private static void refusedAfterStart(String why) {
+    private static synchronized void refusedAfterStart(long start, String why) {
+        if (start <= refusalReported) return;
+        refusalReported = start;
         try {
             android.util.Log.w("RindBench", "RINDBENCH_RUN " + new JSONObject().put("started", false)
                     .put("reason", "the native start refused it: " + why).put("after_start", true));
@@ -852,7 +878,9 @@ final class BenchView extends LinearLayout {
 
     private void clearTapped() {
         if (running) return;
-        clearedRun = nativeStatus().optString("run_id", "");
+        JSONObject cleared = nativeStatus();
+        clearedRun = cleared.optString("run_id", "");
+        clearedRefusal = cleared.optLong("refused_start");
         agree.setChecked(false);
         setAgreeEnabled(true);
         resultsTeaser.setText("");
@@ -934,14 +962,8 @@ final class BenchView extends LinearLayout {
                 String cur = s.optString("current", "");
                 String warm = isWarm() ? " (warm)" : "";
                 setBody(done + " of " + total + (cur.isEmpty() ? "" : " · " + cur) + warm);
-            } else if (s.optString("run_id", "").isEmpty() && !s.optString("start_error", "").isEmpty()) {
-                // Refused after it was acknowledged, once the library listed the tests on the run's thread.
-                String why = s.optString("start_error");
-                showFinished(s, false);
-                progress.setVisibility(GONE);
-                setStatus("Could not start", Status.ERROR);
-                setBody(why);
-                refusedAfterStart(why);
+            } else if (lateRefusal(s)) {
+                showLateRefusal(s);
                 return;
             } else {
                 showFinished(s, true);
