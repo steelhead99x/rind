@@ -17,9 +17,11 @@ fn main() {
             }
             let st = rind_devbench::status();
             println!("{st}");
-            // A start refused once its thread listed the tests: no run, and an error for scripts.
-            if st.get("run_id").is_none() && st.get("start_error").is_some() {
-                eprintln!("devbench-cli: not started: {}", st["start_error"].as_str().unwrap_or("refused"));
+            // No run (a start refused once its thread listed the tests), or a run that failed: an error for
+            // scripts.
+            if st.get("run_id").is_none() || st.get("error").is_some() {
+                let why = st["start_error"].as_str().or(st["error"].as_str()).unwrap_or("no run");
+                eprintln!("devbench-cli: not run: {why}");
                 std::process::exit(1);
             }
         }

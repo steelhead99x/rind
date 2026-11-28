@@ -70,6 +70,8 @@ final class BenchView extends LinearLayout {
     private static String sharedKeysDir;
     /** The native run whose results the person cleared, so a recreated view doesn't bring them back. */
     private static String clearedRun = "";
+    /** The late refusal Clear dismissed, so a recreated view doesn't bring it back. */
+    private static long clearedRefusal;
     /** The collector a device-runner build was given by intent; a failed probe never forgets it. */
     private String runnerHost;
     private int runnerPort = Collector.PORT;
@@ -331,7 +333,7 @@ final class BenchView extends LinearLayout {
             colHow = "set by adb";
             // After setup, probe the new target; a probe of the old one still out is then ignored.
             if (changed && probeGen > 0) findCollector();
-        } else if (newHost == null && runnerHost != null && Collector.RUNNER && it.getBooleanExtra("autostart", false)) {
+        } else if (!it.hasExtra("host") && runnerHost != null && Collector.RUNNER && it.getBooleanExtra("autostart", false)) {
             // A runner launch without `host` goes to the USB or built-in collector, not the last launch's.
             runnerHost = null;
             runnerPort = Collector.PORT;
@@ -450,7 +452,7 @@ final class BenchView extends LinearLayout {
         String run = st.optString("run_id", "");
         if (!run.isEmpty()) {
             if (!run.equals(clearedRun)) showFinished(st, false);
-        } else if (lateRefusal(st)) {
+        } else if (lateRefusal(st) && st.optLong("refused_start") != clearedRefusal) {
             // Refused while no view polled, as across a recreation: show it, and report it if nobody has.
             showLateRefusal(st);
         } else {
@@ -866,7 +868,9 @@ final class BenchView extends LinearLayout {
 
     private void clearTapped() {
         if (running) return;
-        clearedRun = nativeStatus().optString("run_id", "");
+        JSONObject cleared = nativeStatus();
+        clearedRun = cleared.optString("run_id", "");
+        clearedRefusal = cleared.optLong("refused_start");
         agree.setChecked(false);
         setAgreeEnabled(true);
         resultsTeaser.setText("");

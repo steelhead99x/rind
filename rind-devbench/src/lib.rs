@@ -660,7 +660,11 @@ pub fn start(config_json: &str) -> Result<(), String> {
             let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 let cat = if list_on_thread {
                     // Polls see this run listing, not the last run's results.
-                    set_status(|s| *s = json!({"running": true, "current": "listing tests", "done": 0}));
+                    let rounds = cfg.rounds.unwrap_or(3).max(1);
+                    set_status(|s| {
+                        *s = json!({"running": true, "current": "listing tests", "done": 0, "total": 0,
+                            "round": 0, "rounds": rounds})
+                    });
                     let relisted = catalog_in(&mut catalogs(), true);
                     match cached {
                         Some(checked) => after_relist(&cfg, checked, relisted),
@@ -682,11 +686,13 @@ pub fn start(config_json: &str) -> Result<(), String> {
                 }
                 run(cfg, cat)
             }));
+            // The final status and the run slot's release in one step under the status lock, which status()
+            // reads both under: a poll sees either the run going or its final status, never a mix.
+            let mut st = STATUS.lock().unwrap_or_else(|e| e.into_inner());
             if r.is_err() {
-                set_status(|s| {
-                    s["running"] = json!(false);
-                    s["error"] = json!("runner panicked");
-                });
+                let v = st.get_or_insert_with(|| json!({}));
+                v["running"] = json!(false);
+                v["error"] = json!("runner panicked");
             }
             RUNNING.store(false, Ordering::SeqCst);
         })
@@ -698,9 +704,22 @@ pub fn start(config_json: &str) -> Result<(), String> {
 }
 
 pub fn status() -> Value {
-    let mut v = STATUS.lock().unwrap().clone().unwrap_or_else(|| json!({"running": false}));
+    // RUNNING under the status lock: the run's thread writes its final status, then releases the slot
+    // under the same lock.
+    let st = STATUS.lock().unwrap_or_else(|e| e.into_inner());
+    let mut v = st.clone().unwrap_or_else(|| json!({"running": false}));
     v["running"] = json!(RUNNING.load(Ordering::SeqCst));
     v
+}
+
+/// A start refused before it was acknowledged: its reason, in place of an earlier late refusal's.
+fn refused_now(e: &str) {
+    set_status(|st| {
+        st["start_error"] = json!(e);
+        if let Some(o) = st.as_object_mut() {
+            o.remove("refused_start");
+        }
+    });
 }
 
 pub fn stop() {
@@ -732,7 +751,7 @@ pub unsafe extern "C" fn devbench_start(config: *const c_char) -> i32 {
     match start(&s) {
         Ok(()) => 0,
         Err(e) => {
-            set_status(|st| st["start_error"] = json!(e));
+            refused_now(&e);
             1
         }
     }
