@@ -41,6 +41,8 @@ static RUNNING: AtomicBool = AtomicBool::new(false);
 /// Held while the run slot is taken and its STOP cleared, and by stop(), so a stop() of a run that shows as
 /// running is never cleared by that run's start.
 static RUN_SLOT: Mutex<()> = Mutex::new(());
+/// Counts acknowledged starts, so an app can tell one start's refusal on the run's thread from another's.
+static STARTS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 static STATUS: Mutex<Option<Value>> = Mutex::new(None);
 /// The environment a catalog was listed with that decides its rows: rind-bench's rustls rows read
 /// `RIND_BENCH_KEYS_DIR` while listing, `RIND_BENCH_LOW_MEMORY` drops rows, `RIND_CPU_DISABLE_*` changes what
@@ -650,6 +652,7 @@ pub fn start(config_json: &str) -> Result<(), String> {
     };
     drop(cache);
     let before_run = before.clone();
+    let start_no = STARTS.fetch_add(1, Ordering::SeqCst) + 1;
     std::thread::Builder::new()
         .name("devbench".into())
         .stack_size(64 << 20)
@@ -673,7 +676,8 @@ pub fn start(config_json: &str) -> Result<(), String> {
                         None => "no test matches the libraries and groups picked".into(),
                     };
                     restore_env_listed(&before_run);
-                    set_status(|s| *s = json!({"running": false, "error": why, "start_error": why}));
+                    // `refused_start` numbers it, so an app reports it once, even across a recreated view.
+                    set_status(|s| *s = json!({"running": false, "error": why, "start_error": why, "refused_start": start_no}));
                     return;
                 }
                 run(cfg, cat)
@@ -853,6 +857,7 @@ mod tests {
             let st = status();
             assert_eq!(st["running"], false);
             assert!(st.get("run_id").is_none(), "{st}");
+            assert!(st["refused_start"].as_u64().is_some_and(|n| n > 0), "{st}");
             st["error"].as_str().unwrap().to_string()
         };
         // An empty keys directory, as before the app copies its certificates in: rustls can't list.
