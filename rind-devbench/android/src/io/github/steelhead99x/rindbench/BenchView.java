@@ -464,6 +464,8 @@ final class BenchView extends LinearLayout {
             laterLaunches.add(new Object[]{it, runnerLaunch});
         }
         if (runnerLaunch) {
+            // An earlier launch still waiting or queued is replaced: it gets its own outcome first.
+            dropLaunch("a later launch replaced it");
             launchPending = true;
             if (loadedOnce) scheduleAutostart();
         }

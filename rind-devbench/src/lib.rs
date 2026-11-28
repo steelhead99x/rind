@@ -28,7 +28,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ffi::{CStr, CString, c_char};
 use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Mutex, Once, OnceLock};
+use std::sync::{Mutex, Once};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 pub const SCHEMA: &str = "rind-devbench/1";
@@ -39,7 +39,9 @@ pub const TARGET: &str = env!("DEVBENCH_TARGET");
 static STOP: AtomicBool = AtomicBool::new(false);
 static RUNNING: AtomicBool = AtomicBool::new(false);
 static STATUS: Mutex<Option<Value>> = Mutex::new(None);
-static CATALOG: OnceLock<Value> = OnceLock::new();
+/// Catalogs listed so far, by the `RIND_BENCH_KEYS_DIR` each was listed with (rind-bench's rustls rows read it
+/// while listing), so a catalog never answers for a different setting.
+static CATALOGS: Mutex<Vec<(Option<std::ffi::OsString>, &'static Value)>> = Mutex::new(Vec::new());
 
 fn stop_flag() -> bool {
     STOP.load(Ordering::Relaxed)
@@ -153,8 +155,20 @@ fn now_rfc3339() -> String {
 
 /// Lists every row of every bench file (setup code runs; nothing is timed).
 pub fn catalog() -> &'static Value {
+    let keys = std::env::var_os("RIND_BENCH_KEYS_DIR");
+    let mut cache = CATALOGS.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((_, c)) = cache.iter().find(|(k, _)| *k == keys) {
+        return c;
+    }
+    // One per setting a process uses, normally one: leaked so callers keep a plain reference.
+    let c: &'static Value = Box::leak(Box::new(list_catalog()));
+    cache.push((keys, c));
+    c
+}
+
+fn list_catalog() -> Value {
     // Bench setup code wants a big stack; the caller may be a GCD or JNI thread.
-    CATALOG.get_or_init(|| {
+    {
         if denies_missing() {
             return json!({"schema": SCHEMA, "error": DENIES_MISSING, "rows": [], "extra": [], "sections": [], "libraries": [], "operations_without_rows": [], "device": device::capabilities()});
         }
@@ -165,7 +179,7 @@ pub fn catalog() -> &'static Value {
             .ok()
             .and_then(|h| h.join().ok())
             .unwrap_or_else(|| json!({"schema": SCHEMA, "error": "listing panicked", "rows": [], "extra": [], "sections": [], "libraries": [], "operations_without_rows": [], "device": device::capabilities()}))
-    })
+    }
 }
 
 fn build_catalog() -> Value {
@@ -502,8 +516,22 @@ pub fn start(config_json: &str) -> Result<(), String> {
     if RUNNING.swap(true, Ordering::SeqCst) {
         return Err("already running".into());
     }
-    // The configured environment goes in before the catalog is first listed, since rind-bench's rustls
-    // rows read RIND_BENCH_KEYS_DIR while listing and the catalog is cached.
+    // The run slot is ours: a stop() from here on, while the selection is checked, stops this run.
+    STOP.store(false, Ordering::SeqCst);
+    // The configured environment goes in before the catalog is listed, since rind-bench's rustls rows read
+    // RIND_BENCH_KEYS_DIR while listing. A refused start puts back what was there.
+    let before: Vec<(String, Option<std::ffi::OsString>)> = cfg.env.keys().map(|k| (k.clone(), std::env::var_os(k))).collect();
+    let refuse = |e: String| {
+        for (k, v) in &before {
+            // SAFETY: as for set_var below; the run slot is still ours.
+            match v {
+                Some(v) => unsafe { std::env::set_var(k, v) },
+                None => unsafe { std::env::remove_var(k) },
+            }
+        }
+        RUNNING.store(false, Ordering::SeqCst);
+        e
+    };
     for (k, v) in &cfg.env {
         // SAFETY: no run is going (RUNNING was false), so no bench thread reads the environment; the app
         // does not read it concurrently.
@@ -513,10 +541,8 @@ pub fn start(config_json: &str) -> Result<(), String> {
     // before acknowledging the start. Each library and group can be valid alone and still select nothing
     // together, as ring with ML-KEM does.
     if select(&cfg, catalog()["rows"].as_array().map_or(&[][..], |r| r.as_slice())).is_empty() {
-        RUNNING.store(false, Ordering::SeqCst);
-        return Err("no test matches the libraries and groups picked".into());
+        return Err(refuse("no test matches the libraries and groups picked".into()));
     }
-    STOP.store(false, Ordering::SeqCst);
     std::thread::Builder::new()
         .name("devbench".into())
         .stack_size(64 << 20)
@@ -530,10 +556,7 @@ pub fn start(config_json: &str) -> Result<(), String> {
             }
             RUNNING.store(false, Ordering::SeqCst);
         })
-        .map_err(|e| {
-            RUNNING.store(false, Ordering::SeqCst);
-            e.to_string()
-        })?;
+        .map_err(|e| refuse(e.to_string()))?;
     Ok(())
 }
 
@@ -645,13 +668,21 @@ mod tests {
 
     #[test]
     fn a_start_that_would_run_nothing_is_refused_before_it_is_acknowledged() {
-        let e = start(r#"{"libraries": ["no-such-library"], "sections": ["no-such-group"],
-            "env": {"RIND_DEVBENCH_TEST_LISTED_AFTER_ENV": "1"}}"#)
+        let keys = "/nonexistent/rind-devbench-test-keys";
+        let e = start(&format!(r#"{{"libraries": ["no-such-library"], "sections": ["no-such-group"],
+            "env": {{"RIND_BENCH_KEYS_DIR": "{keys}"}}}}"#))
         .unwrap_err();
         assert!(e.contains("no test matches"), "{e}");
         assert!(!RUNNING.load(Ordering::SeqCst));
-        // The configured environment was in place before the catalog was listed for the check.
-        assert_eq!(std::env::var("RIND_DEVBENCH_TEST_LISTED_AFTER_ENV").as_deref(), Ok("1"));
+        // The refused start put the environment back as it found it.
+        assert_eq!(std::env::var_os("RIND_BENCH_KEYS_DIR"), None);
+        // Its check listed with the configured keys directory, where the rustls rows can't list, and that
+        // listing answers only for that setting: the catalog for the environment now has them.
+        let listed: Vec<(Option<std::ffi::OsString>, Value)> =
+            CATALOGS.lock().unwrap().iter().map(|(k, c)| (k.clone(), (*c).clone())).collect();
+        let failed = |c: &Value| c["files_failed_to_list"].as_array().unwrap().contains(&json!("rustls"));
+        assert!(listed.iter().any(|(k, c)| k.as_deref() == Some(keys.as_ref()) && failed(c)));
+        assert!(!failed(catalog()), "{}", catalog()["files_failed_to_list"]);
         for bad in [r#"{"": "1"}"#, r#"{"A=B": "1"}"#, r#"{"A": "x\u0000"}"#] {
             let e = start(&format!(r#"{{"env": {bad}}}"#)).unwrap_err();
             assert!(e.contains("environment entry"), "{e}");
