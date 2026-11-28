@@ -527,6 +527,7 @@ static void SetTitle(UIButton *b, NSString *t) {
 - (void)clearTapped {
   if (running) return;
   agree.on = NO; clearBtn.hidden = YES;
+  lastPicker = nil; lastLibs = nil; lastSecs = nil;  // back at the picker: only Run again reuses the last names
   SetTitle(startBtn, @"Start test"); startBtn.hidden = NO;
   showingRun = NO; [self foldPicker];
   [self setPicking:YES]; [self agreeChanged]; [self ready]; [self findCollector];
@@ -592,7 +593,10 @@ static void SetTitle(UIButton *b, NSString *t) {
   UIApplication.sharedApplication.idleTimerDisabled = YES;
   startBtn.hidden = YES; clearBtn.hidden = YES; stopBtn.hidden = NO; stopBtn.enabled = YES; running = YES;
   [self setPicking:NO];
-  picksLbl.text = [NSString stringWithFormat:@"%@ · %lu libraries · %lu groups", full ? @"Full" : @"Quick", (unsigned long)libs.count, (unsigned long)secs.count];
+  // What the library picked as it accepted the start, not what was asked for.
+  NSDictionary *acked = JSON(devbench_status_json());
+  picksLbl.text = [NSString stringWithFormat:@"%@ · %lu libraries · %lu groups", full ? @"Full" : @"Quick",
+      (unsigned long)[acked[@"libraries_run"] count], (unsigned long)[acked[@"sections_run"] count]];
   showingRun = YES; [self foldPicker];
   statusLbl.text = @"Starting…"; scoreLbl.text = @""; behindLbl.text = @"";
   [self findCollector];
@@ -609,7 +613,9 @@ static void SetTitle(UIButton *b, NSString *t) {
   NSString *thermal = @[@"nominal", @"fair", @"serious", @"critical"][MIN(3, (NSInteger)NSProcessInfo.processInfo.thermalState)];
   double done = [s[@"done"] doubleValue], total = MAX(1, [s[@"total"] doubleValue]);
   progress.progress = done / total;
-  if (running) {
+  if (running && !s[@"run_start"]) {
+    statusLbl.text = @"Starting…";  // accepted, still reaching the collector: no counters yet
+  } else if (running) {
     statusLbl.text = [NSString stringWithFormat:@"Running %@ of %@ · round %@ of %@", s[@"done"], s[@"total"], s[@"round"], s[@"rounds"]];
     currentLbl.text = [NSString stringWithFormat:@"%@\nerrors %@ · sent %@ lines (%@) · thermal %@", s[@"current"] ?: @"", s[@"errors"], s[@"lines"], s[@"sink"], thermal];
   } else {
