@@ -186,7 +186,8 @@ final class BenchView extends LinearLayout {
         } else if (isRunnerLaunch(intent)) {
             Launch l = new Launch(intent, null, Collector.PORT);
             if (l.setsCollector) useCollector(l.host, l.port);
-            showLaunch(l);
+            // A launch that a run going will turn away leaves the picker as it is.
+            if (!nativeStatus().optBoolean("running")) showLaunch(l);
             pending = l;
         } else {
             preselect(intent);
@@ -580,7 +581,8 @@ final class BenchView extends LinearLayout {
             // Its collector applies now, for the screen and for runs by hand; its own run takes it as resolved here.
             Launch l = new Launch(it, runnerHost, runnerPort);
             if (l.setsCollector) useCollector(l.host, l.port);
-            showLaunch(l);
+            // A launch that a run going will turn away leaves the picker as it is.
+            if (!running) showLaunch(l);
             pending = l;
             if (loadedOnce) scheduleAutostart();
             return;
@@ -815,7 +817,10 @@ final class BenchView extends LinearLayout {
     private int probeGen;
 
     /** The screen's latest collector probe is still out; a run by hand tapped meanwhile waits for it. */
-    private boolean discovering, startWhenFound;
+    private boolean discovering;
+    /** A run by hand tapped while the probe was out: the picker and preset as they were at the tap. */
+    private List<String> deferredLibs, deferredSecs;
+    private boolean deferredFull;
 
     private void findCollector() {
         // The targets as of now: an intent or Retry since may have changed them.
@@ -828,7 +833,12 @@ final class BenchView extends LinearLayout {
                 if (gen != probeGen) return;
                 discovering = false;
                 applyCollector(h);
-                if (startWhenFound) { startWhenFound = false; startTapped(); }
+                if (deferredLibs != null) {
+                    List<String> libs = deferredLibs, secs = deferredSecs;
+                    deferredLibs = null;
+                    deferredSecs = null;
+                    if (onScreen && tabShown && !running) start(libs, secs, deferredFull, null);
+                }
             });
         }, "collector-probe").start();
     }
@@ -898,7 +908,9 @@ final class BenchView extends LinearLayout {
         // tap takes the place of a launch still waiting at once.
         if (discovering) {
             dropLaunch("a start by hand took its place");
-            startWhenFound = true;
+            deferredLibs = checked(libSw);
+            deferredSecs = checked(secSw);
+            deferredFull = fullPreset;
             setStatus("Finding the collector", Status.NEUTRAL);
             setBody("Starts once it answers or times out.");
             return;
@@ -1097,8 +1109,10 @@ final class BenchView extends LinearLayout {
     void setOnScreen(boolean on) {
         onScreen = on;
         if (!on) {
-            // Leaving the app drops a launch's autostart, queued or still waiting, and says so.
+            // Leaving the app drops a launch's autostart, queued or still waiting, and says so, and a run by
+            // hand still waiting for the collector.
             dropLaunch("the app was left before the run started");
+            cancelDeferredStart();
         } else if (loadedOnce) {
             scheduleAutostart();
         }
@@ -1110,6 +1124,18 @@ final class BenchView extends LinearLayout {
         if (!shown) {
             // As leaving the app does: a launch still waiting for the list is dropped too, not revived on return.
             dropLaunch("the Bench tab was left before the run started");
+            cancelDeferredStart();
+        }
+    }
+
+    /** Forgets a run by hand waiting for the collector, and the screen that said so. */
+    private void cancelDeferredStart() {
+        if (deferredLibs == null) return;
+        deferredLibs = null;
+        deferredSecs = null;
+        if (!running && resultsText.isEmpty()) {
+            setStatus("Ready", Status.OK);
+            setBody("");
         }
     }
 
