@@ -175,10 +175,16 @@ final class BenchView extends LinearLayout {
         this.restored = restored;
         // A restored activity gets its old intent again: only a fresh launch asks for a run, but a restored
         // runner launch still sets the collector it gave, so runs by hand keep going there.
-        if (isRunnerLaunch(intent)) {
+        if (restored) {
+            // The collector runs went to before, whichever launch set it (MainActivity keeps only the latest
+            // intent), and the restored intent's preselection; a restored activity never queues a run.
+            if (collectorSet) useCollector(savedHost, savedPort);
+            else if (isRunnerLaunch(intent)) { Launch l = new Launch(intent, null, Collector.PORT); if (l.setsCollector) useCollector(l.host, l.port); }
+            preselect(intent);
+        } else if (isRunnerLaunch(intent)) {
             Launch l = new Launch(intent, null, Collector.PORT);
             if (l.setsCollector) useCollector(l.host, l.port);
-            if (!restored) pending = l;
+            pending = l;
         } else {
             preselect(intent);
         }
@@ -408,9 +414,24 @@ final class BenchView extends LinearLayout {
         else if ("quick".equals(preset)) { fullPreset = false; presetChanged(); }
     }
 
-    /** Sends runs to {@code h}:{@code p}, or with a null {@code h} to the USB or built-in collector, and probes it if it changed. */
+    /**
+     * The collector an intent last set, per process, so a recreated view keeps sending there whichever intent
+     * the activity comes back with; {@code collectorSet} once any intent has set one.
+     */
+    private static String savedHost;
+    private static int savedPort = Collector.PORT;
+    private static boolean collectorSet;
+
+    /**
+     * Sends runs to {@code h}:{@code p}, or with a null {@code h} to the USB or built-in collector, and probes
+     * it if it changed; an unchanged one keeps the collector the last probe found.
+     */
     private boolean useCollector(String h, int p) {
+        savedHost = h;
+        savedPort = h == null ? Collector.PORT : p;
+        collectorSet = true;
         boolean changed = h == null ? runnerHost != null : !h.equals(runnerHost) || p != runnerPort;
+        if (!changed) return false;
         runnerHost = h;
         runnerPort = h == null ? Collector.PORT : p;
         colHost = h;
