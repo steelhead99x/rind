@@ -949,15 +949,6 @@ have some different options depending on CPU features:
   ML-KEM-768's nine could, but rind skips it for ML-KEM-768, including when
   it falls back from verified-garbage's routines, and samples eight four at
   a time and the ninth alone. This is Graviola's, and not verified.
-- With the same AVX-512, the PRFs behind `SamplePolyCBD()` with eta 2 run on
-  that 8-wide Keccak-f too, eight inputs to one permutation, as Graviola's
-  `sha3_shake256_8x_one_block` does: eight in ML-KEM-1024's key generation,
-  and in encryption, which samples y, e_1, and e_2 in one batch where eta1 is
-  eta2, nine. ML-KEM-512 never has more than four to hash. ML-KEM-768's six
-  and seven could fill a batch, but rind skips it for ML-KEM-768, including
-  when it falls back from verified-garbage's routines, and hashes them four
-  at a time. Not verified either: the 4-wide batches it replaces are
-  s2n-bignum's.
 - Its 8-wide Keccak-f also runs on its own for two to eight states on x86-64
   with AVX-512 F and VL: ML-DSA's matrix, secret, and mask expansion, eight
   polynomials at a time, and ML-KEM-512's and ML-KEM-1024's noise sampling
