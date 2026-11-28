@@ -83,6 +83,10 @@ cargo llvm-cov show-env --sh "${OPTIONS[@]}" "${cross[@]}" > "$out/env.sh"
 source "$out/env.sh"
 cargo llvm-cov clean --workspace
 
+# Each run is `cargo test`, not nextest, whose process per test would write a
+# profile per test: thousands per run, from show-env's `%p` pattern. Its hang
+# bound is the whole run's, about twice the slowest healthy one: the full
+# workspace under SDE, 61 minutes on an ubuntu-latest runner.
 tests=(--workspace --exclude rind-bench --exclude rind-cpuid --exclude rind-fuzz --exclude rind-timing)
 # rind-fips's module refuses a CPU masked below its baseline.
 denied=("${tests[@]}" --exclude rind-fips)
@@ -92,37 +96,37 @@ armv7=("${portable[@]}" -p rind-aws-lc-rs -p rind-str0m)
 
 case $tier in
     native)
-        env SLOW_TESTS=1 cargo test --locked "${tests[@]}"
+        env SLOW_TESTS=1 timeout 2h cargo test --locked "${tests[@]}"
         # The tiers build.yml tests, each of which reaches a fallback only a
         # CPU without the denied features runs. SDE without AVX-512 reaches
         # the VAES kernels, which some hosted runners lack.
         case $(uname -m) in
             x86_64)
-                env RIND_CPU_DISABLE_sha=1 RIND_CPU_DISABLE_intel=1 cargo test --locked "${denied[@]}"
-                env RIND_CPU_DISABLE_avx512bw=1 RIND_CPU_DISABLE_avx512f=1 RIND_CPU_DISABLE_vaes=1 cargo test --locked "${denied[@]}"
-                env RIND_CPU_DISABLE_adx=1 cargo test --locked "${denied[@]}"
-                env RIND_CPU_DISABLE_avx2=1 RIND_CPU_DISABLE_sha=1 RIND_CPU_DISABLE_intel=1 cargo test --locked "${denied[@]}"
-                env RIND_CPU_DISABLE_avx=1 cargo test --locked "${denied[@]}"
-                env RIND_CPU_DISABLE_aes=1 RIND_CPU_DISABLE_pclmulqdq=1 RIND_CPU_DISABLE_avx=1 RIND_CPU_DISABLE_sse41=1 cargo test --locked "${denied[@]}"
-                env RIND_CPU_DISABLE_ssse3=1 cargo test --locked "${denied[@]}"
-                env CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER="sde -dmr --" cargo test --locked "${tests[@]}"
-                env RIND_CPU_DISABLE_avx512f=1 RIND_CPU_DISABLE_avx512bw=1 CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER="sde -dmr --" cargo test --locked -p rind --lib
+                env RIND_CPU_DISABLE_sha=1 RIND_CPU_DISABLE_intel=1 timeout 2h cargo test --locked "${denied[@]}"
+                env RIND_CPU_DISABLE_avx512bw=1 RIND_CPU_DISABLE_avx512f=1 RIND_CPU_DISABLE_vaes=1 timeout 2h cargo test --locked "${denied[@]}"
+                env RIND_CPU_DISABLE_adx=1 timeout 2h cargo test --locked "${denied[@]}"
+                env RIND_CPU_DISABLE_avx2=1 RIND_CPU_DISABLE_sha=1 RIND_CPU_DISABLE_intel=1 timeout 2h cargo test --locked "${denied[@]}"
+                env RIND_CPU_DISABLE_avx=1 timeout 2h cargo test --locked "${denied[@]}"
+                env RIND_CPU_DISABLE_aes=1 RIND_CPU_DISABLE_pclmulqdq=1 RIND_CPU_DISABLE_avx=1 RIND_CPU_DISABLE_sse41=1 timeout 2h cargo test --locked "${denied[@]}"
+                env RIND_CPU_DISABLE_ssse3=1 timeout 2h cargo test --locked "${denied[@]}"
+                env CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER="sde -dmr --" timeout 2h cargo test --locked "${tests[@]}"
+                env RIND_CPU_DISABLE_avx512f=1 RIND_CPU_DISABLE_avx512bw=1 CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER="sde -dmr --" timeout 2h cargo test --locked -p rind --lib
                 ;;
             arm|arm64|aarch64)
-                env RIND_CPU_DISABLE_sha3=1 RIND_CPU_DISABLE_sve2=1 RIND_CPU_DISABLE_sb=1 cargo test --locked "${denied[@]}"
-                env RIND_CPU_DISABLE_aes=1 RIND_CPU_DISABLE_pmull=1 RIND_CPU_DISABLE_sha2=1 cargo test --locked "${denied[@]}"
+                env RIND_CPU_DISABLE_sha3=1 RIND_CPU_DISABLE_sve2=1 RIND_CPU_DISABLE_sb=1 timeout 2h cargo test --locked "${denied[@]}"
+                env RIND_CPU_DISABLE_aes=1 RIND_CPU_DISABLE_pmull=1 RIND_CPU_DISABLE_sha2=1 timeout 2h cargo test --locked "${denied[@]}"
                 ;;
         esac
         ;;
     portable)
-        env SLOW_TESTS=1 cargo test --locked "${cargo_args[@]}" "${portable[@]}"
+        env SLOW_TESTS=1 timeout 2h cargo test --locked "${cargo_args[@]}" "${portable[@]}"
         ;;
     armv7)
         # shellcheck source=sh/armv7-tiers.sh
         source sh/armv7-tiers.sh
-        "${crypto[@]}" cargo test --locked "${cargo_args[@]}" "${armv7[@]}"
-        "${cortex_a15[@]}" cargo test --locked "${cargo_args[@]}" "${armv7[@]}"
-        "${no_neon[@]}" RIND_CPU_DISABLE_neon=1 cargo test --locked "${cargo_args[@]}" "${armv7[@]}"
+        "${crypto[@]}" timeout 2h cargo test --locked "${cargo_args[@]}" "${armv7[@]}"
+        "${cortex_a15[@]}" timeout 2h cargo test --locked "${cargo_args[@]}" "${armv7[@]}"
+        "${no_neon[@]}" RIND_CPU_DISABLE_neon=1 timeout 2h cargo test --locked "${cargo_args[@]}" "${armv7[@]}"
         ;;
 esac
 

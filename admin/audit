@@ -56,6 +56,7 @@ PINS = [
     ("blind-rsa-signatures", "RFC 9474 test vectors", "admin/sync-vectors", rf"^BLIND_RSA={SHA}$"),
     ("RFC 9497", "OPRF test vectors", "admin/sync-vectors", rf"^VOPRF={SHA}$"),
     ("RFC 9591", "FROST test vectors", "admin/sync-vectors", rf"^FROST={SHA}$"),
+    ("RFC 9807", "OPAQUE test vectors", "admin/sync-vectors", rf"^OPAQUE={SHA}$"),
 ]
 
 
@@ -201,6 +202,7 @@ UNSAFE = [
         "test code, but for the macro and `Mcdt`, which `SAFETY:` comments and `admin/ct-vartime` cover",
     ),
     ("rind/src/mid/", "a test's call into aws-lc", "test code"),
+    ("rind/src/high/opaque/", "a test's read-back of a dropped key's bytes", "test code, with its `SAFETY:` comment"),
     ("rind/src/fips_rng.rs", "the FIPS build's DRBG handle and its test's `fork`", "`SAFETY:` comments"),
     ("rind/src/test.rs", "a test helper", "`SAFETY:` comments"),
     (

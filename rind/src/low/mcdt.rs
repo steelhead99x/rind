@@ -264,12 +264,6 @@ mod tests {
         assert_eq!(is_intel(), vendor.as_flattened() == b"GenuineIntel");
     }
 
-    // See `low::x86_64::cpu`'s report.
-    #[test]
-    fn reports_dispatch() {
-        println!("rind dispatch: mcdt {}", needed());
-    }
-
     // admin/x86-cpu names whether each CPU model it emulates needs the
     // mitigation, since nothing else on a host reports `MCDT_NO`.
     #[test]

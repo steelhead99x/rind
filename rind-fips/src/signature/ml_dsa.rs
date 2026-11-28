@@ -31,8 +31,19 @@ unsafe extern "C" {
     fn rind_fips_ml_dsa_has_seed(key: *const MlDsaHandle) -> bool;
     fn rind_fips_ml_dsa_to_pkcs8(key: *const MlDsaHandle) -> *mut ffi::Encoded;
     fn rind_fips_ml_dsa_public_key(key: *const MlDsaHandle) -> *mut PublicKeyHandle;
+    fn rind_fips_ml_dsa_public_key_verify(
+        key: *const PublicKeyHandle,
+        context: *const u8,
+        context_len: usize,
+        message: *const u8,
+        len: usize,
+        signature: *const u8,
+        signature_len: usize,
+    ) -> Status;
     fn rind_fips_ml_dsa_sign(
         key: *const MlDsaHandle,
+        context: *const u8,
+        context_len: usize,
         message: *const u8,
         len: usize,
         out: *mut u8,
@@ -157,10 +168,25 @@ impl<P: ParameterSet> PublicKey<P> {
         self.key.to_spki()
     }
 
-    /// Verifies `signature` over `message`: pure ML-DSA with the empty
-    /// context, as TLS and X.509 sign.
-    pub fn verify(&self, message: &[u8], signature: &[u8]) -> Result<(), Error> {
-        self.key.verify(message, signature)
+    /// Verifies `signature` over `message` and `context`: pure ML-DSA (FIPS
+    /// 204's `ML-DSA.Verify`). TLS and X.509 sign with the empty context.
+    ///
+    /// A `context` over 255 bytes verifies nothing, so it fails as a bad
+    /// signature does.
+    pub fn verify(&self, context: &[u8], message: &[u8], signature: &[u8]) -> Result<(), Error> {
+        // SAFETY: the handle is live, and `context`, `message`, and
+        // `signature` readable.
+        ffi::check(unsafe {
+            rind_fips_ml_dsa_public_key_verify(
+                self.key.ptr(),
+                context.as_ptr(),
+                context.len(),
+                message.as_ptr(),
+                message.len(),
+                signature.as_ptr(),
+                signature.len(),
+            )
+        })
     }
 }
 
@@ -188,8 +214,8 @@ impl<P: ParameterSet> fmt::Debug for PublicKey<P> {
 /// An ML-DSA private key and its public key, of parameter set `P`; held in
 /// the module, which wipes it on drop.
 ///
-/// It signs pure ML-DSA (FIPS 204) with the empty context, as TLS and X.509
-/// use it, hedged with fresh randomness, as [`PublicKey::verify`] verifies.
+/// It signs pure ML-DSA (FIPS 204) under a context, hedged with fresh
+/// randomness, as [`PublicKey::verify`] verifies.
 pub struct KeyPair<P: ParameterSet> {
     handle: Handle<MlDsaHandle>,
     public: PublicKey<P>,
@@ -263,17 +289,21 @@ impl<P: ParameterSet> KeyPair<P> {
         &self.public
     }
 
-    /// Signs `message`, with fresh randomness from the module's random
-    /// generator.
-    pub fn sign(&self, message: &[u8]) -> Result<Signature<P>, Error> {
+    /// Signs `message` under `context`, with fresh randomness from the
+    /// module's random generator. TLS and X.509 sign with the empty context.
+    ///
+    /// A `context` over 255 bytes is [`Error::WrongLength`].
+    pub fn sign(&self, context: &[u8], message: &[u8]) -> Result<Signature<P>, Error> {
         let mut signature = P::Signature::zeroed();
         let out = signature.as_mut();
         let mut len = 0;
-        // SAFETY: the handle is live, `message` readable, and `out`
-        // writable for its length.
+        // SAFETY: the handle is live, `context` and `message` readable, and
+        // `out` writable for its length.
         ffi::check(unsafe {
             rind_fips_ml_dsa_sign(
                 self.handle.ptr(),
+                context.as_ptr(),
+                context.len(),
                 message.as_ptr(),
                 message.len(),
                 out.as_mut_ptr(),

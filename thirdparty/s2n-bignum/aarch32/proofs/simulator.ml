@@ -935,8 +935,8 @@ and tac_after memop =
    else ALL_TAC) THEN
   REWRITE_TAC AARCH32_OFFSET_RULES THEN
   AARCH32_ADDRESSES_TAC THEN
-  (* The crypto extension's operations reduce as their extra conversions
-     say, and VTBL's lanes by whether each index is in range. *)
+  (* The crypto extension's operations and VTBL's lanes reduce as their
+     extra conversions say. *)
   CONV_TAC(TOP_DEPTH_CONV(WORD_RED_CONV ORELSEC WORD_NUM_RED_CONV ORELSEC
                           INT_RED_CONV ORELSEC NUM_RED_CONV ORELSEC
                           apply_extra_word_convs ORELSEC

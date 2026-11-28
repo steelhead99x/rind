@@ -11,7 +11,8 @@ set_option linter.dupNamespace false
 /-!
 The rind functions the x86_64 translation leaves opaque, beside those
 `Rind.X86_64.AesGcmModel`, `Rind.X86_64.PointSelectModel`, and
-`Rind.X86_64.GatherModel` model. No proof assumes anything about them beyond what
+`Rind.X86_64.GatherModel` model, and the eight-way Keccak-f's `set_row`,
+which this file models by hand, quoting its Rust. No proof assumes anything about them beyond what
 `Rind.X86_64.S2nBignum`, `Rind.X86_64.AwsLc`, `Rind.X86_64.ValeAesGcm`,
 `Rind.X86_64.VgRsa`, `Rind.X86_64.VgChaCha20`, and `Rind.X86_64.RsaMont`'s
 `nohw_spec` state for s2n-bignum's, aws-lc's, Vale's, and
@@ -168,6 +169,25 @@ opaque low.x86_64.aes_gcm_vaes.VaesKernel.avx512
 opaque low.x86_64.aes_gcm_vaes.VaesKernel.avx2
   : Std.U128 → low.x86_64.cpu.HaveVaesAvx2ForAesGcm → Result low.x86_64.aes_gcm_vaes.VaesKernel
 
+/-- The empty cell for VG's AES-GCM context, on the CPUs that run it. -/
+opaque low.x86_64.aes_gcm_vg.LazyVgKey.new
+  : low.x86_64.cpu.HaveAvx512ForAesGcm → Result (Option low.x86_64.aes_gcm_vg.LazyVgKey)
+
+/-- Wiping and freeing VG's AES-GCM context, which no proof observes. -/
+opaque low.x86_64.aes_gcm_vg.LazyVgKey.wipe
+  : low.x86_64.aes_gcm_vg.LazyVgKey → Result low.x86_64.aes_gcm_vg.LazyVgKey
+
+opaque low.x86_64.aes_gcm_vg.LazyVgKey.get
+  : low.x86_64.aes_gcm_vg.LazyVgKey → low.x86_64.aes.HwKey → Result low.x86_64.aes_gcm_vg.VgKey
+
+opaque low.x86_64.aes_gcm_vg.VgKey.seal
+  : low.x86_64.aes_gcm_vg.VgKey → Std.Array U8 12#usize → Slice U8 → Slice U8 →
+    Result ((Std.Array U8 16#usize) × (Slice U8))
+
+opaque low.x86_64.aes_gcm_vg.VgKey.open
+  : low.x86_64.aes_gcm_vg.VgKey → Std.Array U8 12#usize → Slice U8 → Slice U8 →
+    Std.Array U8 16#usize → Result (Bool × (Slice U8))
+
 /-- Wiping a value, which no proof observes: the translation ignores drops. -/
 opaque low.generic.zeroise.zeroise_value {T : Type} (ZeroableInst : low.generic.zeroise.Zeroable T) :
   T → Result T
@@ -179,8 +199,11 @@ one-pass seal and open, behind their Rust wrapper, whose contract
 `Rind.X86_64.ChaCha20Poly1305`'s `OnePass` states as a hypothesis; and the
 separate passes CPUs without SSE4.1 run, which no theorem is about. -/
 
-opaque low.x86_64.cpu.HaveIfmaForVgChaCha20Poly1305.check
-  : Result (Option low.x86_64.cpu.HaveIfmaForVgChaCha20Poly1305)
+opaque low.x86_64.cpu.HaveIfmaForVgChaCha20Poly1305.check_seal
+  : Std.Usize → Result (Option low.x86_64.cpu.HaveIfmaForVgChaCha20Poly1305)
+
+opaque low.x86_64.cpu.HaveIfmaForVgChaCha20Poly1305.check_open
+  : Std.Usize → Result (Option low.x86_64.cpu.HaveIfmaForVgChaCha20Poly1305)
 
 opaque low.x86_64.chacha20poly1305.seal_ifma
   : low.x86_64.cpu.HaveIfmaForVgChaCha20Poly1305 → Std.Array Std.U8 32#usize →
@@ -230,12 +253,28 @@ opaque low.x86_64.chacha20.cipher_ssse3_4x
   : low.x86_64.cpu.HaveSsse3 → Std.Array Std.U32 8#usize → Std.Array Std.U32 4#usize →
     Slice Std.U8 → Result (Slice Std.U8)
 
-/-! rind's eight-way AVX-512 Keccak-f, which `RunsSha3` takes to compute
-Keccak-f on each state. -/
+/-! The eight-way AVX-512 Keccak-f's store of one vector to a state's lanes,
+which goes through a raw pointer, modelled by hand. `admin/prove` fails unless
+this quote is still that Rust:
 
-opaque low.x86_64.sha3_keccak8_f1600.permute
-  : Array (Array Std.U64 25#usize) 8#usize → Array Std.U64 24#usize →
-    low.x86_64.cpu.HaveAvx512Vl → Result (Array (Array Std.U64 25#usize) 8#usize)
+```rust
+fn set_row(s: &mut [u64; 25], i: usize, v: __m512i) {
+    // SAFETY: the eight lanes are 64 bytes, exactly the width of one `__m512i`.
+    unsafe { _mm512_storeu_si512(s[i..i + 8].as_mut_ptr().cast(), v) }
+}
+
+```
+
+The slice `s[i..i + 8]` panics unless `i + 8 ≤ 25`, and an unaligned store
+writes `v`'s 64-bit elements to it in order, element 0 first. -/
+
+/-- `set_row`: lanes `i` to `i + 7` of `s` replaced by `v`'s elements. -/
+def low.x86_64.sha3_keccak8_f1600.set_row (s : Array Std.U64 25#usize) (i : Std.Usize)
+    (v : core.core_arch.x86.__m512i) : Result (Array Std.U64 25#usize) :=
+  if h : i.val + 8 ≤ 25 then
+    ok (Array.make 25#usize (s.val.take i.val ++ (List.range 8).map (fun k => ⟨rind.simd.lane64x8 v k⟩) ++
+      s.val.drop (i.val + 8)) (by simp; omega))
+  else fail .panic
 
 /-! s2n-bignum's Ed25519 routines, transliterated to inline assembly. -/
 
@@ -290,15 +329,45 @@ opaque low.x86_64.bignum_mul_p25519_alt.bignum_mul_p25519_alt
   Array Std.U64 4#usize → Array Std.U64 4#usize → Array Std.U64 4#usize →
     Result (Array Std.U64 4#usize)
 
-/-! Ed25519 verification's multi-scalar multiplication, whose contract
-`Rind.X86_64.Ed25519Verify` takes as the hypothesis `RunsMsm` until a proof
-covers it. -/
+/-! s2n-bignum's Edwards point routines, which Ed25519 verification's
+multi-scalar multiplication runs, and that multiplication's AVX2 port, which
+no proof covers yet (`quest/m4/verified/ed25519-avx2-verify.md`). -/
 
-opaque low.x86_64.adx_mux.edwards25519_msm
+opaque low.x86_64.edwards25519_epadd.edwards25519_epadd
+  :
+  Array Std.U64 16#usize → Array Std.U64 16#usize → Array Std.U64 16#usize
+    → Result (Array Std.U64 16#usize)
+
+opaque low.x86_64.edwards25519_epadd_alt.edwards25519_epadd_alt
+  :
+  Array Std.U64 16#usize → Array Std.U64 16#usize → Array Std.U64 16#usize
+    → Result (Array Std.U64 16#usize)
+
+opaque low.x86_64.edwards25519_epdouble.edwards25519_epdouble
+  :
+  Array Std.U64 16#usize → Array Std.U64 12#usize → Result (Array Std.U64
+    16#usize)
+
+opaque low.x86_64.edwards25519_epdouble_alt.edwards25519_epdouble_alt
+  :
+  Array Std.U64 16#usize → Array Std.U64 12#usize → Result (Array Std.U64
+    16#usize)
+
+opaque low.x86_64.edwards25519_pdouble.edwards25519_pdouble
+  :
+  Array Std.U64 12#usize → Array Std.U64 12#usize → Result (Array Std.U64
+    12#usize)
+
+opaque low.x86_64.edwards25519_pdouble_alt.edwards25519_pdouble_alt
+  :
+  Array Std.U64 12#usize → Array Std.U64 12#usize → Result (Array Std.U64
+    12#usize)
+
+opaque low.x86_64.edwards25519_msm_avx2.edwards25519_msm
   :
   Array Std.U64 12#usize → Array Std.U64 4#usize → Array (Array Std.U64
-    4#usize) 2#usize → Array (Array Std.U64 16#usize) 2#usize → Result
-    (Array Std.U64 12#usize)
+    4#usize) 2#usize → Array (Array Std.U64 16#usize) 2#usize →
+    low.x86_64.cpu.HaveAvx2 → Result (Array Std.U64 12#usize)
 
 /-! The wipe, which writes zeros over a slice through raw pointers, which Aeneas
 cannot translate, so this models it: it returns, leaving the zeros `wiped`
@@ -346,6 +415,14 @@ opaque low.x86_64.cpu.HaveBmi2Adx.check
 
 opaque low.x86_64.cpu.HaveAvx512ForRsa.check
   : Result (Option low.x86_64.cpu.HaveAvx512ForRsa)
+
+opaque low.x86_64.cpu.HaveAvx512ForRsa.fp16
+  : low.x86_64.cpu.HaveAvx512ForRsa → Result Bool
+
+/-- Wiping VG's CRT values, which no proof observes: the translation ignores
+drops. -/
+opaque low.x86_64.rsa_ifma.IfmaCrt.Insts.CoreOpsDropDrop.drop
+  : low.x86_64.rsa_ifma.IfmaCrt → Result low.x86_64.rsa_ifma.IfmaCrt
 
 /-- pyca/verified-garbage's AVX-512 IFMA public operation and CRT, behind
 the Rust that sizes their scratch and calls them, which `Rind.X86_64.VgRsa`
@@ -847,6 +924,9 @@ opaque high.curve.P521.Insts.RindHighAgreementAgreePrivateKey.load
 opaque low.x86_64.bignum_negmodinv.bignum_negmodinv
   : Slice Std.U64 → Slice Std.U64 → Result (Slice Std.U64)
 
+opaque low.x86_64.bignum_montifier.bignum_montifier
+  : Slice Std.U64 → Slice Std.U64 → Slice Std.U64 → Result ((Slice Std.U64) × (Slice Std.U64))
+
 opaque low.x86_64.bignum_bitsize.bignum_bitsize
   : Slice Std.U64 → Result Std.Usize
 
@@ -905,8 +985,10 @@ opaque low.x86_64.bignum_copy_row_from_table.bignum_copy_row_from_table
 
 /-! aws-lc's Montgomery products, behind their Rust wrappers, which
 `Rind.X86_64.RsaMont` states: `nohw_spec` restates rind's HOL Light proof of
-`bn_mul_mont_nohw`, `mul4x_spec` its Lean proof of `bn_mul4x_mont`, and
-`AwsLcMont` the others for the theorems that need them. -/
+`bn_mul_mont_nohw`, `mul4x_spec` and `mulx4x_spec` its Lean proofs of
+`bn_mul4x_mont` and `bn_mulx4x_mont`, `sqrx8x_spec` its Lean proof of
+`bn_sqrx8x_mont`, and `AwsLcMont` `bn_sqr8x_mont` without BMI2 and ADX for
+the theorems that need it. -/
 
 opaque low.x86_64.mont.nohw
   :
@@ -1009,12 +1091,6 @@ function pointers Aeneas cannot translate. No ✓ covers ML-KEM-1024. -/
 opaque mid.mlkem.sample_ntt.sample_ntt_8x
   : Array Std.U8 32#usize → Bool → Slice (Array Std.I16 256#usize) →
     Result (Slice (Array Std.I16 256#usize))
-
-/-- ML-KEM-1024's eight-way CBD sampler, which hands the eight-way SHAKE256
-a function pointer Aeneas cannot translate. No ✓ covers ML-KEM-1024. -/
-opaque mid.mlkem.sample_poly_cbd2_8x
-  : Array Std.U8 32#usize → Std.U8 → Std.Usize →
-    Result (Array (Array Std.I16 256#usize) 8#usize)
 
 /-! pyca/verified-garbage's ML-KEM-768 routines, behind their Rust wrappers,
 whose contracts `Rind.X86_64.VgMlKem` states, and the checks for the CPU

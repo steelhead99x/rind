@@ -12,10 +12,11 @@
 //! (<https://bearssl.org/constanttime.html#ghash-for-gcm>), and reduces as
 //! <https://crypto.stanford.edu/RealWorldCrypto/slides/gueron.pdf> describes.
 //! x86_64's 64-bit `mul` and armv7's `umull` take the same time for every
-//! operand, so its timing is independent of the key and data. It is not
-//! formally verified: its correctness rests on its use and testing in
-//! BoringSSL and aws-lc, and on rind's tests of it against SSSE3, the
-//! portable model, Wycheproof, and aws-lc-rs.
+//! operand, so its timing is independent of the key and data. Its 32-bit
+//! configuration is proven in Lean to compute GHASH, in
+//! `proofs/Rind/Armv7/GhashNohw.lean`; the 64-bit one rests on its use and
+//! testing in BoringSSL and aws-lc, and on rind's tests of it against SSSE3,
+//! the portable model, Wycheproof, and aws-lc-rs.
 
 use crate::low;
 

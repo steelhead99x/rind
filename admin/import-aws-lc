@@ -31,7 +31,8 @@ runs on through changes of width, written as bytes, for routines that load
 across its labels. An import's `tables_of` names an earlier import whose
 tables match its own, which it checks and writes none of. Helpers, the local routines the others `bl` to, become
 naked functions of their own, reached the same way, as are the routines of
-another import that a routine `calls`. An `inner` label, an entry point
+another import that a routine `calls`, and its `owned` helpers, which rind
+replaces with its own copies and this writes none of. An `inner` label, an entry point
 inside a routine that falls through to it, does not end the routine, which
 drops the label line; one naming a helper gives that helper its own copy from
 the label on, which opens a CFI frame of its own where the copy closes one.
@@ -410,7 +411,10 @@ IMPORTS_64 = [
         "perlasm": "crypto/fipsmodule/bn/asm/x86_64-mont5.pl",
         "copyright": "Copyright 2011-2016 The OpenSSL Project Authors. All Rights Reserved.",
         "tables": ["inc"],
-        "routines": ["bn_sqr8x_internal", "bn_sqrx8x_internal", "bn_powerx5"],
+        "routines": ["bn_sqr8x_internal", "bn_powerx5"],
+        # rind's structured copy, which `proofs/Rind/X86_64/Sqrx8xInternal.lean`
+        # proves, in `rind/src/low/x86_64/sqrx8x_internal.s`.
+        "owned": ["bn_sqrx8x_internal"],
         "inner": [
             "__bn_sqr8x_internal",
             "__bn_sqr8x_reduction",
@@ -544,7 +548,9 @@ IMPORTS_64 = [
     # ChaCha20-Poly1305 in one pass, with SSE4.1 or AVX2. The routine picks
     # its AVX2 half from aws-lc's `OPENSSL_ia32cap_P`, which rind does not
     # have, so rind's copy reads the same bits from the data block rind
-    # passes it instead, as rind picks each path once per process.
+    # passes it instead, as rind picks each path once per process. rind seals
+    # with AVX2 through its structured copy, which
+    # `admin/chacha20poly1305-x86/generate` writes from the seal's text here.
     {
         "arch": "x86_64",
         "source": "chacha20_poly1305_x86_64.S",
@@ -555,7 +561,9 @@ IMPORTS_64 = [
         "tables": ["chacha20_consts", "and_masks"],
         "packed": ["chacha20_consts"],
         "routines": ["chacha20_poly1305_open", "chacha20_poly1305_seal"],
-        "helpers": ["poly_hash_ad_internal"],
+        # rind's structured copy, which `proofs/Rind/X86_64/PolyHashAdProof.lean`
+        # proves, in `rind/src/low/x86_64/poly_hash_ad.s`.
+        "owned": ["poly_hash_ad_internal"],
         "labels": ["process_extra_in_trailer"],
         "carries": {
             "chacha20_poly1305_open": ["chacha20_poly1305_open_avx2"],
@@ -682,7 +690,9 @@ IMPORTS_64 = [
             + [f"eor v{i}.16b, v{i}.16b, v{i}.16b // vpxor %xmm{i}, %xmm{i}, %xmm{i}" for i in range(8)],
         },
     },
-    # ChaCha20-Poly1305 in one pass, with NEON.
+    # The constants of ChaCha20-Poly1305 in one pass, with NEON. The routines
+    # are rind's structured copy, `low/aarch64/chacha20poly1305/`, which
+    # rind's Lean model lays out, so they are no longer imported.
     {
         "arch": "aarch64",
         "source": "chacha20_poly1305_armv8.S",
@@ -692,8 +702,7 @@ IMPORTS_64 = [
         "notice": ["Copyright (c) 2020, CloudFlare Ltd.", "SPDX-License-Identifier: ISC"],
         "tables": ["chacha20_consts"],
         "packed": ["chacha20_consts"],
-        "routines": ["chacha20_poly1305_seal", "chacha20_poly1305_open"],
-        "helpers": ["poly_hash_ad_internal"],
+        "routines": [],
     },
 ]
 
@@ -983,9 +992,10 @@ def import_64(aws_lc):
                     rs = os.path.join(out_dir, f"{stem}.{operand}.rs")
                     write(rs, header("//", spec, source) + ["["] + rows + ["]"])
 
-            # And a helper with or without it.
+            # And a helper with or without it, rind's own copies included.
             helpers = spec.get("helpers", [])
-            operands |= {s: (name.lstrip("_"), 0) for name in helpers for s in (name, local + name)}
+            owned = spec.get("owned", [])
+            operands |= {s: (name.lstrip("_"), 0) for name in helpers + owned for s in (name, local + name)}
             # Routines of another import that these call.
             operands |= {prefix + name: (name, 0) for name in spec.get("calls", [])}
             # Entries that share a routine's own, by the routine.

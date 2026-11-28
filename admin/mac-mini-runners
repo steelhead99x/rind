@@ -1,40 +1,42 @@
 #!/usr/bin/env bash
-# The Mac mini's two aarch64 merge-queue runners, for queue-build.yml's
-# `Build aarch64 macOS` and `Build aarch64 Linux` jobs. Each runs in a tart VM
-# of its own, as an unprivileged guest user behind a guest firewall that admits
-# only the internet, so a group's code reaches neither the host's account,
-# which holds the maintainer's credentials, nor the host, its LAN, or the
-# tailnet. Run as that account: tart needs no root, and a LaunchAgent per VM
-# keeps it running.
+# The Mac mini's aarch64 merge-queue runner, for queue-build.yml's
+# `Build aarch64 Linux` job. It runs in a tart VM, as an unprivileged guest
+# user behind a guest firewall that admits only the internet, so a group's
+# code reaches neither the host's account, which holds the maintainer's
+# credentials, nor the host, its LAN, or the tailnet. Run as that account:
+# tart needs no root, and a LaunchAgent keeps the VM running. macOS runs at
+# most two macOS VMs at once; the host's other runner (kixel-release-macos)
+# holds one.
 #
-#   admin/mac-mini-runners setup        create, provision, and start both VMs
-#   admin/mac-mini-runners register     register both runners in kixel-ai's
-#                                       rind-queue runner group, reading a
-#                                       registration token on stdin
-#   admin/mac-mini-runners services     install each runner's service from this
-#                                       script, restarting one whose unit changed
-#   admin/mac-mini-runners ssh VM [CMD] a shell in VM (macos or linux)
+#   admin/mac-mini-runners setup      create, provision, and start the VM
+#   admin/mac-mini-runners register   register the runner in kixel-ai's
+#                                     rind-queue runner group, reading a
+#                                     registration token on stdin
+#   admin/mac-mini-runners services   install the runner's service and the
+#                                     VM's LaunchAgent from this script,
+#                                     restarting either if it changed
+#   admin/mac-mini-runners ssh [CMD]  a shell in the VM
 #
 # setup is idempotent: it starts a provisioned VM and leaves it alone. To
-# rebuild one, unload its LaunchAgent, whose KeepAlive restarts the VM and
+# rebuild it, unload its LaunchAgent, whose KeepAlive restarts the VM and
 # whose running VM tart refuses to delete, then delete it, run setup, and
 # register:
-#   launchctl bootout gui/$(id -u)/dev.kixelated.rind-queue-VM
-#   tart delete rind-queue-VM
+#   launchctl bootout gui/$(id -u)/dev.kixelated.rind-queue-linux
+#   tart delete rind-queue-linux
 #
-# register skips a VM whose runner is already configured, and leaves a running
-# service alone, so a rerun for one VM's rebuild never restarts the other,
-# which could kill its job. services is the explicit upgrade: it installs the
-# service when it is missing or this script's differs, which restarts the
-# runner and kills a job in flight, so run it while no queue job is running.
+# register skips a runner already configured, and leaves a running service
+# alone, so a rerun never kills a job. services is the explicit upgrade: it
+# installs the service when it is missing or this script's differs, which
+# restarts the runner and kills a job in flight, so run it while no queue job
+# is running.
 #
 # GitHub drops a runner offline for 14 days, but the guest keeps its local
 # .runner file, which is why register skips it. To register such a runner
 # again, remove the file in its guest first, then run register:
-#   admin/mac-mini-runners ssh VM 'sudo -u runner rm ~runner/actions-runner/.runner'
+#   admin/mac-mini-runners ssh 'sudo -u runner rm ~runner/actions-runner/.runner'
 set -euo pipefail
 
-usage="usage: admin/mac-mini-runners setup | register | services | ssh macos|linux [COMMAND...]"
+usage="usage: admin/mac-mini-runners setup | register | services | ssh [COMMAND...]"
 [[ $(uname -sm) == "Darwin arm64" ]] || {
     echo "error: runs on the Mac mini (macOS on Apple silicon)" >&2
     exit 1
@@ -44,52 +46,46 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 state=${XDG_STATE_HOME:-$HOME/.local/state}/rind-queue
 mkdir -p "$state"
 key=$state/id_ed25519
-vms=(macos linux)
+name=rind-queue-linux
+label=dev.kixelated.$name
+marker=$state/linux.provisioned
 
 # By digest, so a rebuilt VM starts from the same image.
-declare -A image=(
-    [macos]=ghcr.io/cirruslabs/macos-golden-gate-vanilla@sha256:b35695ce30453bcc1db961a476740be72a44c2a2e464b73ece1ff0fcac12a873
-    [linux]=ghcr.io/cirruslabs/ubuntu@sha256:5a6dcb63b71e7120ac2a08733377083232bb8cd3cc1b20e47c518b56f0f17f1f
-)
-# The host's 15 cores and 64 GiB also serve agent sessions, and a group runs
-# both VMs at once, each job about 1,000 CPU-seconds.
+image=ghcr.io/cirruslabs/ubuntu@sha256:5a6dcb63b71e7120ac2a08733377083232bb8cd3cc1b20e47c518b56f0f17f1f
+# The host's 15 cores and 64 GiB also serve agent sessions; a group's job is
+# about 1,000 CPU-seconds.
 cpus=8
 memory_mib=16384
 disk_gb=120
 # The runner updates itself once registered; this is only the first version.
 runner_version=2.338.2
-declare -A runner_package=([macos]=osx-arm64 [linux]=linux-arm64)
-declare -A runner_sha256=(
-    [macos]=25a065af409ffa317ab4d5a3b614dd15fc9c40f2172bc1b35a1b1258e919a388
-    [linux]=670adb2f268fe21dcbb58b3db0e0aa9d5b3bddfe2c651481336e561ff86de945
-)
+runner_package=linux-arm64
+runner_sha256=670adb2f268fe21dcbb58b3db0e0aa9d5b3bddfe2c651481336e561ff86de945
 
 # tart (unfree, FSL) from the nixpkgs revision flake.lock pins, behind a GC
 # root in $state, so the LaunchAgents' path outlives garbage collection.
 tart_tool() {
     local rev
-    rev=$(jq -er .nodes.nixpkgs.locked.rev "$root/flake.lock")
+    # The root's nixpkgs follows quest's, so it is quest's node's input.
+    rev=$(jq -er '.nodes[.nodes[.nodes.root.inputs.quest].inputs.nixpkgs].locked.rev' "$root/flake.lock")
     NIXPKGS_ALLOW_UNFREE=1 nix build --impure --out-link "$state/tart" "github:NixOS/nixpkgs/$rev#tart"
     tart=$state/tart/bin/tart
 }
 
-vm_name() { echo "rind-queue-$1"; }
-
 ssh_vm() {
-    local vm=$1 ip
-    shift
-    ip=$("$tart" ip --wait 120 "$(vm_name "$vm")")
+    local ip
+    ip=$("$tart" ip --wait 120 "$name")
     # A rebuilt guest has a new host key, and only this host reaches its
     # address on tart's NAT network.
     ssh -i "$key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
         -o LogLevel=ERROR -o ConnectTimeout=10 -o ServerAliveInterval=10 -o BatchMode=yes "admin@$ip" "$@"
 }
 
-# Runs the VM under a LaunchAgent, which restarts it if it exits. A VM already
-# running from the same agent is left alone, so setup never kills a job.
+# Runs the VM under a LaunchAgent, which restarts it if it exits. $1 is 1 to
+# reload a loaded agent whose plist changed (explicit maintenance in services),
+# or 0 to leave a loaded agent running so setup never kills a job in flight.
 start() {
-    local vm=$1 label plist new
-    label=dev.kixelated.$(vm_name "$vm")
+    local upgrade=${1:-0} plist new tmp loaded=0
     plist=$HOME/Library/LaunchAgents/$label.plist
     new=$(
         cat <<EOF
@@ -99,32 +95,61 @@ start() {
 <dict>
   <key>Label</key><string>$label</string>
   <key>ProgramArguments</key>
-  <array><string>$tart</string><string>run</string><string>--no-graphics</string><string>$(vm_name "$vm")</string></array>
+  <array><string>$tart</string><string>run</string><string>--no-graphics</string><string>--no-audio</string><string>$name</string></array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
-  <key>StandardOutPath</key><string>$state/$vm.log</string>
-  <key>StandardErrorPath</key><string>$state/$vm.log</string>
+  <key>StandardOutPath</key><string>$state/linux.log</string>
+  <key>StandardErrorPath</key><string>$state/linux.log</string>
 </dict>
 </plist>
 EOF
     )
-    if [[ -e "$plist" && "$(<"$plist")" == "$new" ]] && launchctl print "gui/$(id -u)/$label" >/dev/null 2>&1; then
+    if launchctl print "gui/$(id -u)/$label" >/dev/null 2>&1; then
+        loaded=1
+    fi
+    if [[ "$loaded" = 1 && "$upgrade" = 0 ]]; then
+        return
+    fi
+    if [[ "$loaded" = 1 && -e "$plist" && "$(<"$plist")" == "$new" ]]; then
         return
     fi
     mkdir -p "${plist%/*}"
-    printf '%s\n' "$new" >"$plist"
-    launchctl bootout "gui/$(id -u)/$label" 2>/dev/null || true
+    tmp=$(mktemp "${plist}.XXXXXX")
+    if ! { printf '%s\n' "$new" >"$tmp" && chmod 644 "$tmp"; }; then
+        rm -f "$tmp"
+        return 1
+    fi
+    if [[ "$loaded" = 1 ]]; then
+        local tries=0
+        launchctl bootout "gui/$(id -u)/$label" || true
+        while launchctl print "gui/$(id -u)/$label" >/dev/null 2>&1; do
+            tries=$((tries + 1))
+            [[ $tries -le 1200 ]] || {
+                rm -f "$tmp"
+                echo "error: launchd still holds gui/$(id -u)/$label 120s after bootout" >&2
+                return 1
+            }
+            sleep 0.1
+        done
+    fi
+    if ! mv "$tmp" "$plist"; then
+        rm -f "$tmp"
+        if [[ "$loaded" = 1 && -e "$plist" ]]; then
+            launchctl bootstrap "gui/$(id -u)" "$plist" || true
+        fi
+        return 1
+    fi
     launchctl bootstrap "gui/$(id -u)" "$plist"
 }
 
 # Waits for the VM's SSH, installing the key with the image's password,
 # `admin`, until provisioning replaces that password.
 wait_ssh() {
-    local vm=$1 ip
+    local ip
     for _ in $(seq 60); do
-        ssh_vm "$vm" true 2>/dev/null && return
-        if [[ ! -e "$state/$vm.provisioned" ]]; then
-            ip=$("$tart" ip --wait 120 "$(vm_name "$vm")")
+        ssh_vm true 2>/dev/null && return
+        if [[ ! -e "$marker" ]]; then
+            ip=$("$tart" ip --wait 120 "$name")
             env SSHPASS=admin nix shell nixpkgs#sshpass --command sshpass -e ssh -o StrictHostKeyChecking=no \
                 -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=10 -o PubkeyAuthentication=no \
                 "admin@$ip" 'mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >>~/.ssh/authorized_keys' <"$key.pub" 2>/dev/null &&
@@ -132,65 +157,16 @@ wait_ssh() {
         fi
         sleep 5
     done
-    echo "error: $(vm_name "$vm") does not answer SSH" >&2
+    echo "error: $name does not answer SSH" >&2
     return 1
 }
 
-# The scripts setup and register run in a guest, as admin with passwordless
-# sudo: provision-macos and provision-linux, then provision on both; register
-# with $token and $name set; service-macos or service-linux with $upgrade set.
+# The scripts setup and register run in the guest, as admin with passwordless
+# sudo: provision; register with $token and $name set; service with $upgrade
+# set.
 guest_script() {
     case $1 in
-        provision-macos)
-            cat <<'GUEST'
-set -euo pipefail
-# Changing it takes the old password, and each failed guess counts toward
-# locking the account, so a marker records the change.
-if [ ! -e /var/db/.rind-queue-admin-password ]; then
-    dscl . -passwd /Users/admin admin "$(openssl rand -hex 32)"
-    sudo touch /var/db/.rind-queue-admin-password
-fi
-sudo defaults delete /Library/Preferences/com.apple.loginwindow autoLoginUser 2>/dev/null || true
-sudo rm -f /etc/kcpassword
-printf 'PasswordAuthentication no\nKbdInteractiveAuthentication no\n' | sudo tee /etc/ssh/sshd_config.d/10-key-only.conf >/dev/null
-# Only globally routable addresses, DHCP, and DNS to the host's resolver on
-# tart's network, as the x86_64 runner's egress rules allow on its host; the
-# runner user cannot change them. sshd's replies match the port-22 rule, so
-# loading this keeps the current session. They replace /etc/pf.conf, since
-# macOS's own com.apple.pfctl also loads that file at boot, in no set order
-# with the daemon below, and would otherwise replace these rules with Apple's.
-gw=$(route -n get default | awk '/gateway:/ { print $2 }')
-[ -n "$gw" ] || { echo "error: the guest has no default gateway" >&2; exit 1; }
-sudo tee /etc/pf.conf >/dev/null <<EOF
-set skip on lo0
-pass in all
-pass out quick proto tcp from any port 22
-pass out quick proto { tcp, udp } to { $gw, fe80::/10 } port 53
-pass out quick proto udp to any port 67
-pass out quick inet6 proto icmp6
-block return out quick inet to { 0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16, 224.0.0.0/4, 240.0.0.0/4 }
-block return out quick inet6 to ! 2000::/3
-EOF
-sudo tee /Library/LaunchDaemons/dev.kixelated.rind-queue-pf.plist >/dev/null <<EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key><string>dev.kixelated.rind-queue-pf</string>
-  <key>ProgramArguments</key><array><string>/sbin/pfctl</string><string>-E</string><string>-f</string><string>/etc/pf.conf</string></array>
-  <key>RunAtLoad</key><true/>
-</dict>
-</plist>
-EOF
-sudo launchctl bootout system/dev.kixelated.rind-queue-pf 2>/dev/null || true
-sudo launchctl bootstrap system /Library/LaunchDaemons/dev.kixelated.rind-queue-pf.plist
-if ! id runner >/dev/null 2>&1; then
-    sudo sysadminctl -addUser runner -fullName "Actions runner" -password "$(openssl rand -hex 32)" -home /Users/runner
-    sudo createhomedir -c -u runner >/dev/null
-fi
-GUEST
-            ;;
-        provision-linux)
+        provision)
             cat <<'GUEST'
 set -euo pipefail
 echo "admin:$(openssl rand -hex 32)" | sudo chpasswd
@@ -226,11 +202,6 @@ sudo systemctl restart nftables.service
 id runner >/dev/null 2>&1 || sudo useradd --create-home --shell /bin/bash runner
 # quest gate runs each command in a scope under the runner's systemd manager.
 sudo loginctl enable-linger runner
-GUEST
-            ;;
-        provision)
-            cat <<'GUEST'
-set -euo pipefail
 if [ ! -x /nix/var/nix/profiles/default/bin/nix ]; then
     curl --proto =https --tlsv1.2 -sSfL https://install.determinate.systems/nix | sh -s -- install --no-confirm
 fi
@@ -245,8 +216,7 @@ if ! sudo -u runner test -x "$home/actions-runner/run.sh"; then
     sudo -u runner tar -xzf "/tmp/$tarball" -C "$home/actions-runner"
     rm "/tmp/$tarball"
 fi
-# actions/checkout needs git for the group's history, and macOS has none
-# without Xcode.
+# actions/checkout needs git for the group's history.
 sudo -u runner test -x "$home/.nix-profile/bin/git" ||
     sudo -u runner -i /nix/var/nix/profiles/default/bin/nix profile add nixpkgs#git
 GUEST
@@ -255,7 +225,7 @@ GUEST
             cat <<'GUEST'
 set -euo pipefail
 # config.sh refuses a runner already configured here, before --replace
-# applies, so a rerun for another VM's rebuild skips it.
+# applies, so a rerun skips it.
 if sudo -u runner test -e "$(eval echo ~runner)/actions-runner/.runner"; then
     echo skipped
 else
@@ -265,84 +235,11 @@ else
 fi
 GUEST
             ;;
-        # Each service's environment: the Nix profile's tools, and the Cargo
+        # The service's environment: the Nix profile's tools, and the Cargo
         # settings of the x86_64 queue runner (dotfiles'
         # nixos/modules/ci-runners.nix), which skip incremental state and
         # debug info a queue build never reuses.
-        service-macos)
-            cat <<'GUEST'
-set -euo pipefail
-label=dev.kixelated.rind-queue-runner
-loaded() { sudo launchctl print "system/$label" >/dev/null 2>&1; }
-# A loaded service is left alone unless this is the explicit upgrade, and then
-# unless its files changed: a restart kills the job in flight.
-if loaded && [ "$upgrade" = 0 ]; then
-    echo "running, left alone"
-    exit 0
-fi
-sudo -u runner test -e /Users/runner/actions-runner/.runner || {
-    echo "error: the runner is not configured; run register first" >&2
-    exit 1
-}
-changed=0
-# put DEST MODE: installs stdin as DEST when it differs.
-put() {
-    local tmp
-    tmp=$(mktemp)
-    cat >"$tmp"
-    if ! sudo cmp -s "$tmp" "$1"; then
-        sudo install -o root -g wheel -m "$2" "$tmp" "$1"
-        changed=1
-    fi
-    rm -f "$tmp"
-}
-# The daemon runs this wrapper as root, which loads the firewall and checks it
-# before it starts the runner as runner, so a runner never starts before
-# dev.kixelated.rind-queue-pf, or Apple's own loader, has the rules in: it
-# fails, and launchd restarts it, until they are. Only root writes it.
-sudo mkdir -p /usr/local/libexec
-put /usr/local/libexec/rind-queue-runner 755 <<'WRAP'
-#!/bin/sh
-set -eu
-/sbin/pfctl -E -f /etc/pf.conf
-/sbin/pfctl -s info 2>/dev/null | grep -q '^Status: Enabled' || {
-    echo "error: pf is not enabled; not starting the runner" >&2
-    exit 1
-}
-/sbin/pfctl -s rules 2>/dev/null | grep -q 'to ! 2000::/3' || {
-    echo "error: pf lacks the egress rules; not starting the runner" >&2
-    exit 1
-}
-cd /Users/runner/actions-runner
-exec /usr/bin/sudo -H -u runner /usr/bin/env \
-    PATH=/Users/runner/.nix-profile/bin:/nix/var/nix/profiles/default/bin:/usr/bin:/bin:/usr/sbin:/sbin \
-    CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=false \
-    /Users/runner/actions-runner/run.sh
-WRAP
-put "/Library/LaunchDaemons/$label.plist" 644 <<EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key><string>$label</string>
-  <key>ProgramArguments</key><array><string>/usr/local/libexec/rind-queue-runner</string></array>
-  <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><true/>
-  <key>StandardOutPath</key><string>/var/log/rind-queue-runner.log</string>
-  <key>StandardErrorPath</key><string>/var/log/rind-queue-runner.log</string>
-</dict>
-</plist>
-EOF
-if [ "$changed" = 0 ] && loaded; then
-    echo "unchanged"
-    exit 0
-fi
-sudo launchctl bootout "system/$label" 2>/dev/null || true
-sudo launchctl bootstrap system "/Library/LaunchDaemons/$label.plist"
-echo "installed"
-GUEST
-            ;;
-        service-linux)
+        service)
             cat <<'GUEST'
 set -euo pipefail
 active() { systemctl is-active --quiet rind-queue-runner.service; }
@@ -426,88 +323,79 @@ GUEST
 }
 
 setup() {
-    local vm name
     [[ -e "$key" ]] || ssh-keygen -q -t ed25519 -N '' -C rind-queue -f "$key"
     tart_tool
-    for vm in "${vms[@]}"; do
-        name=$(vm_name "$vm")
-        # tart cannot read a running VM's disk, so look for its directory.
-        if [[ ! -d "${TART_HOME:-$HOME/.tart}/vms/$name" ]]; then
-            rm -f "$state/$vm.provisioned"
-            "$tart" clone "${image[$vm]}" "$name"
-            "$tart" set "$name" --cpu "$cpus" --memory "$memory_mib" --disk-size "$disk_gb"
-        fi
-        start "$vm"
-        wait_ssh "$vm"
-        if [[ ! -e "$state/$vm.provisioned" ]]; then
-            guest_script "provision-$vm" | ssh_vm "$vm" bash -s
-            guest_script provision |
-                ssh_vm "$vm" "PACKAGE=${runner_package[$vm]} VERSION=$runner_version SHA256=${runner_sha256[$vm]} bash -s"
-            touch "$state/$vm.provisioned"
-        fi
-        echo "$name: provisioned at $("$tart" ip "$name")"
-    done
+    # tart cannot read a running VM's disk, so look for its directory.
+    if [[ ! -d "${TART_HOME:-$HOME/.tart}/vms/$name" ]]; then
+        rm -f "$marker"
+        "$tart" clone "$image" "$name"
+        "$tart" set "$name" --cpu "$cpus" --memory "$memory_mib" --disk-size "$disk_gb"
+    fi
+    start
+    wait_ssh
+    if [[ ! -e "$marker" ]]; then
+        guest_script provision |
+            ssh_vm "PACKAGE=$runner_package VERSION=$runner_version SHA256=$runner_sha256 bash -s"
+        touch "$marker"
+    fi
+    echo "$name: provisioned at $("$tart" ip "$name")"
 }
 
-# One token registers both runners. An org owner mints it on the runner
-# group's "New runner" page or with
+# An org owner mints the token on the runner group's "New runner" page or with
 # `gh api -X POST orgs/kixel-ai/actions/runners/registration-token --jq .token`.
 register() {
-    local vm token status
+    local token status
     read -r token
     [[ -n "$token" ]] || {
         echo "error: no registration token on stdin" >&2
         exit 1
     }
     tart_tool
-    for vm in "${vms[@]}"; do
-        provisioned "$vm"
-        wait_ssh "$vm"
-        # The token travels in the script on stdin, out of the host's process
-        # list.
-        status=$(
-            {
-                printf 'token=%q name=%q\n' "$token" "$(vm_name "$vm")"
-                guest_script register
-            } | ssh_vm "$vm" bash -s
-        )
-        if [[ $status == skipped ]]; then
-            echo "$(vm_name "$vm"): skipped (already configured)"
-        else
-            echo "$(vm_name "$vm"): registered"
-        fi
-        install_service "$vm" 0
-    done
+    provisioned
+    wait_ssh
+    # The token travels in the script on stdin, out of the host's process
+    # list.
+    status=$(
+        {
+            printf 'token=%q name=%q\n' "$token" "$name"
+            guest_script register
+        } | ssh_vm bash -s
+    )
+    if [[ $status == skipped ]]; then
+        echo "$name: skipped (already configured)"
+    else
+        echo "$name: registered"
+    fi
+    install_service 0
 }
 
-# Installs each registered runner's service from this script.
+# Installs the registered runner's service and the VM's LaunchAgent from this
+# script.
 services() {
-    local vm
     tart_tool
-    for vm in "${vms[@]}"; do
-        provisioned "$vm"
-        wait_ssh "$vm"
-        install_service "$vm" 1
-    done
+    provisioned
+    wait_ssh
+    install_service 1
+    start 1
 }
 
 provisioned() {
-    [[ -e "$state/$1.provisioned" ]] || {
-        echo "error: $(vm_name "$1") is not provisioned; run setup first" >&2
+    [[ -e "$marker" ]] || {
+        echo "error: $name is not provisioned; run setup first" >&2
         exit 1
     }
 }
 
-# $2 is 1 to replace a running service whose files differ, 0 to leave it.
+# $1 is 1 to replace a running service whose files differ, 0 to leave it.
 install_service() {
     local out
     out=$(
         {
-            printf 'upgrade=%s\n' "$2"
-            guest_script "service-$1"
-        } | ssh_vm "$1" bash -s
+            printf 'upgrade=%s\n' "$1"
+            guest_script service
+        } | ssh_vm bash -s
     )
-    echo "$(vm_name "$1"): service $out"
+    echo "$name: service $out"
 }
 
 case "${1:-}" in
@@ -515,14 +403,9 @@ case "${1:-}" in
     register) register ;;
     services) services ;;
     ssh)
-        vm=${2:?$usage}
-        [[ " ${vms[*]} " == *" $vm "* ]] || {
-            echo "$usage" >&2
-            exit 2
-        }
-        shift 2
+        shift
         tart_tool
-        ssh_vm "$vm" "$@"
+        ssh_vm "$@"
         ;;
     *)
         echo "$usage" >&2

@@ -1,15 +1,15 @@
 name: PR check
 
-# `just ci` over the PR's diff against its base, the same selection and modules
-# the merge queue runs, so a check that fails in the queue (an unstable-rustfmt
-# import order, stale mutants pins) fails here first. Advisory: main's ruleset
-# requires only queue-build.yml's contexts, which no job here replaces. check.yml
-# runs the unscoped suite on main; queue-build.yml runs the group on the queue's
-# own runner.
-#
-# It leaves no module out: `just ci --all` took 14 minutes on a hosted runner
-# with main's Rust cache (rs 10, vartime 5, dart 4, cross 3, the rest in
-# parallel), and a diff reaches fewer.
+# `just ci` over the PR's diff against its base: the merge queue's selection
+# and modules, so a check that fails in the queue (an unstable-rustfmt import
+# order) fails here first, plus the slower ones the queue leaves out, whose
+# result rests on the PR's own diff: the site, the semver marks, the mutants
+# pins, and the binary-size change, which admin/binary-size reports in the job
+# summary without failing on it. Advisory: main's ruleset requires
+# only queue-build.yml's contexts, which no job here replaces. The cross, MSRV,
+# wasm, no-std, adapter-API, constant-time, structure, Python, Dart, OpenSSL,
+# and patch modules gate no merge: check.yml runs every module over main
+# nightly, as `just release-check` does before a release.
 on:
   pull_request:
     branches: [main]

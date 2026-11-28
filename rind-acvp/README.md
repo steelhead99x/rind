@@ -29,8 +29,8 @@ vectors for what the samples lack, once for each CPU path this host can
 take, by the module's load-time `RIND_CPU_DISABLE_<feature>` mask:
 
 ```sh
-cargo test -p rind-acvp --features module
-SLOW_TESTS=1 cargo test --release -p rind-acvp --features module  # with the 15 GiB large-data hash tests
+cargo nextest run -p rind-acvp --features module
+SLOW_TESTS=1 cargo nextest run --release -p rind-acvp --features module  # with the 15 GiB large-data hash tests
 ```
 
 `just ci` runs it when `rind-fips`, `rind-acvp`, or the sample sets change.

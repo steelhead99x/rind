@@ -323,43 +323,45 @@ fn stitched<const ENC: bool>(
     let htable = &table.htable;
     let [htable4 @ .., _, _, _, _, _, _] = htable;
     let (inout, len) = (blocks.as_mut_ptr(), blocks.len());
+    // s2n-bignum's `_alt` kernels' theorems require `inout` plus its length
+    // to be below 2^63, since the kernels compare their pointers as signed
+    // integers. A pointer tag setting bit 63, as Android's heap tags (`0xB4`
+    // in the top byte) do, breaks that, and the four-way kernels, whose
+    // theorems don't, run instead. A slice is at most `isize::MAX` bytes, so
+    // the subtraction can't wrap.
+    let low = inout.addr() < (1 << 63) - size_of_val(blocks);
     // SAFETY: only a `HaveCryptoExt` token builds a `HwKey`, proving the
     // `aes` cpu feature, `eight_way` proves `sha3`, and `inout` is valid
     // for reads and writes of `len` blocks. s2n-bignum's kernels' theorems
     // (`AES*_GCM_*_NOIBT_SUBROUTINE_{CORRECT,SAFE}`) take the input and
     // output either equal, as here, or disjoint, and every other buffer
-    // is a separate borrow. aws-lc runs its AES-192 routines in place too.
-    // The `_alt` kernels' proofs also assume `inout` plus its length is
-    // below 2^63 (`KernelBuffersLow` in the Lean proofs), which holds for
-    // untagged user-space addresses and is not checked here: the kernels
-    // compare their pointers as signed integers, so two pointers with the
-    // same tag still compare in order, but a tag that sets bit 63 leaves the
-    // proof's cover.
+    // is a separate borrow; `low` meets the `_alt` ones' address bound.
+    // aws-lc runs its AES-192 routines in place too.
     unsafe {
         match (key, ENC, table.eight_way) {
-            (HwKey::Aes128(k), true, None) => {
-                aes128_gcm_enc(inout, len, tag, counter, k.round_keys(), htable4)
-            }
-            (HwKey::Aes128(k), false, None) => {
-                aes128_gcm_dec(inout, len, tag, counter, k.round_keys(), htable4)
-            }
-            (HwKey::Aes128(k), true, Some(_)) => {
+            (HwKey::Aes128(k), true, Some(_)) if low => {
                 aes128_gcm_enc_alt(inout, len, tag, counter, k.round_keys(), htable)
             }
-            (HwKey::Aes128(k), false, Some(_)) => {
+            (HwKey::Aes128(k), false, Some(_)) if low => {
                 aes128_gcm_dec_alt(inout, len, tag, counter, k.round_keys(), htable)
             }
-            (HwKey::Aes256(k), true, None) => {
-                aes256_gcm_enc(inout, len, tag, counter, k.round_keys(), htable4)
+            (HwKey::Aes128(k), true, _) => {
+                aes128_gcm_enc(inout, len, tag, counter, k.round_keys(), htable4)
             }
-            (HwKey::Aes256(k), false, None) => {
-                aes256_gcm_dec(inout, len, tag, counter, k.round_keys(), htable4)
+            (HwKey::Aes128(k), false, _) => {
+                aes128_gcm_dec(inout, len, tag, counter, k.round_keys(), htable4)
             }
-            (HwKey::Aes256(k), true, Some(_)) => {
+            (HwKey::Aes256(k), true, Some(_)) if low => {
                 aes256_gcm_enc_alt(inout, len, tag, counter, k.round_keys(), htable)
             }
-            (HwKey::Aes256(k), false, Some(_)) => {
+            (HwKey::Aes256(k), false, Some(_)) if low => {
                 aes256_gcm_dec_alt(inout, len, tag, counter, k.round_keys(), htable)
+            }
+            (HwKey::Aes256(k), true, _) => {
+                aes256_gcm_enc(inout, len, tag, counter, k.round_keys(), htable4)
+            }
+            (HwKey::Aes256(k), false, _) => {
+                aes256_gcm_dec(inout, len, tag, counter, k.round_keys(), htable4)
             }
             (HwKey::Aes192(k), true, Some(_)) => {
                 let (key, ivec, xi) = (k.round_keys(), counter, tag);

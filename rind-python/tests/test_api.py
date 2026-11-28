@@ -541,6 +541,13 @@ class Signature(unittest.TestCase):
             "5fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b",
         )
         key.public_key().verify(b"", signed)
+        from_public = rind_ed25519.KeyPair.from_seed_and_public_key(
+            key.to_seed(), bytes(key.public_key())
+        )
+        self.assertEqual(from_public.sign(b""), signed)
+        wrong_public = rind_ed25519.KeyPair.from_seed(bytes(32)).public_key()
+        with self.assertRaises(pyrind.KeyRejected):
+            rind_ed25519.KeyPair.from_seed_and_public_key(key.to_seed(), bytes(wrong_public))
         with self.assertRaises(pyrind.BadSignature):
             key.public_key().verify(b"x", signed)
         public = rind_ed25519.PublicKey(bytes(key.public_key()))
@@ -721,7 +728,7 @@ class Signature(unittest.TestCase):
             return der(0x30, der_integer(n) + der_integer(e))
 
         e = unsigned(65537)
-        for bits in (1024, 1025, 2047, 8192):
+        for bits in (1017, 1023, 1024, 1025, 2047, 8192):
             n = modulus(bits)
             key = rsa.PublicKey.from_components(unsigned(n), e)
             self.assertEqual(key.modulus_len(), (bits + 7) // 8)
@@ -730,7 +737,7 @@ class Signature(unittest.TestCase):
             self.assertEqual(bytes(rsa.PublicKey(pkcs1(n))), pkcs1(n))
             self.assertEqual(bytes(rsa.PublicKey.from_spki(key.to_spki())), pkcs1(n))
         for n, e_bytes in (
-            (modulus(1023), e),  # below 1024 bits
+            (modulus(1016), e),  # below the 128-byte parse floor
             (modulus(8193), e),  # above 8192 bits
             (modulus(2048) + 1, e),  # even
             (modulus(2048), unsigned(1)),
@@ -765,11 +772,10 @@ class Signature(unittest.TestCase):
             for signature in (b"", bytes(at.modulus_len()), bytes(at.modulus_len() + 1)):
                 with self.assertRaises(pyrind.BadSignature):
                     at.verify(algorithm, b"m", signature)
-            if floor > 1024:
-                below = rsa.PublicKey.from_components(unsigned(modulus(floor - 1)), e)
-                for signature in (b"", bytes(below.modulus_len())):
-                    with self.assertRaises(pyrind.KeyRejected):
-                        below.verify(algorithm, b"m", signature)
+            below = rsa.PublicKey.from_components(unsigned(modulus(floor - 1)), e)
+            for signature in (b"", bytes(below.modulus_len())):
+                with self.assertRaises(pyrind.KeyRejected):
+                    below.verify(algorithm, b"m", signature)
 
         # RSA-OAEP's floor is 2048 bits, refused as the key loads.
         oaep = rsa.OAEP_SHA256
@@ -805,9 +811,17 @@ class Rsa(unittest.TestCase):
         der = theirs.private_bytes(
             serialization.Encoding.DER, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()
         )
-        ours = rsa.DecryptingKey.from_pkcs8(rsa.OAEP_SHA256, der)
+        private_pkcs1 = theirs.private_bytes(
+            serialization.Encoding.DER, serialization.PrivateFormat.TraditionalOpenSSL,
+            serialization.NoEncryption(),
+        )
+        ours = rsa.DecryptingKey.from_pkcs1(rsa.OAEP_SHA256, private_pkcs1)
+        self.assertEqual(ours.to_pkcs8(), der)
+        from_pkcs8 = rsa.DecryptingKey.from_pkcs8(rsa.OAEP_SHA256, ours.to_pkcs8())
         pad = padding.OAEP(padding.MGF1(hashes.SHA256()), hashes.SHA256(), b"label")
-        self.assertEqual(ours.decrypt(theirs.public_key().encrypt(b"secret", pad), label=b"label"), b"secret")
+        ciphertext = theirs.public_key().encrypt(b"secret", pad)
+        for key in (ours, from_pkcs8):
+            self.assertEqual(key.decrypt(ciphertext, label=b"label"), b"secret")
         spki = ours.public_key().to_spki()
         encrypting = rsa.EncryptingKey.from_spki(rsa.OAEP_SHA256, spki)
         pkcs1 = theirs.public_key().public_bytes(serialization.Encoding.DER, serialization.PublicFormat.PKCS1)

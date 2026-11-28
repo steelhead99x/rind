@@ -3,7 +3,9 @@
 //! Each case is loaded through rind-aws-lc-rs and through the locked
 //! aws-lc-rs 1.19.0. Both must accept or both must reject. A rejection must
 //! use the same [`KeyRejected::description_()`]. An acceptance must produce
-//! the same public key, with no recorded differences.
+//! the same public key. The one recorded difference, `check_unbacked`, is the
+//! one rind-aws-lc-rs's README lists: a PKCS#8 EC key on a curve rind cannot
+//! back whose public key is on the curve but not its scalar's.
 
 #![cfg(not(any(miri, target_family = "wasm")))]
 
@@ -52,6 +54,19 @@ impl Report {
                 format!("rind={} aws-lc-rs={}", brief(ours), brief(theirs))
             };
             self.failures.push(format!("MISMATCH {label}: {detail}"));
+        }
+    }
+
+    /// A key rind cannot back and refuses from public facts: rind says
+    /// `WrongAlgorithm` and aws-lc-rs `expected`, the one difference
+    /// rind-aws-lc-rs's README lists.
+    fn check_unbacked(&mut self, label: &str, ours: &str, theirs: &str, expected: &str) {
+        if theirs != expected || ours != "err:WrongAlgorithm" {
+            self.failures.push(format!(
+                "UNBACKED {label}: rind={} aws-lc-rs={} expected rind=err:WrongAlgorithm aws-lc-rs={expected}",
+                brief(ours),
+                brief(theirs)
+            ));
         }
     }
 
@@ -820,9 +835,9 @@ fn ec_mismatched_point() {
 }
 
 /// EC keys on every curve aws-lc builds in, by name and by explicit
-/// parameters, and DSA keys, valid and not, refused with aws-lc-rs's kind,
-/// including a public key on a curve rind cannot back that is not the
-/// scalar's.
+/// parameters, and DSA keys, valid and not, refused with aws-lc-rs's kind;
+/// and the one recorded difference, a public key on a curve rind cannot back
+/// that is not the scalar's.
 #[test]
 fn unbacked_ec_and_dsa() {
     let mut report = Report::new();
@@ -830,9 +845,14 @@ fn unbacked_ec_and_dsa() {
         let fixture = fixture.map(|kind| format!("err:{kind}"));
         check_pkcs8(&mut report, &label, 44, &doc, fixture.as_deref());
     }
-    for (label, doc, fixture) in unbacked::mismatched_private_keys() {
-        let fixture = fixture.map(|kind| format!("err:{kind}"));
-        check_pkcs8(&mut report, &label, 44, &doc, fixture.as_deref());
+    for (label, doc, expected) in unbacked::mismatched_private_keys() {
+        let (ours, theirs) = load_pkcs8(44, &doc);
+        report.check_unbacked(
+            &label,
+            &ours,
+            &theirs,
+            &format!("err:{}", expected.unwrap()),
+        );
     }
     report.finish();
 }

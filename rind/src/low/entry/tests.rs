@@ -441,7 +441,7 @@ fn calls() -> Vec<Call> {
         }),
         call!("ml_dsa::KeyPair::sign ML-DSA-44", 1, || {
             untimed(|| ml_dsa::KeyPair::<ml_dsa::MlDsa44>::from_seed(&[12; 32]).unwrap())
-                .sign(b"message")
+                .sign(&[], b"message")
                 .unwrap()
         }),
         call!("ecdsa::KeyPair::generate P-256", 1, || {

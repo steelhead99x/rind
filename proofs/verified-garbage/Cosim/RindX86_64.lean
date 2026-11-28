@@ -8,9 +8,11 @@ Each distinct instruction and branch of the functions rind proves in its
 x86_64 model (`RindIsa/Proven.lean`), as its machine code
 (`Instr.encode`), run in the model from random states and on the CPU from
 the same ones, as `Cosim/X86_64.lean` runs VG's: VG's own instructions
-through its cases, the others through `extCase`. The padding (`align`,
-`jmpAlign`), which runs as no instructions, is not cosimulated: `admin/prove
-lean` checks its bytes.
+through its cases, the others through `extCase`. A RIP-relative operand,
+whose displacement the linker fills, points at `symTarget` in both: its
+displacement in the machine code, and its static's address in the model.
+The padding (`align`, `jmpAlign`), which runs as no instructions, is not
+cosimulated: `admin/prove lean` checks its bytes.
 -/
 
 namespace Cosim.RindX86_64
@@ -32,24 +34,42 @@ def parts : VG.Code Rind.X86_64.Instr Rind.X86_64.Cond → List Rind.X86_64.Inst
   | .call _ b => parts b
   | .frame i b j => let (is, c) := parts b; (i :: is ++ [j], c)
 
+/-- Where a RIP-relative operand points in every case: in the window,
+32-byte aligned for `vmovdqa`. An instruction's machine code is the same
+in all its cases, so its static is at the same address in each. -/
+def symTarget : Nat := windowBase + 256
+
+/-- `placeMem`, then the operand's address moved down to a multiple of
+`k`, as an aligned access needs. -/
+def placeAligned (img : Img) (m : MemOp) (k : Nat) : Gen Img := do
+  let img ← placeMem img m
+  let a := (img.state.ea m).toNat
+  return img.setReg m.base (((img.gpr[m.base.idx]!).toNat + 2 ^ 64 - a % k) % 2 ^ 64)
+
 /-- A case of one of the instructions VG's model lacks: a start image, and
 the model's end image with its defined flags. The stack's claimed region
-runs from `rsp` to the window's end, and `lo` is 0, so a push or `lea rsp`
-moves `rsp` within the model's bounds; a push starts near the window's top,
-and a memory operand points into the window, 16-byte aligned for `movdqa`.
-Retries a state the model faults in. -/
+runs from `rsp` to the window's end, and `lo` is 0, so a push, a pop, or a
+move of `rsp` stays within the model's bounds; a push starts near the
+window's top and an `add` to `rsp` near its bottom, a memory operand points
+into the window, aligned for `movdqa` and `vmovdqa`, and a static at
+`symTarget`. Retries a state the model faults in. -/
 def extCase (i : Rind.X86_64.Instr) : Gen (Option (Img × Img × Nat)) := do
   for _ in [0:32] do
     let mut img ← randomImg
     match i with
     | .push _ => img := img.setReg .rsp (windowBase + windowLen - 8 * (← below 4))
-    | .lea _ m | .leaRsp m => img ← placeMem img m
-    | .movdqaLoad _ m | .movdqaStore m _ =>
+    | .aluRsp .add _ => img := img.setReg .rsp (windowBase + 8 * (← below 4))
+    | .lea _ m | .leaRsp m | .vpshufdLoad _ m _ | .imulMem _ m | .mulxD32 _ _ m | .pinsrb _ m _
+    | .pextrb m _ _ =>
       img ← placeMem img m
-      let a := (img.state.ea m).toNat
-      img := img.setReg m.base (((img.gpr[m.base.idx]!).toNat + 2 ^ 64 - a % 16) % 2 ^ 64)
+    | .movdqaLoad _ m | .movdqaStore m _ | .xload _ _ (.op m) | .vmovdqaLoad .l128 _ (.op m)
+    | .vmovdqaStore .l128 m _ => img ← placeAligned img m 16
+    | .vmovdqaLoad .l256 _ (.op m) | .vmovdqaStore .l256 m _ => img ← placeAligned img m 32
     | _ => pure ()
     let g := img.state
+    let g := match i.sym with
+      | some m => { g with syms := fun _ => BitVec.ofNat 64 symTarget - BitVec.ofInt 64 m.disp }
+      | none => g
     let sp := (g.gpr .rsp).toNat
     let s : Rind.X86_64.State := ⟨{ g with wr := ⟨g.gpr .rsp, windowBase + windowLen - sp⟩ :: g.wr }, 0⟩
     if let some s' := Rind.X86_64.exec i s then
@@ -57,14 +77,28 @@ def extCase (i : Rind.X86_64.Instr) : Gen (Option (Img × Img × Nat)) := do
       return some (img, out, mask)
   return none
 
-/-- The machine code of `i`. -/
+/-- The machine code of `i` at `insnAddr`: a RIP-relative operand of aws-lc's
+code with its displacement, its last four bytes, the distance from its end
+to `symTarget`; `rip` with its `disp32` 2, then `jmp` (`EB cb`) over the
+static's words, so it reads them. -/
 def code (i : Rind.X86_64.Instr) : Option ByteArray :=
-  (i.encode 0).map fun bs => ⟨(bs.map (·.toUInt8)).toArray⟩
+  (i.encode 0).map fun bs =>
+    let bs : List Nat := match i, i.sym with
+      | .rip _ _ ws, _ =>
+        let tbl := ws.flatMap fun (w : BitVec 64) => Enc.le 8 w.toNat
+        bs.take (bs.length - 4) ++ [2, 0, 0, 0, 0xEB, tbl.length] ++ tbl
+      | _, some _ => bs.take (bs.length - 4) ++ Enc.le 4 (((symTarget : Int) - (insnAddr + bs.length)) % 2 ^ 32).toNat
+      | _, none => bs
+    ⟨(bs.map (·.toUInt8)).toArray⟩
 
-/-- A branch on `c` to `targetAddr`, `jcc rel32`; `ja` is `0F 87`. -/
+/-- A branch on `c` to `targetAddr`, `jcc rel32` (`0F 80+cc`). `jrcxz`
+reaches only a byte's displacement, so `rcxz` branches by it to a `jmp
+rel32` there, past which a `jmp` skips when not taken, and `rcxnz` is the
+`jrcxz` past a `jmp rel32` that `layout` lays it out as. -/
 def jccOf : Rind.X86_64.Cond → ByteArray
-  | .vg c => jcc c
-  | .a => ByteArray.mk #[0x0F, 0x87] ++ rel32 (insnAddr + 6)
+  | .rcxz => ByteArray.mk #[0xE3, 0x02, 0xEB, 0x05, 0xE9] ++ rel32 (insnAddr + 9)
+  | .rcxnz => ByteArray.mk #[0xE3, 0x05, 0xE9] ++ rel32 (insnAddr + 7)
+  | c => ByteArray.mk #[0x0F, (0x80 + c.cc).toUInt8] ++ rel32 (insnAddr + 6)
 
 /-- A case of a branch on `c`: taken or not, and nothing else changed. -/
 def branchOf (c : Rind.X86_64.Cond) : Gen (Option (Img × Bool)) := do

@@ -2,9 +2,8 @@ name: regenerate
 
 # Re-runs every importer and generator at the upstream revision it pins and
 # fails on any difference from the committed code, or on an unlisted change in
-# rind's fork of s2n-bignum. Nightly; the merge queue's build runs it too when
-# a group changes a generator, a pin, the fork, or the flake that pins its
-# tools (`CHECK_QUEUE` in sh/dispatch.sh).
+# rind's fork of s2n-bignum. Nightly, and on dispatch; a generator, pin, or
+# fork change gates no merge on it.
 on:
   schedule:
     - cron: "0 18 * * *"

@@ -27,6 +27,8 @@ opaque low.entry.Entry.new_secret : Result low.entry.Entry
 /-- Whether an entry guard is held, which a debug build asserts. -/
 opaque low.entry.Entry.assert_held : Result Unit
 
+opaque low.entry.Entry.new_public : Result low.entry.Entry
+
 /-! AES, which no proof covers on this backend. -/
 
 opaque mid.aes.Aes.new
@@ -66,6 +68,18 @@ opaque mid.sha3.Sha3Context.finish {R : Std.Usize} {OUT : Std.Usize}
 
 opaque mid.sha3.Sha3Context.Insts.CoreCloneClone.clone {R : Std.Usize} {OUT : Std.Usize}
   : mid.sha3.Sha3Context R OUT → Result (mid.sha3.Sha3Context R OUT)
+
+/-! RSA's DER parsing and encoding, which the ✓ leaves out. -/
+
+opaque high.rsa.pkcs1_components
+  : Slice Std.U8 → Result (core.result.Result ((Slice Std.U8) × (Slice Std.U8)) error.Error)
+
+opaque high.rsa.spki_components
+  : Slice Std.U8 → Result (core.result.Result ((Slice Std.U8) × (Slice Std.U8)) error.Error)
+
+opaque high.rsa.VerifyingKey.to_pkcs1_der
+  : high.rsa.VerifyingKey → Slice Std.U8 →
+    Result ((core.result.Result (Slice Std.U8) error.Error) × (Slice Std.U8))
 
 /-- `ZeroableRef::new`: its value, as `low.generic.zeroise.ZeroableRef` models
 it. -/

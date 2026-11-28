@@ -18,6 +18,10 @@ pub(crate) struct Poly1305 {
 
     /// Unprocessed input
     bw: Blockwise<16>,
+
+    /// r's powers for x86_64's SSE2 lanes, once a run long enough needs them.
+    #[cfg(rind_backend = "x86_64")]
+    powers: Option<crate::low::x86_64::poly1305_sse2::Powers>,
 }
 
 impl Poly1305 {
@@ -34,6 +38,8 @@ impl Poly1305 {
             r,
             s,
             bw: Blockwise::new(),
+            #[cfg(rind_backend = "x86_64")]
+            powers: None,
         }
     }
 
@@ -45,6 +51,13 @@ impl Poly1305 {
         }
 
         let (full_blocks, remainder) = bytes.as_chunks::<16>();
+        #[cfg(rind_backend = "x86_64")]
+        let full_blocks = crate::low::x86_64::poly1305_sse2::blocks(
+            &mut self.h,
+            &self.r,
+            &mut self.powers,
+            full_blocks,
+        );
         for block in full_blocks {
             self.process_whole_block(block);
         }
@@ -187,7 +200,10 @@ fn full_reduce(h: &mut [u64; 3]) {
     let (g2, carry2a) = h[2].overflowing_sub((carry1a as u64).wrapping_add(carry1b as u64));
     let (_, carry2b) = g2.overflowing_sub(3);
 
-    let positive_mask = ((carry2a | carry2b) as u64).wrapping_sub(1);
+    // Through `black_box`, as `ct_copy` takes its mask, or LLVM can turn the
+    // select below into a branch on the secret, as it did once `finish`
+    // inlined into `tests::lanes_match_scalar`.
+    let positive_mask = core::hint::black_box((carry2a | carry2b) as u64).wrapping_sub(1);
     let negative_mask = !positive_mask;
     h[0] = (h[0] & negative_mask) | (g0 & positive_mask);
     h[1] = (h[1] & negative_mask) | (g1 & positive_mask);
@@ -231,6 +247,54 @@ mod tests {
                 p.add_bytes(&message[first..second]);
                 p.add_bytes(&message[second..]);
                 assert_eq!(p.finish(), want, "{first}, {second}");
+            }
+        }
+    }
+
+    /// The tag from `process_whole_block` alone, without x86_64's lanes.
+    fn scalar(key: &[u8; 32], message: &[u8]) -> [u8; 16] {
+        let mut p = Poly1305::new(key);
+        let (blocks, tail) = message.as_chunks::<16>();
+        for block in blocks {
+            p.process_whole_block(block);
+        }
+        if !tail.is_empty() {
+            p.process_last_block(tail);
+        }
+        p.finish()
+    }
+
+    // x86_64 hashes runs of whole blocks in two SSE2 lanes. Every length
+    // through several of their four-block passes, on each side of the
+    // shortest run they take, gives the scalar blocks' tag, starting from
+    // each offset into a block, so a scalar accumulator enters the lanes, and
+    // under keys and messages of all-ones limbs, whose sums carry most, as
+    // well as random ones. `admin/ctgrind` keeps the key and the message
+    // secret, and runs this on the CPU tiers that hash this way.
+    #[test]
+    fn lanes_match_scalar() {
+        let mut rng = super::super::splitmix::Rng(1305);
+        let mut bytes = |n: usize| (0..n).map(|_| rng.next() as u8).collect::<Vec<u8>>();
+        let keys = [[0xff; 32], [0; 32], bytes(32).try_into().unwrap()];
+        let messages = [vec![0xff; 50 * 16], bytes(50 * 16)];
+        for key in &keys {
+            for message in &messages {
+                for len in 0..=message.len() {
+                    let message = &message[..len];
+                    let want = scalar(key, message);
+                    for split in [0, 1, 15, 16, 17, 33, 49, 129] {
+                        let split = split.min(len);
+                        ct::secret_slice(key);
+                        ct::secret_slice(message);
+                        let mut p = Poly1305::new(key);
+                        p.add_bytes(&message[..split]);
+                        p.add_bytes(&message[split..]);
+                        let got = ct::into_public(p.finish());
+                        ct::public_slice(key);
+                        ct::public_slice(message);
+                        assert_eq!(got, want, "{len} bytes split at {split}");
+                    }
+                }
             }
         }
     }

@@ -12,7 +12,8 @@
 #   ab.json, rounds.json, meta.json, run.log, raw/, and
 #   variants/<name>/<host>.json.
 #
-# One binary of rind-bench's mldsa target at the fork's main (which has
+# One binary of rind-bench's mldsa target at the fork's main, its last
+# Criterion commit ($HW_CRITERION_MAIN in lib.sh) unless pinned (it has
 # kixel-ai/rind#863), built with --cfg rind_cpu_disable and run with the
 # tier's denials: RIND_CPU_DISABLE_{avx2,adx,bmi2,sha}=1, OPENSSL_ia32cap
 # for aws-lc, and VG_CPU_FEATURES for VG. Two variants, interleaved with their
@@ -39,7 +40,7 @@ hw_check_idle
 hw_preflight_done
 
 hw_setup
-main=$(hw_rev refs/heads/main "${HW_MAIN_REV:-}")
+main=$(hw_rev refs/heads/main "${HW_MAIN_REV:-$HW_CRITERION_MAIN}")
 git -C "$HW_ROOT" merge-base --is-ancestor c851e38f9 "$main" ||
     hw_die "$main does not have kixel-ai/rind#863 (c851e38f9)"
 hw_say "main $main, pinned to CPU $HW_PIN"

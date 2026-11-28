@@ -3,9 +3,10 @@ name: Check
 permissions:
   contents: read
 
-# The unscoped backstop for the queue's diff-scoped selection: every module
-# on main's head once a day, rather than on each push, which the next push
-# cancelled a quarter of the time.
+# The unscoped backstop for the PR check's and the queue's diff-scoped gate,
+# and the one run of the modules that gate leaves out: every module on main's
+# head once a day, rather than on each push, which the next push cancelled a
+# quarter of the time.
 on:
   schedule:
     - cron: "23 15 * * *"

@@ -6,9 +6,7 @@ name: Queue
 # the land fixer and re-enqueues it at the back of the queue.
 #
 # `main`'s ruleset requires the build's context, `Queue build / Build`, and
-# will require its aarch64 jobs' `Queue build / Build aarch64 macOS` and
-# `Queue build / Build aarch64 Linux` once one merge group has passed both
-# (quest/m0/mac-mini-runner.md); until then they report but gate nothing.
+# its aarch64 job's, `Queue build / Build aarch64 Linux`.
 # GitHub admits a PR to the queue only once its required checks pass on the PR
 # itself, so the build also reports, as skipped, on main pull requests; a
 # skipped job satisfies the requirement.
@@ -48,11 +46,10 @@ jobs:
   # since the group admits that workflow only at refs/heads/main: a PR's edit to
   # queue-build.yml runs only after it lands.
   #
-  # Its jobs report `Queue build / Build` and the aarch64 contexts, which
-  # main's ruleset requires (the aarch64 two once a group has passed them),
-  # with no job after them waiting on a hosted runner. The call runs on pull
-  # requests too, where that job skips without a runner; a call skipped here
-  # would report no context at all.
+  # Its jobs report `Queue build / Build` and `Queue build / Build aarch64
+  # Linux`, which main's ruleset requires, with no job after them waiting on a
+  # hosted runner. The call runs on pull requests too, where those jobs skip
+  # without a runner; a call skipped here would report no context at all.
   build:
     name: Queue build
     if: github.event_name != 'workflow_dispatch'
@@ -75,7 +72,7 @@ jobs:
           SHA: ${{ inputs.sha }}
         run: |
           [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::sha must be a full commit SHA" >&2; exit 1; }
-          for name in 'Queue build / Build' 'Queue build / Build aarch64 macOS' 'Queue build / Build aarch64 Linux'; do
+          for name in 'Queue build / Build' 'Queue build / Build aarch64 Linux'; do
             gh api "repos/$REPO/check-runs" -f "name=$name" -f head_sha="$SHA" -f status=completed -f conclusion=skipped \
               -f "output[title]=$name" -f 'output[summary]=Skipped on the pull request; the merge queue builds the group.' --silent
           done

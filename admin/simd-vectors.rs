@@ -345,6 +345,23 @@ fn main() {
                 format!("{}#32", *x as u32),
             );
         }
+        let x = unsafe {
+            [
+                _mm256_extract_epi64::<0>(a),
+                _mm256_extract_epi64::<1>(a),
+                _mm256_extract_epi64::<2>(a),
+                _mm256_extract_epi64::<3>(a),
+            ]
+        };
+        for (i, x) in x.iter().enumerate() {
+            guard(
+                format!(
+                    "((·.bv) <$> core.core_arch.x86_64.avx._mm256_extract_epi64 ⟨{i}#32⟩ {})",
+                    q256(a)
+                ),
+                format!("{}#64", *x as u64),
+            );
+        }
         let d: [i32; 8] = unsafe { transmute(a) };
         let r = unsafe { _mm256_setr_epi32(d[0], d[1], d[2], d[3], d[4], d[5], d[6], d[7]) };
         let args: Vec<String> = d.iter().map(|x| format!("⟨{}#32⟩", *x as u32)).collect();

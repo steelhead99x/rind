@@ -1,21 +1,23 @@
+//! A 32-byte key for one label, from a PRK extracted once: what a QUIC token
+//! or an e2ee track key derives from a long-lived secret.
+
 #[cfg(target_arch = "xtensa")]
 fn main() {}
 
 #[cfg(not(target_arch = "xtensa"))]
-#[macro_use]
-mod criterion;
-#[cfg(not(target_arch = "xtensa"))]
-use std::hint::black_box;
+mod common;
 
 #[cfg(not(target_arch = "xtensa"))]
-use criterion::measurement::WallTime;
+use common::{Dit, dit};
+
 #[cfg(not(target_arch = "xtensa"))]
-use criterion::{BenchmarkGroup, Criterion, criterion_group, criterion_main};
+const SECRET: [u8; 32] = [0x5a; 32];
+#[cfg(not(target_arch = "xtensa"))]
+const INFO: [&[u8]; 1] = [b"label"];
 
 #[cfg(not(target_arch = "xtensa"))]
 struct Len(usize);
 
-#[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
 #[cfg(not(target_arch = "xtensa"))]
 impl aws_lc_rs::hkdf::KeyType for Len {
     fn len(&self) -> usize {
@@ -28,176 +30,6 @@ impl ring::hkdf::KeyType for Len {
     fn len(&self) -> usize {
         self.0
     }
-}
-
-// A 32-byte key for one label, from a PRK extracted once: what a QUIC token
-// or an e2ee track key derives from a long-lived secret.
-#[cfg(not(target_arch = "xtensa"))]
-fn bench<V: verified_garbage::hmac::HmacHash>(
-    c: &mut Criterion,
-    name: &str,
-    ring: ring::hkdf::Algorithm,
-    aws: aws!(hkdf::Algorithm),
-    ours: &'static rind::hkdf::Algorithm,
-    hash: Hash,
-) {
-    #[cfg(any(target_arch = "xtensa", target_os = "none"))]
-    let _ = &aws;
-    let mut group = c.benchmark_group(name);
-    let secret = [0x5a; 32];
-    let info: [&[u8]; 1] = [b"label"];
-
-    // aws-lc-rs extracts lazily, inside each expansion, so extraction is
-    // timed with one expansion after it.
-    group.bench_function("extract-expand/ring", |b| {
-        b.iter(|| {
-            let mut out = [0u8; 32];
-            ring::hkdf::Salt::new(ring, b"salt")
-                .extract(&secret)
-                .expand(&info, Len(32))
-                .unwrap()
-                .fill(&mut out)
-                .unwrap();
-            black_box(out)
-        })
-    });
-    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
-    group.bench_function("extract-expand/aws-lc-rs", |b| {
-        b.iter(|| {
-            let mut out = [0u8; 32];
-            aws_lc_rs::hkdf::Salt::new(aws, b"salt")
-                .extract(&secret)
-                .expand(&info, Len(32))
-                .unwrap()
-                .fill(&mut out)
-                .unwrap();
-            black_box(out)
-        })
-    });
-    group.bench_function("extract-expand/rind", |b| {
-        let _dit = criterion::rind_dit();
-        b.iter(|| {
-            let mut out = [0u8; 32];
-            rind::hkdf::Salt::new(ours, b"salt")
-                .extract(&secret)
-                .unwrap()
-                .fill(&info, &mut out)
-                .unwrap();
-            black_box(out)
-        })
-    });
-
-    let prk = ring::hkdf::Salt::new(ring, b"salt").extract(&secret);
-    group.bench_function("expand/ring", |b| {
-        b.iter(|| {
-            let mut out = [0u8; 32];
-            prk.expand(&info, Len(32)).unwrap().fill(&mut out).unwrap();
-            black_box(out)
-        })
-    });
-
-    group.bench_function("expand-aes-256-gcm-key/ring", |b| {
-        b.iter(|| {
-            black_box(ring::aead::UnboundKey::from(
-                prk.expand(&info, &ring::aead::AES_256_GCM).unwrap(),
-            ))
-        })
-    });
-
-    // aws-lc-rs's `extract` defers extraction to each expansion, so its PRK
-    // is computed here instead.
-    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
-    let prk_bytes = aws_lc_rs::hmac::sign(
-        &aws_lc_rs::hmac::Key::new(aws.hmac_algorithm(), b"salt"),
-        &secret,
-    );
-    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
-    let prk = aws_lc_rs::hkdf::Prk::new_less_safe(aws, prk_bytes.as_ref());
-    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
-    group.bench_function("expand/aws-lc-rs", |b| {
-        b.iter(|| {
-            let mut out = [0u8; 32];
-            prk.expand(&info, Len(32)).unwrap().fill(&mut out).unwrap();
-            black_box(out)
-        })
-    });
-    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
-    group.bench_function("expand-aes-256-gcm-key/aws-lc-rs", |b| {
-        b.iter(|| {
-            black_box(aws_lc_rs::aead::UnboundKey::from(
-                prk.expand(&info, &aws_lc_rs::aead::AES_256_GCM).unwrap(),
-            ))
-        })
-    });
-
-    let prk = rind::hkdf::Salt::new(ours, b"salt")
-        .extract(&secret)
-        .unwrap();
-    group.bench_function("expand/rind", |b| {
-        let _dit = criterion::rind_dit();
-        b.iter(|| {
-            let mut out = [0u8; 32];
-            prk.fill(&info, &mut out).unwrap();
-            black_box(out)
-        })
-    });
-    group.bench_function("expand-aes-256-gcm-key/rind", |b| {
-        let _dit = criterion::rind_dit();
-        b.iter(|| {
-            black_box(rind::aead::Key::from(
-                prk.expand(&info, &rind::aead::AES_256_GCM).unwrap(),
-            ))
-        })
-    });
-
-    match hash {
-        Hash::Sha1 => rustcrypto::<hkdf::hmac::Hmac<sha1::Sha1>>(&mut group, &secret, info[0]),
-        Hash::Sha256 => rustcrypto::<hkdf::hmac::Hmac<sha2::Sha256>>(&mut group, &secret, info[0]),
-        Hash::Sha384 => rustcrypto::<hkdf::hmac::Hmac<sha2::Sha384>>(&mut group, &secret, info[0]),
-        Hash::Sha512 => rustcrypto::<hkdf::hmac::Hmac<sha2::Sha512>>(&mut group, &secret, info[0]),
-    }
-    libcrux(&mut group, hash, &secret, info[0]);
-    vg::<V>(&mut group, ours, &secret, info[0]);
-    #[cfg(all(
-        feature = "__bench_openssl",
-        target_family = "unix",
-        not(target_arch = "xtensa")
-    ))]
-    openssl(&mut group, hash, &secret, info[0]);
-}
-
-#[derive(Clone, Copy)]
-#[cfg(not(target_arch = "xtensa"))]
-enum Hash {
-    Sha1,
-    Sha256,
-    Sha384,
-    Sha512,
-}
-
-#[cfg(not(target_arch = "xtensa"))]
-fn rustcrypto<H: hkdf::HmacImpl>(
-    group: &mut BenchmarkGroup<'_, WallTime>,
-    secret: &[u8],
-    info: &[u8],
-) {
-    group.bench_function("extract-expand/rustcrypto", |b| {
-        b.iter(|| {
-            let mut out = [0u8; 32];
-            hkdf::GenericHkdf::<H>::new(Some(b"salt"), secret)
-                .expand(info, &mut out)
-                .unwrap();
-            black_box(out)
-        })
-    });
-    let prk = hkdf::GenericHkdf::<H>::new(Some(b"salt"), secret);
-    group.bench_function("expand/rustcrypto", |b| {
-        b.iter(|| {
-            let mut out = [0u8; 32];
-            prk.expand(info, &mut out).unwrap();
-            black_box(out)
-        })
-    });
 }
 
 // verified-garbage has no HKDF, so this is RFC 5869 over its HMAC, as rind's
@@ -219,172 +51,341 @@ fn vg_expand<V: verified_garbage::hmac::HmacHash>(prk: &[u8], info: &[u8], out: 
 }
 
 #[cfg(not(target_arch = "xtensa"))]
-fn vg<V: verified_garbage::hmac::HmacHash>(
-    group: &mut BenchmarkGroup<'_, WallTime>,
-    ours: &'static rind::hkdf::Algorithm,
-    secret: &[u8],
-    info: &[u8],
-) {
-    let extract_expand = |out: &mut [u8]| {
-        let prk = verified_garbage::hmac::Hmac::<V>::mac(b"salt", secret);
-        vg_expand::<V>(prk.as_ref(), info, out);
-    };
-    let mut expected = [0u8; 32];
-    rind::hkdf::Salt::new(ours, b"salt")
-        .extract(secret)
-        .unwrap()
-        .fill(&[info], &mut expected)
-        .unwrap();
-    let mut out = [0u8; 32];
-    extract_expand(&mut out);
-    assert_eq!(out, expected);
-
-    // Each HMAC this glue runs sets DIT on its own, so the held row saves
-    // a toggle per HMAC, not per HKDF call.
-    for (lib, held) in criterion::vg_rows() {
-        group.bench_function(format!("extract-expand/{lib}"), |b| {
-            vg_scope!(
-                held,
-                b.iter(|| {
-                    let mut out = [0u8; 32];
-                    extract_expand(&mut out);
-                    black_box(out)
-                })
-            )
-        });
-    }
-    let prk = verified_garbage::hmac::Hmac::<V>::mac(b"salt", secret);
-    for (lib, held) in criterion::vg_rows() {
-        group.bench_function(format!("expand/{lib}"), |b| {
-            vg_scope!(
-                held,
-                b.iter(|| {
-                    let mut out = [0u8; 32];
-                    vg_expand::<V>(prk.as_ref(), info, &mut out);
-                    black_box(out)
-                })
-            )
-        });
-    }
+fn vg_extract_expand<V: verified_garbage::hmac::HmacHash>(out: &mut [u8]) {
+    let prk = verified_garbage::hmac::Hmac::<V>::mac(b"salt", &SECRET);
+    vg_expand::<V>(prk.as_ref(), INFO[0], out);
 }
 
+/// OpenSSL's HKDF over `md`: it expands `key` as a PRK, or extracts from it
+/// with the salt first.
+#[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
 #[cfg(not(target_arch = "xtensa"))]
-fn libcrux(group: &mut BenchmarkGroup<'_, WallTime>, hash: Hash, secret: &[u8], info: &[u8]) {
-    use libcrux_hkdf::{Algorithm, expand, extract, hkdf};
-    let (algorithm, prk_len) = match hash {
-        Hash::Sha1 => return,
-        Hash::Sha256 => (Algorithm::Sha256, 32),
-        Hash::Sha384 => (Algorithm::Sha384, 48),
-        Hash::Sha512 => (Algorithm::Sha512, 64),
-    };
-    group.bench_function("extract-expand/libcrux", |b| {
-        b.iter(|| {
-            let mut out = [0u8; 32];
-            hkdf(algorithm, &mut out, b"salt", secret, info).unwrap();
-            black_box(out)
-        })
-    });
-    let mut prk = [0u8; 64];
-    let prk = &mut prk[..prk_len];
-    extract(algorithm, prk, b"salt", secret).unwrap();
-    group.bench_function("expand/libcrux", |b| {
-        b.iter(|| {
-            let mut out = [0u8; 32];
-            expand(algorithm, &mut out, prk, info).unwrap();
-            black_box(out)
-        })
-    });
-}
-
-#[cfg(all(
-    feature = "__bench_openssl",
-    target_family = "unix",
-    not(target_arch = "xtensa")
-))]
-#[cfg(not(target_arch = "xtensa"))]
-fn openssl(group: &mut BenchmarkGroup<'_, WallTime>, hash: Hash, secret: &[u8], info: &[u8]) {
-    use openssl::md::Md;
+fn openssl_derive(md: &openssl::md::MdRef, expand_only: bool, key: &[u8]) -> [u8; 32] {
     use openssl::pkey::Id;
     use openssl::pkey_ctx::{HkdfMode, PkeyCtx};
-    let md = match hash {
-        Hash::Sha1 => Md::sha1(),
-        Hash::Sha256 => Md::sha256(),
-        Hash::Sha384 => Md::sha384(),
-        Hash::Sha512 => Md::sha512(),
-    };
-    // Expands `key` as a PRK, or extracts from it with the salt first.
-    let derive = |expand_only: bool, key: &[u8]| {
-        let mut out = [0u8; 32];
-        let mut ctx = PkeyCtx::new_id(Id::HKDF).unwrap();
-        ctx.derive_init().unwrap();
-        ctx.set_hkdf_md(md).unwrap();
-        if expand_only {
-            ctx.set_hkdf_mode(HkdfMode::EXPAND_ONLY).unwrap();
-        } else {
-            ctx.set_hkdf_salt(b"salt").unwrap();
+    let mut out = [0u8; 32];
+    let mut ctx = PkeyCtx::new_id(Id::HKDF).unwrap();
+    ctx.derive_init().unwrap();
+    ctx.set_hkdf_md(md).unwrap();
+    if expand_only {
+        ctx.set_hkdf_mode(HkdfMode::EXPAND_ONLY).unwrap();
+    } else {
+        ctx.set_hkdf_salt(b"salt").unwrap();
+    }
+    ctx.set_hkdf_key(key).unwrap();
+    ctx.add_hkdf_info(INFO[0]).unwrap();
+    ctx.derive(Some(&mut out)).unwrap();
+    out
+}
+
+/// One hash's rows. `$hkdf` names the ring and aws-lc-rs algorithm, `$hmac`
+/// aws-lc-rs's HMAC over the same hash, and `$md` OpenSSL's digest;
+/// libcrux's rows, where it has the hash, take its algorithm and PRK length.
+macro_rules! rows {
+    (
+        $hkdf:ident, $hmac:ident, $rind:path, $rustcrypto:ty, $vg:ty, $md:ident
+        $(, libcrux($libcrux:ident, $prk_len:literal))?
+    ) => {
+        // aws-lc-rs extracts lazily, inside each expansion, so extraction is
+        // timed with one expansion after it.
+        mod extract_expand {
+            use super::*;
+            use swole::bench;
+
+            #[bench]
+            fn ring() -> [u8; 32] {
+                let mut out = [0u8; 32];
+                ring::hkdf::Salt::new(ring::hkdf::$hkdf, b"salt")
+                    .extract(&SECRET)
+                    .expand(&INFO, Len(32))
+                    .unwrap()
+                    .fill(&mut out)
+                    .unwrap();
+                out
+            }
+
+            #[bench]
+            fn aws_lc_rs() -> [u8; 32] {
+                let mut out = [0u8; 32];
+                aws_lc_rs::hkdf::Salt::new(aws_lc_rs::hkdf::$hkdf, b"salt")
+                    .extract(&SECRET)
+                    .expand(&INFO, Len(32))
+                    .unwrap()
+                    .fill(&mut out)
+                    .unwrap();
+                out
+            }
+
+
+            #[bench(setup = dit)]
+            fn rind(_: &Dit<()>) -> [u8; 32] {
+                let mut out = [0u8; 32];
+                rind::hkdf::Salt::new(&$rind, b"salt")
+                    .extract(&SECRET)
+                    .unwrap()
+                    .fill(&INFO, &mut out)
+                    .unwrap();
+                out
+            }
+
+            #[bench]
+            fn rustcrypto() -> [u8; 32] {
+                let mut out = [0u8; 32];
+                hkdf::GenericHkdf::<$rustcrypto>::new(Some(b"salt"), &SECRET)
+                    .expand(INFO[0], &mut out)
+                    .unwrap();
+                out
+            }
+
+            $(
+                #[bench]
+                fn libcrux() -> [u8; 32] {
+                    let mut out = [0u8; 32];
+                    libcrux_hkdf::hkdf(
+                        libcrux_hkdf::Algorithm::$libcrux,
+                        &mut out,
+                        b"salt",
+                        &SECRET,
+                        INFO[0],
+                    )
+                    .unwrap();
+                    out
+                }
+            )?
+
+            /// Checks verified-garbage derives the key rind does.
+            fn vg_checked() {
+                let mut expected = [0u8; 32];
+                rind::hkdf::Salt::new(&$rind, b"salt")
+                    .extract(&SECRET)
+                    .unwrap()
+                    .fill(&INFO, &mut expected)
+                    .unwrap();
+                let mut out = [0u8; 32];
+                vg_extract_expand::<$vg>(&mut out);
+                assert_eq!(out, expected);
+            }
+
+            #[bench(setup = vg_checked)]
+            fn verified_garbage(_: &()) -> [u8; 32] {
+                let mut out = [0u8; 32];
+                vg_extract_expand::<$vg>(&mut out);
+                out
+            }
+
+            #[cfg(target_arch = "aarch64")]
+            #[bench(setup = vg_checked)]
+            fn verified_garbage_dit_held(input: &(), iterations: swole::Iterations) -> std::time::Duration {
+                common::vg_dit_held(iterations, || verified_garbage(input))
+            }
+
+            #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+            #[bench]
+            fn openssl() -> [u8; 32] {
+                openssl_derive(openssl::md::Md::$md(), false, &SECRET)
+            }
         }
-        ctx.set_hkdf_key(key).unwrap();
-        ctx.add_hkdf_info(info).unwrap();
-        ctx.derive(Some(&mut out)).unwrap();
-        out
+
+        mod expand {
+            use super::*;
+            use swole::bench;
+
+            pub(super) fn ring_prk() -> ring::hkdf::Prk {
+                ring::hkdf::Salt::new(ring::hkdf::$hkdf, b"salt").extract(&SECRET)
+            }
+
+            #[bench(setup = ring_prk)]
+            fn ring(prk: &ring::hkdf::Prk) -> [u8; 32] {
+                let mut out = [0u8; 32];
+                prk.expand(&INFO, Len(32)).unwrap().fill(&mut out).unwrap();
+                out
+            }
+
+            // aws-lc-rs's `extract` defers extraction to each expansion, so
+            // its PRK is computed here instead.
+            pub(super) fn aws_prk() -> aws_lc_rs::hkdf::Prk {
+                let prk = aws_lc_rs::hmac::sign(
+                    &aws_lc_rs::hmac::Key::new(aws_lc_rs::hmac::$hmac, b"salt"),
+                    &SECRET,
+                );
+                aws_lc_rs::hkdf::Prk::new_less_safe(aws_lc_rs::hkdf::$hkdf, prk.as_ref())
+            }
+
+            #[bench(setup = aws_prk)]
+            fn aws_lc_rs(prk: &aws_lc_rs::hkdf::Prk) -> [u8; 32] {
+                let mut out = [0u8; 32];
+                prk.expand(&INFO, Len(32)).unwrap().fill(&mut out).unwrap();
+                out
+            }
+
+            pub(super) fn rind_prk() -> Dit<rind::hkdf::Prk> {
+                Dit::hold(rind::hkdf::Salt::new(&$rind, b"salt").extract(&SECRET).unwrap())
+            }
+
+            #[bench(setup = rind_prk)]
+            fn rind(prk: &Dit<rind::hkdf::Prk>) -> [u8; 32] {
+                let mut out = [0u8; 32];
+                prk.fill(&INFO, &mut out).unwrap();
+                out
+            }
+
+            fn rustcrypto_prk() -> hkdf::GenericHkdf<$rustcrypto> {
+                hkdf::GenericHkdf::<$rustcrypto>::new(Some(b"salt"), &SECRET)
+            }
+
+            #[bench(setup = rustcrypto_prk)]
+            fn rustcrypto(prk: &hkdf::GenericHkdf<$rustcrypto>) -> [u8; 32] {
+                let mut out = [0u8; 32];
+                prk.expand(INFO[0], &mut out).unwrap();
+                out
+            }
+
+            $(
+                fn libcrux_prk() -> [u8; $prk_len] {
+                    let mut prk = [0u8; $prk_len];
+                    libcrux_hkdf::extract(
+                        libcrux_hkdf::Algorithm::$libcrux,
+                        &mut prk,
+                        b"salt",
+                        &SECRET,
+                    )
+                    .unwrap();
+                    prk
+                }
+
+                #[bench(setup = libcrux_prk)]
+                fn libcrux(prk: &[u8; $prk_len]) -> [u8; 32] {
+                    let mut out = [0u8; 32];
+                    libcrux_hkdf::expand(libcrux_hkdf::Algorithm::$libcrux, &mut out, prk, INFO[0])
+                        .unwrap();
+                    out
+                }
+            )?
+
+            fn vg_prk() -> <$vg as verified_garbage::hashes::HashFunction>::Output {
+                verified_garbage::hmac::Hmac::<$vg>::mac(b"salt", &SECRET)
+            }
+
+            #[bench(setup = vg_prk)]
+            fn verified_garbage(prk: &<$vg as verified_garbage::hashes::HashFunction>::Output) -> [u8; 32] {
+                let mut out = [0u8; 32];
+                vg_expand::<$vg>(prk.as_ref(), INFO[0], &mut out);
+                out
+            }
+
+            #[cfg(target_arch = "aarch64")]
+            #[bench(setup = vg_prk)]
+            fn verified_garbage_dit_held(prk: &<$vg as verified_garbage::hashes::HashFunction>::Output, iterations: swole::Iterations) -> std::time::Duration {
+                common::vg_dit_held(iterations, || verified_garbage(prk))
+            }
+
+            #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+            fn openssl_prk() -> aws_lc_rs::hmac::Tag {
+                aws_lc_rs::hmac::sign(
+                    &aws_lc_rs::hmac::Key::new(aws_lc_rs::hmac::$hmac, b"salt"),
+                    &SECRET,
+                )
+            }
+
+            #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+            #[bench(setup = openssl_prk)]
+            fn openssl(prk: &aws_lc_rs::hmac::Tag) -> [u8; 32] {
+                openssl_derive(openssl::md::Md::$md(), true, prk.as_ref())
+            }
+        }
+
+        mod expand_aes_256_gcm_key {
+            use std::hint::black_box;
+
+            use super::expand::{aws_prk, ring_prk, rind_prk};
+            use super::*;
+            use swole::bench;
+
+            // Each key drops inside the call, so its wiping is timed too.
+            #[bench(setup = ring_prk)]
+            fn ring(prk: &ring::hkdf::Prk) {
+                black_box(ring::aead::UnboundKey::from(
+                    prk.expand(&INFO, &ring::aead::AES_256_GCM).unwrap(),
+                ));
+            }
+
+            #[bench(setup = aws_prk)]
+            fn aws_lc_rs(prk: &aws_lc_rs::hkdf::Prk) {
+                black_box(aws_lc_rs::aead::UnboundKey::from(
+                    prk.expand(&INFO, &aws_lc_rs::aead::AES_256_GCM).unwrap(),
+                ));
+            }
+
+            #[bench(setup = rind_prk)]
+            fn rind(prk: &Dit<rind::hkdf::Prk>) {
+                black_box(rind::aead::Key::from(
+                    prk.expand(&INFO, &rind::aead::AES_256_GCM).unwrap(),
+                ));
+            }
+        }
     };
-    group.bench_function("extract-expand/openssl", |b| {
-        b.iter(|| black_box(derive(false, secret)))
-    });
-    let prk = aws_lc_rs::hmac::sign(
-        &aws_lc_rs::hmac::Key::new(
-            match hash {
-                Hash::Sha1 => aws_lc_rs::hmac::HMAC_SHA1_FOR_LEGACY_USE_ONLY,
-                Hash::Sha256 => aws_lc_rs::hmac::HMAC_SHA256,
-                Hash::Sha384 => aws_lc_rs::hmac::HMAC_SHA384,
-                Hash::Sha512 => aws_lc_rs::hmac::HMAC_SHA512,
-            },
-            b"salt",
-        ),
-        secret,
-    );
-    group.bench_function("expand/openssl", |b| {
-        b.iter(|| black_box(derive(true, prk.as_ref())))
-    });
 }
 
 #[cfg(not(target_arch = "xtensa"))]
-fn hkdf(c: &mut Criterion) {
-    bench::<verified_garbage::hashes::sha1::Sha1>(
-        c,
-        "hkdf-sha1",
-        ring::hkdf::HKDF_SHA1_FOR_LEGACY_USE_ONLY,
-        aws!(hkdf::HKDF_SHA1_FOR_LEGACY_USE_ONLY),
-        &rind::hkdf::legacy::HKDF_SHA1,
-        Hash::Sha1,
-    );
-    bench::<verified_garbage::hashes::sha256::Sha256>(
-        c,
-        "hkdf-sha256",
-        ring::hkdf::HKDF_SHA256,
-        aws!(hkdf::HKDF_SHA256),
-        &rind::hkdf::HKDF_SHA256,
-        Hash::Sha256,
-    );
-    bench::<verified_garbage::hashes::sha384::Sha384>(
-        c,
-        "hkdf-sha384",
-        ring::hkdf::HKDF_SHA384,
-        aws!(hkdf::HKDF_SHA384),
-        &rind::hkdf::HKDF_SHA384,
-        Hash::Sha384,
-    );
-    bench::<verified_garbage::hashes::sha512::Sha512>(
-        c,
-        "hkdf-sha512",
-        ring::hkdf::HKDF_SHA512,
-        aws!(hkdf::HKDF_SHA512),
-        &rind::hkdf::HKDF_SHA512,
-        Hash::Sha512,
+mod hkdf_sha1 {
+    use super::*;
+
+    rows!(
+        HKDF_SHA1_FOR_LEGACY_USE_ONLY,
+        HMAC_SHA1_FOR_LEGACY_USE_ONLY,
+        rind::hkdf::legacy::HKDF_SHA1,
+        hkdf::hmac::Hmac<sha1::Sha1>,
+        verified_garbage::hashes::sha1::Sha1,
+        sha1
     );
 }
 
 #[cfg(not(target_arch = "xtensa"))]
-criterion_group!(benches, hkdf);
+mod hkdf_sha256 {
+    use super::*;
+
+    rows!(
+        HKDF_SHA256,
+        HMAC_SHA256,
+        rind::hkdf::HKDF_SHA256,
+        hkdf::hmac::Hmac<sha2::Sha256>,
+        verified_garbage::hashes::sha256::Sha256,
+        sha256,
+        libcrux(Sha256, 32)
+    );
+}
+
 #[cfg(not(target_arch = "xtensa"))]
-criterion_main!(benches);
+mod hkdf_sha384 {
+    use super::*;
+
+    rows!(
+        HKDF_SHA384,
+        HMAC_SHA384,
+        rind::hkdf::HKDF_SHA384,
+        hkdf::hmac::Hmac<sha2::Sha384>,
+        verified_garbage::hashes::sha384::Sha384,
+        sha384,
+        libcrux(Sha384, 48)
+    );
+}
+
+#[cfg(not(target_arch = "xtensa"))]
+mod hkdf_sha512 {
+    use super::*;
+
+    rows!(
+        HKDF_SHA512,
+        HMAC_SHA512,
+        rind::hkdf::HKDF_SHA512,
+        hkdf::hmac::Hmac<sha2::Sha512>,
+        verified_garbage::hashes::sha512::Sha512,
+        sha512,
+        libcrux(Sha512, 64)
+    );
+}
+
+#[cfg(not(target_arch = "xtensa"))]
+fn main() {
+    swole::main();
+}

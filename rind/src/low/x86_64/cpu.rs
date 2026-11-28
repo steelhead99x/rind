@@ -179,7 +179,35 @@ impl HaveAvx512ForAesGcm {
             false => None,
         }
     }
+
+    /// pyca/verified-garbage's AVX-512 AES-GCM, where it is faster for long
+    /// messages: on AMD's family 1Ah (Zen 5), and nowhere else measured.
+    pub(crate) fn vg(self) -> Option<HaveAvx512ForVgAesGcm> {
+        has(FAMILY_1AH).then(|| self.vg_anywhere())
+    }
+
+    /// pyca/verified-garbage's AVX-512 AES-GCM, which runs on every CPU this
+    /// token is for, whether or not it is faster there.
+    pub(crate) fn vg_anywhere(self) -> HaveAvx512ForVgAesGcm {
+        const {
+            assert!(
+                (AES_GCM_BASE | AVX512F | AVX512BW | AVX512VL | VPCLMULQDQ | VAES) & VG_AES_GCM
+                    == VG_AES_GCM
+            )
+        };
+        HaveAvx512ForVgAesGcm(())
+    }
 }
+
+/// Proof that the CPU has what pyca/verified-garbage's AVX-512 AES-GCM runs:
+/// SSSE3, PCLMULQDQ, AVX, AVX2, AVX-512 F and BW, VAES, VPCLMULQDQ, and
+/// AES-NI, its `_FEATURES` for seal and open, of which its key preparation
+/// needs a subset.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct HaveAvx512ForVgAesGcm(());
+
+const VG_AES_GCM: u32 =
+    SSSE3 | PCLMULQDQ | AVX | AVX2 | AVX512F | AVX512BW | VAES | VPCLMULQDQ | AES;
 
 /// Token type reflecting the check for CPU features needed for VAES-AES-GCM
 /// on 256-bit vectors.
@@ -238,8 +266,34 @@ pub(crate) struct HaveAvx512ForVgMlKem(());
 
 impl HaveAvx512ForVgMlKem {
     pub(crate) fn check() -> Option<Self> {
+        #[cfg(test)]
+        if FORCE_AVX512_FOR_VG_MLKEM.get() {
+            return Some(Self(()));
+        }
         has(AVX | AVX2 | AVX512F | AVX512BW | AVX512VL).then_some(Self(()))
     }
+}
+
+#[cfg(test)]
+std::thread_local! {
+    /// Whether [`HaveAvx512ForVgMlKem::check`] passes on this thread whatever
+    /// the CPU has: for `admin/ct-binsec`, which stubs VG's AVX-512 routines
+    /// by their contracts, natively too, so that BINSEC checks the Rust
+    /// around them on a CPU without AVX-512 and with AVX-512 denied. Set
+    /// only by [`force_avx512_for_vg_mlkem`].
+    static FORCE_AVX512_FOR_VG_MLKEM: core::cell::Cell<bool> = const { core::cell::Cell::new(false) };
+}
+
+/// Makes [`HaveAvx512ForVgMlKem::check`] pass on this thread from now on,
+/// in a test `admin/ct-binsec` runs: it sets `RIND_CT_BINSEC` and stubs VG's
+/// AVX-512 routines, so none runs on a CPU without AVX-512 F, BW, and VL.
+#[cfg(test)]
+pub(crate) fn force_avx512_for_vg_mlkem() {
+    assert!(
+        std::env::var_os("RIND_CT_BINSEC").is_some(),
+        "only admin/ct-binsec, which stubs VG's AVX-512 routines, may force them"
+    );
+    FORCE_AVX512_FOR_VG_MLKEM.set(true);
 }
 
 /// Proof that the CPU has what RSA with AVX-512 IFMA runs: AVX-512 F, VL,
@@ -345,6 +399,45 @@ impl HaveIfmaForVgChaCha20Poly1305 {
     pub(crate) fn check() -> Option<Self> {
         has(AVX | AVX2 | AVX512F | AVX512VL | AVX512IFMA).then_some(Self(()))
     }
+
+    /// As [`check`](Self::check), but not for a seal of fewer than 800 bytes
+    /// on AMD's family 19h: of its CPUs only Zen 4 has AVX-512 IFMA, and
+    /// there aws-lc's AVX2 one pass seals those faster, by up to 1.14x (see
+    /// [`runs_vg`]).
+    pub(crate) fn check_seal(len: usize) -> Option<Self> {
+        if runs_vg(has(FAMILY_19H), len, 800) {
+            Self::check()
+        } else {
+            None
+        }
+    }
+
+    /// As [`check_seal`](Self::check_seal), for an open of fewer than 512
+    /// bytes.
+    pub(crate) fn check_open(len: usize) -> Option<Self> {
+        if runs_vg(has(FAMILY_19H), len, 512) {
+            Self::check()
+        } else {
+            None
+        }
+    }
+}
+
+/// Whether VG's ChaCha20-Poly1305 runs a message of `len` bytes, where it
+/// runs none on AMD's family 19h below `vg_from`. In `bench` runs on a Zen 4
+/// EPYC 9V74, VG's routines under rind's glue took 1.07 to 1.04 of aws-lc's
+/// AVX2 routine's time sealing 32 to 512 bytes and 1.05 to 1.11 opening up to
+/// 256, and 0.99 and 0.90 at 1200, so from there they run. A sweep of 16 to
+/// 16384 bytes put VG at 1.03 to 1.14 of aws-lc's through 320 bytes, both
+/// ways, but at 0.90 to 0.92 sealing 384 to 448 bytes, and opening at 1.06 to
+/// 1.13 to 448 and 0.78 to 1.00 from 512 but for 992 to 1088, up to 1.11;
+/// sealing from 800 bytes it took 0.78 to 1.05. The two codes' costs step at
+/// different blocks, which makes the crossover ragged; each limit leaves the
+/// benchmark's sizes on the faster side. Every other CPU with AVX-512 IFMA
+/// runs VG's at every length: on Granite Rapids and Zen 5 it matched or beat
+/// aws-lc's at each size measured.
+fn runs_vg(family_19h: bool, len: usize, vg_from: usize) -> bool {
+    !family_19h || len >= vg_from
 }
 
 /// Proof that the CPU has AES-NI and PCLMULQDQ, and the SSSE3 and SSE4.1
@@ -466,6 +559,10 @@ const AVX512IFMA: u32 = 1 << 19;
 const BMI1: u32 = 1 << 20;
 const AVX512FP16: u32 = 1 << 22;
 const INTEL: u32 = 1 << 30;
+/// AMD's family 19h (Zen 3 and 4), by CPUID leaf 1's family and vendor.
+const FAMILY_19H: u32 = 1 << 21;
+/// AMD's family 1Ah (Zen 5), likewise.
+const FAMILY_1AH: u32 = 1 << 23;
 /// What rind's AVX2 kernels use, for [`HaveAvx2`].
 const AVX2_KERNELS: u32 = AVX | AVX2 | BMI1 | BMI2 | POPCNT | SSSE3;
 /// What the AES-GCM kernels for wider vectors build on: the AVX2 ISA, AES-NI
@@ -562,21 +659,28 @@ fn detect() -> u32 {
         0
     };
     let found = decode(registers()) | ENABLED | valgrind;
-    let intel = if found & INTEL != 0 && !super::super::cpu_denied("intel") {
-        INTEL
-    } else {
-        0
-    };
+    let vendor = [
+        (INTEL, "intel"),
+        (FAMILY_19H, "family19h"),
+        (FAMILY_1AH, "family1ah"),
+    ]
+    .into_iter()
+    .filter(|&(bit, name)| found & bit != 0 && !super::super::cpu_denied(name))
+    .fold(0, |features, (bit, _)| features | bit);
     NAMED
         .iter()
         .filter(|&&(bit, name)| found & bit != 0 && !super::super::cpu_denied(name))
-        .fold(intel, |features, &(bit, _)| features | bit)
+        .fold(vendor, |features, &(bit, _)| features | bit)
 }
 
 /// The `cpuid` and `xgetbv` registers that name the features rind tests for.
 #[derive(Clone, Copy, Default)]
 struct Registers {
     intel: bool,
+    amd: bool,
+    /// Leaf 1's EAX, which holds the CPU's family, or zero where the CPU has
+    /// no leaf 1.
+    eax1: u32,
     /// Leaf 1's ECX, or zero where the CPU has no leaf 1.
     ecx1: u32,
     /// Leaf 7's EBX, ECX, and EDX, or zero where the CPU has no leaf 7.
@@ -601,9 +705,12 @@ fn registers() -> Registers {
     let leaf0 = unsafe { __cpuid(0) };
     // "GenuineIntel", spread over ebx, edx, and ecx.
     found.intel = (leaf0.ebx, leaf0.edx, leaf0.ecx) == (0x756e_6547, 0x4965_6e69, 0x6c65_746e);
+    // "AuthenticAMD".
+    found.amd = (leaf0.ebx, leaf0.edx, leaf0.ecx) == (0x6874_7541, 0x6974_6e65, 0x444d_4163);
     if leaf0.eax >= 1 {
         // SAFETY: as above.
-        found.ecx1 = unsafe { __cpuid(1) }.ecx;
+        let leaf1 = unsafe { __cpuid(1) };
+        (found.eax1, found.ecx1) = (leaf1.eax, leaf1.ecx);
     }
     if leaf0.eax >= 7 {
         // SAFETY: as above.
@@ -633,6 +740,15 @@ fn decode(r: Registers) -> u32 {
         }
     };
     set(r.intel, INTEL);
+    // The family is leaf 1's EAX bits 11:8, plus bits 27:20 where those are 0xf.
+    let family = (r.eax1 >> 8 & 0xf)
+        + if r.eax1 >> 8 & 0xf == 0xf {
+            r.eax1 >> 20 & 0xff
+        } else {
+            0
+        };
+    set(r.amd && family == 0x19, FAMILY_19H);
+    set(r.amd && family == 0x1a, FAMILY_1AH);
     set(bit(r.ecx1, 1), PCLMULQDQ);
     set(bit(r.ecx1, 9), SSSE3);
     set(bit(r.ecx1, 19), SSE41);
@@ -752,7 +868,10 @@ mod tests {
     /// The registers decode as `std` reads them on this host.
     #[test]
     fn detects_what_std_does() {
-        assert_eq!((decode(registers()) | ENABLED) & !INTEL, std_detected());
+        assert_eq!(
+            (decode(registers()) | ENABLED) & !(INTEL | FAMILY_19H | FAMILY_1AH),
+            std_detected()
+        );
     }
 
     /// Where each feature's bit is, and the registers `decode` needs before
@@ -827,6 +946,8 @@ mod tests {
     fn decodes_vector_features_only_where_the_os_saves_them() {
         let all = Registers {
             intel: false,
+            amd: false,
+            eax1: 0,
             ecx1: u32::MAX,
             ebx7: u32::MAX,
             ecx7: u32::MAX,
@@ -862,6 +983,65 @@ mod tests {
                 ..all
             };
             assert_eq!(decode(r), named & !avx512);
+        }
+    }
+
+    /// AMD's family 19h is leaf 1's family 0xf plus extended family 0xa, as on
+    /// Zen 4's models 0x11 and 0x61, and Zen 3's 0x21, and family 1Ah plus
+    /// 0xb, as on Zen 5; no other vendor's, and no other family, such as Zen
+    /// 2's 0x17.
+    #[test]
+    fn decodes_amd_families() {
+        let zen4 = Registers {
+            amd: true,
+            eax1: 0x00a1_0f11,
+            ..Registers::default()
+        };
+        assert_eq!(decode(zen4), FAMILY_19H);
+        assert_eq!(
+            decode(Registers {
+                eax1: 0x00a2_0f10,
+                ..zen4
+            }),
+            FAMILY_19H
+        );
+        assert_eq!(decode(Registers { amd: false, ..zen4 }), 0);
+        assert_eq!(
+            decode(Registers {
+                intel: true,
+                amd: false,
+                ..zen4
+            }),
+            INTEL
+        );
+        // Zen 5's model 0x44 is family 1Ah.
+        assert_eq!(
+            decode(Registers {
+                eax1: 0x00b4_0f41,
+                ..zen4
+            }),
+            FAMILY_1AH
+        );
+        assert_eq!(
+            decode(Registers {
+                amd: false,
+                eax1: 0x00b4_0f41,
+                ..zen4
+            }),
+            0
+        );
+        for eax1 in [0x0086_0f01, 0x0000_0f11, 0x0000_1911, 0x0010_0f11] {
+            assert_eq!(decode(Registers { eax1, ..zen4 }), 0, "{eax1:#x}");
+        }
+    }
+
+    /// Only AMD's family 19h runs VG's routines from the length it names.
+    #[test]
+    fn family_19h_runs_vg_from_its_length() {
+        for len in [0, 1, 511, 512, 799, 800, 1200, usize::MAX] {
+            assert!(runs_vg(false, len, 800));
+            assert_eq!(runs_vg(true, len, 800), len >= 800);
+            assert_eq!(runs_vg(true, len, 512), len >= 512);
         }
     }
 
@@ -1052,14 +1232,6 @@ mod tests {
             is_intel(),
             vendor.as_flattened() == b"GenuineIntel" && !crate::low::cpu_denied("intel")
         );
-    }
-
-    // admin/x86-cpu groups the SDE models by what this and `low::mcdt`'s
-    // report print: models that print the same take every `has` decision
-    // alike, and so every path this file picks.
-    #[test]
-    fn reports_dispatch() {
-        println!("rind dispatch: features {:#x}", features());
     }
 
     // CI runs the suite again with features denied, and names the path each

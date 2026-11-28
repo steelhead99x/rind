@@ -13,8 +13,14 @@ if [[ $# -ne 1 ]]; then
 fi
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
-mapfile -t all < <(cargo metadata --format-version 1 --no-deps --locked |
+# Captured first: a failure inside `< <(...)` would leave the list empty.
+targets=$(cargo metadata --format-version 1 --no-deps --locked |
     jq -r '.packages[] | select(.name == "rind-bench").targets[] | select(.kind == ["bench"]).name')
+mapfile -t all <<<"$targets"
+if [[ -z $targets ]]; then
+    echo "sh/bench-select.sh: found no rind-bench bench targets" >&2
+    exit 1
+fi
 read -ra row <<<"$1"
 ((${#row[@]})) || row=("${all[@]}")
 read -ra want <<<"${BENCHES:-}"

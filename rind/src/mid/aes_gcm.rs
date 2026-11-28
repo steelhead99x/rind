@@ -21,6 +21,13 @@ impl AesGcm {
         self.key.key_len()
     }
 
+    /// Wipes and frees what the key keeps on the heap: a whole-value wipe
+    /// that skips this key's drop must call this first.
+    #[cfg(rind_backend = "x86_64")]
+    pub(crate) fn release(&mut self) {
+        self.gh.release();
+    }
+
     /// Expands a 16-, 24-, or 32-byte key, which the caller has checked,
     /// into an AES-128-GCM, AES-192-GCM, or AES-256-GCM key.
     pub(crate) fn new(key: &[u8]) -> Self {

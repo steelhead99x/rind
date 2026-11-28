@@ -9,6 +9,7 @@ use core::mem;
 use super::aes::{AesKey, HwKey};
 use super::aes_ctr;
 use super::aes_gcm_avx::AvxKernel;
+use super::aes_gcm_vg::VgKey;
 use super::cpu::HaveAvx512ForAesGcm;
 use super::ghash::{self, ClmulTable, Ghash, GhashTable, GhashTableAvx512};
 use crate::low::ct_equal;
@@ -23,6 +24,9 @@ pub(crate) fn seal(
 ) -> [u8; 16] {
     if let Some((hw_key, kernel)) = vale::<true>(key, table, aad, cipher_inout) {
         return kernel.seal(hw_key, nonce, aad, cipher_inout);
+    }
+    if let Some(vg) = vg(key, table, cipher_inout.len()) {
+        return vg.seal(nonce, aad, cipher_inout);
     }
     tagged::<true>(key, table, nonce, aad, cipher_inout)
 }
@@ -39,6 +43,9 @@ pub(crate) fn open(
 ) -> bool {
     if let Some((hw_key, kernel)) = vale::<false>(key, table, aad, cipher_inout) {
         return kernel.open(hw_key, nonce, aad, cipher_inout, tag);
+    }
+    if let Some(vg) = vg(key, table, cipher_inout.len()) {
+        return vg.open(nonce, aad, cipher_inout, tag);
     }
     ct_equal(&tagged::<false>(key, table, nonce, aad, cipher_inout), tag)
 }
@@ -69,6 +76,20 @@ fn vale<'a, const ENC: bool>(
         }
         (AesKey::Hw(hw_key), GhashTable::VaesAvx2(.., kernel)) if len < vaes_avx2_below => {
             Some((hw_key, kernel))
+        }
+        _ => None,
+    }
+}
+
+/// pyca/verified-garbage's AES-GCM, where the CPU is one it is faster on
+/// and the message is long enough, with its key context, made on the first
+/// such message.
+fn vg<'a>(key: &'a AesKey, table: &'a GhashTable, len: usize) -> Option<&'a VgKey> {
+    match (key, table) {
+        (AesKey::Hw(hw_key), GhashTable::Avx512(GhashTableAvx512 { vg: Some(vg), .. }))
+            if len >= VG_FROM =>
+        {
+            Some(vg.get(hw_key))
         }
         _ => None,
     }
@@ -516,6 +537,19 @@ const AVX512_MINIMUM_CIPHER_LEN: usize = 16 * 16;
 /// setup costs more on short ones.
 const AVX512_KERNEL_MINIMUM_CIPHER_LEN: usize = 2048;
 
+/// The message length from which pyca/verified-garbage's AES-GCM seals and
+/// opens on the AVX-512 tier, where it runs. On Zen 5 (a Ryzen 9 9950X),
+/// under rind's glue and a 32-byte AAD, its seals took 1.05-1.10x the time of
+/// BoringSSL's 512-bit kernel at 4 and 5 KB and 0.85-1.01x from 6 to 64 KB,
+/// and its opens 0.96-1.07x and 0.87-1.00x; at 2 and 3 KB both took
+/// 1.02-1.25x, and below 2 KB, against rind's by-16 path, up to 1.56x.
+/// Preparing its key context doubles key setup (75-95 to 160-190 ns), so a
+/// key makes it on its first message this long. On Granite Rapids
+/// ([kixel-ai/rind#955](https://github.com/kixel-ai/rind/pull/955)) it lost
+/// below 12 KB and won above only with AES-128 and AES-192, so it runs on no
+/// other CPU.
+const VG_FROM: usize = 6144;
+
 /// How many message bytes BoringSSL's 256-bit kernel needs to beat the AVX
 /// path, whose single blocks are quicker for short messages.
 const VAES_AVX2_MINIMUM_CIPHER_LEN: usize = 16 * 16;
@@ -652,6 +686,7 @@ mod tests {
     use crate::low::ct;
     use crate::low::generic::ghash::gcm_model;
     use crate::low::x86_64::adx_mux::tests::Rng;
+    use crate::low::x86_64::aes_gcm_vg::LazyVgKey;
     use crate::low::x86_64::aes_nohw::NohwKey;
     use crate::low::x86_64::cpu::{HaveAesHardware, HaveAvxMovbeForAesGcm, HaveSsse3};
     use crate::low::x86_64::ct_sde;
@@ -662,8 +697,9 @@ mod tests {
     // Every other test sees only the path the CPU picks, so the slower ones
     // are checked against it here, under a key `admin/ctgrind` keeps secret:
     // the by-8 PCLMULQDQ kernel, which a CPU with AVX and MOVBE runs only for
-    // short messages, Vale's AES-GCM, vpaes with SSSE3 GHASH, and SSE2 AES
-    // with integer GHASH. Each key size, and AAD and message lengths around
+    // short messages, Vale's AES-GCM, vpaes with SSSE3 GHASH, SSE2 AES
+    // with integer GHASH, and on an AVX-512 CPU, VG's AES-GCM, which only
+    // Zen 5 picks, and BoringSSL's kernel, which it replaces there. Each key size, and AAD and message lengths around
     // the block, six-, eight-, and sixteen-block boundaries, the minimums of
     // Vale's six-block loop, and where the AVX and VAES-AVX2 tiers hand over
     // between Vale and by-8, both ways, with a tag wrong in either half, and
@@ -700,14 +736,25 @@ mod tests {
                     let kernel = AvxKernel::new(&clmul, h, token);
                     slow.push((AesKey::new(&key), GhashTable::Avx(clmul, kernel)));
                 }
+                // The AVX-512 tier with VG's AES-GCM and without, whichever
+                // the CPU picks.
+                if let Some(token) = HaveAvx512ForAesGcm::check() {
+                    for vg in [None, Some(token.vg_anywhere())] {
+                        let mut table = GhashTableAvx512::new(u128::from_be_bytes(h), hw, token);
+                        table.vg = vg.map(LazyVgKey::with);
+                        slow.push((AesKey::new(&key), GhashTable::Avx512(table)));
+                    }
+                }
             }
 
             // Around where the AVX and VAES-AVX2 tiers hand over between
-            // Vale's AES-GCM and their own paths.
+            // Vale's AES-GCM and their own paths, and the AVX-512 tier
+            // between BoringSSL's kernel and VG's.
             let crossovers = [
                 AVX_VALE_SEAL_FROM,
                 VAES_AVX2_VALE_OPEN_BELOW,
                 VAES_AVX2_VALE_SEAL_BELOW,
+                VG_FROM,
             ]
             .into_iter()
             .flat_map(|n| [n.saturating_sub(1), n, n + 1]);
@@ -715,6 +762,8 @@ mod tests {
                 0, 1, 15, 16, 17, 95, 96, 97, 112, 127, 128, 129, 255, 256, 257, 287, 288, 289,
                 1000, 5000,
             ];
+            // A TLS record's 16 KB, and a partial block, on VG's side.
+            msg_lens.push(16384 + 17);
             msg_lens.extend(crossovers);
             msg_lens.sort_unstable();
             msg_lens.dedup();
@@ -825,10 +874,11 @@ mod tests {
         }
     }
 
-    // The AVX-512 key setup, by-16 loop, and BoringSSL kernel, both ways,
-    // with a secret key, nonce, AAD, and message, for `admin/ct-sde`. Each
-    // message takes its path's 16-block loop and a masked tail of 12 blocks
-    // and 8 bytes, and the AAD the 512-bit GHASH and then a partial block.
+    // The AVX-512 key setup, by-16 loop, BoringSSL kernel, and VG's AES-GCM
+    // with its key preparation, both ways, with a secret key, nonce, AAD, and
+    // message, for `admin/ct-sde`. Each message takes its path's 16-block
+    // loop and a masked tail of 12 blocks and 8 bytes, and the AAD the 512-bit
+    // GHASH and then a partial block.
     #[test]
     #[ignore = "admin/ct-sde runs it under Intel SDE"]
     fn ct_sde_aes128_gcm() {
@@ -849,10 +899,18 @@ mod tests {
 
     fn trace_avx512(key_len: usize) {
         let mut rng = Rng(ct_sde::seed());
-        let (key, table) = traced_key(&mut rng, key_len);
-        assert!(matches!(table, GhashTable::Avx512(_)), "AVX-512 VAES");
-        for len in [AVX512_MINIMUM_CIPHER_LEN, AVX512_KERNEL_MINIMUM_CIPHER_LEN].map(|n| n + 200) {
-            traced_seal_open(&mut rng, &key, &table, len);
+        let (key, mut table) = traced_key(&mut rng, key_len);
+        let GhashTable::Avx512(avx512) = &mut table else {
+            panic!("AVX-512 VAES");
+        };
+        // VG's, from its length, as on Zen 5, whichever CPU SDE emulates.
+        avx512.vg = Some(LazyVgKey::with(avx512.token.vg_anywhere()));
+        for len in [
+            AVX512_MINIMUM_CIPHER_LEN,
+            AVX512_KERNEL_MINIMUM_CIPHER_LEN,
+            VG_FROM,
+        ] {
+            traced_seal_open(&mut rng, &key, &table, len + 200);
         }
     }
 
