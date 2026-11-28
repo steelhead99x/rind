@@ -13,6 +13,7 @@ its publisher. The day palette adapts the same roles for light surfaces.
 
 ## Permission
 
-The Kixel AI mark and the Kixel AI name are used with the permission of
-Kixel AI's maintainer, Luke Curley, pending his final approval in the pull
-request that adds them.
+Permission to use the Kixel AI mark and name has not been granted yet.
+Kixel AI's maintainer, Luke Curley, has been asked to approve or decline
+it in [#344](https://github.com/steelhead99x/rind/pull/344); this section
+will cite his answer.
