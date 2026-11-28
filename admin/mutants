@@ -594,7 +594,9 @@ case $campaign in
         # The explicit target keeps these builds apart from the host's, and
         # RUSTFLAGS from its build scripts.
         export CARGO_BUILD_TARGET=x86_64-unknown-linux-gnu
-        export RUSTFLAGS='--cfg rind_portable --cfg curve25519_dalek_backend="serial"'
+        # `rind_no_sse2`: AES's integer words, which the x86_64 campaign's
+        # no-SSSE3 tests cannot reach.
+        export RUSTFLAGS='--cfg rind_portable --cfg rind_no_sse2 --cfg curve25519_dalek_backend="serial"'
         # The assembly backends, and the 32-bit limbs a 64-bit target
         # doesn't, which the x86_64 campaign's tests reach.
         skip=(
