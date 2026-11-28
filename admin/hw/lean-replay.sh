@@ -4,7 +4,7 @@
 # cannot. claude/handoff-lean-prove.md in the rind project has the reasons.
 #
 #   HW_PR=323 (default): the upstream sync to eba4c466. Its merge adds
-#     `sample_poly_cbd2_8x` in rind/src/mid/mlkem.rs, opaque in admin/prove
+#     `sample_poly_cbd2_8x` in rind/src/mid/mlkem.rs (since removed), opaque in admin/prove
 #     and declared in proofs/Rind/X86_64/FunsExternal.lean, so the Aeneas
 #     translation and every Lean module must still check: `admin/prove lean`.
 #   HW_PR=322: the smaller P-256 IFMA import into #246's branch:

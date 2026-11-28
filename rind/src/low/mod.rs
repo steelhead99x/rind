@@ -145,7 +145,7 @@ mod generic {
     #[cfg(any(
         all(
             rind_backend = "portable",
-            any(target_pointer_width = "32", rind_limb = "32")
+            any(target_pointer_width = "32", rind_limb = "32", rind_mul16)
         ),
         test
     ))]
@@ -157,7 +157,7 @@ mod generic {
         all(
             any(rind_mul16, rind_mul16_top, rind_mul16_soft),
             rind_backend = "portable",
-            any(target_pointer_width = "32", rind_limb = "32")
+            any(target_pointer_width = "32", rind_limb = "32", rind_mul16)
         ),
         test
     ))]
@@ -168,7 +168,8 @@ mod generic {
     // The portable backend's group orders, picked from by modulus.
     #[cfg(any(rind_backend = "arm", rind_backend = "portable"))]
     pub(crate) mod order;
-    // x86_64's separate-pass Poly1305 and the 64-bit portable backend's.
+    // x86_64's separate-pass Poly1305, around `x86_64::poly1305_sse2`'s
+    // lanes, and the 64-bit portable backend's.
     // aarch64 runs Poly1305 only in aws-lc's one-pass ChaCha20-Poly1305,
     // whose tests check it against this, and every backend's tests check
     // `poly1305_32` against it.
@@ -177,17 +178,17 @@ mod generic {
         all(
             rind_backend = "portable",
             target_pointer_width = "64",
-            not(rind_limb = "32")
+            not(any(rind_limb = "32", rind_mul16))
         ),
         test
     ))]
     pub(crate) mod poly1305;
     // The portable backend's Poly1305 on 32-bit targets, in 26-bit limbs,
-    // and on 64-bit ones forced to 32-bit limbs, so CI checks it on x86_64.
+    // and on 64-bit ones without a widening multiply or forced for tests.
     #[cfg(any(
         all(
             rind_backend = "portable",
-            any(target_pointer_width = "32", rind_limb = "32")
+            any(target_pointer_width = "32", rind_limb = "32", rind_mul16)
         ),
         test
     ))]
@@ -505,6 +506,9 @@ cfg_if::cfg_if! {
         pub(crate) use x86_64::adx_mux::edwards25519_pdouble;
         pub(crate) use x86_64::adx_mux::edwards25519_scalarmulbase;
         pub(crate) use x86_64::adx_mux::edwards25519_msm;
+        pub(crate) use x86_64::adx_mux::edwards25519_mul_avx2;
+        #[cfg(test)]
+        pub(crate) use x86_64::adx_mux::edwards25519_mul_avx2_any;
         pub(crate) use x86_64::ghash;
         #[cfg(feature = "ml-dsa")]
         pub(crate) use x86_64::mldsa::{
@@ -543,7 +547,6 @@ cfg_if::cfg_if! {
         pub(crate) use x86_64::rsaz_avx512::{Operands, RsazAvx512};
         pub(crate) use x86_64::rsa_ifma::{IfmaCrt, RsaIfma};
         pub(crate) use x86_64::mlkem_sample_poly_ntt_8x::mlkem_sample_poly_ntt_8x;
-        pub(crate) use x86_64::mlkem_shake256_8x::mlkem_shake256_8x;
 
         pub(crate) use x86_64::adx_mux::p256_montjadd;
         pub(crate) use x86_64::adx_mux::p256_montjdouble;

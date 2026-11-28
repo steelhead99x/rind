@@ -17,6 +17,6 @@ Considered and left out, so don't raise them again without new evidence:
 - An RSA tier on AVX-IFMA, the VEX encoding Alder Lake and Zen 5 have without AVX-512. The evidence on `desktop` points against it, and the way to find out is an A/B with `OPENSSL_ia32cap` on OpenSSL, which has that tier, before any rind code.
 - A batch API for Ed25519, as above.
 - RSA key generation on armv7, 1.34 to 1.93 times aws-lc-rs's time in BENCHMARKS.md: nobody generates RSA keys on a 32-bit board often enough to care.
-- wasm's simd128, SVE2, and riscv64's vector crypto: no consumer on any of them, and no host to measure the last two.
+- SVE2 and riscv64's vector crypto: no consumer on either, and no host to measure them. wasm's simd128 was here too until the owner, on 2026-11-28, asked for it for portable AES ([its quest](/quest/m2/speed/portable-aes-vectors/wasm-simd128.md)).
 - Multi-threaded Argon2id (`p > 1` thread pool): decided 2026-11-21 (maintainer, /quest-plan) to leave out, focusing instead on single-thread loop/allocation wins, additive Cargo algorithm features for binary size (`default` stays all-on; `rind-rustls` opts into `default-features = false`), a benchmark-gated (`>= 5%` win) thread-local DRBG spike, AVX-512 8-way Keccak reuse / aarch64 PQ kernels, and Rust wrapper/stack overhead.
 

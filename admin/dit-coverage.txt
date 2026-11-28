@@ -99,8 +99,12 @@ high/hpke::Recipient::export delegates to export, which enter
 high/hpke::Sender::export delegates to export, which enter
 high/kem::Ciphertext::new delegates to mlkem::Ciphertext::from_slice, which enter
 high/kem::DecapsulationKey::decapsulate delegates to SharedSecret::new, decaps, which enter
+high/kem::DecapsulationKey::from_seed delegates to mlkem::DecapKey::from_seed, which enter
 high/kem::DecapsulationKey::generate delegates to mlkem::DecapKey::generate, which enter
+high/kem::DecapsulationKey::new delegates to mlkem::DecapKey::parse, which enter
 high/kem::DecapsulationKey::public_key accessor returns what the value holds
+high/kem::DecapsulationKey::to_bytes delegates to mlkem::DecapKey::as_bytes, which enter
+high/kem::DecapsulationKey::to_seed accessor returns what the value holds
 high/kem::EncapsulationKey::encapsulate delegates to encaps, SharedSecret::new, which enter
 high/kem::EncapsulationKey::new delegates to mlkem::EncapKey::from_bytes, which enter
 high/oaep::DecryptingKey::decrypt delegates to the algorithm's decrypt, which enters
@@ -166,11 +170,13 @@ high/signature/rsa::KeyPair::from_components delegates to rsa::SigningKey::from_
 high/signature/rsa::KeyPair::from_pkcs1 delegates to rsa::SigningKey::from_pkcs1_der, which enter
 high/signature/rsa::KeyPair::from_pkcs8 delegates to rsa::SigningKey::from_pkcs8_der, which enter
 high/signature/rsa::KeyPair::generate delegates to rsa::SigningKey::generate, which enter
+high/signature/rsa::KeyPair::prime_bits accessor returns the prime lengths loading the key already revealed
 high/signature/rsa::KeyPair::public_key accessor returns what the value holds
 high/signature/rsa::KeyPair::sign delegates to the algorithm's sign, which enters
 high/signature/rsa::KeyPair::to_pkcs8 delegates to to_pkcs8_der, which enter
 high/signature/rsa::PublicKey::from_components delegates to rsa::VerifyingKey::from_components, which enter
 high/signature/rsa::PublicKey::from_spki delegates to rsa::VerifyingKey::from_spki_der, which enter
+high/signature/rsa::PublicKey::modulus_bits public computes the bit length of the public modulus
 high/signature/rsa::PublicKey::modulus_len public computes on public parameters only
 high/signature/rsa::PublicKey::new delegates to rsa::VerifyingKey::from_pkcs1_der, which enter
 high/signature/rsa::PublicKey::to_spki delegates to to_spki_der, which enter
@@ -178,6 +184,7 @@ high/signature/rsa::PublicKey::verify delegates to the algorithm's verify, which
 high/signature/rsa::SigningAlgorithm::pss_sha256 public builds an algorithm description
 high/signature/rsa::SigningAlgorithm::pss_sha384 public builds an algorithm description
 high/signature/rsa::SigningAlgorithm::pss_sha512 public builds an algorithm description
+high/signature/rsa::VerificationAlgorithm::floor_in_bytes public computes on public parameters only
 high/signature/rsa::VerificationAlgorithm::pss_sha256 public builds an algorithm description
 high/signature/rsa::VerificationAlgorithm::pss_sha384 public builds an algorithm description
 high/signature/rsa::VerificationAlgorithm::pss_sha512 public builds an algorithm description

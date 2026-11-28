@@ -54,7 +54,7 @@ qemu. iOS devices' code is only built.
   [verified-garbage]'s assembly, and
   table lookups use SSE2 (see [ALGORITHMS.md](ALGORITHMS.md)). Without `sse4.1`,
   as on the first Core 2s and Atoms and AMD's Bobcat, ChaCha20 and Poly1305
-  run in separate passes.
+  run in separate passes, Poly1305 in a port of aws-lc's SSE2 lanes.
   Without `ssse3` either, as on Intel's CPUs before Core 2, AMD's before
   Bobcat and Bulldozer, and QEMU's default `qemu64` model, AES and GHASH run
   Rust ports of [aws-lc]'s constant-time SSE2 and integer C, SHA1 and SHA256
@@ -350,11 +350,10 @@ operands, so it is not constant-time on them:
   The rest of rind's secret arithmetic on a target with no multiply
   instruction still calls `__mulsi3` or `__muldi3`.
 - `riscv64` without the M extension and without Zmmul: there is no `mul`.
-  Poly1305 stays on 64-bit limbs, so each 64x64->128 product is a call to
-  `__multi3` on the secret limbs. `rind_mul16` does not apply to that width.
-  The build warns. Zmmul is a multiplier, and then those products are `mul`
-  and `mulhu`. The rest of rind's secret arithmetic on a target with no
-  multiply instruction still calls `__multi3`.
+  Poly1305 uses its 26-bit limbs with the same masked shifts and adds as
+  RV32I. With M or Zmmul it keeps 64-bit limbs and `mul` and `mulhu`.
+  The rest of rind's secret arithmetic on a target with no multiply
+  instruction still calls `__multi3`.
 - `s390x`: IBM publishes no instruction timing for IBM Z, so rind cannot say.
 - 32-bit `arm` before ARMv7: Intel's XScale (ARMv5TE), whose `mul`, `umull`,
   and `smull` terminate early by the top bits of their second operand

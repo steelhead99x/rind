@@ -45,8 +45,8 @@ HIGH_PQ_LOADERS = re.compile(r"^signature/(ml_dsa|slh_dsa)\.rs$")
 # API.
 BINDINGS = ("rind-python", "rind-dart", "rind-openssl", "rind-fips")
 OUT = (
-    "rind-bench", "rind-cpuid", "rind-timing", "rind-acvp", "fuzz", "admin", "sh", "site", "benchmarks",
-    "quest", ".github", "thirdparty", "patch", "t3.json",
+    "rind-bench", "rind-cpuid", "rind-devbench", "rind-timing", "rind-acvp", "fuzz", "admin", "sh", "site",
+    "benchmarks", "quest", ".github", "thirdparty", "patch", "t3.json",
 )
 
 # Lean files that state what a reviewer must read rather than check: a file
