@@ -804,14 +804,9 @@ fn decode(r: Registers) -> u32 {
         };
     set(r.amd && family == 0x19, FAMILY_19H);
     set(r.amd && family == 0x1a, FAMILY_1AH);
-    // The model is leaf 1's EAX bits 7:4, plus bits 19:16 above them in
-    // families 6 and 0xf.
-    let model = (r.eax1 >> 4 & 0xf)
-        | if family == 6 || family == 0xf {
-            r.eax1 >> 12 & 0xf0
-        } else {
-            0
-        };
+    // The model is leaf 1's EAX bits 7:4 plus bits 19:16 above them, as
+    // families 6 and 0xf read it; only family 6 is matched.
+    let model = (r.eax1 >> 4 & 0xf) + (r.eax1 >> 12 & 0xf0);
     set(
         r.intel && family == 6 && matches!(model, 0xc5 | 0xc6),
         ARROW_LAKE,
