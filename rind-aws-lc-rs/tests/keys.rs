@@ -665,10 +665,16 @@ fn ml_dsa_every_refusal() {
         assert_eq!(theirs.description_(), expected, "aws-lc-rs");
         assert_eq!(ours.description_(), expected, "rind");
     };
-    // An RSA key of a size rind cannot back is refused from its modulus
-    // length, and an EC key on a curve rind cannot back without checking that
-    // its public key is the scalar's, so a malformed one is `WrongAlgorithm`
-    // where aws-lc-rs names a parse error.
+    // An EC key on a curve rind cannot back is refused without checking that
+    // its public key is the scalar's, so one whose public key is another
+    // point on the curve is `WrongAlgorithm` where aws-lc-rs names a parse
+    // error: the difference rind-aws-lc-rs's README lists.
+    let unbacked = |doc: &[u8], theirs_expected: &str| {
+        let ours = ours::signature::PqdsaKeyPair::from_pkcs8(ours44, doc).unwrap_err();
+        let theirs = theirs::signature::PqdsaKeyPair::from_pkcs8(theirs44, doc).unwrap_err();
+        assert_eq!(theirs.description_(), theirs_expected, "aws-lc-rs");
+        assert_eq!(ours.description_(), "WrongAlgorithm", "rind");
+    };
     let loaded = |doc: &[u8], ours_alg, theirs_alg| {
         let ours = ours::signature::PqdsaKeyPair::from_pkcs8(ours_alg, doc).unwrap();
         let theirs = theirs::signature::PqdsaKeyPair::from_pkcs8(theirs_alg, doc).unwrap();
@@ -833,10 +839,8 @@ fn ml_dsa_every_refusal() {
         theirs44,
         "InvalidEncoding",
     );
-    kind(
+    unbacked(
         &ec_pkcs8(&[0x2b, 0x81, 0x04, 0x00, 0x0a], &[2], Some(&k1_g)),
-        ours44,
-        theirs44,
         "InvalidEncoding",
     );
     let mut compressed = vec![0x02];

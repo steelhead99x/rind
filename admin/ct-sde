@@ -31,6 +31,7 @@ MODELS = {
     "vaes_avx2": "-adl",  # Alder Lake: VAES without AVX-512.
     "hmac": "-arl",  # Arrow Lake: the SHA extensions, for HMAC-SHA1 and -SHA256.
     "_ifma_": "-icx",  # Ice Lake server: AVX-512 IFMA without AVX512_FP16.
+    "_vg_avx2": "-arl",  # Arrow Lake: AVX2 without AVX-512, on Intel.
 }
 # Far below where the program maps its thread stacks and heaps.
 PIN_MEMORY = "0x100000000000:0x200000000000"

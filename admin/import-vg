@@ -44,9 +44,12 @@ ROOTS = {
         "vg_chacha20_init",
         "vg_chacha20_apply_avx2",
         "vg_chacha20_apply_avx512vl",
-        # ChaCha20-Poly1305 with AVX512_IFMA.
+        # ChaCha20-Poly1305 with AVX512_IFMA, and on Intel's CPUs with AVX2
+        # but no AVX-512 from a length.
         "vg_chacha20_poly1305_seal_ifma",
         "vg_chacha20_poly1305_open_ifma",
+        "vg_chacha20_poly1305_seal_avx2",
+        "vg_chacha20_poly1305_open_avx2",
         # AES-GCM on Zen 5 with AVX-512, VAES, and VPCLMULQDQ, for long
         # messages, over a key context prepared on first use.
         "vg_aes_gcm_prepare_vpclmul_avx512",

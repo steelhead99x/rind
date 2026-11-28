@@ -104,7 +104,7 @@ jobs:
       - name: Artificial CPU feature tests
         shell: bash
         run: |
-          sh/cpu-tiers.sh cargo nextest run --workspace --exclude rind-fips
+          sh/cpu-tiers.sh cargo nextest run --workspace --exclude rind-fips --cargo-profile test-fast
           SLOW_TESTS=1 RUSTFLAGS='--cfg rind_cpu_disable' sh/cpu-tiers.sh cargo nextest run --release -p rind --lib cctv_accumulated detects_the_expected_cpu
 
   # musl runs the glibc build's code, so these test the packages consumers

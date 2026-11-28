@@ -36,11 +36,19 @@ pub(crate) mod vg_chacha20_block;
 #[rustfmt::skip]
 pub(crate) mod vg_chacha20_init;
 #[rustfmt::skip]
+pub(crate) mod vg_chacha20_poly1305_open_avx2;
+#[rustfmt::skip]
+pub(crate) mod vg_chacha20_poly1305_open_body_avx2;
+#[rustfmt::skip]
 pub(crate) mod vg_chacha20_poly1305_open_body_avx512vl;
 #[rustfmt::skip]
 pub(crate) mod vg_chacha20_poly1305_open_body_ifma;
 #[rustfmt::skip]
 pub(crate) mod vg_chacha20_poly1305_open_ifma;
+#[rustfmt::skip]
+pub(crate) mod vg_chacha20_poly1305_seal_avx2;
+#[rustfmt::skip]
+pub(crate) mod vg_chacha20_poly1305_seal_body_avx2;
 #[rustfmt::skip]
 pub(crate) mod vg_chacha20_poly1305_seal_body_ifma;
 #[rustfmt::skip]
