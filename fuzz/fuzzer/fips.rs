@@ -214,12 +214,14 @@ mod module {
         MlDsaPair {
             set: u8,
             seed: Vec<u8>,
+            context: Vec<u8>,
             message: Vec<u8>,
         },
         MlDsaVerify {
             set: u8,
             spki: bool,
             key: Vec<u8>,
+            context: Vec<u8>,
             message: Vec<u8>,
             signature: Vec<u8>,
         },
@@ -1110,26 +1112,38 @@ mod module {
                     theirs.verify(message, signature),
                 );
             }
-            Op::MlDsaPair { set, seed, message } => match set % 3 {
-                0 => ml_dsa_pair::<fips::ml_dsa::MlDsa44, rind::ml_dsa::MlDsa44>(seed, message),
-                1 => ml_dsa_pair::<fips::ml_dsa::MlDsa65, rind::ml_dsa::MlDsa65>(seed, message),
-                _ => ml_dsa_pair::<fips::ml_dsa::MlDsa87, rind::ml_dsa::MlDsa87>(seed, message),
+            Op::MlDsaPair {
+                set,
+                seed,
+                context,
+                message,
+            } => match set % 3 {
+                0 => ml_dsa_pair::<fips::ml_dsa::MlDsa44, rind::ml_dsa::MlDsa44>(
+                    seed, context, message,
+                ),
+                1 => ml_dsa_pair::<fips::ml_dsa::MlDsa65, rind::ml_dsa::MlDsa65>(
+                    seed, context, message,
+                ),
+                _ => ml_dsa_pair::<fips::ml_dsa::MlDsa87, rind::ml_dsa::MlDsa87>(
+                    seed, context, message,
+                ),
             },
             Op::MlDsaVerify {
                 set,
                 spki,
                 key,
+                context,
                 message,
                 signature,
             } => match set % 3 {
                 0 => ml_dsa_verify::<fips::ml_dsa::MlDsa44, rind::ml_dsa::MlDsa44>(
-                    *spki, key, message, signature,
+                    *spki, key, context, message, signature,
                 ),
                 1 => ml_dsa_verify::<fips::ml_dsa::MlDsa65, rind::ml_dsa::MlDsa65>(
-                    *spki, key, message, signature,
+                    *spki, key, context, message, signature,
                 ),
                 _ => ml_dsa_verify::<fips::ml_dsa::MlDsa87, rind::ml_dsa::MlDsa87>(
-                    *spki, key, message, signature,
+                    *spki, key, context, message, signature,
                 ),
             },
             Op::RsaPair {
@@ -1409,6 +1423,7 @@ mod module {
 
     fn ml_dsa_pair<O: fips::ml_dsa::ParameterSet, T: rind::ml_dsa::ParameterSet>(
         seed: &[u8],
+        context: &[u8],
         message: &[u8],
     ) {
         let ours = fips::ml_dsa::KeyPair::<O>::from_seed(seed);
@@ -1419,16 +1434,27 @@ mod module {
         assert_eq!(ours.public_key().as_ref(), theirs.public_key().as_ref());
         assert_eq!(ours.to_pkcs8().as_ref(), theirs.to_pkcs8().as_ref());
         // Signing is hedged: rind verifies the module's.
-        let signature = ours.sign(message).unwrap();
-        theirs
-            .public_key()
-            .verify(message, signature.as_ref())
-            .unwrap();
+        let signature = ours.sign(context, message);
+        let their_signature = theirs.sign(context, message);
+        same_verdict(
+            signature.as_ref().map(drop).map_err(|e| *e),
+            their_signature.as_ref().map(drop).map_err(|e| *e),
+        );
+        if let Ok(signature) = signature {
+            theirs
+                .public_key()
+                .verify(context, message, signature.as_ref())
+                .unwrap();
+            ours.public_key()
+                .verify(context, message, their_signature.unwrap().as_ref())
+                .unwrap();
+        }
     }
 
     fn ml_dsa_verify<O: fips::ml_dsa::ParameterSet, T: rind::ml_dsa::ParameterSet>(
         spki: bool,
         key: &[u8],
+        context: &[u8],
         message: &[u8],
         signature: &[u8],
     ) {
@@ -1447,8 +1473,8 @@ mod module {
             return;
         };
         same_verdict(
-            ours.verify(message, signature),
-            theirs.verify(message, signature),
+            ours.verify(context, message, signature),
+            theirs.verify(context, message, signature),
         );
     }
 

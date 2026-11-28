@@ -2,17 +2,18 @@
 fn main() {}
 
 #[cfg(not(target_arch = "xtensa"))]
-#[macro_use]
-mod criterion;
-#[cfg(all(
-    feature = "__bench_openssl",
-    target_family = "unix",
-    not(target_arch = "xtensa")
-))]
+mod common;
+#[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
 #[cfg(not(target_arch = "xtensa"))]
 mod ossl_aead;
+
 #[cfg(not(target_arch = "xtensa"))]
-use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+use common::{AEAD_ROWS, Aead, Dit};
+
+#[cfg(not(target_arch = "xtensa"))]
+const KEY: [u8; 32] = [0; 32];
+#[cfg(not(target_arch = "xtensa"))]
+const NONCE: [u8; 12] = [0; 12];
 
 #[cfg(not(target_arch = "xtensa"))]
 fn test_ring_chacha(key: &ring::aead::LessSafeKey, nonce: &[u8; 12], aad: &[u8], buf: &mut [u8]) {
@@ -25,7 +26,6 @@ fn test_ring_chacha(key: &ring::aead::LessSafeKey, nonce: &[u8; 12], aad: &[u8],
         .unwrap();
 }
 
-#[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
 #[cfg(not(target_arch = "xtensa"))]
 fn test_aws_chacha(
     key: &aws_lc_rs::aead::LessSafeKey,
@@ -40,12 +40,12 @@ fn test_aws_chacha(
 
 #[cfg(not(target_arch = "xtensa"))]
 fn test_rc_chacha(
-    key: &chacha20poly1305::ChaCha20Poly1305,
+    key: &::chacha20poly1305::ChaCha20Poly1305,
     nonce: &[u8; 12],
     aad: &[u8],
     buf: &mut [u8],
 ) {
-    use chacha20poly1305::AeadInOut;
+    use ::chacha20poly1305::AeadInOut;
     let _tag = key
         .encrypt_inout_detached(nonce.into(), aad, buf.into())
         .unwrap();
@@ -58,233 +58,382 @@ fn test_rind_chacha(key: &rind::aead::Key, nonce: &[u8; 12], aad: &[u8], buf: &m
         .unwrap();
 }
 
+/// A key and the buffer it seals in place each call: the same buffer, so a
+/// call times the cipher alone, without an allocation or a copy of the input.
 #[cfg(not(target_arch = "xtensa"))]
-fn bench_chacha20poly1305(c: &mut Criterion) {
-    let key = [0u8; 32];
-    let key_bytes = &key;
-    let nonce = [0u8; 12];
+struct Seal<K> {
+    key: K,
+    aad: &'static [u8],
+    buf: Vec<u8>,
+}
 
-    let mut group = c.benchmark_group("chacha20poly1305");
-    for (size, size_name, aad) in criterion::aead_rows() {
-        // Sealing the same buffer in place each iteration times the cipher
-        // alone, without an allocation or a copy of the input.
-        let mut buf = vec![0u8; size];
-        group.throughput(Throughput::Bytes(size as u64));
-
-        group.bench_function(BenchmarkId::new("ring", size_name), |b| {
-            use ring::aead::{CHACHA20_POLY1305, LessSafeKey, UnboundKey};
-            let key = UnboundKey::new(&CHACHA20_POLY1305, &key).unwrap();
-            let key = LessSafeKey::new(key);
-            b.iter(|| test_ring_chacha(&key, &nonce, aad, &mut buf));
-        });
-        #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
-        group.bench_function(BenchmarkId::new("aws-lc-rs", size_name), |b| {
-            use aws_lc_rs::aead::{CHACHA20_POLY1305, LessSafeKey, UnboundKey};
-            let key = UnboundKey::new(&CHACHA20_POLY1305, &key).unwrap();
-            let key = LessSafeKey::new(key);
-            b.iter(|| test_aws_chacha(&key, &nonce, aad, &mut buf));
-        });
-        group.bench_function(BenchmarkId::new("rustcrypto", size_name), |b| {
-            use chacha20poly1305::KeyInit;
-            let key = chacha20poly1305::ChaCha20Poly1305::new_from_slice(&key).unwrap();
-            b.iter(|| test_rc_chacha(&key, &nonce, aad, &mut buf));
-        });
-        group.bench_function(BenchmarkId::new("rind", size_name), |b| {
-            let _dit = criterion::rind_dit();
-            use rind::aead::{CHACHA20_POLY1305, Key};
-            let key = Key::new(&CHACHA20_POLY1305, &key).unwrap();
-            b.iter(|| test_rind_chacha(&key, &nonce, aad, &mut buf));
-        });
-        for (lib, held) in criterion::vg_rows() {
-            group.bench_function(BenchmarkId::new(lib, size_name), |b| {
-                let key = verified_garbage::aead::chacha20poly1305::ChaCha20Poly1305::new(&key);
-                let mut expect = vec![0u8; size];
-                let tag = rind::aead::Key::new(&rind::aead::CHACHA20_POLY1305, key_bytes)
-                    .unwrap()
-                    .seal_in_place_separate_tag(
-                        rind::aead::Nonce::assume_unique_for_key(nonce),
-                        aad,
-                        &mut expect,
-                    )
-                    .unwrap();
-                let mut ct = vec![0u8; size];
-                assert_eq!(
-                    key.encrypt_in_place(&nonce, aad, &mut ct).unwrap(),
-                    tag.as_ref()
-                );
-                assert_eq!(ct, expect);
-                vg_scope!(
-                    held,
-                    b.iter(|| key.encrypt_in_place(&nonce, aad, &mut buf).unwrap())
-                );
-            });
-        }
-        #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-        group.bench_function(BenchmarkId::new("graviola", size_name), |b| {
-            let key = graviola::aead::ChaCha20Poly1305::new(key);
-            let mut tag = [0u8; 16];
-            b.iter(|| key.encrypt(&nonce, aad, &mut buf, &mut tag));
-        });
-        // libcrux seals out of place.
-        group.bench_function(BenchmarkId::new("libcrux", size_name), |b| {
-            let mut ct = vec![0u8; size];
-            let mut tag = [0u8; 16];
-            b.iter(|| {
-                libcrux_chacha20poly1305::encrypt_detached(
-                    &key, &buf, &mut ct, &mut tag, aad, &nonce,
-                )
-                .unwrap();
-            });
-        });
-        #[cfg(all(
-            feature = "__bench_openssl",
-            target_family = "unix",
-            not(target_arch = "xtensa")
-        ))]
-        group.bench_function(BenchmarkId::new("openssl", size_name), |b| {
-            let cipher = openssl::cipher::Cipher::chacha20_poly1305();
-            let mut key = ossl_aead::Sealer::new(cipher, &key);
-            b.iter(|| key.seal(&nonce, aad, &mut buf));
-        });
-    }
-    group.finish();
-
-    if let Some(mut group) = criterion::dit_per_call(c, "chacha20poly1305") {
-        for (size, size_name, aad) in criterion::dit_per_call_aead_rows() {
-            let mut buf = vec![0u8; size];
-            group.throughput(Throughput::Bytes(size as u64));
-            group.bench_function(BenchmarkId::new("rind", size_name), |b| {
-                use rind::aead::{CHACHA20_POLY1305, Key};
-                let key = Key::new(&CHACHA20_POLY1305, &key).unwrap();
-                b.iter(|| test_rind_chacha(&key, &nonce, aad, &mut buf));
-            });
+#[cfg(not(target_arch = "xtensa"))]
+impl<K> Seal<K> {
+    fn new(key: K, row: Aead) -> Self {
+        Self {
+            key,
+            aad: row.aad,
+            buf: row.size.zeros(),
         }
     }
 }
 
-// Decrypting and verifying each size's ciphertext, as a receiver pays.
+/// A key, with the tag it opens under, and a ciphertext rind sealed. As in
+/// `aes_gcm`, each call copies the ciphertext into a buffer a whole number
+/// of 4 KiB pages after it, so the copies do not share a page offset.
 #[cfg(not(target_arch = "xtensa"))]
-fn bench_chacha20poly1305_open(c: &mut Criterion) {
-    let key = [0u8; 32];
-    let nonce = [0u8; 12];
-    let rind_key = rind::aead::Key::new(&rind::aead::CHACHA20_POLY1305, &key).unwrap();
+struct Open<K> {
+    key: K,
+    aad: &'static [u8],
+    buf: Vec<u8>,
+    stride: usize,
+}
 
-    let mut group = c.benchmark_group("chacha20poly1305-open");
-    for (size, size_name, aad) in criterion::aead_rows() {
-        // As in `aes_gcm`, the ciphertext is copied into a buffer a whole number
-        // of 4 KiB pages after it, so the copies do not share a page offset.
-        let stride = size.next_multiple_of(4096);
-        let mut buf = vec![0u8; stride + size];
-        let (ct, pt) = buf.split_at_mut(stride);
-        let ct = &mut ct[..size];
-        let tag = rind_key
-            .seal_in_place_separate_tag(rind::aead::Nonce::assume_unique_for_key(nonce), aad, ct)
+#[cfg(not(target_arch = "xtensa"))]
+impl<K> Open<K> {
+    /// Seals `row` with rind, then makes the row's key from the tag.
+    fn new(row: Aead, make: impl FnOnce([u8; 16]) -> K) -> Self {
+        let stride = row.len().next_multiple_of(4096);
+        let mut buf = vec![0; stride + row.len()];
+        let tag = rind::aead::Key::new(&rind::aead::CHACHA20_POLY1305, &KEY)
+            .unwrap()
+            .seal_in_place_separate_tag(
+                rind::aead::Nonce::assume_unique_for_key(NONCE),
+                row.aad,
+                &mut buf[..row.len()],
+            )
             .unwrap();
-        group.throughput(Throughput::Bytes(size as u64));
-
-        group.bench_function(BenchmarkId::new("ring", size_name), |b| {
-            use ring::aead::{CHACHA20_POLY1305, LessSafeKey, UnboundKey};
-            let key = LessSafeKey::new(UnboundKey::new(&CHACHA20_POLY1305, &key).unwrap());
-            let tag = ring::aead::Tag::try_from(tag.as_ref()).unwrap();
-            b.iter(|| {
-                pt.copy_from_slice(ct);
-                key.open_in_place_separate_tag(
-                    ring::aead::Nonce::assume_unique_for_key(nonce),
-                    ring::aead::Aad::from(aad),
-                    tag,
-                    pt,
-                    0..,
-                )
-                .unwrap();
-            });
-        });
-        #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
-        group.bench_function(BenchmarkId::new("aws-lc-rs", size_name), |b| {
-            use aws_lc_rs::aead::{CHACHA20_POLY1305, LessSafeKey, UnboundKey};
-            let key = LessSafeKey::new(UnboundKey::new(&CHACHA20_POLY1305, &key).unwrap());
-            b.iter(|| {
-                pt.copy_from_slice(ct);
-                key.open_in_place_separate_tag(
-                    aws_lc_rs::aead::Nonce::assume_unique_for_key(nonce),
-                    aws_lc_rs::aead::Aad::from(aad),
-                    tag.as_ref(),
-                    pt,
-                )
-                .unwrap();
-            });
-        });
-        group.bench_function(BenchmarkId::new("rustcrypto", size_name), |b| {
-            use chacha20poly1305::{AeadInOut, KeyInit};
-            let key = chacha20poly1305::ChaCha20Poly1305::new_from_slice(&key).unwrap();
-            let tag = <&[u8; 16]>::try_from(tag.as_ref()).unwrap().into();
-            b.iter(|| {
-                pt.copy_from_slice(ct);
-                key.decrypt_inout_detached(&nonce.into(), aad, pt.into(), tag)
-                    .unwrap();
-            });
-        });
-        group.bench_function(BenchmarkId::new("rind", size_name), |b| {
-            let _dit = criterion::rind_dit();
-            b.iter(|| {
-                pt.copy_from_slice(ct);
-                rind_key
-                    .open_in_place_separate_tag(
-                        rind::aead::Nonce::assume_unique_for_key(nonce),
-                        aad,
-                        tag,
-                        pt,
-                    )
-                    .unwrap();
-            });
-        });
-        for (lib, held) in criterion::vg_rows() {
-            group.bench_function(BenchmarkId::new(lib, size_name), |b| {
-                let key = verified_garbage::aead::chacha20poly1305::ChaCha20Poly1305::new(&key);
-                let tag = tag.as_ref().try_into().unwrap();
-                pt.copy_from_slice(ct);
-                key.decrypt_in_place(&nonce, aad, pt, tag).unwrap();
-                assert!(pt.iter().all(|&x| x == 0));
-                vg_scope!(
-                    held,
-                    b.iter(|| {
-                        pt.copy_from_slice(ct);
-                        key.decrypt_in_place(&nonce, aad, pt, tag).unwrap();
-                    })
-                );
-            });
+        Self {
+            key: make(tag.as_ref().try_into().unwrap()),
+            aad: row.aad,
+            buf,
+            stride,
         }
-        #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-        group.bench_function(BenchmarkId::new("graviola", size_name), |b| {
-            let key = graviola::aead::ChaCha20Poly1305::new(key);
-            b.iter(|| {
-                pt.copy_from_slice(ct);
-                key.decrypt(&nonce, aad, pt, tag.as_ref()).unwrap();
-            });
-        });
-        // libcrux opens out of place, so it needs no copy.
-        group.bench_function(BenchmarkId::new("libcrux", size_name), |b| {
-            let tag = tag.as_ref().try_into().unwrap();
-            b.iter(|| {
-                libcrux_chacha20poly1305::decrypt_detached(&key, pt, ct, tag, aad, &nonce).unwrap();
-            });
-        });
-        #[cfg(all(
-            feature = "__bench_openssl",
-            target_family = "unix",
-            not(target_arch = "xtensa")
-        ))]
-        group.bench_function(BenchmarkId::new("openssl", size_name), |b| {
-            let cipher = openssl::cipher::Cipher::chacha20_poly1305();
-            let mut key = ossl_aead::Opener::new(cipher, &key);
-            b.iter(|| {
-                pt.copy_from_slice(ct);
-                key.open(&nonce, aad, tag.as_ref(), pt);
-            });
-        });
+    }
+
+    /// The key, the ciphertext, and the buffer it is opened in.
+    fn parts(&mut self) -> (&mut K, &[u8], &mut [u8]) {
+        let (ct, pt) = self.buf.split_at_mut(self.stride);
+        (&mut self.key, &ct[..pt.len()], pt)
     }
 }
 
 #[cfg(not(target_arch = "xtensa"))]
-criterion_group!(benches, bench_chacha20poly1305, bench_chacha20poly1305_open);
+mod chacha20poly1305 {
+    use swole::bench;
+
+    use super::*;
+
+    fn ring_seal(row: Aead) -> Seal<ring::aead::LessSafeKey> {
+        let key = ring::aead::UnboundKey::new(&ring::aead::CHACHA20_POLY1305, &KEY).unwrap();
+        Seal::new(ring::aead::LessSafeKey::new(key), row)
+    }
+
+    #[bench(args = AEAD_ROWS, setup = ring_seal)]
+    fn ring(s: &mut Seal<ring::aead::LessSafeKey>) {
+        test_ring_chacha(&s.key, &NONCE, s.aad, &mut s.buf);
+    }
+
+    fn aws_seal(row: Aead) -> Seal<aws_lc_rs::aead::LessSafeKey> {
+        let key =
+            aws_lc_rs::aead::UnboundKey::new(&aws_lc_rs::aead::CHACHA20_POLY1305, &KEY).unwrap();
+        Seal::new(aws_lc_rs::aead::LessSafeKey::new(key), row)
+    }
+
+    #[bench(args = AEAD_ROWS, setup = aws_seal)]
+    fn aws_lc_rs(s: &mut Seal<aws_lc_rs::aead::LessSafeKey>) {
+        test_aws_chacha(&s.key, &NONCE, s.aad, &mut s.buf);
+    }
+
+    fn rustcrypto_seal(row: Aead) -> Seal<::chacha20poly1305::ChaCha20Poly1305> {
+        use ::chacha20poly1305::KeyInit;
+        let key = ::chacha20poly1305::ChaCha20Poly1305::new_from_slice(&KEY).unwrap();
+        Seal::new(key, row)
+    }
+
+    #[bench(args = AEAD_ROWS, setup = rustcrypto_seal)]
+    fn rustcrypto(s: &mut Seal<::chacha20poly1305::ChaCha20Poly1305>) {
+        test_rc_chacha(&s.key, &NONCE, s.aad, &mut s.buf);
+    }
+
+    fn rind_seal(row: Aead) -> Dit<Seal<rind::aead::Key>> {
+        let key = rind::aead::Key::new(&rind::aead::CHACHA20_POLY1305, &KEY).unwrap();
+        Dit::hold(Seal::new(key, row))
+    }
+
+    #[bench(args = AEAD_ROWS, setup = rind_seal)]
+    fn rind(s: &mut Dit<Seal<rind::aead::Key>>) {
+        let s = &mut **s;
+        test_rind_chacha(&s.key, &NONCE, s.aad, &mut s.buf);
+    }
+
+    type Vg = verified_garbage::aead::chacha20poly1305::ChaCha20Poly1305;
+
+    /// verified-garbage's key, after checking its ciphertext and tag match
+    /// rind's.
+    fn vg_seal(row: Aead) -> Seal<Vg> {
+        let key = Vg::new(&KEY);
+        let mut expect = row.size.zeros();
+        let tag = rind::aead::Key::new(&rind::aead::CHACHA20_POLY1305, &KEY)
+            .unwrap()
+            .seal_in_place_separate_tag(
+                rind::aead::Nonce::assume_unique_for_key(NONCE),
+                row.aad,
+                &mut expect,
+            )
+            .unwrap();
+        let mut ct = row.size.zeros();
+        assert_eq!(
+            key.encrypt_in_place(&NONCE, row.aad, &mut ct).unwrap(),
+            tag.as_ref()
+        );
+        assert_eq!(ct, expect);
+        Seal::new(key, row)
+    }
+
+    #[bench(args = AEAD_ROWS, setup = vg_seal)]
+    fn verified_garbage(s: &mut Seal<Vg>) -> [u8; 16] {
+        s.key.encrypt_in_place(&NONCE, s.aad, &mut s.buf).unwrap()
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    #[bench(args = AEAD_ROWS, setup = vg_seal)]
+    fn verified_garbage_dit_held(
+        s: &mut Seal<Vg>,
+        iterations: swole::Iterations,
+    ) -> std::time::Duration {
+        common::vg_dit_held(iterations, || verified_garbage(s))
+    }
+
+    #[cfg(graviola)]
+    fn graviola_seal(row: Aead) -> Seal<(graviola::aead::ChaCha20Poly1305, [u8; 16])> {
+        Seal::new((graviola::aead::ChaCha20Poly1305::new(KEY), [0; 16]), row)
+    }
+
+    #[cfg(graviola)]
+    #[bench(args = AEAD_ROWS, setup = graviola_seal)]
+    fn graviola(s: &mut Seal<(graviola::aead::ChaCha20Poly1305, [u8; 16])>) {
+        let (key, tag) = &mut s.key;
+        key.encrypt(&NONCE, s.aad, &mut s.buf, tag);
+    }
+
+    /// libcrux seals out of place, into a ciphertext buffer of its own, with
+    /// a tag.
+    fn libcrux_seal(row: Aead) -> Seal<(Vec<u8>, [u8; 16])> {
+        Seal::new((row.size.zeros(), [0; 16]), row)
+    }
+
+    #[bench(args = AEAD_ROWS, setup = libcrux_seal)]
+    fn libcrux(s: &mut Seal<(Vec<u8>, [u8; 16])>) {
+        let (ct, tag) = &mut s.key;
+        libcrux_chacha20poly1305::encrypt_detached(&KEY, &s.buf, ct, tag, s.aad, &NONCE).unwrap();
+    }
+
+    #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+    fn openssl_seal(row: Aead) -> Seal<ossl_aead::Sealer> {
+        let cipher = openssl::cipher::Cipher::chacha20_poly1305();
+        Seal::new(ossl_aead::Sealer::new(cipher, &KEY), row)
+    }
+
+    #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+    #[bench(args = AEAD_ROWS, setup = openssl_seal)]
+    fn openssl(s: &mut Seal<ossl_aead::Sealer>) -> [u8; 16] {
+        s.key.seal(&NONCE, s.aad, &mut s.buf)
+    }
+}
+
+/// Decrypting and verifying each size's ciphertext, as a receiver pays.
 #[cfg(not(target_arch = "xtensa"))]
-criterion_main!(benches);
+mod chacha20poly1305_open {
+    use swole::bench;
+
+    use super::*;
+
+    fn ring_open(row: Aead) -> Open<(ring::aead::LessSafeKey, ring::aead::Tag)> {
+        Open::new(row, |tag| {
+            let key = ring::aead::UnboundKey::new(&ring::aead::CHACHA20_POLY1305, &KEY).unwrap();
+            let tag = ring::aead::Tag::try_from(&tag[..]).unwrap();
+            (ring::aead::LessSafeKey::new(key), tag)
+        })
+    }
+
+    #[bench(args = AEAD_ROWS, setup = ring_open)]
+    fn ring(open: &mut Open<(ring::aead::LessSafeKey, ring::aead::Tag)>) {
+        let aad = open.aad;
+        let ((key, tag), ct, pt) = open.parts();
+        pt.copy_from_slice(ct);
+        key.open_in_place_separate_tag(
+            ring::aead::Nonce::assume_unique_for_key(NONCE),
+            ring::aead::Aad::from(aad),
+            *tag,
+            pt,
+            0..,
+        )
+        .unwrap();
+    }
+
+    fn aws_open(row: Aead) -> Open<(aws_lc_rs::aead::LessSafeKey, [u8; 16])> {
+        Open::new(row, |tag| {
+            let key = aws_lc_rs::aead::UnboundKey::new(&aws_lc_rs::aead::CHACHA20_POLY1305, &KEY)
+                .unwrap();
+            (aws_lc_rs::aead::LessSafeKey::new(key), tag)
+        })
+    }
+
+    #[bench(args = AEAD_ROWS, setup = aws_open)]
+    fn aws_lc_rs(open: &mut Open<(aws_lc_rs::aead::LessSafeKey, [u8; 16])>) {
+        let aad = open.aad;
+        let ((key, tag), ct, pt) = open.parts();
+        pt.copy_from_slice(ct);
+        key.open_in_place_separate_tag(
+            aws_lc_rs::aead::Nonce::assume_unique_for_key(NONCE),
+            aws_lc_rs::aead::Aad::from(aad),
+            tag,
+            pt,
+        )
+        .unwrap();
+    }
+
+    type RustCrypto = (
+        ::chacha20poly1305::ChaCha20Poly1305,
+        ::chacha20poly1305::Tag,
+    );
+
+    fn rustcrypto_open(row: Aead) -> Open<RustCrypto> {
+        use ::chacha20poly1305::KeyInit;
+        Open::new(row, |tag| {
+            let key = ::chacha20poly1305::ChaCha20Poly1305::new_from_slice(&KEY).unwrap();
+            (key, tag.into())
+        })
+    }
+
+    #[bench(args = AEAD_ROWS, setup = rustcrypto_open)]
+    fn rustcrypto(open: &mut Open<RustCrypto>) {
+        use ::chacha20poly1305::AeadInOut;
+        let aad = open.aad;
+        let ((key, tag), ct, pt) = open.parts();
+        pt.copy_from_slice(ct);
+        key.decrypt_inout_detached(&NONCE.into(), aad, pt.into(), tag)
+            .unwrap();
+    }
+
+    fn rind_open(row: Aead) -> Dit<Open<(rind::aead::Key, rind::aead::Tag)>> {
+        Dit::hold(Open::new(row, |tag| {
+            let key = rind::aead::Key::new(&rind::aead::CHACHA20_POLY1305, &KEY).unwrap();
+            (key, rind::aead::Tag::try_from(&tag[..]).unwrap())
+        }))
+    }
+
+    #[bench(args = AEAD_ROWS, setup = rind_open)]
+    fn rind(open: &mut Dit<Open<(rind::aead::Key, rind::aead::Tag)>>) {
+        let aad = open.aad;
+        let ((key, tag), ct, pt) = open.parts();
+        pt.copy_from_slice(ct);
+        key.open_in_place_separate_tag(
+            rind::aead::Nonce::assume_unique_for_key(NONCE),
+            aad,
+            *tag,
+            pt,
+        )
+        .unwrap();
+    }
+
+    type Vg = verified_garbage::aead::chacha20poly1305::ChaCha20Poly1305;
+
+    /// verified-garbage's key, after checking it opens what rind sealed.
+    fn vg_open(row: Aead) -> Open<(Vg, [u8; 16])> {
+        let mut open = Open::new(row, |tag| (Vg::new(&KEY), tag));
+        let ((key, tag), ct, pt) = open.parts();
+        pt.copy_from_slice(ct);
+        key.decrypt_in_place(&NONCE, row.aad, pt, tag).unwrap();
+        assert!(pt.iter().all(|&x| x == 0));
+        open
+    }
+
+    #[bench(args = AEAD_ROWS, setup = vg_open)]
+    fn verified_garbage(open: &mut Open<(Vg, [u8; 16])>) {
+        let aad = open.aad;
+        let ((key, tag), ct, pt) = open.parts();
+        pt.copy_from_slice(ct);
+        key.decrypt_in_place(&NONCE, aad, pt, tag).unwrap();
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    #[bench(args = AEAD_ROWS, setup = vg_open)]
+    fn verified_garbage_dit_held(
+        open: &mut Open<(Vg, [u8; 16])>,
+        iterations: swole::Iterations,
+    ) -> std::time::Duration {
+        common::vg_dit_held(iterations, || verified_garbage(open))
+    }
+
+    #[cfg(graviola)]
+    fn graviola_open(row: Aead) -> Open<(graviola::aead::ChaCha20Poly1305, [u8; 16])> {
+        Open::new(row, |tag| (graviola::aead::ChaCha20Poly1305::new(KEY), tag))
+    }
+
+    #[cfg(graviola)]
+    #[bench(args = AEAD_ROWS, setup = graviola_open)]
+    fn graviola(open: &mut Open<(graviola::aead::ChaCha20Poly1305, [u8; 16])>) {
+        let aad = open.aad;
+        let ((key, tag), ct, pt) = open.parts();
+        pt.copy_from_slice(ct);
+        key.decrypt(&NONCE, aad, pt, tag).unwrap();
+    }
+
+    fn libcrux_open(row: Aead) -> Open<[u8; 16]> {
+        Open::new(row, |tag| tag)
+    }
+
+    /// libcrux opens out of place, so it needs no copy.
+    #[bench(args = AEAD_ROWS, setup = libcrux_open)]
+    fn libcrux(open: &mut Open<[u8; 16]>) {
+        let aad = open.aad;
+        let (tag, ct, pt) = open.parts();
+        libcrux_chacha20poly1305::decrypt_detached(&KEY, pt, ct, tag, aad, &NONCE).unwrap();
+    }
+
+    #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+    fn openssl_open(row: Aead) -> Open<(ossl_aead::Opener, [u8; 16])> {
+        Open::new(row, |tag| {
+            let cipher = openssl::cipher::Cipher::chacha20_poly1305();
+            (ossl_aead::Opener::new(cipher, &KEY), tag)
+        })
+    }
+
+    #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+    #[bench(args = AEAD_ROWS, setup = openssl_open)]
+    fn openssl(open: &mut Open<(ossl_aead::Opener, [u8; 16])>) {
+        let aad = open.aad;
+        let ((key, tag), ct, pt) = open.parts();
+        pt.copy_from_slice(ct);
+        key.open(&NONCE, aad, tag, pt);
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+#[cfg(not(target_arch = "xtensa"))]
+mod dit_per_call {
+    use super::*;
+
+    mod chacha20poly1305 {
+        use swole::bench;
+
+        use super::*;
+
+        fn seal(row: Aead) -> Seal<rind::aead::Key> {
+            let key = rind::aead::Key::new(&rind::aead::CHACHA20_POLY1305, &KEY).unwrap();
+            Seal::new(key, row)
+        }
+
+        #[bench(args = common::DIT_PER_CALL_AEAD_ROWS, setup = seal)]
+        fn rind(s: &mut Seal<rind::aead::Key>) {
+            test_rind_chacha(&s.key, &NONCE, s.aad, &mut s.buf);
+        }
+    }
+}
+
+#[cfg(not(target_arch = "xtensa"))]
+fn main() {
+    swole::main();
+}

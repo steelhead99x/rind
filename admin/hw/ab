@@ -54,6 +54,14 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 
 
+
+# Criterion's flags for the bench binaries `rounds` times. rind-bench's
+# benches are swole's since the merge of kixel-ai/rind#1141, whose binaries
+# refuse these flags, so `rounds` times only revisions from before it; a
+# swole revision's A/B is `swole bench <base>`, which ab does not run yet.
+CRITERION_ARGS = ["--noplot", "--warm-up-time", "1", "--measurement-time", "3"]
+
+
 def bench_report():
     """admin/bench-report as a module, for its idle check and host metadata."""
     path = os.path.join(ROOT, "admin", "bench-report")
@@ -267,7 +275,7 @@ def cmd_rounds(args):
             ours0 = resource.getrusage(resource.RUSAGE_CHILDREN)
             wall0 = time.monotonic()
             for b in v["bins"]:
-                cmd = ["taskset", "-c", args.pin, b, "--bench"] + br.CRITERION_ARGS + [v["filter"]]
+                cmd = ["taskset", "-c", args.pin, b, "--bench"] + CRITERION_ARGS + [v["filter"]]
                 with open(os.path.join(home, "stdout.txt"), "a") as log:
                     proc = subprocess.run(cmd, cwd=v["cwd"], env=env, stdout=log, stderr=subprocess.STDOUT)
                 if proc.returncode != 0:
@@ -375,7 +383,7 @@ def write_rounds_outputs(out, args, br, variants, compares, controls, rounds, st
         "pin": args.pin,
         "governor": governor(args.pin),
         "toolchain": toolchain(),
-        "criterion_args": br.CRITERION_ARGS,
+        "criterion_args": CRITERION_ARGS,
         "bound": args.bound,
         "clean_rounds_needed": args.rounds,
         "rounds_run": len(rounds),
@@ -448,7 +456,7 @@ def write_rounds_outputs(out, args, br, variants, compares, controls, rounds, st
             "os": meta["os"],
             "toolchain": {"rustc": meta["toolchain"]},
             "status": "ok",
-            "criterion_args": br.CRITERION_ARGS,
+            "criterion_args": CRITERION_ARGS,
             "pinned_cpus": args.pin,
             "runs": len(rounds),
             "spread_is": "runs",
@@ -473,7 +481,7 @@ def write_rounds_outputs(out, args, br, variants, compares, controls, rounds, st
         f"- Host: {cpu['model']} ({cpu['logical_cpus']} logical CPUs), {meta['os']}, pinned to CPU {args.pin}"
         + (f", governor `{meta['governor']}`" if meta["governor"] else ""),
         f"- Toolchain: `{(meta['toolchain'] or '?').splitlines()[0]}`",
-        f"- Criterion `{' '.join(br.CRITERION_ARGS)}`; {len(rounds)} rounds, variant order rotated each round; "
+        f"- Criterion `{' '.join(CRITERION_ARGS)}`; {len(rounds)} rounds, variant order rotated each round; "
         f"a round is clean when no run in it was busy (admin/bench-report's limit) and each control is within {args.bound}.",
     ]
     for n, v in variants.items():

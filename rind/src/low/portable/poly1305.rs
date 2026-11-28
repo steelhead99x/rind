@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
 //! The portable backend's Poly1305: rind's 26-bit limbs in
-//! `generic::poly1305_32` on 32-bit targets, where each limb product is one
+//! `generic::poly1305_32` on 32-bit or multiplier-free targets, where each limb product is one
 //! 32x32->64-bit multiply, or four 16-bit halves where build.rs sets
 //! `rind_mul16`, and rind's 64-bit limbs in `generic::poly1305` on
 //! 64-bit ones, as x86_64 runs without SSE4.1. Neither counts its input, so
@@ -21,12 +21,12 @@ use libcrux_poly1305::hacl::mac_poly1305::{self, state_t};
 #[cfg(all(
     rind_backend = "portable",
     target_pointer_width = "64",
-    not(rind_limb = "32")
+    not(any(rind_limb = "32", rind_mul16))
 ))]
 pub(crate) use crate::low::generic::poly1305::Poly1305;
 #[cfg(all(
     rind_backend = "portable",
-    any(target_pointer_width = "32", rind_limb = "32")
+    any(target_pointer_width = "32", rind_limb = "32", rind_mul16)
 ))]
 pub(crate) use crate::low::generic::poly1305_32::Poly1305;
 

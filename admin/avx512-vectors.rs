@@ -80,6 +80,16 @@ fn ternary128<const I: i32>(a: __m128i, b: __m128i, c: __m128i) -> __m128i {
     _mm_ternarylogic_epi32::<I>(a, b, c)
 }
 
+#[target_feature(enable = "avx512f")]
+fn rol64<const I: i32>(a: __m512i) -> __m512i {
+    _mm512_rol_epi64::<I>(a)
+}
+
+#[target_feature(enable = "avx512f")]
+fn shuffle_i64x2<const I: i32>(a: __m512i, b: __m512i) -> __m512i {
+    _mm512_shuffle_i64x2::<I>(a, b)
+}
+
 #[target_feature(enable = "avx512f,vpclmulqdq")]
 fn clmul<const I: i32>(a: __m512i, b: __m512i) -> __m512i {
     _mm512_clmulepi64_epi128::<I>(a, b)
@@ -113,6 +123,11 @@ fn v(x: [u128; 4]) -> __m512i {
 fn q(x: __m512i) -> String {
     let [a, b, c, d] = unsafe { transmute::<__m512i, [u128; 4]>(x) };
     format!("0x{d:032x}{c:032x}{b:032x}{a:032x}#512")
+}
+
+fn q256(x: __m256i) -> String {
+    let [a, b] = unsafe { transmute::<__m256i, [u128; 2]>(x) };
+    format!("0x{b:032x}{a:032x}#256")
 }
 
 fn v128(x: u128) -> __m128i {
@@ -246,6 +261,45 @@ fn main() {
         }
         let r = unsafe { ternary128[imm](v128(x1), v128(y1), v128(z1)) };
         guard(format!("{F}._mm_ternarylogic_epi32 ⟨{imm}#32⟩ x1 y1 z1"), q128(r));
+    }
+
+    // The eight-way Keccak-f's intrinsics, after the rest so that adding
+    // them left the lines above as they were.
+    let rols: [Unary; 256] = imm8!(rol64);
+    let shuffles: [Binary; 256] = imm8!(shuffle_i64x2);
+    for imm in 0..256 {
+        let r = unsafe { rols[imm](v(x)) };
+        guard(format!("{F}._mm512_rol_epi64 ⟨{imm}#32⟩ x"), q(r));
+        let r = unsafe { shuffles[imm](v(x), v(y)) };
+        guard(format!("{F}._mm512_shuffle_i64x2 ⟨{imm}#32⟩ x y"), q(r));
+    }
+    let binary: [(&str, Binary); 3] = [
+        ("_mm512_xor_si512", |a, b| unsafe { _mm512_xor_si512(a, b) }),
+        ("_mm512_unpacklo_epi64", |a, b| unsafe { _mm512_unpacklo_epi64(a, b) }),
+        ("_mm512_unpackhi_epi64", |a, b| unsafe { _mm512_unpackhi_epi64(a, b) }),
+    ];
+    for (name, f) in binary {
+        for &(a, b) in &pairs {
+            let r = unsafe { f(v(a), v(b)) };
+            guard(format!("{F}.{name} {} {}", q(v(a)), q(v(b))), q(r));
+        }
+    }
+    for &a in &inputs {
+        let r = unsafe {
+            [
+                _mm512_extracti64x4_epi64::<0>(v(a)),
+                _mm512_extracti64x4_epi64::<1>(v(a)),
+            ]
+        };
+        for (imm, r) in r.into_iter().enumerate() {
+            guard(format!("{F}._mm512_extracti64x4_epi64 ⟨{imm}#32⟩ {}", q(v(a))), q256(r));
+        }
+        let e: [i64; 8] = unsafe { transmute(v(a)) };
+        let r = unsafe { _mm512_setr_epi64(e[0], e[1], e[2], e[3], e[4], e[5], e[6], e[7]) };
+        let args: Vec<String> = e.iter().map(|x| format!("⟨{}#64⟩", *x as u64)).collect();
+        guard(format!("{F}._mm512_setr_epi64 {}", args.join(" ")), q(r));
+        let r = unsafe { _mm512_set1_epi64(e[0] ^ e[7]) };
+        guard(format!("{F}._mm512_set1_epi64 ⟨{}#64⟩", (e[0] ^ e[7]) as u64), q(r));
     }
     print!("{out}");
 }

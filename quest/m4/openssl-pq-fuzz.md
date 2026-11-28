@@ -17,8 +17,8 @@ error reaching OpenSSL's core with a known reason.
 - Cover import with seed, expanded, and public forms that disagree, which
   must give a key that fails each use; generation from a `seed`; and
   encapsulation, decapsulation, signing, and verification with the
-  parameters rind refuses (`ikme`, `context-string`, `deterministic`,
-  `test-entropy`, `mu`, `message-encoding`).
+  parameters rind refuses (`ikme`, `deterministic`, `test-entropy`, `mu`,
+  `message-encoding`), and with `context-string` at lengths around 255.
 
 ## Required
 

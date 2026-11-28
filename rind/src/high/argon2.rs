@@ -54,7 +54,7 @@ impl Params {
         })
     }
 
-    fn cost(self) -> Cost {
+    pub(super) const fn cost(self) -> Cost {
         Cost {
             memory_kib: self.memory_kib,
             passes: self.passes,

@@ -11,6 +11,10 @@ pyca/verified-garbage's `vg_rsa_public_precompute_adx`, which
 otherwise by `pub_montifier`'s `k + 1` steps of Knuth's algorithm D in
 `mul_word_mod`; and `mont_neg_inverse`'s `-n⁻¹ mod 2^64`. A key it returns
 meets `PubKeyInv`.
+
+`admin/prove` writes the portable backend's copy without the sections marked
+as this target's alone, whose `Precompute::check` never gives a token, with
+the lines marked as the portable backend's in their place.
 -/
 
 namespace rind.x86_64
@@ -1037,6 +1041,7 @@ theorem pub_montifier_spec (self : RsaInt) (hk2 : 2 ≤ self.used.val) (hk : sel
   exact Nat.eq_of_mul_eq_mul_right (by positivity) hr'
 
 
+-- BEGIN x86_64
 /-- A list whose words are `toWords x` holds `x` modulo its width. -/
 theorem wordsNat_of_toWords (l : List U64) (x : Nat)
     (h : l.map (·.bv) = VG.Spec.Rsa.toWords x l.length) : wordsNat l = x % 2 ^ (64 * l.length) := by
@@ -1063,9 +1068,9 @@ theorem wordsNat_of_toWords (l : List U64) (x : Nat)
       show 64 * (l.length + 1) = 64 + 64 * l.length by ring, pow_add, Nat.mod_mul]
 
 /-- `Precompute::check` returns, on a CPU whose BMI2 and ADX check returns. -/
-theorem precompute_check_spec (hcpu : ∃ t, low.x86_64.cpu.HaveBmi2Adx.check = ok t) (n : Slice U64) :
+theorem precompute_check_spec (hrun : Runs) (n : Slice U64) :
     low.x86_64.rsa_vg.Precompute.check n ⦃ _ => True ⦄ := by
-  obtain ⟨t, ht⟩ := hcpu
+  obtain ⟨-, -, ⟨t, ht⟩, -⟩ := hrun
   unfold low.x86_64.rsa_vg.Precompute.check
   dsimp only
   split
@@ -1074,12 +1079,13 @@ theorem precompute_check_spec (hcpu : ∃ t, low.x86_64.cpu.HaveBmi2Adx.check = 
     simp only [ht, bind_ok]
     cases t <;> simp [core.option.Option.Insts.CoreOpsTry_traitTry.branch,
       core.option.Option.Insts.CoreOpsTry_traitFromResidualOptionNever.from_residual]
+-- END x86_64
 
 /-- `montifier_of` returns `2^(128k) mod n` for an odd `k`-word modulus `n`
 of 1017 to 8192 bits whose top word is nonzero: by pyca/verified-garbage's
 routine where `Precompute::check` gives a token, and otherwise by
 `pub_montifier`. -/
-theorem montifier_of_spec (hcpu : ∃ t, low.x86_64.cpu.HaveBmi2Adx.check = ok t) (n : RsaInt)
+theorem montifier_of_spec (hrun : Runs) (n : RsaInt)
     (hk : n.used.val ≤ 128)
     (hodd : wordsNat (lowWords n n.used) % 2 = 1)
     (hsz : 1017 ≤ (wordsNat (lowWords n n.used)).size)
@@ -1096,12 +1102,14 @@ theorem montifier_of_spec (hcpu : ∃ t, low.x86_64.cpu.HaveBmi2Adx.check = ok t
   step as ⟨s, s_post, s_post1⟩
   have hsv : s.val = lowWords n n.used := by
     rw [s_post]; simp [lowWords, List.slice, Array.val_to_slice]
-  step with precompute_check_spec hcpu s as ⟨o⟩
+  step with precompute_check_spec hrun s as ⟨o⟩
   split
   · step with pub_montifier_spec n (by omega) hk (by rw [hN]; exact hodd) (by rw [hN]; exact htop)
       as ⟨m, hmu, hm⟩
     exact ⟨m, rfl, hmu, by rw [hm, hN]⟩
   rename_i vg
+  -- portable: cases vg
+  -- BEGIN x86_64
   unfold low.posint.PosInt.len_bytes
   step with len_bits_spec n hk as ⟨b, hb⟩
   rw [hN] at hb
@@ -1193,6 +1201,7 @@ theorem montifier_of_spec (hcpu : ∃ t, low.x86_64.cpu.HaveBmi2Adx.check = ok t
   have := take_setSlice! (Array.repeat 128#usize 0#u64).val s6.val 0 (by omega)
   rw [List.take_zero, List.nil_append, zero_add, hs6l] at this
   rw [lowWords, s_post2, s1_post, this, hs6N]
+  -- END x86_64
 
 /-- What `RsaPublicKey::new` accepts: an odd modulus of 1017 to 8192 bits
 and an odd exponent above one and below `2^33`. -/
@@ -1291,7 +1300,7 @@ theorem rsa_public_key_new_spec (hrun : Runs) (h : low.entry.Entry.assert_held =
           intro h0; apply hodd; simp only [decide_eq_true_eq]; rw [UScalar.eq_equiv]; exact h0
         rw [hw0and] at h0; omega
       have htop : 2 ^ (64 * (n.used.val - 1)) ≤ N := by rcases htight with h | h <;> [omega; exact h]
-      step with montifier_of_spec hrun.2.2.1 n hk (by rw [hN]; exact hodd') (by rw [hN]; exact hsz.1)
+      step with montifier_of_spec hrun n hk (by rw [hN]; exact hodd') (by rw [hN]; exact hsz.1)
         (by rw [hN]; exact htop) as ⟨r, m, hrm, hmu, hm⟩
       subst hrm
       simp only [core.result.Result.Insts.CoreOpsTry.branch, bind_ok]

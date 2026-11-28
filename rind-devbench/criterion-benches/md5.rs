@@ -1,0 +1,97 @@
+#[cfg(target_arch = "xtensa")]
+fn main() {}
+
+#[cfg(not(target_arch = "xtensa"))]
+mod criterion;
+#[cfg(not(target_arch = "xtensa"))]
+use std::hint::black_box;
+
+#[cfg(not(target_arch = "xtensa"))]
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+#[cfg(not(target_arch = "xtensa"))]
+use md5::Digest;
+
+// aws-lc's MD5, which aws-lc-rs does not export, through aws-lc-sys.
+#[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
+#[cfg(not(target_arch = "xtensa"))]
+fn test_aws_md5(data: &[u8]) {
+    let mut out = [0u8; 16];
+    // SAFETY: `data` is readable for its length, and `out` is writable for
+    // MD5's 16-byte digest.
+    let ok = unsafe {
+        aws_lc_sys::EVP_Digest(
+            data.as_ptr().cast(),
+            data.len(),
+            out.as_mut_ptr(),
+            core::ptr::null_mut(),
+            aws_lc_sys::EVP_md5(),
+            core::ptr::null_mut(),
+        )
+    };
+    assert_eq!(ok, 1);
+    black_box(out);
+}
+
+#[cfg(not(target_arch = "xtensa"))]
+fn test_rc_md5(data: &[u8]) {
+    let mut ctx = md5::Md5::new();
+    ctx.update(data);
+    black_box(ctx.finalize());
+}
+
+#[cfg(not(target_arch = "xtensa"))]
+fn test_rind_md5(data: &[u8]) {
+    let mut ctx = rind::digest::Context::new(&rind::digest::legacy::MD5);
+    ctx.update(data);
+    black_box(ctx.finish());
+}
+
+#[cfg(not(target_arch = "xtensa"))]
+fn test_vg_md5(data: &[u8]) {
+    let mut ctx = verified_garbage::hashes::md5::Md5::new();
+    ctx.update(data);
+    black_box(ctx.finalize());
+}
+
+#[cfg(not(target_arch = "xtensa"))]
+fn md5(c: &mut Criterion) {
+    let mut group = c.benchmark_group("md5");
+    for (size, size_name) in criterion::HASH_SIZES {
+        let input = vec![0u8; size];
+        group.throughput(Throughput::Bytes(size as u64));
+
+        #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
+        group.bench_with_input(
+            BenchmarkId::new("aws-lc-rs", size_name),
+            &input,
+            |b, input| b.iter(|| test_aws_md5(input)),
+        );
+        group.bench_with_input(
+            BenchmarkId::new("rustcrypto", size_name),
+            &input,
+            |b, input| b.iter(|| test_rc_md5(input)),
+        );
+        group.bench_with_input(BenchmarkId::new("rind", size_name), &input, |b, input| {
+            let _dit = criterion::rind_dit();
+            b.iter(|| test_rind_md5(input))
+        });
+        assert_eq!(
+            {
+                let mut ctx = verified_garbage::hashes::md5::Md5::new();
+                ctx.update(&input);
+                ctx.finalize()
+            },
+            rind::digest::digest(&rind::digest::legacy::MD5, &input).as_ref()
+        );
+        group.bench_with_input(
+            BenchmarkId::new("verified-garbage", size_name),
+            &input,
+            |b, input| b.iter(|| test_vg_md5(input)),
+        );
+    }
+}
+
+#[cfg(not(target_arch = "xtensa"))]
+criterion_group!(benches, md5);
+#[cfg(not(target_arch = "xtensa"))]
+criterion_main!(benches);

@@ -79,10 +79,13 @@ impl<P: ParameterSet> PublicKey<P> {
         }))
     }
 
-    /// Verifies `signature` over `message`: pure ML-DSA with the empty
-    /// context, as TLS and X.509 sign.
-    pub fn verify(&self, message: &[u8], signature: &[u8]) -> Result<(), Error> {
-        self.0.verify(&[], message, signature)
+    /// Verifies `signature` over `message` and `context`: pure ML-DSA (FIPS
+    /// 204's `ML-DSA.Verify`). TLS and X.509 sign with the empty context.
+    ///
+    /// A `context` over 255 bytes verifies nothing, so it fails as a bad
+    /// signature does.
+    pub fn verify(&self, context: &[u8], message: &[u8], signature: &[u8]) -> Result<(), Error> {
+        self.0.verify(context, message, signature)
     }
 }
 
@@ -113,8 +116,8 @@ pub(super) const MAX_PRIVATE_KEY_LEN: usize = mldsa::secret_key_len::<MlDsa87>()
 
 /// An ML-DSA private key and its public key, of parameter set `P`.
 ///
-/// It signs pure ML-DSA (FIPS 204) with the empty context, as TLS and X.509
-/// use it, hedged with fresh randomness, as [`PublicKey::verify`] verifies.
+/// It signs pure ML-DSA (FIPS 204) under a context, hedged with fresh
+/// randomness, as [`PublicKey::verify`] verifies.
 ///
 /// Loading it expands its encodings once, so that no signature repeats that
 /// work, and keeps the expansion on the heap: 28 KiB for ML-DSA-44, 47 KiB
@@ -224,9 +227,12 @@ impl<P: ParameterSet> KeyPair<P> {
         &self.public
     }
 
-    /// Signs `message`, with fresh randomness from the system random source.
-    pub fn sign(&self, message: &[u8]) -> Result<Signature<P>, Error> {
-        self.pair.sign(&[], message).map(Signature)
+    /// Signs `message` under `context`, with fresh randomness from the
+    /// system random source. TLS and X.509 sign with the empty context.
+    ///
+    /// A `context` over 255 bytes is [`Error::WrongLength`].
+    pub fn sign(&self, context: &[u8], message: &[u8]) -> Result<Signature<P>, Error> {
+        self.pair.sign(context, message).map(Signature)
     }
 }
 

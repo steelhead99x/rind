@@ -100,13 +100,19 @@ fn mul4x(z: &mut [u64], x: &[u64], y: &[u64], m: &[u64], n0: u64, adx: Option<Ha
 fn sqr8x(z: &mut [u64], x: &[u64], m: &[u64], n0: u64, adx: Option<HaveBmi2Adx>) {
     let k = m.len();
     assert!(k >= 8 && k.is_multiple_of(8) && z.len() == k && x.len() == k);
-    let mulx = adx.is_some().into();
-    // SAFETY: `z`, `x`, and `m` are each `k` words, as `bn_sqr8x_mont` reads
-    // and writes for such a `k`, and it reads `n0` as one word. It runs
-    // `mulx`, `adcx`, and `adox` only if `mulx_adx_capable` is nonzero,
-    // which the token proves the CPU has.
-    unsafe {
-        asm_call!(unsafe extern "sysv64" bn_sqr8x_mont(z.as_mut_ptr(), x.as_ptr(), mulx, m.as_ptr(), &n0, k))
+    match adx {
+        // SAFETY: `z`, `x`, and `m` are each `k` words, as
+        // `bn_sqrx8x_mont` reads and writes for such a `k`, and it reads
+        // `n0` as one word. It runs `mulx`, `adcx`, and `adox`, which the
+        // token proves the CPU has.
+        Some(_) => unsafe {
+            asm_call!(unsafe extern "sysv64" bn_sqrx8x_mont(z.as_mut_ptr(), x.as_ptr(), 0, m.as_ptr(), &n0, k))
+        },
+        // SAFETY: as above, for `bn_sqr8x_mont`, which runs no `mulx`,
+        // `adcx`, or `adox` as `mulx_adx_capable` is zero.
+        None => unsafe {
+            asm_call!(unsafe extern "sysv64" bn_sqr8x_mont(z.as_mut_ptr(), x.as_ptr(), 0, m.as_ptr(), &n0, k))
+        },
     };
 }
 
@@ -174,6 +180,38 @@ unsafe extern "sysv64" fn bn_sqr8x_mont(
     );
 }
 
+/// `bn_sqr8x_mont` by `bn_sqrx8x_internal` alone, for CPUs with BMI2 and
+/// ADX: rind's structured copy of aws-lc's, which `proofs/` proves. It
+/// ignores its third argument, aws-lc's `mulx_adx_capable`.
+#[unsafe(naked)]
+unsafe extern "sysv64" fn bn_sqrx8x_mont(
+    rp: *mut u64,
+    ap: *const u64,
+    _unused: u64,
+    np: *const u64,
+    n0: *const u64,
+    num: usize,
+) -> i32 {
+    // aws-lc's alignment and CFI frame, as `bn_sqrx8x_internal`'s.
+    #[cfg(not(target_vendor = "apple"))]
+    core::arch::naked_asm!(
+        ".align 32",
+        ".cfi_startproc",
+        include_str!("sqrx8x_mont.s"),
+        ".cfi_endproc",
+        bn_sqrx8x_internal = sym bn_sqrx8x_internal,
+        options(att_syntax),
+    );
+    #[cfg(target_vendor = "apple")]
+    core::arch::naked_asm!(
+        ".cfi_startproc",
+        include_str!("sqrx8x_mont.s"),
+        ".cfi_endproc",
+        bn_sqrx8x_internal = sym bn_sqrx8x_internal,
+        options(att_syntax),
+    );
+}
+
 /// `bn_sqr8x_mont`'s squaring and reduction, which takes its arguments in
 /// registers and a stack frame of that routine's making, so only it and
 /// `bn_power5` call this.
@@ -192,19 +230,24 @@ pub(super) unsafe extern "sysv64" fn bn_sqr8x_internal() {
 }
 
 /// `bn_sqr8x_internal` by `mulx`, `adcx`, and `adox`, which only
-/// `bn_sqr8x_mont` and `bn_powerx5` call, likewise.
+/// `bn_sqrx8x_mont`, `bn_sqr8x_mont`, and `bn_powerx5` call, likewise: rind's structured copy
+/// of aws-lc's, which `proofs/` proves.
 #[unsafe(naked)]
 pub(super) unsafe extern "sysv64" fn bn_sqrx8x_internal() {
+    // aws-lc's alignment, which raises the section's on ELF but would pad
+    // after the label on Mach-O, whose functions share one, as
+    // `admin/import-aws-lc` says; and its CFI, which Apple's flavor lacks.
     #[cfg(not(target_vendor = "apple"))]
     core::arch::naked_asm!(
-        include_str!("aws_lc/bn_sqrx8x_internal.linux.s"),
-        options(att_syntax)
+        ".align 32",
+        ".cfi_startproc",
+        ".cfi_def_cfa rsp, 8",
+        include_str!("sqrx8x_internal.s"),
+        ".cfi_endproc",
+        options(att_syntax),
     );
     #[cfg(target_vendor = "apple")]
-    core::arch::naked_asm!(
-        include_str!("aws_lc/bn_sqrx8x_internal.apple.s"),
-        options(att_syntax)
-    );
+    core::arch::naked_asm!(include_str!("sqrx8x_internal.s"), options(att_syntax));
 }
 
 #[unsafe(naked)]

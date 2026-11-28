@@ -17,19 +17,23 @@ import Rind.X86_64.Ed25519Ifma
 import Rind.X86_64.Ed25519Verify
 import Rind.X86_64.RsaDispatch
 import Rind.X86_64.RsaPrivate
+import Rind.X86_64.RsaPrivKey
 import Rind.X86_64.Sha3
 import Rind.X86_64.AesKw
 import Rind.X86_64.P256Signature
 import Rind.X86_64.P384Signature
 import Rind.X86_64.PointSelect
 import Rind.X86_64.MlKemCoding
+import Rind.X86_64.VgMlKem768Ct
+import Rind.X86_64.MlKemCbd
 open rind.x86_64
 
 /-!
 The axioms each theorem rests on, beyond Lean's own: s2n-bignum's contracts
 in `Rind.X86_64.S2nBignum` for X25519, P-256 key generation, ECDH, and
-ECDSA, P-384, Ed25519, RSA verification and the private operation, and the
-Keccak-f of SHA-3 and ML-KEM's SHAKE; for the SHA-512 family, for HMAC, HKDF,
+ECDSA, P-384, Ed25519, RSA verification, key loading, and the private
+operation, and the Keccak-f of SHA-3 and ML-KEM's SHAKE; for the SHA-512
+family, for HMAC, HKDF,
 and PBKDF2, which cover SHA-384 and SHA-512, and for Ed25519's hashes, aws-lc's
 AVX routine's in `Rind.X86_64.AwsLc` and rind's HOL Light proof there of
 OpenSSL's AVX2 routine; for SHA-256, which the theorems over every HMAC algorithm cover,
@@ -38,8 +42,9 @@ rind's HOL Light proofs of its routines for the SHA extensions in
 `Rind.X86_64.ShaBlocks`; Vale's in
 `Rind.X86_64.ValeAesGcm` for AES-GCM, rind's HOL Light proof of aws-lc's
 `bn_mul_mont_nohw` in `Rind.X86_64.RsaMont` for RSA's Montgomery products at
-the widths aws-lc's 4x and 8x routines do not take, and its Lean proof there
-of `bn_mul4x_mont` for the 4x products without BMI2 and ADX, rind's HOL Light proofs
+the widths aws-lc's 4x and 8x routines do not take, and its Lean proofs there
+of `bn_mul4x_mont` and `bn_mulx4x_mont` for the 4x products and of its
+`bn_sqrx8x_mont` for the 8x squares with BMI2 and ADX, rind's HOL Light proofs
 of its constant-time compares in `Rind.X86_64.CtEqual` for HMAC's and PBKDF2's
 `verify`, AES-GCM's tag check, ChaCha20-Poly1305's one-pass tag check,
 RSASSA-PSS's hash compare, and key wrap's `unwrap` and
@@ -54,24 +59,26 @@ and ECDSA verification in `Rind.X86_64.VgP256`, and for P-384's `d·G`,
 which key generation and each ECDSA signature's nonce point take, and its
 ECDSA verification, in `Rind.X86_64.VgP384`, and for ChaCha20-Poly1305's
 and XChaCha20-Poly1305's one pass on AVX-512 IFMA in
-`Rind.X86_64.VgChaCha20Poly1305`; and nothing else.
-Ed25519 verification also takes its multi-scalar multiplication,
-`low::x86_64::adx_mux::edwards25519_msm`, as the hypothesis `RunsMsm`, and
-the edwards25519 group's orders, which HOL Light proves, as the hypothesis
-`EdOrders`. ChaCha20-Poly1305's one pass also takes aws-lc's routines as the
-hypothesis `RunsChaCha20Poly1305`, which no axiom states, whose `OnePass`
-takes them on CPUs without IFMA, and the AEAD API above it takes the one pass
-as the hypotheses `Seals` and `Opens`.
-SHA-3's and SHAKE's theorems take rind's eight-way AVX-512 Keccak-f as part
-of the hypothesis `RunsSha3`. None of these four states an axiom.
-RSA's Montgomery products at the widths aws-lc's `bn_mulx4x_mont` and
-`bn_sqr8x_mont` take, but for s2n-bignum's Karatsuba routines, take those as
-the hypothesis `AwsLcMont`, which no axiom states either. ChaCha20's
+`Rind.X86_64.VgChaCha20Poly1305`, and, for the leakage of its ML-KEM-768
+routines (which no theorem about rind's wrappers uses), in
+`Rind.X86_64.VgMlKem768Ct`; and nothing else.
+Ed25519 verification takes the hypothesis `MsmS2n`, that the CPU runs its
+multi-scalar multiplication over s2n-bignum's point routines rather than the
+AVX2 port. ChaCha20-Poly1305's one pass also takes aws-lc's routines and rind's copy of
+its AVX2 seal as the hypotheses `RunsSeal` and `RunsOpen`, which no axiom states, whose `OnePass`
+takes them on CPUs without IFMA, and on Zen 4 for short messages, and the AEAD API above it takes the one pass
+as the hypotheses `Seals` and `Opens`. None of these hypotheses states an axiom.
+RSA's Montgomery squares at the widths aws-lc's `bn_sqr8x_mont` takes, on
+CPUs without BMI2 and ADX, take it as the hypothesis `AwsLcMont`,
+which no axiom states either. ChaCha20's
 `apply_keystream` takes the hypothesis `LinuxBuild`, which no axiom states
 either, where `new` picks no VG routine and finds SSSE3, since rind's HOL Light
 proof of the SSSE3 routine covers the `x86_64-unknown-linux-gnu` build's object,
 not Apple's; `Rind.X86_64.ChaCha20Avx2` proves rind's two-block kernel
-over `Rind.X86_64.Simd`'s models of the AVX2 intrinsics. The generator
+over `Rind.X86_64.Simd`'s models of the AVX2 intrinsics, and
+`Rind.X86_64.Keccak8Avx512` rind's eight-way Keccak-f, which SHA-3's and
+SHAKE's theorems take on AVX-512, over its models of the AVX-512 ones and
+`Rind.X86_64.FunsExternal`'s hand model of its one store. The generator
 tables' point selects rest on no axiom, only on the hand model in
 `Rind.X86_64.PointSelectModel`, as RSA's AVX2 table gather does on
 `Rind.X86_64.GatherModel`; without AVX2, the gather rests on s2n-bignum's
@@ -655,6 +662,12 @@ change to the trust base.
  compress_avx_spec,
  edwards25519_decode_alt_spec,
  edwards25519_decode_spec,
+ edwards25519_epadd_alt_spec,
+ edwards25519_epadd_spec,
+ edwards25519_epdouble_alt_spec,
+ edwards25519_epdouble_spec,
+ edwards25519_pdouble_alt_spec,
+ edwards25519_pdouble_spec,
  sha512_block_data_order_avx2_spec] -/
 #guard_msgs in
 #print axioms ed25519_key_pair_verify
@@ -673,6 +686,12 @@ change to the trust base.
  compress_avx_spec,
  edwards25519_decode_alt_spec,
  edwards25519_decode_spec,
+ edwards25519_epadd_alt_spec,
+ edwards25519_epadd_spec,
+ edwards25519_epdouble_alt_spec,
+ edwards25519_epdouble_spec,
+ edwards25519_pdouble_alt_spec,
+ edwards25519_pdouble_spec,
  sha512_block_data_order_avx2_spec] -/
 #guard_msgs in
 #print axioms ed25519_public_key_new
@@ -1078,7 +1097,9 @@ change to the trust base.
  bignum_ksqr_32_64_spec,
  bignum_optsub_spec,
  mul4x_spec,
- nohw_spec] -/
+ mulx4x_spec,
+ nohw_spec,
+ sqrx8x_spec] -/
 #guard_msgs in
 #print axioms mont_products
 
@@ -1101,9 +1122,26 @@ change to the trust base.
  bignum_mul_spec,
  bignum_negmodinv_spec,
  bignum_optsub_spec,
+ ifma_crt_spec,
  rsa_ifma_public_spec] -/
 #guard_msgs in
 #print axioms private_op_rsa2048_spec
+
+/-- info: 'rind.x86_64.rsa_private_key_new_spec' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ bignum_bitsize_spec,
+ bignum_cmp_lt_spec,
+ bignum_eq_spec,
+ bignum_modadd_spec,
+ bignum_montifier_spec,
+ bignum_montredc_spec,
+ bignum_mul_spec,
+ bignum_negmodinv_spec,
+ bignum_optsub_spec,
+ rsa_vg_precompute_spec] -/
+#guard_msgs in
+#print axioms rsa_private_key_new_spec
 
 /-- info: 'rind.x86_64.sha3_family_digest' depends on axioms: [propext, Classical.choice, Quot.sound, sha3_keccak_f1600_spec] -/
 #guard_msgs in
@@ -1267,3 +1305,77 @@ change to the trust base.
 /-- info: 'rind.x86_64.MlKemCoding.sample_cbd3_spec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
 #print axioms MlKemCoding.sample_cbd3_spec
+
+/-- info: 'rind.x86_64.vg_mlkem768_keygen_avx512_ct' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ vg_mlkem768_keygen_avx512_ct] -/
+#guard_msgs in
+#print axioms vg_mlkem768_keygen_avx512_ct
+
+/-- info: 'rind.x86_64.vg_mlkem768_encaps_h_avx512_ct' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ vg_mlkem768_encaps_h_avx512_ct] -/
+#guard_msgs in
+#print axioms vg_mlkem768_encaps_h_avx512_ct
+
+/-- info: 'rind.x86_64.vg_mlkem768_encaps_avx512_ct' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ vg_mlkem768_encaps_avx512_ct] -/
+#guard_msgs in
+#print axioms vg_mlkem768_encaps_avx512_ct
+
+/-- info: 'rind.x86_64.vg_mlkem768_decaps_avx512_ct' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ vg_mlkem768_decaps_avx512_ct] -/
+#guard_msgs in
+#print axioms vg_mlkem768_decaps_avx512_ct
+
+/-- info: 'rind.x86_64.vg_mlkem768_encaps_h_avx2_ct' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ vg_mlkem768_encaps_h_avx2_ct] -/
+#guard_msgs in
+#print axioms vg_mlkem768_encaps_h_avx2_ct
+
+/-- info: 'rind.x86_64.vg_mlkem768_encaps_avx2_ct' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ vg_mlkem768_encaps_avx2_ct] -/
+#guard_msgs in
+#print axioms vg_mlkem768_encaps_avx2_ct
+
+/-- info: 'rind.x86_64.vg_mlkem768_encaps_h_avx_ct' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ vg_mlkem768_encaps_h_avx_ct] -/
+#guard_msgs in
+#print axioms vg_mlkem768_encaps_h_avx_ct
+
+/-- info: 'rind.x86_64.vg_mlkem768_encaps_avx_ct' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ vg_mlkem768_encaps_avx_ct] -/
+#guard_msgs in
+#print axioms vg_mlkem768_encaps_avx_ct
+
+/-- info: 'rind.x86_64.vg_mlkem768_encaps_h_ct' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ vg_mlkem768_encaps_h_ct] -/
+#guard_msgs in
+#print axioms vg_mlkem768_encaps_h_ct
+
+/-- info: 'rind.x86_64.vg_mlkem768_encaps_ct' depends on axioms: [propext, Classical.choice, Quot.sound, vg_mlkem768_encaps_ct] -/
+#guard_msgs in
+#print axioms vg_mlkem768_encaps_ct
+/-- info: 'rind.x86_64.MlKemCbd.sample_poly_cbd_spec' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ sha3_keccak4_f1600_alt_spec,
+ sha3_keccak_f1600_spec] -/
+#guard_msgs in
+#print axioms MlKemCbd.sample_poly_cbd_spec

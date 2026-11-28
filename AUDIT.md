@@ -132,6 +132,7 @@ The pins, as `admin/audit` renders them from the files that hold them, so
 | blind-rsa-signatures | `45d0abfa829c` | `admin/sync-vectors` | RFC 9474 test vectors |
 | RFC 9497 | `5d7d94c8dc75` | `admin/sync-vectors` | OPRF test vectors |
 | RFC 9591 | `127452b93acb` | `admin/sync-vectors` | FROST test vectors |
+| RFC 9807 | `78597fc81b79` | `admin/sync-vectors` | OPAQUE test vectors |
 | cfg-if | 1.0.5 | `Cargo.lock` | a macro for `cfg` blocks |
 | curve25519-dalek | 5.0.0 | `Cargo.lock` | X25519, Ed25519, and ristretto255 on armv7 and the portable backend |
 | fiat-crypto | 0.3.0 | `Cargo.lock` | the NIST curves' field arithmetic on armv7 and the portable backend |
@@ -187,10 +188,12 @@ establishes, and what it does not:
   against the independent oracle [TESTING.md's primitives
   table](TESTING.md#primitives) names, a Rust implementation that shares no
   code with the path rind runs, on the same tiers. Where rind runs aws-lc's
-  own routine, as for ChaCha20-Poly1305 on x86_64 and aarch64 or RSA's RSAZ
+  own routine, as for ChaCha20-Poly1305 on x86_64 or RSA's RSAZ
   exponentiation, aws-lc-rs compares that routine with itself, so it checks
-  rind's glue around it, and the oracle checks the routine. wasm runs none,
-  since aws-lc does not build for it.
+  rind's glue around it, and the oracle checks the routine. On aarch64 rind
+  runs its own structured copy of aws-lc's ChaCha20-Poly1305, and on x86_64
+  with AVX2 its copy of aws-lc's seal, which aws-lc-rs's originals check. wasm runs none, since aws-lc does not build
+  for it.
 - **Fuzz targets**, weekly for twenty minutes each against aws-lc-rs,
   replayed on every tier and against the portable backend. The ECVRF, OPRF,
   and blind RSA targets compare rind with itself, so they find panics and
@@ -211,7 +214,7 @@ establishes, and what it does not:
   AVX-512, or aarch64's crypto extension and SHA3, it
   does not run on armv7, and its lifter misses a secret branch whose two
   sides are empty.
-- **`admin/ct-vartime`**, in `just ci`, scans the release builds of every
+- **`admin/ct-vartime`**, in the nightly `just ci --all`, scans the release builds of every
   Linux target rind builds for divisions and floating point, against an
   allowlist of public operands. On the x86_64 backend it also fails on a
   multiply whose timing depends on MXCSR that an export reaches on a path
@@ -289,17 +292,23 @@ still reaches each.
 Hand-written arithmetic no proof covers, by where it came from:
 
 - **aws-lc's, BoringSSL's, and OpenSSL's assembly** that rind runs without a
-  ✓, such as ChaCha20-Poly1305 on x86_64 and aarch64, RSAZ, Montgomery
-  multiplication off ADX, the AVX2 and SHA512-instruction SHA-2, VAES
-  AES-GCM, and all of armv7's. Vectors and fuzzing reach each on its tier;
-  aws-lc-rs, which runs that code too, checks only the glue, and the
-  independent oracle checks the routine.
+  ✓, such as ChaCha20-Poly1305 on x86_64, RSAZ, Montgomery multiplication
+  off ADX, the AVX2 and SHA512-instruction SHA-2, VAES AES-GCM, and all of
+  armv7's but its NEON GHASH, its SHA-256 with the crypto extension, and its
+  NEON SHA-384/512. Vectors and fuzzing reach each on its tier; aws-lc-rs, which runs
+  that code too, checks only the glue, and the independent oracle checks the
+  routine. rind's structured copies of aws-lc's aarch64 ChaCha20-Poly1305
+  and its x86_64 AVX2 seal are proven constant-time but not correct, and
+  aws-lc-rs's originals check them.
 - **Graviola's** code under AES, GHASH, SHA-256, HMAC, P-256, P-384,
   ML-KEM, and RSA, wherever ALGORITHMS.md names it. Vectors, differential
   tests independent of it, and fuzzing reach each.
 - **rind's own**, which ALGORITHMS.md marks ⚡, such as its parts of P-384 and
-  P-521, x86_64 SHA-256, the portable RSA multiplication, and armv7
-  Ed25519. Vectors, independent differential tests, and fuzzing reach each,
+  P-521, x86_64 SHA-256, the portable RSA multiplication (its Montgomery
+  products on 64-bit limbs too, whose proof is parked until
+  quest/m4/verified/rsa-verify-portable-four-product.md), and armv7 Ed25519, whose Lean proof holds only
+  on CPUs with NEON, since a CPU without it hashes with aws-lc's unproven
+  integer 32-bit ARM SHA-384/512, and so earns no ✓. Vectors, independent differential tests, and fuzzing reach each,
   and each Montgomery routine's unit tests compare it with proven or
   portable arithmetic on edge-case limbs, as
   [TESTING.md](TESTING.md#vector-suites) describes.
@@ -309,9 +318,16 @@ Hand-written arithmetic no proof covers, by where it came from:
   `low::generic::mldsa_poly::backend_matches_port` checks the ML-DSA port
   against the AVX2 and Neon routines.
 - **curve25519-dalek's serial backend**, X25519, Ed25519, and ristretto255
-  on armv7 and the portable backend. There ristretto255's differential test
-  compares dalek with itself, so beside RFC 9496's and RFC 9497's vectors
-  only the textbook reference in `rind/src/test/reference.rs` checks it.
+  on armv7 and the portable backend. Beneficial AI Foundation's Lean proofs,
+  which `proofs/` restates as axioms, cover the functions armv7's X25519
+  and Ed25519 call, but neither earns a ✓ yet: X25519's shared secret runs
+  BoringSSL's unproven NEON ladder on every armv7 CPU the benchmarks run,
+  and Ed25519's proof covers only CPUs with NEON, since a CPU without it
+  hashes with aws-lc's unproven integer 32-bit ARM SHA-512. Nothing
+  checks that the portable backend's 64-bit build is the code those proofs
+  are about. On both, ristretto255's differential test compares dalek with
+  itself, so beside RFC 9496's and RFC 9497's vectors only the textbook
+  reference in `rind/src/test/reference.rs` checks it.
 - **x86_64 P-256's mixed addition on macOS**, aws-lc's: rind's HOL Light
   proofs check the Linux build's object, and Apple's text can place the
   routines' helpers at other offsets.
@@ -360,6 +376,7 @@ counts out, since nearly every change to `low` moves them:
 | `rind/src/low/portable` | volatile writes and reads for the wipe and the constant-time compare, and Xtensa `asm!` in SHA-256 for ESP-IDF | the same |
 | other `rind/src/low` files | test harnesses (`abi`, `guard_pages`, `ct_binsec`, `vartime_planted`), the `asm_call!` macro, and `Mcdt`'s MXCSR loads and `cpuid` | test code, but for the macro and `Mcdt`, which `SAFETY:` comments and `admin/ct-vartime` cover |
 | `rind/src/mid` | a test's call into aws-lc | test code |
+| `rind/src/high/opaque` | a test's read-back of a dropped key's bytes | test code, with its `SAFETY:` comment |
 | `rind/src/fips_rng.rs` | the FIPS build's DRBG handle and its test's `fork` | `SAFETY:` comments |
 | `rind/src/test.rs` | a test helper | `SAFETY:` comments |
 | `rind-aws-lc-rs/src` | `Send` and `Sync` for the KEM keys, bounded as aws-lc-rs bounds them | `SAFETY:` comments, and a compile-time check that what the keys hold is `Send` and `Sync` |

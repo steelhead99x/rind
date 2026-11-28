@@ -47,6 +47,11 @@ ROOTS = {
         # ChaCha20-Poly1305 with AVX512_IFMA.
         "vg_chacha20_poly1305_seal_ifma",
         "vg_chacha20_poly1305_open_ifma",
+        # AES-GCM on Zen 5 with AVX-512, VAES, and VPCLMULQDQ, for long
+        # messages, over a key context prepared on first use.
+        "vg_aes_gcm_prepare_vpclmul_avx512",
+        "vg_aes_gcm_seal_prepared_vaes_vpclmul_avx512",
+        "vg_aes_gcm_open_prepared_vaes_vpclmul_avx512",
         # ML-KEM-768's encapsulation key check and encapsulation, by key or
         # with its hash, on every CPU; key generation and decapsulation
         # with AVX-512.

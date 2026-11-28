@@ -32,19 +32,24 @@ jobs:
       - uses: ./.github/actions/nix
 
       - name: Answer ACVP's sets
-        run: nix develop .#acvp --command cargo test --release -p rind-acvp --features module --locked
+        run: nix develop .#acvp --command cargo nextest run --release -p rind-acvp --features module --locked
         env:
           SLOW_TESTS: 1
 
   build:
     strategy:
+      # Every row reports, so one platform's failure hides no other's.
+      fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
             rustc: stable
           - os: ubuntu-latest
             rustc: nightly
-          # macos-latest is aarch64; macos-15-intel is the x86_64 runner.
+          # macos-latest is aarch64; macos-15-intel is the x86_64 runner. The
+          # Mac mini runs this row's tests about 1.8 times as fast, but the
+          # nightly's wall time is macos-15-intel's, and the mini has no third
+          # macOS VM slot (see admin/mac-mini-runners), so the row stays hosted.
           - os: macos-latest
             rustc: stable
           - os: macos-15-intel
@@ -67,22 +72,29 @@ jobs:
         with:
           toolchain: ${{ matrix.rustc }}
 
+      - uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
+        with:
+          tool: cargo-nextest@0.9.149
+
       - name: Build (debug)
         run: cargo build -p rind
       - name: Run tests (debug)
-        run: cargo test
+        run: cargo nextest run
+      - name: Run doc tests (debug)
+        timeout-minutes: 5
+        run: cargo test --doc
       - name: Run tests (debug, --no-default-features)
-        run: cargo test --no-default-features
+        run: cargo nextest run --no-default-features
 
       - name: Build (release)
         run: cargo build -p rind --release
       - name: Run tests (release)
-        run: env SLOW_TESTS=1 cargo test --release
+        run: env SLOW_TESTS=1 cargo nextest run --release
       # Each self-test's failure, and on every call, that each service's
       # stack stays within what it zeroes.
       - name: Run FIPS break tests
         if: runner.os == 'Linux'
-        run: cargo test -p rind-fips --features __break_tests
+        run: cargo nextest run -p rind-fips --features __break_tests
 
       # Each tier runs the tests, then CCTV's million ML-KEM vectors in a
       # release build, which honours the tier's denials only with
@@ -92,8 +104,8 @@ jobs:
       - name: Artificial CPU feature tests
         shell: bash
         run: |
-          sh/cpu-tiers.sh cargo test --workspace --exclude rind-fips
-          SLOW_TESTS=1 RUSTFLAGS='--cfg rind_cpu_disable' sh/cpu-tiers.sh cargo test --release -p rind --lib -- cctv_accumulated detects_the_expected_cpu
+          sh/cpu-tiers.sh cargo nextest run --workspace --exclude rind-fips
+          SLOW_TESTS=1 RUSTFLAGS='--cfg rind_cpu_disable' sh/cpu-tiers.sh cargo nextest run --release -p rind --lib cctv_accumulated detects_the_expected_cpu
 
   # musl runs the glibc build's code, so these test the packages consumers
   # link, without the CPU feature passes. The bench and fuzz crates need C++
@@ -128,10 +140,17 @@ jobs:
           sudo apt-get install --yes musl-tools
           echo "CC_${CARGO_BUILD_TARGET//-/_}=musl-gcc" >> "$GITHUB_ENV"
 
+      - uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
+        with:
+          tool: cargo-nextest@0.9.149
+
       - name: Run tests (debug)
-        run: cargo test -p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-rand-core -p rind-ring -p rind-aws-lc-rs -p rind-dimpl -p rind-openmls -p rind-str0m
+        run: cargo nextest run -p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-rand-core -p rind-ring -p rind-aws-lc-rs -p rind-dimpl -p rind-openmls -p rind-str0m
+      - name: Run doc tests (debug)
+        timeout-minutes: 5
+        run: cargo test --doc -p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-rand-core -p rind-ring -p rind-aws-lc-rs -p rind-dimpl -p rind-openmls -p rind-str0m
       - name: Run tests (release)
-        run: env SLOW_TESTS=1 cargo test -p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-rand-core -p rind-ring -p rind-aws-lc-rs -p rind-dimpl -p rind-openmls -p rind-str0m --release
+        run: env SLOW_TESTS=1 cargo nextest run -p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-rand-core -p rind-ring -p rind-aws-lc-rs -p rind-dimpl -p rind-openmls -p rind-str0m --release
 
   # 32-bit x86 Windows on the portable backend, which the x86_64 runner runs
   # natively. The qemu job tests Linux's, and the android job Android's.
@@ -150,10 +169,17 @@ jobs:
           toolchain: stable
           targets: i686-pc-windows-msvc
 
+      - uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
+        with:
+          tool: cargo-nextest@0.9.149
+
       - name: Run tests (debug)
-        run: cargo test -p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-rand-core -p rind-ring -p rind-aws-lc-rs -p rind-dimpl -p rind-openmls -p rind-str0m --locked
+        run: cargo nextest run -p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-rand-core -p rind-ring -p rind-aws-lc-rs -p rind-dimpl -p rind-openmls -p rind-str0m --locked
+      - name: Run doc tests (debug)
+        timeout-minutes: 5
+        run: cargo test --doc -p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-rand-core -p rind-ring -p rind-aws-lc-rs -p rind-dimpl -p rind-openmls -p rind-str0m --locked
       - name: Run tests (release)
-        run: env SLOW_TESTS=1 cargo test -p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-rand-core -p rind-ring -p rind-aws-lc-rs -p rind-dimpl -p rind-openmls -p rind-str0m --locked --release
+        run: env SLOW_TESTS=1 cargo nextest run -p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-rand-core -p rind-ring -p rind-aws-lc-rs -p rind-dimpl -p rind-openmls -p rind-str0m --locked --release
 
   # 32-bit ARM runs libcrux, or aws-lc's assembly for ChaCha20, NEON, and the
   # crypto extension. The recipe builds and lints Android and Linux gnueabihf,
@@ -398,6 +424,10 @@ jobs:
           toolchain: stable
           targets: aarch64-apple-ios,aarch64-apple-ios-sim
 
+      - uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
+        with:
+          tool: cargo-nextest@0.9.149
+
       # aws-lc-rs's C, which the tests link, targets the SDK's own iOS
       # version unless told otherwise, and then needs symbols rustc's
       # default iOS version lacks; this gives both rustc's default.
@@ -419,8 +449,8 @@ jobs:
           RIND_TEST_ARM_CRYPTO_EXT: 1
         run: |
           export "$(rustc --print deployment-target --target aarch64-apple-ios-sim)"
-          cargo test -p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-rand-core -p rind-ring -p rind-aws-lc-rs -p rind-dimpl -p rind-openmls -p rind-str0m --target aarch64-apple-ios-sim
-          env SLOW_TESTS=1 cargo test -p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-rand-core -p rind-ring -p rind-aws-lc-rs -p rind-dimpl -p rind-openmls -p rind-str0m --target aarch64-apple-ios-sim --release
+          cargo nextest run -p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-rand-core -p rind-ring -p rind-aws-lc-rs -p rind-dimpl -p rind-openmls -p rind-str0m --target aarch64-apple-ios-sim
+          env SLOW_TESTS=1 cargo nextest run -p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-rand-core -p rind-ring -p rind-aws-lc-rs -p rind-dimpl -p rind-openmls -p rind-str0m --target aarch64-apple-ios-sim --release
 
   # cross's images (see Cross.toml) hold an Android system for the tests, and
   # run aarch64, armv7, and i686 under qemu-user. The aarch64 and armv7 CPUs
@@ -432,14 +462,19 @@ jobs:
         include:
           - target: aarch64-linux-android
             expect: RIND_TEST_ARM_CRYPTO_EXT=1
+            minutes: 40
           - target: armv7-linux-androideabi
             expect: RIND_TEST_ARM_NEON=1 RIND_TEST_ARM_CRYPTO_EXT=1
+            minutes: 105
           - target: x86_64-linux-android
             expect: ""
+            minutes: 25
           - target: i686-linux-android
             expect: ""
+            minutes: 270
           - target: arm-linux-androideabi
             expect: ""
+            minutes: 140
 
     runs-on: ubuntu-latest
     steps:
@@ -463,8 +498,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes qemu-user-binfmt
 
-      # Optimised for qemu, but keeping the checks a debug build has.
+      # Optimised for qemu, but keeping the checks a debug build has. cross
+      # runs the tests inside its image, which has no nextest, so the hang
+      # bound is the step's: about twice its slowest healthy run.
       - name: Run tests
+        timeout-minutes: ${{ matrix.minutes }}
         env:
           CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS: true
           CARGO_PROFILE_RELEASE_OVERFLOW_CHECKS: true

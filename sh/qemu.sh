@@ -23,4 +23,6 @@ export CARGO_PROFILE_RELEASE_OVERFLOW_CHECKS=true
 # _FORTIFY_SOURCE at -O0, which fails aws-lc's compiler probes and so its
 # big-endian build.
 cargo clippy "${packages[@]}" --locked --release --target "$target" --all-targets -- --deny warnings
-cargo test "${packages[@]}" --locked --release --target "$target"
+# qemu's hang bound (.config/nextest.toml). The doc tests, which only show the
+# API, run on the native targets.
+NEXTEST_PROFILE=emulated cargo nextest run "${packages[@]}" --locked --release --target "$target"

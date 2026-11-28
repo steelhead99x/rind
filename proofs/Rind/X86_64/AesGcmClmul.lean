@@ -218,6 +218,14 @@ theorem vale_clmul (enc : Bool) (hk : low.x86_64.aes.HwKey) (t : low.x86_64.ghas
   unfold low.x86_64.aes_gcm.vale
   cases hk <;> cases enc <;> step*
 
+/-- `seal` and `open` run pyca/verified-garbage's AES-GCM only on the AVX-512
+tier, so never on a by8 table. -/
+theorem vg_by8 (key : low.x86_64.aes.AesKey) (g : low.x86_64.ghash.GhashTable)
+    (t : low.x86_64.ghash.ClmulTable) (hg : By8Of g t) (len : Usize) :
+    low.x86_64.aes_gcm.vg key g len ⦃ o => o = none ⦄ := by
+  unfold low.x86_64.aes_gcm.vg
+  rcases hg with rfl | ⟨a, rfl⟩ <;> cases key <;> step*
+
 theorem bvs_beq (a b : List U8) : (bvs a == bvs b) = decide (a = b) := by
   have hinj : Function.Injective (fun x : U8 => x.bv) := by
     intro x y h; cases x; cases y; simp_all
@@ -291,10 +299,13 @@ theorem aes_gcm_encrypt_by8 (he : ∃ e, low.entry.Entry.new_secret = ok e) (alg
   obtain ⟨key, gh⟩ := g
   simp only at hkey hgt hv
   subst hkey
+  have hvg := vg_by8 (.Hw hk) gh t hgt inout.len
   unfold mid.aes_gcm.AesGcm.encrypt low.x86_64.aes_gcm.seal
   rw [he, bind_ok]
   step*
   subst x_post
+  step with hvg
+  subst_vars
   apply WP.spec_bind (tagged_seal_spec hk alg kw hhk t ht gh hgt nonce aad inout (by omega))
   rintro ⟨tg, out⟩ ⟨hl, h⟩
   step*
@@ -320,10 +331,13 @@ theorem aes_gcm_decrypt_by8 (he : ∃ e, low.entry.Entry.new_secret = ok e)
   obtain ⟨key, gh⟩ := g
   simp only at hkey hgt hv
   subst hkey
+  have hvg := vg_by8 (.Hw hk) gh t hgt inout.len
   unfold mid.aes_gcm.AesGcm.decrypt low.x86_64.aes_gcm.open
   rw [he, bind_ok]
   step*
   subst x_post
+  step with hvg
+  subst_vars
   step with tagged_open_spec hk alg kw hhk t ht gh hgt nonce aad inout (by omega) as ⟨res, hl, h⟩
   obtain ⟨tg, out⟩ := res
   simp only at hl h

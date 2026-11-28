@@ -138,7 +138,7 @@ impl VerifyingKey {
         // Step: rfc8032 5.1.7.3
         // `R := [S]B - [k]A`, compared in its encoding.
         let r = EdwardsPoint::vartime_double_scalar_mul_basepoint(&k, &-self.point, &s);
-        if r.compress().0 == sig_r {
+        if sig_r == r.compress().0 {
             Ok(())
         } else {
             Err(Error::BadSignature)

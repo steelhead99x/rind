@@ -2,10 +2,9 @@
 //! ML-DSA key management and signatures, as OpenSSL 3.5's default provider
 //! offers them under `ML-DSA-44`, `ML-DSA-65`, and `ML-DSA-87`.
 //!
-//! rind signs and verifies pure ML-DSA with the empty context, hedged with
-//! fresh randomness, as TLS and X.509 use it, so it refuses a context
-//! string, deterministic or test randomness, external mu, and the raw
-//! message encoding, which OpenSSL also takes.
+//! rind signs and verifies pure ML-DSA under a context string, hedged with
+//! fresh randomness, so it refuses deterministic or test randomness,
+//! external mu, and the raw message encoding, which OpenSSL also takes.
 
 use core::ffi::{c_char, c_int, c_uint, c_void};
 use core::marker::PhantomData;
@@ -275,15 +274,18 @@ pub(crate) static SIGNATURE_87: [Dispatch; 16] = signature_functions!(MlDsa87);
 struct Signing<P: Set> {
     provider: Arc<Provider>,
     key: Option<Arc<Key<MlDsa<P>>>>,
+    options: Options,
+}
+
+/// What a context's parameters last set.
+#[derive(Clone, Default)]
+struct Options {
+    /// The context string, at most 255 bytes, which signing and
+    /// verification both bind in.
+    context: Vec<u8>,
     /// Why a signature would not be hedged with fresh randomness, which
     /// refuses signing but not verification, which these flags do not
     /// change.
-    unhedged: Unhedged,
-}
-
-/// The signing flags rind refuses, as a context's parameters last set them.
-#[derive(Clone, Copy, Default)]
-struct Unhedged {
     deterministic: bool,
     test_entropy: bool,
 }
@@ -293,7 +295,7 @@ impl<P: Set> Clone for Signing<P> {
         Self {
             provider: self.provider.clone(),
             key: self.key.clone(),
-            unhedged: self.unhedged,
+            options: self.options.clone(),
         }
     }
 }
@@ -323,7 +325,7 @@ impl<P: Set> Signing<P> {
             self.key = Some(key);
         }
         // SAFETY: per the caller.
-        set_params(unsafe { Params::new(params) }, &mut self.unhedged)
+        set_params(unsafe { Params::new(params) }, &mut self.options)
     }
 
     fn key(&self) -> Result<&Key<MlDsa<P>>, Failure> {
@@ -350,17 +352,17 @@ impl<P: Set> Signing<P> {
             if size < P::SIGNATURE_LEN {
                 return Err(Failure::invalid("the output buffer is too small"));
             }
-            if self.unhedged.deterministic {
+            if self.options.deterministic {
                 return Err(Failure::unsupported(
                     "rind signs ML-DSA hedged, not deterministically",
                 ));
             }
-            if self.unhedged.test_entropy {
+            if self.options.test_entropy {
                 return Err(Failure::unsupported(
                     "rind signs ML-DSA only with fresh randomness, not test-entropy",
                 ));
             }
-            let signed = pair.sign(message)?;
+            let signed = pair.sign(&self.options.context, message)?;
             // SAFETY: OpenSSL passes `size` writable bytes at `signature`.
             unsafe {
                 core::ptr::copy_nonoverlapping(
@@ -383,7 +385,7 @@ impl<P: Set> Signing<P> {
         // OpenSSL's default provider raises no error for a signature that
         // fails, whatever its length or content.
         public
-            .verify(message, signature)
+            .verify(&self.options.context, message, signature)
             .map_err(|_| Failure::Quiet)
     }
 }
@@ -413,23 +415,25 @@ fn integer(param: &Param) -> Option<i64> {
 }
 
 /// The parameters an operation takes, each of which rind accepts only at
-/// the value pure ML-DSA with the empty context has, but for those that
-/// change only signing, which `unhedged` records for signing to refuse.
-fn set_params(params: Params<'_>, unhedged: &mut Unhedged) -> Result<(), Failure> {
+/// the value pure ML-DSA has, but for the context string, which it keeps,
+/// and those that change only signing, which `options` records for signing
+/// to refuse.
+fn set_params(params: Params<'_>, options: &mut Options) -> Result<(), Failure> {
+    // As OpenSSL's, a context string that is refused leaves the empty one.
     if let Some(context) = params.find(c"context-string") {
         match context.octets() {
-            Some([]) => {}
             Some(context) if context.len() <= MAX_CONTEXT_LEN => {
-                return Err(Failure::unsupported(
-                    "rind signs ML-DSA only with the empty context string",
-                ));
+                options.context.clear();
+                options.context.extend_from_slice(context);
             }
             Some(_) => {
+                options.context.clear();
                 return Err(Failure::invalid(
                     "the context string is longer than 255 bytes",
                 ));
             }
             None => {
+                options.context.clear();
                 return Err(Failure::invalid(
                     "the context string must be an octet string",
                 ));
@@ -439,9 +443,9 @@ fn set_params(params: Params<'_>, unhedged: &mut Unhedged) -> Result<(), Failure
     // OpenSSL stores these two as it reads each, in this order, so a call it
     // refuses later keeps them, and drops a test entropy of the wrong size.
     match params.find(c"test-entropy").map(|param| param.octets()) {
-        Some(Some(entropy)) if entropy.len() == TEST_ENTROPY_LEN => unhedged.test_entropy = true,
+        Some(Some(entropy)) if entropy.len() == TEST_ENTROPY_LEN => options.test_entropy = true,
         Some(_) => {
-            unhedged.test_entropy = false;
+            options.test_entropy = false;
             return Err(Failure::invalid("the test entropy must be 32 bytes"));
         }
         None => {}
@@ -449,7 +453,7 @@ fn set_params(params: Params<'_>, unhedged: &mut Unhedged) -> Result<(), Failure
     // OpenSSL reads it as an `int` and signs deterministically only at 1.
     if let Some(param) = params.find(c"deterministic") {
         match integer(param).map(i32::try_from) {
-            Some(Ok(value)) => unhedged.deterministic = value == 1,
+            Some(Ok(value)) => options.deterministic = value == 1,
             _ => return Err(Failure::invalid("deterministic must be an int")),
         }
     }
@@ -504,7 +508,7 @@ unsafe extern "C" fn newctx<P: Set>(provctx: *mut c_void, _propq: *const c_char)
     Box::into_raw(Box::new(Signing::<P> {
         provider,
         key: None,
-        unhedged: Unhedged::default(),
+        options: Options::default(),
     }))
     .cast()
 }
@@ -606,7 +610,7 @@ static GETTABLE_CTX: [Param; 2] = [
 
 // Listed so that OpenSSL hands rind each of them, which it refuses, or
 // refuses to sign with, unless at pure, hedged ML-DSA's value, rather than
-// dropping them unread.
+// dropping them unread. The context string is the one that it takes.
 static SETTABLE_CTX: [Param; 6] = [
     Param::describe(Some(c"context-string"), OCTET_STRING, 0),
     Param::describe(Some(c"test-entropy"), OCTET_STRING, 0),
@@ -642,7 +646,7 @@ unsafe extern "C" fn set_ctx_params<P: Set>(ctx: *mut c_void, params: *const Par
         return 0;
     };
     // SAFETY: as above.
-    let result = set_params(unsafe { Params::new(params) }, &mut ctx.unhedged);
+    let result = set_params(unsafe { Params::new(params) }, &mut ctx.options);
     ctx.provider.status(result)
 }
 

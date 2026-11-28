@@ -119,6 +119,6 @@ jobs:
           shell: .#sde
 
       - name: Check Diamond Rapids
-        run: nix develop .#sde --command cargo test --release -p rind-acvp --features module --locked
+        run: nix develop .#sde --command cargo nextest run --profile emulated --release -p rind-acvp --features module --locked
         env:
           RIND_ACVP_WRAPPER_RUNNER: "sde -dmr --"

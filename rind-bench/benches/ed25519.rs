@@ -2,84 +2,114 @@
 fn main() {}
 
 #[cfg(not(target_arch = "xtensa"))]
-mod criterion;
+mod common;
+
 #[cfg(not(target_arch = "xtensa"))]
 use std::hint::black_box;
 
 #[cfg(not(target_arch = "xtensa"))]
-use criterion::{Bencher, Criterion, Throughput, criterion_group, criterion_main};
+use common::{Dit, dit};
+
+#[cfg(not(target_arch = "xtensa"))]
+const PUBLIC_KEY: &[u8; 32] = b"\x7d\x4d\x0e\x7f\x61\x53\xa6\x9b\x62\x42\xb5\x22\xab\xbe\xe6\x85\xfd\xa4\x42\x0f\x88\x34\xb1\x08\xc3\xbd\xae\x36\x9e\xf5\x49\xfa";
+#[cfg(not(target_arch = "xtensa"))]
+const MESSAGE: &[u8] = b"\x54\x65\x73\x74";
+#[cfg(not(target_arch = "xtensa"))]
+const SIGNATURE: &[u8; 64] = b"\x7c\x38\xe0\x26\xf2\x9e\x14\xaa\xbd\x05\x9a\x0f\x2d\xb8\xb0\xcd\x78\x30\x40\x60\x9a\x8b\xe6\x84\xdb\x12\xf8\x2a\x27\x77\x4a\xb0\x7a\x91\x55\x71\x1e\xcf\xaf\x7f\x99\xf2\x77\xba\xd0\xc6\xae\x7e\x39\xd4\xee\xf6\x76\x57\x33\x36\xa5\xc5\x1e\xb6\xf9\x46\xb3\x0d";
+
+/// The message the signing rows sign.
+#[cfg(not(target_arch = "xtensa"))]
+const SIGNED: &[u8] = b"\x31\x32\x33\x34\x30\x30";
+
+#[cfg(not(target_arch = "xtensa"))]
+fn rind_public_key() -> rind::ed25519::PublicKey {
+    rind::ed25519::PublicKey::new(PUBLIC_KEY).unwrap()
+}
+
+#[cfg(not(target_arch = "xtensa"))]
+fn rind_verify(public_key: &rind::ed25519::PublicKey) {
+    public_key.verify(MESSAGE, SIGNATURE).unwrap();
+}
+
+#[cfg(not(target_arch = "xtensa"))]
+fn rind_signing_key() -> rind::ed25519::KeyPair {
+    rind::ed25519::KeyPair::generate().unwrap()
+}
+
+#[cfg(not(target_arch = "xtensa"))]
+fn rind_sign(signing_key: &rind::ed25519::KeyPair) {
+    black_box(signing_key.sign(SIGNED));
+}
 
 // Generate a fresh key and make a PKCS8 document of it.
 #[cfg(not(target_arch = "xtensa"))]
-fn keygen(c: &mut Criterion) {
-    let mut group = c.benchmark_group("ed25519-keygen");
-    group.throughput(Throughput::Elements(1));
+mod ed25519_keygen {
+    use swole::bench;
 
-    group.bench_function("ring", |b| {
-        use ring::{rand, signature};
-        let rng = rand::SystemRandom::new();
+    use super::*;
 
-        b.iter(|| {
-            black_box(
-                signature::Ed25519KeyPair::generate_pkcs8(&rng)
-                    .unwrap()
-                    .as_ref(),
-            );
-        })
-    });
+    fn ring_rng() -> ring::rand::SystemRandom {
+        ring::rand::SystemRandom::new()
+    }
 
-    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
-    group.bench_function("aws-lc-rs", |b| {
-        use aws_lc_rs::{rand, signature};
-        let rng = rand::SystemRandom::new();
+    #[bench(setup = ring_rng)]
+    fn ring(rng: &ring::rand::SystemRandom) {
+        black_box(
+            ring::signature::Ed25519KeyPair::generate_pkcs8(rng)
+                .unwrap()
+                .as_ref(),
+        );
+    }
 
-        b.iter(|| {
-            black_box(
-                signature::Ed25519KeyPair::generate_pkcs8(&rng)
-                    .unwrap()
-                    .as_ref(),
-            );
-        })
-    });
+    fn aws_rng() -> aws_lc_rs::rand::SystemRandom {
+        aws_lc_rs::rand::SystemRandom::new()
+    }
 
-    group.bench_function("dalek", |b| {
+    #[bench(setup = aws_rng)]
+    fn aws_lc_rs(rng: &aws_lc_rs::rand::SystemRandom) {
+        black_box(
+            aws_lc_rs::signature::Ed25519KeyPair::generate_pkcs8(rng)
+                .unwrap()
+                .as_ref(),
+        );
+    }
+
+    #[bench]
+    fn dalek() {
         use ed25519_dalek::SigningKey;
         use ed25519_dalek::pkcs8::EncodePrivateKey;
         use getrandom::{SysRng, rand_core::UnwrapErr};
 
-        b.iter(|| {
-            let key = SigningKey::generate(&mut UnwrapErr(SysRng));
-            black_box(key.to_pkcs8_der().unwrap());
-        });
-    });
+        let key = SigningKey::generate(&mut UnwrapErr(SysRng));
+        black_box(key.to_pkcs8_der().unwrap());
+    }
 
-    group.bench_function("rind", |b| {
-        let _dit = criterion::rind_dit();
-        b.iter(|| {
-            let our_private_key = rind::ed25519::KeyPair::generate().unwrap();
-            black_box(our_private_key.to_pkcs8());
-        })
-    });
+    #[bench(setup = dit)]
+    fn rind(_dit: &Dit<()>) {
+        let our_private_key = rind::ed25519::KeyPair::generate().unwrap();
+        black_box(our_private_key.to_pkcs8());
+    }
 
-    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-    group.bench_function("graviola", |b| {
-        let mut pkcs8 = [0u8; 128];
-        b.iter(|| {
-            let key = graviola::signing::eddsa::Ed25519SigningKey::generate().unwrap();
-            black_box(key.to_pkcs8_der(&mut pkcs8).unwrap());
-        })
-    });
+    #[cfg(graviola)]
+    fn pkcs8() -> [u8; 128] {
+        [0; 128]
+    }
+
+    #[cfg(graviola)]
+    #[bench(setup = pkcs8)]
+    fn graviola(pkcs8: &mut [u8; 128]) {
+        let key = graviola::signing::eddsa::Ed25519SigningKey::generate().unwrap();
+        black_box(key.to_pkcs8_der(pkcs8).unwrap());
+    }
 
     // libcrux has no PKCS#8 encoding.
-    group.bench_function("libcrux", |b| {
-        b.iter(|| {
-            black_box(libcrux_ed25519::generate_key_pair(&mut getrandom::SysRng).unwrap());
-        })
-    });
+    #[bench]
+    fn libcrux() {
+        black_box(libcrux_ed25519::generate_key_pair(&mut getrandom::SysRng).unwrap());
+    }
 
-    // verified-garbage has no key generation or PKCS#8 encoding: a random
-    // seed and its public key.
-    group.bench_function("verified-garbage", |b| {
+    /// Checks verified-garbage's public key against rind's, from a fixed seed.
+    fn vg_checked() {
         use verified_garbage::ed25519::SigningKey;
         let seed = [7u8; 32];
         assert_eq!(
@@ -89,246 +119,250 @@ fn keygen(c: &mut Criterion) {
                 .public_key()
                 .as_ref()
         );
+    }
 
-        b.iter(|| {
-            let mut seed = [0u8; 32];
-            getrandom::fill(&mut seed).unwrap();
-            black_box(SigningKey::from_seed(&seed).verifying_key().as_bytes());
-        })
-    });
+    // verified-garbage has no key generation or PKCS#8 encoding: a random
+    // seed and its public key.
+    #[bench(setup = vg_checked)]
+    fn verified_garbage(_: &()) {
+        use verified_garbage::ed25519::SigningKey;
+        let mut seed = [0u8; 32];
+        getrandom::fill(&mut seed).unwrap();
+        black_box(SigningKey::from_seed(&seed).verifying_key().as_bytes());
+    }
 
-    #[cfg(all(
-        feature = "__bench_openssl",
-        target_family = "unix",
-        not(target_arch = "xtensa")
-    ))]
-    group.bench_function("openssl", |b| {
-        b.iter(|| {
-            let key = openssl::pkey::PKey::generate_ed25519().unwrap();
-            black_box(key.private_key_to_pkcs8().unwrap());
-        })
-    });
+    #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+    #[bench]
+    fn openssl() {
+        let key = openssl::pkey::PKey::generate_ed25519().unwrap();
+        black_box(key.private_key_to_pkcs8().unwrap());
+    }
 }
 
+// Each library parses the key once, outside the timed call, where its API
+// allows.
 #[cfg(not(target_arch = "xtensa"))]
-fn verify(c: &mut Criterion) {
-    let mut group = c.benchmark_group("ed25519-verify");
-    group.throughput(Throughput::Elements(1));
+mod ed25519_verify {
+    use swole::bench;
 
-    let public_key = b"\x7d\x4d\x0e\x7f\x61\x53\xa6\x9b\x62\x42\xb5\x22\xab\xbe\xe6\x85\xfd\xa4\x42\x0f\x88\x34\xb1\x08\xc3\xbd\xae\x36\x9e\xf5\x49\xfa";
-    let message = b"\x54\x65\x73\x74";
-    let signature = b"\x7c\x38\xe0\x26\xf2\x9e\x14\xaa\xbd\x05\x9a\x0f\x2d\xb8\xb0\xcd\x78\x30\x40\x60\x9a\x8b\xe6\x84\xdb\x12\xf8\x2a\x27\x77\x4a\xb0\x7a\x91\x55\x71\x1e\xcf\xaf\x7f\x99\xf2\x77\xba\xd0\xc6\xae\x7e\x39\xd4\xee\xf6\x76\x57\x33\x36\xa5\xc5\x1e\xb6\xf9\x46\xb3\x0d";
+    use super::*;
 
-    // Each library parses the key once, outside the timed loop, where its API allows.
+    fn ring_key() -> ring::signature::UnparsedPublicKey<&'static [u8; 32]> {
+        ring::signature::UnparsedPublicKey::new(&ring::signature::ED25519, PUBLIC_KEY)
+    }
+
     // ring has no parsed key: `UnparsedPublicKey` parses on every verify.
-    group.bench_function("ring", |b| {
-        let public_key =
-            ring::signature::UnparsedPublicKey::new(&ring::signature::ED25519, public_key);
+    #[bench(setup = ring_key)]
+    fn ring(public_key: &ring::signature::UnparsedPublicKey<&'static [u8; 32]>) {
+        public_key.verify(MESSAGE, SIGNATURE).unwrap();
+    }
 
-        b.iter(|| {
-            public_key.verify(message, signature).unwrap();
-        })
-    });
+    fn aws_key() -> aws_lc_rs::signature::ParsedPublicKey {
+        aws_lc_rs::signature::ParsedPublicKey::new(&aws_lc_rs::signature::ED25519, PUBLIC_KEY)
+            .unwrap()
+    }
 
-    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
-    group.bench_function("aws-lc-rs", |b| {
-        let public_key =
-            aws_lc_rs::signature::ParsedPublicKey::new(&aws_lc_rs::signature::ED25519, public_key)
-                .unwrap();
+    #[bench(setup = aws_key)]
+    fn aws_lc_rs(public_key: &aws_lc_rs::signature::ParsedPublicKey) {
+        public_key.verify_sig(MESSAGE, SIGNATURE).unwrap();
+    }
 
-        b.iter(|| {
-            public_key.verify_sig(message, signature).unwrap();
-        })
-    });
+    fn dalek_key() -> ed25519_dalek::VerifyingKey {
+        ed25519_dalek::VerifyingKey::from_bytes(PUBLIC_KEY).unwrap()
+    }
 
-    group.bench_function("dalek", |b| {
-        use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+    #[bench(setup = dalek_key)]
+    fn dalek(verifying_key: &ed25519_dalek::VerifyingKey) {
+        use ed25519_dalek::{Signature, Verifier};
+        verifying_key
+            .verify(MESSAGE, &Signature::from_slice(SIGNATURE).unwrap())
+            .unwrap();
+    }
 
-        let verifying_key = VerifyingKey::from_bytes(public_key).unwrap();
+    fn rind_key() -> Dit<rind::ed25519::PublicKey> {
+        Dit::hold(rind_public_key())
+    }
 
-        b.iter(|| {
-            verifying_key
-                .verify(message, &Signature::from_slice(signature).unwrap())
-                .unwrap();
-        });
-    });
+    #[bench(setup = rind_key)]
+    fn rind(public_key: &Dit<rind::ed25519::PublicKey>) {
+        rind_verify(public_key);
+    }
 
-    let rind = |b: &mut Bencher<'_>| {
-        let public_key = rind::ed25519::PublicKey::new(public_key).unwrap();
+    #[cfg(graviola)]
+    fn graviola_key() -> graviola::signing::eddsa::Ed25519VerifyingKey {
+        graviola::signing::eddsa::Ed25519VerifyingKey::from_bytes(PUBLIC_KEY).unwrap()
+    }
 
-        b.iter(|| {
-            public_key.verify(message, signature).unwrap();
-        })
-    };
-    group.bench_function("rind", |b| {
-        let _dit = criterion::rind_dit();
-        rind(b)
-    });
+    #[cfg(graviola)]
+    #[bench(setup = graviola_key)]
+    fn graviola(public_key: &graviola::signing::eddsa::Ed25519VerifyingKey) {
+        public_key.verify(SIGNATURE, MESSAGE).unwrap();
+    }
 
-    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-    group.bench_function("graviola", |b| {
-        use graviola::signing::eddsa::Ed25519VerifyingKey;
-        let public_key = Ed25519VerifyingKey::from_bytes(public_key).unwrap();
+    fn vg_key() -> verified_garbage::ed25519::VerifyingKey {
+        verified_garbage::ed25519::VerifyingKey::from_bytes(PUBLIC_KEY)
+    }
 
-        b.iter(|| {
-            public_key.verify(signature, message).unwrap();
-        })
-    });
-
-    group.bench_function("verified-garbage", |b| {
-        use verified_garbage::ed25519::VerifyingKey;
-        let public_key = VerifyingKey::from_bytes(public_key);
-
-        b.iter(|| {
-            public_key.verify(message, signature).unwrap();
-        })
-    });
+    #[bench(setup = vg_key)]
+    fn verified_garbage(public_key: &verified_garbage::ed25519::VerifyingKey) {
+        public_key.verify(MESSAGE, SIGNATURE).unwrap();
+    }
 
     // libcrux has no parsed key: `verify` takes the key's bytes.
-    group.bench_function("libcrux", |b| {
-        b.iter(|| {
-            libcrux_ed25519::verify(message, public_key, signature).unwrap();
-        })
-    });
+    #[bench]
+    fn libcrux() {
+        libcrux_ed25519::verify(MESSAGE, PUBLIC_KEY, SIGNATURE).unwrap();
+    }
 
-    #[cfg(all(
-        feature = "__bench_openssl",
-        target_family = "unix",
-        not(target_arch = "xtensa")
-    ))]
-    group.bench_function("openssl", |b| {
+    #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+    fn openssl_key() -> openssl::pkey::PKey<openssl::pkey::Public> {
         use openssl::pkey::{Id, PKey};
-        use openssl::sign::Verifier;
-        let key = PKey::public_key_from_raw_bytes(public_key, Id::ED25519).unwrap();
+        PKey::public_key_from_raw_bytes(PUBLIC_KEY, Id::ED25519).unwrap()
+    }
 
-        b.iter(|| {
-            let mut verifier = Verifier::new_without_digest(&key).unwrap();
-            assert!(verifier.verify_oneshot(signature, message).unwrap());
-        })
-    });
-    group.finish();
-
-    if let Some(mut group) = criterion::dit_per_call(c, "ed25519-verify") {
-        group.throughput(Throughput::Elements(1));
-        group.bench_function("rind", rind);
+    #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+    #[bench(setup = openssl_key)]
+    fn openssl(key: &openssl::pkey::PKey<openssl::pkey::Public>) {
+        let mut verifier = openssl::sign::Verifier::new_without_digest(key).unwrap();
+        assert!(verifier.verify_oneshot(SIGNATURE, MESSAGE).unwrap());
     }
 }
 
 #[cfg(not(target_arch = "xtensa"))]
-fn sign(c: &mut Criterion) {
-    let mut group = c.benchmark_group("ed25519-sign");
-    group.throughput(Throughput::Elements(1));
-    let message = b"\x31\x32\x33\x34\x30\x30";
+mod ed25519_sign {
+    use swole::bench;
 
-    group.bench_function("ring", |b| {
+    use super::*;
+
+    fn ring_key() -> ring::signature::Ed25519KeyPair {
         use ring::{rand, signature};
         let rng = rand::SystemRandom::new();
-
         let private_key = signature::Ed25519KeyPair::generate_pkcs8(&rng).unwrap();
-        let private_key = signature::Ed25519KeyPair::from_pkcs8(private_key.as_ref()).unwrap();
+        signature::Ed25519KeyPair::from_pkcs8(private_key.as_ref()).unwrap()
+    }
 
-        b.iter(|| {
-            black_box(private_key.sign(message));
-        })
-    });
+    #[bench(setup = ring_key)]
+    fn ring(private_key: &ring::signature::Ed25519KeyPair) {
+        black_box(private_key.sign(SIGNED));
+    }
 
-    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
-    group.bench_function("aws-lc-rs", |b| {
+    fn aws_key() -> aws_lc_rs::signature::Ed25519KeyPair {
         use aws_lc_rs::{rand, signature};
         let rng = rand::SystemRandom::new();
-
         let private_key = signature::Ed25519KeyPair::generate_pkcs8(&rng).unwrap();
-        let private_key = signature::Ed25519KeyPair::from_pkcs8(private_key.as_ref()).unwrap();
+        signature::Ed25519KeyPair::from_pkcs8(private_key.as_ref()).unwrap()
+    }
 
-        b.iter(|| {
-            black_box(private_key.sign(message));
-        })
-    });
+    #[bench(setup = aws_key)]
+    fn aws_lc_rs(private_key: &aws_lc_rs::signature::Ed25519KeyPair) {
+        black_box(private_key.sign(SIGNED));
+    }
 
-    group.bench_function("dalek", |b| {
-        use ed25519_dalek::{Signature, Signer, SigningKey};
+    fn dalek_key() -> ed25519_dalek::SigningKey {
         use getrandom::{SysRng, rand_core::UnwrapErr};
-        let signing_key = SigningKey::generate(&mut UnwrapErr(SysRng));
+        ed25519_dalek::SigningKey::generate(&mut UnwrapErr(SysRng))
+    }
 
-        b.iter(|| {
-            let _sig: Signature = signing_key.sign(message);
-            black_box(_sig);
-        });
-    });
+    #[bench(setup = dalek_key)]
+    fn dalek(signing_key: &ed25519_dalek::SigningKey) {
+        use ed25519_dalek::{Signature, Signer};
+        let sig: Signature = signing_key.sign(SIGNED);
+        black_box(sig);
+    }
 
-    let rind = |b: &mut Bencher<'_>| {
-        let signing_key = rind::ed25519::KeyPair::generate().unwrap();
+    fn rind_key() -> Dit<rind::ed25519::KeyPair> {
+        Dit::hold(rind_signing_key())
+    }
 
-        b.iter(|| {
-            black_box(signing_key.sign(message));
-        });
-    };
-    group.bench_function("rind", |b| {
-        let _dit = criterion::rind_dit();
-        rind(b)
-    });
+    #[bench(setup = rind_key)]
+    fn rind(signing_key: &Dit<rind::ed25519::KeyPair>) {
+        rind_sign(signing_key);
+    }
 
-    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-    group.bench_function("graviola", |b| {
-        let signing_key = graviola::signing::eddsa::Ed25519SigningKey::generate().unwrap();
+    #[cfg(graviola)]
+    fn graviola_key() -> graviola::signing::eddsa::Ed25519SigningKey {
+        graviola::signing::eddsa::Ed25519SigningKey::generate().unwrap()
+    }
 
-        b.iter(|| {
-            black_box(signing_key.sign(message));
-        });
-    });
+    #[cfg(graviola)]
+    #[bench(setup = graviola_key)]
+    fn graviola(signing_key: &graviola::signing::eddsa::Ed25519SigningKey) {
+        black_box(signing_key.sign(SIGNED));
+    }
 
-    group.bench_function("verified-garbage", |b| {
+    /// A random key, after checking it signs as rind's of the same seed
+    /// does, and that rind verifies its signature: Ed25519 is deterministic.
+    fn vg_key() -> verified_garbage::ed25519::SigningKey {
         use rind::ed25519::{KeyPair, PublicKey};
         let mut seed = [0u8; 32];
         getrandom::fill(&mut seed).unwrap();
         let signing_key = verified_garbage::ed25519::SigningKey::from_seed(&seed);
-        // Ed25519 is deterministic, so both sign alike and rind verifies it.
         let rind_key = KeyPair::from_seed(&seed).unwrap();
-        let signature = signing_key.sign(message);
-        assert_eq!(signature[..], *rind_key.sign(message).as_ref());
+        let signature = signing_key.sign(SIGNED);
+        assert_eq!(signature[..], *rind_key.sign(SIGNED).as_ref());
         PublicKey::new(signing_key.verifying_key().as_bytes())
             .unwrap()
-            .verify(message, &signature)
+            .verify(SIGNED, &signature)
             .unwrap();
+        signing_key
+    }
 
-        b.iter(|| {
-            black_box(signing_key.sign(message));
-        });
-    });
+    #[bench(setup = vg_key)]
+    fn verified_garbage(signing_key: &verified_garbage::ed25519::SigningKey) {
+        black_box(signing_key.sign(SIGNED));
+    }
+
+    fn libcrux_key() -> [u8; 32] {
+        let (signing_key, _) = libcrux_ed25519::generate_key_pair(&mut getrandom::SysRng).unwrap();
+        signing_key.into_bytes()
+    }
 
     // libcrux signs with the seed alone, deriving the public key each time.
-    group.bench_function("libcrux", |b| {
-        let (signing_key, _) = libcrux_ed25519::generate_key_pair(&mut getrandom::SysRng).unwrap();
-        let signing_key = signing_key.into_bytes();
+    #[bench(setup = libcrux_key)]
+    fn libcrux(signing_key: &[u8; 32]) {
+        black_box(libcrux_ed25519::sign(SIGNED, signing_key).unwrap());
+    }
 
-        b.iter(|| {
-            black_box(libcrux_ed25519::sign(message, &signing_key).unwrap());
-        });
-    });
+    #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+    fn openssl_key() -> openssl::pkey::PKey<openssl::pkey::Private> {
+        openssl::pkey::PKey::generate_ed25519().unwrap()
+    }
 
-    #[cfg(all(
-        feature = "__bench_openssl",
-        target_family = "unix",
-        not(target_arch = "xtensa")
-    ))]
-    group.bench_function("openssl", |b| {
-        use openssl::sign::Signer;
-        let signing_key = openssl::pkey::PKey::generate_ed25519().unwrap();
+    #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+    #[bench(setup = openssl_key)]
+    fn openssl(signing_key: &openssl::pkey::PKey<openssl::pkey::Private>) {
+        let mut signer = openssl::sign::Signer::new_without_digest(signing_key).unwrap();
+        black_box(signer.sign_oneshot_to_vec(SIGNED).unwrap());
+    }
+}
 
-        b.iter(|| {
-            let mut signer = Signer::new_without_digest(&signing_key).unwrap();
-            black_box(signer.sign_oneshot_to_vec(message).unwrap());
-        });
-    });
-    group.finish();
+#[cfg(target_arch = "aarch64")]
+#[cfg(not(target_arch = "xtensa"))]
+mod dit_per_call {
+    mod ed25519_verify {
+        use swole::bench;
 
-    if let Some(mut group) = criterion::dit_per_call(c, "ed25519-sign") {
-        group.throughput(Throughput::Elements(1));
-        group.bench_function("rind", rind);
+        use super::super::*;
+
+        #[bench(setup = rind_public_key)]
+        fn rind(public_key: &rind::ed25519::PublicKey) {
+            rind_verify(public_key);
+        }
+    }
+
+    mod ed25519_sign {
+        use swole::bench;
+
+        use super::super::*;
+
+        #[bench(setup = rind_signing_key)]
+        fn rind(signing_key: &rind::ed25519::KeyPair) {
+            rind_sign(signing_key);
+        }
     }
 }
 
 #[cfg(not(target_arch = "xtensa"))]
-criterion_group!(benches, keygen, verify, sign);
-#[cfg(not(target_arch = "xtensa"))]
-criterion_main!(benches);
+fn main() {
+    swole::main();
+}

@@ -147,12 +147,14 @@ impl<const N: usize> PosInt<N> {
     /// without branching on the value. A value that does not fit loses its
     /// words above `words`.
     #[must_use]
+    // Indexes rather than skipping and taking `iter_mut`, which Aeneas
+    // cannot translate, so `proofs/` can prove RSA's private key loading.
     pub(crate) fn fit(&mut self, words: usize) -> bool {
         assert!(words <= N);
         let mut high = 0;
-        for word in self.words.iter_mut().take(self.used).skip(words) {
-            high |= *word;
-            *word = 0;
+        for i in words..self.used {
+            high |= self.words[i];
+            self.words[i] = 0;
         }
         self.used = words;
         high == 0
@@ -691,32 +693,39 @@ impl<const N: usize> PosInt<N> {
         // The remaining bits are shifted in by doubling, then added, a word
         // at a time where a word is below `m`, as it is when `m` is wider,
         // and a bit at a time otherwise. Each step writes to the other of
-        // `a` and `b`, then they swap roles.
-        let bits = if m.used > 1 { 64 } else { 1 };
-        let (mut r, mut next) = (&mut a, &mut b);
+        // `a` and `b`, and `in_b` says which holds the value: swapping
+        // references instead is a step Aeneas cannot translate, and `bits`
+        // is a `usize` rather than an `i32`, so `proofs/` can prove RSA's
+        // key loading.
+        let bits: usize = if m.used > 1 { 64 } else { 1 };
+        let mut in_b = false;
         for j in (0..i).rev() {
             for piece in (0..64 / bits).rev() {
                 for _ in 0..bits {
-                    low::bignum_modadd(
-                        next.as_mut_words(),
-                        r.as_words(),
-                        r.as_words(),
-                        m.as_words(),
-                    );
-                    core::mem::swap(&mut r, &mut next);
+                    PosInt::reduce_step(&mut a, &mut b, in_b, None, m);
+                    in_b = !in_b;
                 }
 
                 addend.words[0] = self.words[j] >> (piece * bits) & u64::MAX >> (64 - bits);
-                low::bignum_modadd(
-                    next.as_mut_words(),
-                    r.as_words(),
-                    addend.as_words(),
-                    m.as_words(),
-                );
-                core::mem::swap(&mut r, &mut next);
+                PosInt::reduce_step(&mut a, &mut b, in_b, Some(&addend), m);
+                in_b = !in_b;
             }
         }
-        r.clone()
+        if in_b { b } else { a }
+    }
+
+    /// Sets whichever of `a` and `b` does not hold `reduce_even`'s value, as
+    /// `in_b` says, to that value plus `addend`, or doubled without one,
+    /// modulo `m`. The branch lives here, outside `reduce_even`'s loops,
+    /// because Aeneas cannot translate a loop that branches on `in_b`.
+    fn reduce_step(a: &mut Self, b: &mut Self, in_b: bool, addend: Option<&Self>, m: &Self) {
+        let (a, b, m) = (a.as_mut_words(), b.as_mut_words(), m.as_words());
+        match (in_b, addend) {
+            (false, None) => low::bignum_modadd(b, a, a, m),
+            (true, None) => low::bignum_modadd(a, b, b, m),
+            (false, Some(y)) => low::bignum_modadd(b, a, y.as_words(), m),
+            (true, Some(y)) => low::bignum_modadd(a, b, y.as_words(), m),
+        }
     }
 
     /// Computes `self` + `b`

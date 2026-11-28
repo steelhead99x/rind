@@ -61,7 +61,3 @@ Left: re-measure cancelled and post-merge hosted hours over the week after #958 
 ## Scheduled
 
 - 2026-11-30 - a week of runs after #958 lands
-
-## Related
-
-- [The merge queue runs rind's tests natively on aarch64](/quest/m0/mac-mini-runner.md) - a second queue runner, which a queue module must not slow

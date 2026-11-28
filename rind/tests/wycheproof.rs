@@ -1421,10 +1421,14 @@ struct MlDsaTest {
 }
 
 impl MlDsaTest {
-    /// Whether this test signs a message with the empty context, as rind's
-    /// public API does, rather than a context or only `mu`.
+    /// Whether this test signs a message and context, as rind's public API
+    /// does, rather than only `mu`.
     fn pure(&self) -> bool {
-        self.ctx.is_empty() && !self.flags.iter().any(|flag| flag == "Internal")
+        !self.has("Internal")
+    }
+
+    fn has(&self, flag: &str) -> bool {
+        self.flags.iter().any(|f| f == flag)
     }
 }
 
@@ -1461,7 +1465,7 @@ fn ml_dsa_wycheproof<P: ml_dsa::ParameterSet>([seed, noseed, verify]: [&str; 3],
 
         for test in group.tests.iter().filter(|test| test.pure()) {
             let result = match &key {
-                Ok(key) => key.verify(&test.msg, &test.sig),
+                Ok(key) => key.verify(&test.ctx, &test.msg, &test.sig),
                 Err(e) => Err(*e),
             };
             match (test.result, result) {
@@ -1502,10 +1506,21 @@ fn ml_dsa_wycheproof<P: ml_dsa::ParameterSet>([seed, noseed, verify]: [&str; 3],
         for test in group.tests.iter().filter(|test| test.pure()) {
             // Signing is hedged, so check that the signature verifies rather
             // than its bytes.
-            let signature = key.sign(&test.msg).unwrap();
-            verifier.verify(&test.msg, signature.as_ref()).unwrap();
+            if test.has("InvalidContext") {
+                assert_eq!(
+                    key.sign(&test.ctx, &test.msg).err(),
+                    Some(Error::WrongLength),
+                    "tcId {}",
+                    test.id
+                );
+            } else {
+                let signature = key.sign(&test.ctx, &test.msg).unwrap();
+                verifier
+                    .verify(&test.ctx, &test.msg, signature.as_ref())
+                    .unwrap();
+            }
             assert_eq!(
-                verifier.verify(&test.msg, &test.sig).is_ok(),
+                verifier.verify(&test.ctx, &test.msg, &test.sig).is_ok(),
                 test.result == ExpectedResult::Valid,
                 "tcId {}",
                 test.id
@@ -1529,6 +1544,30 @@ fn ml_dsa_wycheproof<P: ml_dsa::ParameterSet>([seed, noseed, verify]: [&str; 3],
         // A key loaded in its expanded form has no seed, so it writes that.
         assert!(key.to_seed().is_none());
         assert_eq!(key.to_pkcs8().as_ref(), der);
+
+        // It signs from that form what its public key verifies.
+        let verifier = ml_dsa::PublicKey::<P>::new(&public_key).unwrap();
+        for test in group.tests.iter().filter(|test| test.pure()) {
+            if test.has("InvalidContext") {
+                assert_eq!(
+                    key.sign(&test.ctx, &test.msg).err(),
+                    Some(Error::WrongLength),
+                    "tcId {}",
+                    test.id
+                );
+            } else {
+                let signature = key.sign(&test.ctx, &test.msg).unwrap();
+                verifier
+                    .verify(&test.ctx, &test.msg, signature.as_ref())
+                    .unwrap();
+            }
+            assert_eq!(
+                verifier.verify(&test.ctx, &test.msg, &test.sig).is_ok(),
+                test.result == ExpectedResult::Valid,
+                "tcId {}",
+                test.id
+            );
+        }
     }
 }
 
