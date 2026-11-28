@@ -141,6 +141,7 @@ static NSString *const kConsent = @"The run keeps the CPU busy (minutes on Quick
   // its names to what the picker shows (a "More" chip stands for every More group); a chip tap forgets them.
   NSArray<NSSet *> *lastPicker;
   NSArray<NSString *> *lastLibs, *lastSecs;
+  BOOL pickedSinceQueued;  // a chip was tapped while the -autostart waited, so its names don't stand for the picker
   NSDictionary *catalog;
   NSMutableDictionary<NSString *, UIButton *> *libChips, *secChips;
   NSArray<NSString *> *moreSections;
@@ -408,7 +409,7 @@ static void SetTitle(UIButton *b, NSString *t) {
   [self reportLayout:@"ready"];
   // -autostart waits a moment, so a runner can capture the picker before the run.
   if (ArgOn(@"autostart")) {
-    autostartQueued = YES;
+    autostartQueued = YES; pickedSinceQueued = NO;
     // The launch's own -libraries, -sections and -preset, fixed now: what it leaves out is the list's
     // defaults (every library; every group with rows but the More ones), as the picker's first load has it,
     // so a chip or preset tapped during the wait changes only a run started by hand.
@@ -482,6 +483,7 @@ static void SetTitle(UIButton *b, NSString *t) {
   if (running) return;
   b.selected = !b.selected; [self paintChip:b];
   lastLibs = nil; lastSecs = nil;  // a picked selection, even one back where it was, runs as the picker shows it
+  pickedSinceQueued = YES;
 }
 
 - (void)showConsent {
@@ -584,7 +586,9 @@ static void SetTitle(UIButton *b, NSString *t) {
   // A start by hand consumes the queued -autostart, even once this run stops; the launch gets its outcome.
   if (autostartQueued && !autostartRun) RunLine(@{@"started": @NO, @"reason": @"a start by hand took its place"});
   autostartQueued = NO;
-  lastPicker = picker; lastLibs = [libs copy]; lastSecs = [secs copy];
+  // An autostart's names stand for the picker in a rerun only if nobody touched a chip while it waited.
+  if (wantLibs && pickedSinceQueued) { lastPicker = nil; lastLibs = nil; lastSecs = nil; }
+  else { lastPicker = picker; lastLibs = [libs copy]; lastSecs = [secs copy]; }
   UIApplication.sharedApplication.idleTimerDisabled = YES;
   startBtn.hidden = YES; clearBtn.hidden = YES; stopBtn.hidden = NO; stopBtn.enabled = YES; running = YES;
   [self setPicking:NO];

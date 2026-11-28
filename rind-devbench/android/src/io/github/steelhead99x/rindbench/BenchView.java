@@ -572,9 +572,8 @@ final class BenchView extends LinearLayout {
                     notStarted(running ? "a run is going" : "the app or the Bench tab was left");
                     return;
                 }
-                // A finished run's results are cleared only now, right before Start, so a launch dropped
-                // while it waited leaves them shown; the collector was just probed, so no new probe.
-                if (!nativeStatus().optString("run_id", "").isEmpty()) clearResults(false);
+                // A finished run's results stay until the library accepts this start, whose fresh status then
+                // replaces them; a launch dropped or refused leaves them shown and restorable.
                 agree.setChecked(true);
                 start(libs, secs, full);
             }
