@@ -141,6 +141,11 @@ static NSString *const kConsent = @"The run keeps the CPU busy (minutes on Quick
   BOOL autostartQueued;  // -autostart's delayed start, until it fires or a start by hand takes its place
   BOOL autostartRun;     // the current start is -autostart's: its refusal and picked rows go to stderr
   long long autostartNo; // its start number (`acked_start`), once accepted
+  // The last run's picker selection, as sets of library and group names, and what that run sent: a run
+  // started by hand with the picker untouched since sends the same, so rerunning an autostart doesn't widen
+  // its names to what the picker shows (a "More" chip stands for every More group); a chip tap forgets them.
+  NSArray<NSSet *> *lastPicker;
+  NSArray<NSString *> *lastLibs, *lastSecs;
   NSDictionary *catalog;
   NSMutableDictionary<NSString *, UIButton *> *libChips, *secChips;
   NSArray<NSString *> *moreSections;
@@ -496,6 +501,7 @@ static UIImageView *BrandMark(NSString *name, CGFloat size) {
 - (void)chipTapped:(UIButton *)b {
   if (running) return;
   b.selected = !b.selected; [self paintChip:b];
+  lastLibs = nil; lastSecs = nil;  // a picked selection, even one back where it was, runs as the picker shows it
 }
 
 - (void)showConsent {
@@ -554,6 +560,10 @@ static UIImageView *BrandMark(NSString *name, CGFloat size) {
   for (NSString *k in libChips) if (libChips[k].selected) [libs addObject:k];
   for (NSString *k in secChips) if (secChips[k].selected) [secs addObject:k];
   if (moreChip.selected) [secs addObjectsFromArray:moreSections];
+  NSArray<NSSet *> *picker = @[[NSSet setWithArray:libs], [NSSet setWithArray:secs]];
+  if (!wantLibs && !wantSecs && lastLibs && [picker isEqualToArray:lastPicker]) {
+    libs = [lastLibs mutableCopy]; secs = [lastSecs mutableCopy];
+  }
   if (wantLibs.count) libs = [wantLibs mutableCopy];
   if (wantSecs.count) secs = [wantSecs mutableCopy];
   if (!libs.count || !secs.count) {
@@ -586,7 +596,10 @@ static UIImageView *BrandMark(NSString *name, CGFloat size) {
     autostartNo = [JSON(devbench_status_json())[@"acked_start"] longLongValue];
     RunLine(@{@"started": @YES, @"start": @(autostartNo), @"libraries": libs, @"sections": secs});
   }
-  autostartQueued = NO;  // a start by hand consumes the queued -autostart, even once this run stops
+  // A start by hand consumes the queued -autostart, even once this run stops; the launch gets its outcome.
+  if (autostartQueued && !autostartRun) RunLine(@{@"started": @NO, @"reason": @"a start by hand took its place"});
+  autostartQueued = NO;
+  lastPicker = picker; lastLibs = [libs copy]; lastSecs = [secs copy];
   UIApplication.sharedApplication.idleTimerDisabled = YES;
   startBtn.hidden = YES; clearBtn.hidden = YES; stopBtn.hidden = NO; stopBtn.enabled = YES; running = YES;
   [self setPicking:NO];

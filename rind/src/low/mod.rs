@@ -168,7 +168,8 @@ mod generic {
     // The portable backend's group orders, picked from by modulus.
     #[cfg(any(rind_backend = "arm", rind_backend = "portable"))]
     pub(crate) mod order;
-    // x86_64's separate-pass Poly1305 and the 64-bit portable backend's.
+    // x86_64's separate-pass Poly1305, around `x86_64::poly1305_sse2`'s
+    // lanes, and the 64-bit portable backend's.
     // aarch64 runs Poly1305 only in aws-lc's one-pass ChaCha20-Poly1305,
     // whose tests check it against this, and every backend's tests check
     // `poly1305_32` against it.
