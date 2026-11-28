@@ -77,16 +77,20 @@ fn main() {
     println!("cargo::rustc-check-cfg=cfg(rind_reg_asm)");
     println!("cargo::rustc-check-cfg=cfg(rind_no_cas_cache)");
     println!("cargo::rerun-if-env-changed=RUST_TARGET_PATH");
-    // These targets support atomic word loads and stores without supporting
-    // CAS. The cache costs every ECDSA public key's memory whether or not the
-    // key is reused, so the program opts in with `no-cas-ecdsa-cache`.
-    if matches!(
-        env::var("TARGET").as_deref(),
-        Ok("thumbv6m-none-eabi" | "riscv32imc-unknown-none-elf")
-    ) && target_json_text().is_none()
-        && env::var_os("CARGO_FEATURE_NO_CAS_ECDSA_CACHE").is_some()
-    {
-        println!("cargo::rustc-cfg=rind_no_cas_cache");
+    // The cache costs every ECDSA public key's memory whether or not the key
+    // is reused, so the program opts in with `no-cas-ecdsa-cache`. It takes
+    // effect on every target without compare-and-swap that has 32-bit atomic
+    // loads and stores, which the table is built of; a target with
+    // compare-and-swap always caches through `low::ReuseCache` instead.
+    if env::var_os("CARGO_FEATURE_NO_CAS_ECDSA_CACHE").is_some() {
+        if !target_has_cas() && target_has_atomic_u32() {
+            println!("cargo::rustc-cfg=rind_no_cas_cache");
+        } else if !target_has_cas() {
+            println!(
+                "cargo::warning=no-cas-ecdsa-cache has no effect on {}, which has no 32-bit atomic loads and stores",
+                env::var("TARGET").unwrap_or_default()
+            );
+        }
     }
 
     let os = env::var("CARGO_CFG_TARGET_OS").expect("cargo sets the target os");
@@ -448,6 +452,50 @@ fn rustflag_feature_lists(encoded: &str) -> Vec<&str> {
         }
     }
     lists
+}
+
+/// Whether the target has compare-and-swap, which `low::ReuseCache` keys on
+/// as `target_has_atomic = "8"`.
+fn target_has_cas() -> bool {
+    env::var("CARGO_CFG_TARGET_HAS_ATOMIC").is_ok_and(|widths| widths.split(',').any(|w| w == "8"))
+}
+
+/// Whether the target has `AtomicU32`: a maximum atomic width of at least 32
+/// bits. Stable Cargo passes no cfg for atomic loads and stores without
+/// compare-and-swap (`target_has_atomic_load_store` is unstable), so a custom
+/// specification is read for its `max-atomic-width`, which defaults to the
+/// pointer width as rustc's does, and a built-in target is judged by its
+/// pointer width, less those rustc's specifications give no atomics at all.
+/// The built-in targets without compare-and-swap that this takes are
+/// `thumbv6m-none-eabi`, `xtensa-esp32s2-none-elf`, and the RV32E and RV32I
+/// targets without the A extension, such as `riscv32imc-unknown-none-elf`.
+fn target_has_atomic_u32() -> bool {
+    let pointer_width = env::var("CARGO_CFG_TARGET_POINTER_WIDTH")
+        .ok()
+        .and_then(|w| w.parse::<u32>().ok())
+        .unwrap_or(0);
+    if let Some(text) = target_json_text() {
+        let width = text
+            .split_once("\"max-atomic-width\"")
+            .and_then(|(_, rest)| {
+                let digits = rest.trim_start().strip_prefix(':')?.trim_start();
+                let end = digits
+                    .find(|c: char| !c.is_ascii_digit())
+                    .unwrap_or(digits.len());
+                digits[..end].parse::<u32>().ok()
+            })
+            .unwrap_or(pointer_width);
+        return width >= 32;
+    }
+    let no_atomics = [
+        "armv4t-none-eabi",
+        "armv5te-none-eabi",
+        "thumbv4t-none-eabi",
+        "thumbv5te-none-eabi",
+        "mipsel-sony-psx",
+    ];
+    let target = env::var("TARGET").unwrap_or_default();
+    pointer_width >= 32 && !no_atomics.contains(&target.as_str())
 }
 
 fn target_json_text() -> Option<String> {

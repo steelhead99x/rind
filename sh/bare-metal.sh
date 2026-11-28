@@ -201,6 +201,12 @@ for target in thumbv6m-none-eabi riscv32imc-unknown-none-elf; do
     lint "$target" --features no-cas-ecdsa-cache
     lint "$target" --no-default-features --features no-cas-ecdsa-cache
 done
+# Clippy generates no code, so each is also built once, in release as
+# firmware would be, compiling the table's 32-bit atomic loads and stores.
+for target in thumbv6m-none-eabi riscv32imc-unknown-none-elf; do
+    run_cargo "$target" "$(required_flags "$target")" "${cargo[@]}" build -p rind --lib --locked \
+        --target "$target" --release --features no-cas-ecdsa-cache
+done
 assemble x86_64-unknown-none
 # The rlib this cargo invocation wrote. A `find` of the shared debug
 # directory also sees an older rlib from the SSE2 assemble row above.

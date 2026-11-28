@@ -27,13 +27,14 @@ ml-dsa = []
 slh-dsa = []
 # zeroize's `ZeroizeOnDrop` on every type that wipes itself on drop.
 zeroize = ["dep:zeroize"]
-# Caches each ECDSA public key's eight-point verification table on the targets
-# without compare-and-swap, `thumbv6m-none-eabi` and
-# `riscv32imc-unknown-none-elf`, which otherwise rebuild it on every
-# verification. Repeated P-256 verification with one key was about 10% faster
-# on a Cortex-M0 model, for about 1.2 KiB more in every ECDSA public key
-# (P-256 too: the key is sized for P-521) and about 3.4 KiB more stack.
-# Every other target caches the table always and ignores this.
+# Caches each ECDSA public key's eight-point verification table on targets
+# without compare-and-swap but with 32-bit atomic loads and stores, such as
+# `thumbv6m-none-eabi` and `riscv32imc-unknown-none-elf`, which otherwise
+# rebuild it on every verification. Repeated P-256 verification with one key
+# was about 10% faster on a Cortex-M0 model, for about 1.2 KiB more in every
+# ECDSA public key (P-256 too: the key is sized for P-521) and about 3.4 KiB
+# more stack. Targets with compare-and-swap always cache the table and ignore
+# this; a target without 32-bit atomics never caches, and the build warns.
 no-cas-ecdsa-cache = []
 # Runs the unrolled SHA-512 body on the ESP32-S3 instead of the rolled loop
 # every 32-bit microcontroller runs by default. The unrolled body is about 18 KiB of

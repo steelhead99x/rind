@@ -95,7 +95,12 @@ impl VerifyingKey {
         if let Some(vg) = low::p384_vg::Verify::check() {
             // On aarch64, only while the multiples are not ready:
             // `get_or_build` returns `None` on a key's first verification and
-            // while another thread builds them.
+            // while another thread builds them. `rind_no_cas_cache` is only
+            // ever set on a target without compare-and-swap, and the vg
+            // backend runs only on x86_64 and aarch64, which have it, so the
+            // two never meet in a real build; were the cfg forced onto a vg
+            // build, every verification would take vg's routine, and the
+            // cached table below would go unused.
             #[cfg(rind_no_cas_cache)]
             return self.vg_ecdsa_verify(vg, r, s, e);
             #[cfg(not(rind_no_cas_cache))]

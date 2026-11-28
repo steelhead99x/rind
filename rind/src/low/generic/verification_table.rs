@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
+use core::fmt;
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 /// A table of eight public ECDSA points, filled without compare-and-swap.
@@ -8,7 +9,6 @@ use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 /// second builder may publish while a reader is copying the table, so all
 /// accesses to the stored words are atomic. Acquiring readiness guarantees
 /// at least one complete build, and concurrent stores write identical words.
-#[derive(Debug)]
 pub(crate) struct VerificationTable<const N: usize> {
     ready: AtomicBool,
     coordinates: [[[AtomicU32; 2]; N]; 8],
@@ -50,6 +50,16 @@ impl<const N: usize> VerificationTable<N> {
     }
 }
 
+/// Whether the table is ready, not its words: they are public, but there are
+/// 8 × N × 2 of them, which would flood a key's `Debug`.
+impl<const N: usize> fmt::Debug for VerificationTable<N> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("VerificationTable")
+            .field("ready", &self.ready.load(Ordering::Relaxed))
+            .finish_non_exhaustive()
+    }
+}
+
 impl<const N: usize> Clone for VerificationTable<N> {
     fn clone(&self) -> Self {
         let clone = Self::new();
@@ -86,6 +96,20 @@ mod tests {
         let mut copied = [[0; 2]; 8];
         clone.fill(&mut copied, |p| p, || unreachable!());
         assert_eq!(copied, VALUE);
+    }
+
+    #[test]
+    fn debug_shows_readiness_not_words() {
+        let cache = VerificationTable::<2>::new();
+        assert_eq!(
+            format!("{cache:?}"),
+            "VerificationTable { ready: false, .. }"
+        );
+        cache.fill(&mut [[0; 2]; 8], |p| p, || VALUE);
+        assert_eq!(
+            format!("{cache:?}"),
+            "VerificationTable { ready: true, .. }"
+        );
     }
 
     #[test]
