@@ -331,6 +331,13 @@ final class BenchView extends LinearLayout {
             colHow = "set by adb";
             // After setup, probe the new target; a probe of the old one still out is then ignored.
             if (changed && probeGen > 0) findCollector();
+        } else if (newHost == null && runnerHost != null && Collector.RUNNER && it.getBooleanExtra("autostart", false)) {
+            // A runner launch without `host` goes to the USB or built-in collector, not the last launch's.
+            runnerHost = null;
+            runnerPort = Collector.PORT;
+            colHost = null;
+            colHow = "";
+            if (probeGen > 0) findCollector();
         }
         // Each runner launch resolves its own preset, so one without `preset` runs Quick, as in a fresh
         // process, rather than the Full a previous run picked.
