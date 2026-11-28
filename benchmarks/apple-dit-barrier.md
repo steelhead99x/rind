@@ -2,6 +2,10 @@
 
 Research date: 2026-11-22, for fork issues #259 to #266 and PR #292's measuring cfgs. Scope: what rind's `barrier_after_set` (rind/src/low/aarch64/cpu.rs) should emit after `msr DIT, #1` on Apple targets. "Verified" means I read the quoted text in the primary source myself. Anything marked **UNVERIFIED** I could not confirm from a primary source.
 
+## Update (2026-11-26): Apple's cores on other targets
+
+Point 2 below picked Apple by target triple, so `aarch64-unknown-linux-gnu` on Apple silicon (Asahi, or a Linux VM under Hypervisor.framework: OrbStack, UTM, Lima) set DIT with no barrier on the very cores Apple's advice is for. Off Apple's targets and outside the FIPS module, `barrier_after_set` now also runs Apple's sequence when `MIDR_EL1` reports implementer `0x61`, read once on Linux the way the narrow-multiplier pick reads it (`HWCAP_CPUID`, no file opened) and cached. A Linux kernel that hides the part (no `HWCAP_CPUID`, or valgrind) runs the barrier too. Targets that cannot read the part (Windows, the BSDs, Android, `no_std`) still run none. `admin/dit-disasm` now expects all three endings on `aarch64-unknown-linux-gnu`: `sb`, `dsb nsh; isb`, and no barrier.
+
 ## Decision (project owner, 2026-11-23)
 
 1. **Non-Apple aarch64: no barrier after `msr DIT, #1`.** This follows the Arm ARM (DDI 0487 M.d), which requires none: C5.1.3.3 ("Writes to PSTATE occur in program order without the need for additional synchronization") and B1.5.6 (instructions speculatively executed after the 0 to 1 change are part of the data-independent-time sequence). On those cores the guarantee rests on that architectural rule alone. It has not been tested on any non-Apple hardware by us. Since upstream's #1005 (2026-11-24) rind sets DIT on every aarch64 core whose OS reports it, so this is the shipped default off Apple.
