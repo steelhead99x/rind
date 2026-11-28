@@ -28,14 +28,17 @@ export CARGO_PROFILE_RELEASE_OVERFLOW_CHECKS=true
 SLOW_TESTS=1 cargo test "${packages[@]}" --locked --release --target "$target"
 # The ECDSA verification that `no-cas-ecdsa-cache` caches on
 # `thumbv6m-none-eabi` and `riscv32imc-unknown-none-elf`, which CI only lints:
-# their cfg forced here, so its verify path runs Wycheproof and the curves'
-# tests. Its own target directory, as below. It keeps `rind_portable`, which
-# also turns off P-384's vg routine: without it, every P-384 verification
-# would take vg and leave the cached table unexercised.
+# their cfg forced here, on the 32-bit limbs those targets run, so its verify
+# path runs Wycheproof, the curves' tests, and the ECDSA cross-checks against
+# aws-lc-rs and each curve's independent implementation. Its own target
+# directory, as below. It keeps `rind_portable`, which also turns off P-384's
+# vg routine: without it, every P-384 verification would take vg and leave the
+# cached table unexercised.
 CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-target}/rind-no-cas-cache" \
-    CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="$CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS --cfg rind_no_cas_cache" \
+    CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="$CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS --cfg rind_no_cas_cache --cfg rind_limb=\"32\"" \
     sh -c 'cargo test -p rind --lib --locked --release --target "$1" -- p256 p384 p521 ecdsa verification_table &&
-        cargo test -p rind --test wycheproof --locked --release --target "$1" -- ecdsa' sh "$target"
+        cargo test -p rind --test wycheproof --locked --release --target "$1" -- ecdsa &&
+        cargo test -p rind --test crosschecks_curves --locked --release --target "$1" -- ecdsa' sh "$target"
 # wasm runs on 32-bit limbs and generates only RSA-2048 keys, so every size's
 # key generation is wipe-checked here on those limbs, with the checks above.
 # Its own target directory keeps this cfg from rebuilding the tree above, at
