@@ -532,16 +532,20 @@ final class BenchView extends LinearLayout {
             notStarted("the Bench tab isn't shown");
             return;
         }
-        autostart = () -> {
-            autostart = null;
-            if (!onScreen || !tabShown || running) {
-                notStarted(running ? "a run is going" : "the app or the Bench tab was left");
-                return;
+        autostart = new Runnable() {
+            @Override public void run() {
+                // Until the collector probe answers, the run's collector isn't known: wait for it, still queued.
+                if (probing) { ui.postDelayed(this, 250); return; }
+                autostart = null;
+                if (!onScreen || !tabShown || running) {
+                    notStarted(running ? "a run is going" : "the app or the Bench tab was left");
+                    return;
+                }
+                // A finished run's results are cleared as the Clear button does, so Start can run.
+                if (!nativeStatus().optString("run_id", "").isEmpty()) clearTapped();
+                agree.setChecked(true);
+                startTapped();
             }
-            // A finished run's results are cleared as the Clear button does, so Start can run.
-            if (!nativeStatus().optString("run_id", "").isEmpty()) clearTapped();
-            agree.setChecked(true);
-            startTapped();
         };
         ui.postDelayed(autostart, 3000);
     }
@@ -550,6 +554,17 @@ final class BenchView extends LinearLayout {
     private static void notStarted(String reason) {
         try {
             android.util.Log.w("RindBench", "RINDBENCH_RUN " + new JSONObject().put("started", false).put("reason", reason));
+        } catch (Exception ignored) {}
+    }
+
+    /**
+     * A start the library refused after acknowledging it, for a device runner: it ends the launch with
+     * RINDBENCH_RUN {"started":false,"reason":...,"after_start":true}, after its "started":true line.
+     */
+    private static void refusedAfterStart(String why) {
+        try {
+            android.util.Log.w("RindBench", "RINDBENCH_RUN " + new JSONObject().put("started", false)
+                    .put("reason", "the native start refused it: " + why).put("after_start", true));
         } catch (Exception ignored) {}
     }
 
@@ -658,9 +673,13 @@ final class BenchView extends LinearLayout {
     /** Counts probes, so a slow one that finishes after a newer one started can't overwrite its answer. */
     private int probeGen;
 
+    /** The latest collector probe hasn't answered yet. */
+    private boolean probing;
+
     private void findCollector() {
         // The targets as of now: an intent or Retry since may have changed them.
         final int gen = ++probeGen;
+        probing = true;
         final List<String[]> targets = candidates();
         new Thread(() -> {
             String[] hit = null;
@@ -672,7 +691,7 @@ final class BenchView extends LinearLayout {
                 } catch (Exception ignored) {}
             }
             final String[] h = hit;
-            ui.post(() -> { if (gen == probeGen) applyCollector(h); });
+            ui.post(() -> { if (gen == probeGen) { probing = false; applyCollector(h); } });
         }, "collector-probe").start();
     }
 
@@ -915,6 +934,15 @@ final class BenchView extends LinearLayout {
                 String cur = s.optString("current", "");
                 String warm = isWarm() ? " (warm)" : "";
                 setBody(done + " of " + total + (cur.isEmpty() ? "" : " · " + cur) + warm);
+            } else if (s.optString("run_id", "").isEmpty() && !s.optString("start_error", "").isEmpty()) {
+                // Refused after it was acknowledged, once the library listed the tests on the run's thread.
+                String why = s.optString("start_error");
+                showFinished(s, false);
+                progress.setVisibility(GONE);
+                setStatus("Could not start", Status.ERROR);
+                setBody(why);
+                refusedAfterStart(why);
+                return;
             } else {
                 showFinished(s, true);
                 return;

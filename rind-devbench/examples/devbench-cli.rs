@@ -15,7 +15,13 @@ fn main() {
             while rind_devbench::status()["running"] == true {
                 std::thread::sleep(std::time::Duration::from_millis(500));
             }
-            println!("{}", rind_devbench::status());
+            let st = rind_devbench::status();
+            println!("{st}");
+            // A start refused once its thread listed the tests: no run, and an error for scripts.
+            if st.get("run_id").is_none() && st.get("start_error").is_some() {
+                eprintln!("devbench-cli: not started: {}", st["start_error"].as_str().unwrap_or("refused"));
+                std::process::exit(1);
+            }
         }
         _ => eprintln!("usage: devbench-cli catalog|run CONFIG"),
     }
