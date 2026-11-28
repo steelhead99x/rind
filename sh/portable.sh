@@ -38,7 +38,7 @@ CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-target}/rind-no-cas-cache" \
     CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="$CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS --cfg rind_no_cas_cache --cfg rind_limb=\"32\"" \
     sh -c 'cargo test -p rind --lib --locked --release --target "$1" -- p256 p384 p521 ecdsa verification_table &&
         cargo test -p rind --test wycheproof --locked --release --target "$1" -- ecdsa &&
-        cargo test -p rind --test crosschecks_curves --locked --release --target "$1" -- ecdsa' sh "$target"
+        cargo test -p rind --test crosschecks_curves --locked --release --target "$1" -- ecdsa ec_oracle' sh "$target"
 # wasm runs on 32-bit limbs and generates only RSA-2048 keys, so every size's
 # key generation is wipe-checked here on those limbs, with the checks above.
 # Its own target directory keeps this cfg from rebuilding the tree above, at
