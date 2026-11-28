@@ -857,6 +857,7 @@ A change here is a change to the trust base.
  sha3_keccak2_f1600_spec,
  sha3_keccak4_f1600_alt_spec,
  sha3_keccak4_f1600_spec,
+ sha3_keccak_f1600_alt2_spec,
  sha3_keccak_f1600_alt_spec,
  sha3_keccak_f1600_spec] -/
 #guard_msgs in
@@ -868,6 +869,7 @@ A change here is a change to the trust base.
  sha3_keccak2_f1600_spec,
  sha3_keccak4_f1600_alt_spec,
  sha3_keccak4_f1600_spec,
+ sha3_keccak_f1600_alt2_spec,
  sha3_keccak_f1600_alt_spec,
  sha3_keccak_f1600_spec,
  MlKemRoutines.mlkem_basemul_k3_axiom,
@@ -886,6 +888,7 @@ A change here is a change to the trust base.
  sha3_keccak2_f1600_spec,
  sha3_keccak4_f1600_alt_spec,
  sha3_keccak4_f1600_spec,
+ sha3_keccak_f1600_alt2_spec,
  sha3_keccak_f1600_alt_spec,
  sha3_keccak_f1600_spec,
  MlKemRoutines.mlkem_reduce_axiom,

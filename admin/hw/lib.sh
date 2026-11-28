@@ -15,6 +15,7 @@ HW_REMOTE=${HW_REMOTE:-https://github.com/steelhead99x/rind.git}
 HW_AB=$HW_ROOT/admin/hw/ab
 # The fork's last main whose benches are Criterion's, which admin/hw/ab times;
 # since the upstream sync they are swole's. A script's "main" defaults to it.
+# shellcheck disable=SC2034 # avx-ifma.sh and mldsa-sign-vg.sh read it.
 HW_CRITERION_MAIN=741e32aefd62166ddbdfce064c3b67c04aadce5c
 HW_TARGET_ROOT=${HW_TARGET_ROOT:-$HW_ROOT/.tmp/hw/target}
 
