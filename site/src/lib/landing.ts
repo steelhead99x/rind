@@ -87,4 +87,4 @@ export const footer = [
 	{ label: "Launch post", href: ref("launch-post") },
 	{ label: "MoQ", href: "https://moq.dev" },
 ];
-export const builtBy = { label: "Kixel", href: "https://kixel.ai" };
+export const builtBy = { label: "Kixel AI", href: "https://kixel.ai" };

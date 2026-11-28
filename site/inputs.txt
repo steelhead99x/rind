@@ -9,6 +9,7 @@ MIGRATING.md
 benchmarks/report.json
 admin/wordmark.svg
 admin/wordmark-light.svg
+rind-devbench/android/res/drawable-nodpi/kixel_mark.png
 proofs/README.md
 rind-ring/README.md
 rind-ring/Cargo.toml

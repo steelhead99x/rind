@@ -21,13 +21,18 @@ export const sources = [
 	"benchmarks/report.json",
 	"admin/wordmark.svg",
 	"admin/wordmark-light.svg",
+	"rind-devbench/android/res/drawable-nodpi/kixel_mark.png",
 	...routes.flatMap((r) => [`${r.crate}/README.md`, `${r.crate}/Cargo.toml`]),
 ];
 
 // Read one of `sources`.
 export function read(file: string): string {
+	return readBytes(file).toString("utf8");
+}
+
+export function readBytes(file: string): Buffer {
 	if (!sources.includes(file)) throw new Error(`${file} is missing from src/lib/repo.ts's sources`);
-	return readFileSync(path.join(root, file), "utf8");
+	return readFileSync(path.join(root, file));
 }
 
 // The commit the build reads, which a page about unreleased code pins.

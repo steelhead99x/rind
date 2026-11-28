@@ -18,11 +18,14 @@ targets:
       properties:
         CFBundleDisplayName: RindBench All
         CFBundleShortVersionString: "15.0"
-        CFBundleVersion: "17"
+        CFBundleVersion: "22"
         UILaunchScreen: {}
         UIUserInterfaceStyle: Dark
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true
+        CFBundleIcons:
+          CFBundlePrimaryIcon:
+            CFBundleIconFiles: [AppIcon60x60]
         CFBundleIcons~ipad:
           CFBundlePrimaryIcon:
             CFBundleIconFiles: [AppIcon20x20, AppIcon29x29, AppIcon40x40, AppIcon76x76, AppIcon83.5x83.5]

@@ -10,6 +10,7 @@
 #include <unistd.h>
 #include <poll.h>
 #include <float.h>
+#include <stdio.h>
 
 extern char *devbench_catalog_json(void);
 extern int devbench_start(const char *config);
@@ -56,25 +57,39 @@ static BOOL ArgOn(NSString *k) {
   NSString *v = Arg(k).lowercaseString;
   return [v isEqual:@"yes"] || [v isEqual:@"true"] || [v isEqual:@"1"];
 }
-static NSSet<NSString *> *ArgList(NSString *k) {
-  NSMutableSet *out = [NSMutableSet new];
+// A comma-separated argument's names, in order and without repeats.
+static NSArray<NSString *> *ArgNames(NSString *k) {
+  NSMutableOrderedSet *out = [NSMutableOrderedSet new];
   for (NSString *p in [Arg(k) componentsSeparatedByString:@","]) {
     NSString *t = [p stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
     if (t.length) [out addObject:t];
   }
-  return out;
+  return out.array;
+}
+static NSSet<NSString *> *ArgList(NSString *k) { return [NSSet setWithArray:ArgNames(k)]; }
+// One RINDBENCH_RUN line on stderr, which `devicectl ... --console` shows, for a runner watching an
+// autostart without seeing the screen.
+static void RunLine(NSDictionary *d) {
+  NSData *js = [NSJSONSerialization dataWithJSONObject:d options:0 error:nil];
+  if (!js) return;
+  fprintf(stderr, "RINDBENCH_RUN %s\n", [[NSString alloc] initWithData:js encoding:NSUTF8StringEncoding].UTF8String);
+  fflush(stderr);
 }
 
 #define RGB(r, g, b) [UIColor colorWithRed:(r) / 255.0 green:(g) / 255.0 blue:(b) / 255.0 alpha:1]
-#define C_BG RGB(13, 15, 20)
-#define C_CARD RGB(24, 27, 34)
-#define C_LINE RGB(44, 48, 58)
-#define C_CHIP RGB(36, 40, 50)
-#define C_MUTED RGB(150, 156, 170)
-#define C_TEXT RGB(236, 238, 243)
-#define C_ACCENT RGB(250, 191, 51)
-#define C_GOOD RGB(84, 214, 146)
-#define C_BAD RGB(255, 120, 110)
+// Android's night palette: Rind green for controls, Kixel graphite and amber for readouts.
+#define C_BG RGB(7, 9, 13)
+#define C_CARD RGB(18, 24, 32)
+#define C_LINE RGB(42, 51, 64)
+#define C_CHIP RGB(27, 36, 48)
+#define C_MUTED RGB(181, 192, 206)
+#define C_TEXT RGB(231, 236, 242)
+#define C_ACCENT RGB(161, 199, 2)
+#define C_ON_ACCENT RGB(25, 36, 0)
+#define C_SELECTED RGB(43, 54, 19)
+#define C_ON_SELECTED RGB(218, 238, 154)
+#define C_READOUT RGB(255, 176, 32)
+#define C_BAD RGB(255, 180, 171)
 
 static NSString *const kConsent = @"The run keeps the CPU busy (minutes on Quick, longer on Full) and warms the device. "
   "It sends only timings and the model, chip, OS version and CPU features to the computer that installed this app. "
@@ -123,6 +138,14 @@ static NSString *const kConsent = @"The run keeps the CPU busy (minutes on Quick
   UISwitch *agree; UISegmentedControl *preset;
   UIButton *startBtn, *stopBtn, *clearBtn;
   BOOL running;
+  BOOL autostartQueued;  // -autostart's delayed start, until it fires or a start by hand takes its place
+  BOOL autostartRun;     // the current start is -autostart's: its outcome goes to stderr
+  // The last run's picker selection, as sets of library and group names, and what that run sent: a run
+  // started by hand with the picker untouched since sends the same, so rerunning an autostart doesn't widen
+  // its names to what the picker shows (a "More" chip stands for every More group); a chip tap forgets them.
+  NSArray<NSSet *> *lastPicker;
+  NSArray<NSString *> *lastLibs, *lastSecs;
+  BOOL pickedSinceQueued;  // a chip was tapped while the -autostart waited, so its names don't stand for the picker
   NSDictionary *catalog;
   NSMutableDictionary<NSString *, UIButton *> *libChips, *secChips;
   NSArray<NSString *> *moreSections;
@@ -148,58 +171,77 @@ static NSString *const kConsent = @"The run keeps the CPU busy (minutes on Quick
   s.layoutMargins = UIEdgeInsetsMake(14, 16, 14, 16); s.backgroundColor = C_CARD; s.layer.cornerRadius = 16;
   s.layer.borderWidth = 1; s.layer.borderColor = C_LINE.CGColor; s.clipsToBounds = YES; return s;
 }
-// Buttons are drawn from a UIButtonConfiguration (contentEdgeInsets and the
-// titleLabel/tint setters are deprecated or ignored once one is set). The app
-// paints every state itself, so automatic state updates are off.
-static UIButtonConfiguration *ButtonConfig(NSString *title, UIFont *font, NSDirectionalEdgeInsets insets, CGFloat radius) {
+// Action buttons are drawn from a UIButtonConfiguration (contentEdgeInsets and
+// the titleLabel/tint setters are ignored once one is set), with automatic state
+// updates off since the app paints every state. Picker chips are plain custom
+// buttons, so UIKit keeps their per-state title colours.
+static UIButtonConfiguration *ButtonConfig(NSString *title, NSDirectionalEdgeInsets insets, CGFloat radius) {
   UIButtonConfiguration *c = [UIButtonConfiguration plainButtonConfiguration];
   c.title = title;
   c.contentInsets = insets;
   c.titleLineBreakMode = NSLineBreakByTruncatingTail;
-  c.titleTextAttributesTransformer = ^NSDictionary<NSAttributedStringKey, id> *(NSDictionary<NSAttributedStringKey, id> *in) {
-    NSMutableDictionary *out = [in mutableCopy]; out[NSFontAttributeName] = font; return out;
-  };
   c.background.cornerRadius = radius;
   c.cornerStyle = UIButtonConfigurationCornerStyleFixed;
   return c;
 }
+static UIFont *ButtonFont(void) { return [UIFont systemFontOfSize:17 weight:UIFontWeightBold]; }
+static void SetButtonTitleStyle(UIButtonConfiguration *c, NSString *title, UIFont *font, UIColor *color) {
+  c.baseForegroundColor = color;
+  c.attributedTitle = [[NSAttributedString alloc] initWithString:title attributes:@{
+    NSFontAttributeName: font, NSForegroundColorAttributeName: color}];
+}
 - (UIButton *)chip:(NSString *)title on:(BOOL)on enabled:(BOOL)en {
   BOOL small = [self compact];
-  UIButtonConfiguration *c = ButtonConfig(title,
-      [UIFont systemFontOfSize:small ? 13 : 14 weight:UIFontWeightSemibold],
-      small ? NSDirectionalEdgeInsetsMake(5, 10, 5, 10) : NSDirectionalEdgeInsetsMake(7, 12, 7, 12),
-      small ? 13 : 15);
-  c.background.strokeWidth = 1;
-  UIButton *b = [UIButton buttonWithConfiguration:c primaryAction:nil];
-  b.automaticallyUpdatesConfiguration = NO;
+  UIButton *b = [UIButton buttonWithType:UIButtonTypeCustom];
+  b.contentEdgeInsets = small ? UIEdgeInsetsMake(5, 10, 5, 10) : UIEdgeInsetsMake(7, 12, 7, 12);
+  b.layer.cornerRadius = small ? 13 : 15;
+  b.layer.borderWidth = 1;
+  b.titleLabel.font = [UIFont systemFontOfSize:small ? 13 : 14 weight:UIFontWeightSemibold];
+  b.titleLabel.lineBreakMode = NSLineBreakByTruncatingTail;
+  [b setTitle:title forState:UIControlStateNormal];
+  [b setTitleColor:C_TEXT forState:UIControlStateNormal];
+  [b setTitleColor:C_ON_SELECTED forState:UIControlStateSelected];
+  [b setTitleColor:C_ON_SELECTED forState:UIControlStateSelected | UIControlStateHighlighted];
+  [b setTitleColor:C_MUTED forState:UIControlStateDisabled];
+  [b setTitleColor:C_MUTED forState:UIControlStateDisabled | UIControlStateSelected];
   b.selected = on; b.enabled = en;
   [b addTarget:self action:@selector(chipTapped:) forControlEvents:UIControlEventTouchUpInside];
   [self paintChip:b]; return b;
 }
 - (void)paintChip:(UIButton *)b {
-  BOOL on = b.selected;
-  UIButtonConfiguration *c = b.configuration;
-  c.background.backgroundColor = on ? C_ACCENT : C_CHIP;
-  c.background.strokeColor = on ? C_ACCENT : C_LINE;
-  c.baseForegroundColor = !b.enabled ? C_MUTED : (on ? UIColor.blackColor : C_TEXT);
-  b.configuration = c;
+  b.backgroundColor = b.selected ? C_SELECTED : C_CHIP;
+  b.layer.borderColor = (b.selected ? C_SELECTED : C_LINE).CGColor;
   b.alpha = b.enabled ? 1 : 0.45;
 }
 - (UIButton *)button:(NSString *)t action:(SEL)a primary:(BOOL)primary {
-  UIButtonConfiguration *c = ButtonConfig(t, [UIFont systemFontOfSize:17 weight:UIFontWeightBold],
-      NSDirectionalEdgeInsetsMake(11, 22, 11, 22), 12);
+  UIButtonConfiguration *c = ButtonConfig(t, NSDirectionalEdgeInsetsMake(11, 22, 11, 22), 12);
   c.background.backgroundColor = primary ? C_ACCENT : C_CHIP;
-  c.baseForegroundColor = primary ? UIColor.blackColor : C_TEXT;
+  UIColor *color = primary ? C_ON_ACCENT : C_TEXT;
+  SetButtonTitleStyle(c, t, ButtonFont(), color);
   UIButton *b = [UIButton buttonWithConfiguration:c primaryAction:nil];
+  b.tintColor = color;
   b.automaticallyUpdatesConfiguration = NO;
   [b addTarget:self action:a forControlEvents:UIControlEventTouchUpInside]; return b;
 }
 // A configured button's title lives in its configuration.
 static void SetTitle(UIButton *b, NSString *t) {
-  UIButtonConfiguration *c = b.configuration; c.title = t; b.configuration = c;
+  UIButtonConfiguration *c = b.configuration;
+  SetButtonTitleStyle(c, t, ButtonFont(), c.baseForegroundColor);
+  b.configuration = c;
 }
 
 #pragma mark - layout
+
+static UIImageView *BrandMark(NSString *name, CGFloat size) {
+  UIImageView *image = [[UIImageView alloc] initWithImage:[UIImage imageNamed:name]];
+  image.contentMode = UIViewContentModeScaleAspectFit;
+  image.isAccessibilityElement = NO;
+  [NSLayoutConstraint activateConstraints:@[
+    [image.widthAnchor constraintEqualToConstant:size],
+    [image.heightAnchor constraintEqualToConstant:size],
+  ]];
+  return image;
+}
 
 - (void)viewDidLoad {
   [super viewDidLoad];
@@ -208,9 +250,15 @@ static void SetTitle(UIButton *b, NSString *t) {
 
   // Header: name, device, where results go.
   UILabel *title = [self label:@"RindBench" size:28 weight:UIFontWeightHeavy color:nil];
-  UILabel *tag = [self label:@"every library" size:15 weight:UIFontWeightSemibold color:C_ACCENT];
-  UIStackView *titleRow = [[UIStackView alloc] initWithArrangedSubviews:@[title, tag, [UIView new]]];
-  titleRow.spacing = 10; titleRow.alignment = UIStackViewAlignmentLastBaseline;
+  title.accessibilityTraits |= UIAccessibilityTraitHeader;
+  UILabel *publisher = [self label:@"rind by Kixel AI" size:13 weight:UIFontWeightSemibold color:C_MUTED];
+  UIStackView *credit = [[UIStackView alloc] initWithArrangedSubviews:@[BrandMark(@"kixel-mark", 21), publisher]];
+  credit.spacing = 6; credit.alignment = UIStackViewAlignmentCenter;
+  credit.isAccessibilityElement = YES; credit.accessibilityLabel = @"rind by Kixel AI";
+  UIStackView *titleRow = [[UIStackView alloc] initWithArrangedSubviews:@[
+    BrandMark(@"rind-mark", 34), title, [UIView new], credit
+  ]];
+  titleRow.spacing = 8; titleRow.alignment = UIStackViewAlignmentCenter;
   deviceLbl = [self label:@"Reading the list of tests…" size:13 weight:UIFontWeightMedium color:C_MUTED];
   deviceLbl.numberOfLines = 2;
   collectorLbl = [self label:@"Results: looking for the computer that installed this app…" size:13 weight:UIFontWeightRegular color:C_MUTED];
@@ -245,7 +293,7 @@ static void SetTitle(UIButton *b, NSString *t) {
 
   preset = [[UISegmentedControl alloc] initWithItems:@[@"Quick · 1 round", @"Full · 3 rounds"]];
   preset.selectedSegmentIndex = 0; preset.selectedSegmentTintColor = C_ACCENT;
-  [preset setTitleTextAttributes:@{NSForegroundColorAttributeName: UIColor.blackColor} forState:UIControlStateSelected];
+  [preset setTitleTextAttributes:@{NSForegroundColorAttributeName: C_ON_ACCENT} forState:UIControlStateSelected];
   [preset setTitleTextAttributes:@{NSForegroundColorAttributeName: C_TEXT} forState:UIControlStateNormal];
   agree = [UISwitch new]; agree.onTintColor = C_ACCENT;
   [agree addTarget:self action:@selector(agreeChanged) forControlEvents:UIControlEventValueChanged];
@@ -274,9 +322,9 @@ static void SetTitle(UIButton *b, NSString *t) {
   // On a narrow screen the picker folds away during and after a run, and this line stands in for it.
   picksLbl = [self label:@"" size:13 weight:UIFontWeightMedium color:C_ACCENT]; picksLbl.hidden = YES;
   progress = [[UIProgressView alloc] initWithProgressViewStyle:UIProgressViewStyleDefault];
-  progress.progressTintColor = C_ACCENT; progress.trackTintColor = C_LINE; progress.progress = 0;
+  progress.progressTintColor = C_READOUT; progress.trackTintColor = C_LINE; progress.progress = 0;
   currentLbl = [self label:@"" size:13 weight:UIFontWeightRegular color:C_MUTED]; currentLbl.numberOfLines = 2;
-  scoreLbl = [self label:@"" size:34 weight:UIFontWeightHeavy color:C_GOOD]; scoreLbl.numberOfLines = 1;
+  scoreLbl = [self label:@"" size:34 weight:UIFontWeightHeavy color:C_ACCENT]; scoreLbl.numberOfLines = 1;
   scoreLbl.adjustsFontSizeToFitWidth = YES; scoreLbl.minimumScaleFactor = 0.5;
   behindLbl = [self label:@"" size:13 weight:UIFontWeightRegular color:nil];
   behindLbl.font = [UIFont monospacedSystemFontOfSize:13 weight:UIFontWeightRegular];
@@ -389,10 +437,28 @@ static void SetTitle(UIButton *b, NSString *t) {
   [self ready];
   [self reportLayout:@"ready"];
   // -autostart waits a moment, so a runner can capture the picker before the run.
-  if (ArgOn(@"autostart"))
+  if (ArgOn(@"autostart")) {
+    autostartQueued = YES; pickedSinceQueued = NO;
+    // The launch's own -libraries, -sections and -preset, fixed now: what it leaves out is the list's
+    // defaults (every library; every group with rows but the More ones), as the picker's first load has it,
+    // so a chip or preset tapped during the wait changes only a run started by hand.
+    NSArray<NSString *> *libs = ArgNames(@"libraries"), *secs = ArgNames(@"sections");
+    if (!libs.count) libs = [cat[@"libraries"] copy] ?: @[];
+    if (!secs.count) {
+      NSMutableArray *d = [NSMutableArray new];
+      for (NSString *s in cat[@"sections"]) if ([sc[s] intValue] > 0 && ![s hasPrefix:@"More: "]) [d addObject:s];
+      secs = d;
+    }
+    NSNumber *full = @([Arg(@"preset") isEqual:@"full"]);
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-      self->agree.on = YES; [self agreeChanged]; [self startTapped];
+      if (!self->autostartQueued) return;  // a run started by hand while it waited took its place
+      self->autostartQueued = NO;
+      // They go to the native start as given, so a name the picker lacks still reaches the library's check.
+      self->agree.on = YES; [self agreeChanged];
+      self->autostartRun = YES;
+      [self startWithLibs:libs secs:secs full:full];
     });
+  }
 }
 
 // One machine-readable line saying whether the screen fits, for a device
@@ -445,6 +511,8 @@ static void SetTitle(UIButton *b, NSString *t) {
 - (void)chipTapped:(UIButton *)b {
   if (running) return;
   b.selected = !b.selected; [self paintChip:b];
+  lastLibs = nil; lastSecs = nil;  // a picked selection, even one back where it was, runs as the picker shows it
+  pickedSinceQueued = YES;
 }
 
 - (void)showConsent {
@@ -470,7 +538,7 @@ static void SetTitle(UIButton *b, NSString *t) {
     dispatch_async(dispatch_get_main_queue(), ^{
       self->collectorLbl.text = ok ? [NSString stringWithFormat:@"● Results: %@:%@ over the network, and saved on this device", host, port]
                                    : [NSString stringWithFormat:@"○ Results: %@:%@ not reachable yet (tries again at Start); saved on this device", host, port];
-      self->collectorLbl.textColor = ok ? C_GOOD : C_MUTED;
+      self->collectorLbl.textColor = ok ? C_ACCENT : C_MUTED;
     });
   });
 }
@@ -488,19 +556,35 @@ static void SetTitle(UIButton *b, NSString *t) {
 - (void)clearTapped {
   if (running) return;
   agree.on = NO; clearBtn.hidden = YES;
+  lastPicker = nil; lastLibs = nil; lastSecs = nil;  // back at the picker: only Run again reuses the last names
   SetTitle(startBtn, @"Start test"); startBtn.hidden = NO;
   showingRun = NO; [self foldPicker];
   [self setPicking:YES]; [self agreeChanged]; [self ready]; [self findCollector];
 }
 
-- (void)startTapped {
+- (void)startTapped { autostartRun = NO; [self startWithLibs:nil secs:nil full:nil]; }
+
+// Starts a run of the picker's selection and preset, or, for an autostart, of its launch's (nil keeps the
+// picker's, or the preset control's).
+- (void)startWithLibs:(NSArray<NSString *> *)wantLibs secs:(NSArray<NSString *> *)wantSecs full:(NSNumber *)wantFull {
   if (!agree.on || !catalog) return;
   NSMutableArray *libs = [NSMutableArray new], *secs = [NSMutableArray new];
   for (NSString *k in libChips) if (libChips[k].selected) [libs addObject:k];
   for (NSString *k in secChips) if (secChips[k].selected) [secs addObject:k];
   if (moreChip.selected) [secs addObjectsFromArray:moreSections];
-  if (!libs.count || !secs.count) { statusLbl.text = @"Pick at least one library and one operation"; return; }
-  BOOL full = preset.selectedSegmentIndex == 1;
+  NSArray<NSSet *> *picker = @[[NSSet setWithArray:libs], [NSSet setWithArray:secs]];
+  if (!wantLibs && !wantSecs && lastLibs && [picker isEqualToArray:lastPicker]) {
+    libs = [lastLibs mutableCopy]; secs = [lastSecs mutableCopy];
+  }
+  if (wantLibs.count) libs = [wantLibs mutableCopy];
+  if (wantSecs.count) secs = [wantSecs mutableCopy];
+  if (!libs.count || !secs.count) {
+    statusLbl.text = @"Pick at least one library and one operation";
+    if (autostartRun) RunLine(@{@"started": @NO, @"reason": libs.count ? @"no group is picked" : @"no library is picked"});
+    autostartRun = NO;
+    return;
+  }
+  BOOL full = wantFull ? wantFull.boolValue : preset.selectedSegmentIndex == 1;
   NSString *docs = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
   NSString *keys = [NSBundle.mainBundle.resourcePath stringByAppendingPathComponent:@"keys"];
   NSMutableDictionary *cfg = [@{
@@ -513,11 +597,35 @@ static void SetTitle(UIButton *b, NSString *t) {
   if (host.length && port) { cfg[@"host"] = host; cfg[@"port"] = port; }
   NSData *js = [NSJSONSerialization dataWithJSONObject:cfg options:0 error:nil];
   NSString *s = [[NSString alloc] initWithData:js encoding:NSUTF8StringEncoding];
-  if (devbench_start(s.UTF8String) != 0) { NSDictionary *st = JSON(devbench_status_json()); statusLbl.text = [NSString stringWithFormat:@"Could not start: %@", st[@"start_error"]]; return; }
+  if (devbench_start(s.UTF8String) != 0) {
+    NSDictionary *st = JSON(devbench_status_json());
+    statusLbl.text = [NSString stringWithFormat:@"Could not start: %@", st[@"start_error"]];
+    if (autostartRun) RunLine(@{@"started": @NO, @"reason": [NSString stringWithFormat:@"the native start refused it: %@", st[@"start_error"] ?: @""]});
+    autostartRun = NO;
+    return;
+  }
+  if (autostartRun) {
+    // The rows the library picked as it accepted the start: the libraries and groups that run, and those
+    // named that have no row.
+    NSDictionary *st = JSON(devbench_status_json());
+    RunLine(@{@"started": @YES, @"start": st[@"acked_start"] ?: @0, @"preset": full ? @"full" : @"quick",
+              @"libraries": st[@"libraries_run"] ?: @[], @"libraries_missing": st[@"libraries_missing"] ?: @[],
+              @"sections": st[@"sections_run"] ?: @[], @"sections_missing": st[@"sections_missing"] ?: @[]});
+    autostartRun = NO;
+  }
+  // A start by hand consumes the queued -autostart, even once this run stops; the launch gets its outcome.
+  if (autostartQueued && !autostartRun) RunLine(@{@"started": @NO, @"reason": @"a start by hand took its place"});
+  autostartQueued = NO;
+  // An autostart's names stand for the picker in a rerun only if nobody touched a chip while it waited.
+  if (wantLibs && pickedSinceQueued) { lastPicker = nil; lastLibs = nil; lastSecs = nil; }
+  else { lastPicker = picker; lastLibs = [libs copy]; lastSecs = [secs copy]; }
   UIApplication.sharedApplication.idleTimerDisabled = YES;
   startBtn.hidden = YES; clearBtn.hidden = YES; stopBtn.hidden = NO; stopBtn.enabled = YES; running = YES;
   [self setPicking:NO];
-  picksLbl.text = [NSString stringWithFormat:@"%@ · %lu libraries · %lu groups", full ? @"Full" : @"Quick", (unsigned long)libs.count, (unsigned long)secs.count];
+  // What the library picked as it accepted the start, not what was asked for.
+  NSDictionary *acked = JSON(devbench_status_json());
+  picksLbl.text = [NSString stringWithFormat:@"%@ · %lu libraries · %lu groups", full ? @"Full" : @"Quick",
+      (unsigned long)[acked[@"libraries_run"] count], (unsigned long)[acked[@"sections_run"] count]];
   showingRun = YES; [self foldPicker];
   statusLbl.text = @"Starting…"; scoreLbl.text = @""; behindLbl.text = @"";
   [self findCollector];
@@ -534,7 +642,9 @@ static void SetTitle(UIButton *b, NSString *t) {
   NSString *thermal = @[@"nominal", @"fair", @"serious", @"critical"][MIN(3, (NSInteger)NSProcessInfo.processInfo.thermalState)];
   double done = [s[@"done"] doubleValue], total = MAX(1, [s[@"total"] doubleValue]);
   progress.progress = done / total;
-  if (running) {
+  if (running && !s[@"run_start"]) {
+    statusLbl.text = @"Starting…";  // accepted, still reaching the collector: no counters yet
+  } else if (running) {
     statusLbl.text = [NSString stringWithFormat:@"Running %@ of %@ · round %@ of %@", s[@"done"], s[@"total"], s[@"round"], s[@"rounds"]];
     currentLbl.text = [NSString stringWithFormat:@"%@\nerrors %@ · sent %@ lines (%@) · thermal %@", s[@"current"] ?: @"", s[@"errors"], s[@"lines"], s[@"sink"], thermal];
   } else {
@@ -576,7 +686,7 @@ static void SetTitle(UIButton *b, NSString *t) {
   }
   if (!compared) { scoreLbl.text = @""; behindLbl.text = errors ? [NSString stringWithFormat:@"%d rows failed so far", errors] : @""; return; }
   scoreLbl.text = [NSString stringWithFormat:@"rind fastest on %d of %d", wins, compared];
-  scoreLbl.textColor = wins * 2 >= compared ? C_GOOD : C_ACCENT;
+  scoreLbl.textColor = wins * 2 >= compared ? C_ACCENT : C_READOUT;
   [behind sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) { return [b[@"ratio"] compare:a[@"ratio"]]; }];
   NSMutableAttributedString *out = [NSMutableAttributedString new];
   UIFont *mono = [UIFont monospacedSystemFontOfSize:13 weight:UIFontWeightRegular];

@@ -24,7 +24,6 @@ import {
 	title,
 	untimed,
 } from "../lib/benchmarks";
-import { builtBy } from "../lib/landing";
 import { cell as md, html, lex } from "../lib/markdown";
 
 const hostRows = report.sections.map((s) => ({ name: s.name, rows: s.operations }));
@@ -252,15 +251,11 @@ const list = new Intl.ListFormat("en");
 		</section>
 	</main>
 
-	<footer>
-		<p>Built by <a href={builtBy.href}>{builtBy.label}</a></p>
-	</footer>
 </Base>
 
 <style>
 	header,
-	main,
-	footer {
+	main {
 		max-width: 72rem;
 		margin: 0 auto;
 		padding: 0 1.25rem;
@@ -276,6 +271,7 @@ const list = new Intl.ListFormat("en");
 		margin: 0.5rem 0;
 	}
 	.standing {
+		color: var(--readout);
 		font-weight: 600;
 	}
 	main > section {
@@ -331,13 +327,5 @@ const list = new Intl.ListFormat("en");
 	}
 	tr:target {
 		background: var(--surface);
-	}
-	footer {
-		margin-top: 4rem;
-		padding-top: 1.5rem;
-		padding-bottom: 3rem;
-		border-top: 1px solid var(--border);
-		color: var(--muted);
-		text-align: center;
 	}
 </style>
