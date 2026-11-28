@@ -545,7 +545,7 @@ static void SetTitle(UIButton *b, NSString *t) {
     currentLbl.text = [NSString stringWithFormat:@"%@\nerrors %@ · sent %@ lines (%@) · thermal %@", s[@"current"] ?: @"", s[@"errors"], s[@"lines"], s[@"sink"], thermal];
   } else if (![s[@"run_id"] length] && [s[@"refused_start"] longLongValue] > 0) {
     // Refused after it was acknowledged, once the library listed the tests on the run's thread.
-    statusLbl.text = [NSString stringWithFormat:@"Could not start: %@", s[@"start_error"]];
+    statusLbl.text = [NSString stringWithFormat:@"Could not start: %@", s[@"refused_reason"]];
     currentLbl.text = @"";
   } else {
     statusLbl.text = [NSString stringWithFormat:@"%@ · %@ rows in %.0f s", [s[@"stopped"] boolValue] ? @"Stopped" : @"Finished", s[@"done"], [s[@"elapsed_s"] doubleValue]];

@@ -559,7 +559,7 @@ final class BenchView extends LinearLayout {
 
     /** Shows a late refusal as a refused start, not as a finished run, and reports it to a device runner. */
     private void showLateRefusal(JSONObject s) {
-        String why = s.optString("start_error");
+        String why = s.optString("refused_reason");
         showFinished(s, false);
         progress.setVisibility(GONE);
         statusTitle.setText("Could not start");

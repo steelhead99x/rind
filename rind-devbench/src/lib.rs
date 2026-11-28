@@ -681,7 +681,9 @@ pub fn start(config_json: &str) -> Result<(), String> {
                     };
                     restore_env_listed(&before_run);
                     // `refused_start` numbers it, so an app reports it once, even across a recreated view.
-                    set_status(|s| *s = json!({"running": false, "error": why, "start_error": why, "refused_start": start_no}));
+                    // Its reason is `refused_reason`, apart from `start_error`, which a later start refused before
+                    // acknowledgement (as "already running") writes without touching it.
+                    set_status(|s| *s = json!({"running": false, "error": why, "refused_reason": why, "refused_start": start_no}));
                     return;
                 }
                 run(cfg, cat)
@@ -712,14 +714,10 @@ pub fn status() -> Value {
     v
 }
 
-/// A start refused before it was acknowledged: its reason, in place of an earlier late refusal's.
+/// A start refused before it was acknowledged: its reason in `start_error`, leaving an acknowledged start's
+/// late refusal (`refused_start`, `refused_reason`) as it is.
 fn refused_now(e: &str) {
-    set_status(|st| {
-        st["start_error"] = json!(e);
-        if let Some(o) = st.as_object_mut() {
-            o.remove("refused_start");
-        }
-    });
+    set_status(|st| st["start_error"] = json!(e));
 }
 
 pub fn stop() {
@@ -877,7 +875,12 @@ mod tests {
             assert_eq!(st["running"], false);
             assert!(st.get("run_id").is_none(), "{st}");
             assert!(st["refused_start"].as_u64().is_some_and(|n| n > 0), "{st}");
-            st["error"].as_str().unwrap().to_string()
+            // A start refused before acknowledgement, as a second view's would be, leaves the late refusal.
+            refused_now("already running");
+            let after = status();
+            assert_eq!(after["refused_start"], st["refused_start"]);
+            assert_eq!(after["refused_reason"], st["refused_reason"]);
+            st["refused_reason"].as_str().unwrap().to_string()
         };
         // An empty keys directory, as before the app copies its certificates in: rustls can't list.
         let dir = std::env::temp_dir().join(format!("rind-devbench-test-keys-{}", std::process::id()));
