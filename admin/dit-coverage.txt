@@ -176,7 +176,7 @@ high/signature/rsa::KeyPair::sign delegates to the algorithm's sign, which enter
 high/signature/rsa::KeyPair::to_pkcs8 delegates to to_pkcs8_der, which enter
 high/signature/rsa::PublicKey::from_components delegates to rsa::VerifyingKey::from_components, which enter
 high/signature/rsa::PublicKey::from_spki delegates to rsa::VerifyingKey::from_spki_der, which enter
-high/signature/rsa::PublicKey::modulus_bits accessor returns the modulus length
+high/signature/rsa::PublicKey::modulus_bits public computes the bit length of the public modulus
 high/signature/rsa::PublicKey::modulus_len public computes on public parameters only
 high/signature/rsa::PublicKey::new delegates to rsa::VerifyingKey::from_pkcs1_der, which enter
 high/signature/rsa::PublicKey::to_spki delegates to to_spki_der, which enter
