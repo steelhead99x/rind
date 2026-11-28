@@ -54,7 +54,7 @@ qemu. iOS devices' code is only built.
   [verified-garbage]'s assembly, and
   table lookups use SSE2 (see [ALGORITHMS.md](ALGORITHMS.md)). Without `sse4.1`,
   as on the first Core 2s and Atoms and AMD's Bobcat, ChaCha20 and Poly1305
-  run in separate passes.
+  run in separate passes, Poly1305 in a port of aws-lc's SSE2 lanes.
   Without `ssse3` either, as on Intel's CPUs before Core 2, AMD's before
   Bobcat and Bulldozer, and QEMU's default `qemu64` model, AES and GHASH run
   Rust ports of [aws-lc]'s constant-time SSE2 and integer C, SHA1 and SHA256
