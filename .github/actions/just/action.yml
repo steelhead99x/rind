@@ -14,4 +14,4 @@ runs:
     - uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
       if: runner.environment != 'self-hosted'
       with:
-        tool: just@1.58.0
+        tool: just@1.59.0
