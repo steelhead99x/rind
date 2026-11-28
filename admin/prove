@@ -1180,7 +1180,7 @@ if [[ -n $only && $only != lean ]]; then
     exit 0
 fi
 
-# `Cosim.Progs` imports VG's P-256 code, whose two generated tables Git
+# `Cosim.Progs.X86_64` imports VG's P-256 code, whose two generated tables Git
 # ignores; write them before the translate-only exit, so every Lean build
 # after it, `lake build` by hand included, finds them.
 admin/import-vg-models --tables
