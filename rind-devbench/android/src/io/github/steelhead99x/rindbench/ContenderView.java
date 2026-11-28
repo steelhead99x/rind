@@ -211,7 +211,7 @@ final class ContenderView extends LinearLayout {
         agreeRow.setEnabled(enable.isChecked());
         enabledOn = enable.isChecked() && agree.isChecked();
         // Turning Contender or I agree off drops any probe or lookup still out.
-        if (!enabledOn) { probeSeq++; lookupSeq++; }
+        if (!enabledOn) { probeSeq++; lookupSeq++; lookingUp = false; }
         joinCard.setVisibility((enabledOn && sessionCard.getVisibility() != VISIBLE) ? VISIBLE : GONE);
         if (!enable.isChecked()) {
             setStatus("Contender is off", OFF, "Nothing connects while this is off.", false);
@@ -291,6 +291,8 @@ final class ContenderView extends LinearLayout {
     /** Count health probes and session lookups: a lookup supersedes a probe and earlier lookups, and Leave
      *  supersedes lookups, so only the latest answer is shown. */
     private int probeSeq, lookupSeq;
+    /** A lookup is out and its "Looking up session…" status is showing. */
+    private boolean lookingUp;
 
     private void joinTapped() {
         if (!enabledOn) return;
@@ -304,8 +306,10 @@ final class ContenderView extends LinearLayout {
         // answers: only the newest may change the screen, so an older, slower answer can't replace it.
         probeSeq++;
         final int seq = ++lookupSeq;
+        lookingUp = true;
         client.lookupSession(code, (session, error) -> ui.post(() -> {
             if (!enabledOn || seq != lookupSeq) return;
+            lookingUp = false;
             if (error != null || session == null) {
                 boolean unavail = error != null && error.contains("not available");
                 String title = unavail ? "Session service not available yet" : (error != null ? error : "Could not join");
@@ -335,6 +339,8 @@ final class ContenderView extends LinearLayout {
 
     private void leaveTapped() {
         lookupSeq++; // a lookup still out can't bring the session back; a probe still finishes
+        // A lookup cut off here showed "Looking up session…", which nothing else would replace.
+        if (lookingUp) { lookingUp = false; if (enabledOn) probe(); }
         sessionCard.setVisibility(GONE);
         sessionName.setText("");
         if (enabledOn) joinCard.setVisibility(VISIBLE);
