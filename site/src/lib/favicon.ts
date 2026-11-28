@@ -7,5 +7,5 @@ import { read } from "./repo";
 const peel = read("admin/wordmark.svg").match(/^ {2}<g id="peel">\n[\s\S]*?\n {2}<\/g>$/m);
 if (!peel) throw new Error('admin/wordmark.svg has no <g id="peel"> group for the favicon');
 
-const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="80 100 1050 1050">${peel[0].replace(/\n\s*/g, "")}</svg>`;
-export const favicon = `data:image/svg+xml,${encodeURIComponent(svg)}`;
+export const peelSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="80 100 1050 1050">${peel[0].replace(/\n\s*/g, "")}</svg>`;
+export const favicon = `data:image/svg+xml,${encodeURIComponent(peelSvg)}`;
