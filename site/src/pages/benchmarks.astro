@@ -24,7 +24,6 @@ import {
 	title,
 	untimed,
 } from "../lib/benchmarks";
-import { builtBy } from "../lib/landing";
 import { cell as md, html, lex } from "../lib/markdown";
 
 const hostRows = report.sections.map((s) => ({ name: s.name, rows: s.operations }));
@@ -254,7 +253,6 @@ const list = new Intl.ListFormat("en");
 	</main>
 
 	<footer>
-		<p>Built by <a href={builtBy.href}>{builtBy.label}</a></p>
 	</footer>
 </Base>
 
@@ -277,6 +275,7 @@ const list = new Intl.ListFormat("en");
 		margin: 0.5rem 0;
 	}
 	.standing {
+		color: var(--readout);
 		font-weight: 600;
 	}
 	main > section {

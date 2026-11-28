@@ -1051,7 +1051,7 @@ final class BenchView extends LinearLayout {
         LayoutParams logo = new LayoutParams(Theme.dpi(host, 30), Theme.dpi(host, 30));
         logo.setMarginEnd(inset);
         publisher.addView(mark, logo);
-        publisher.addView(Theme.text(host, "Kixel AI", Theme.Type.TITLE_SMALL, Theme.onSurface));
+        publisher.addView(Theme.text(host, "Rind by Kixel AI", Theme.Type.TITLE_SMALL, Theme.onSurface));
         LayoutParams publisherSize = new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT);
         publisherSize.setMarginStart(Theme.dpi(host, 24));
         publisherSize.bottomMargin = inset;

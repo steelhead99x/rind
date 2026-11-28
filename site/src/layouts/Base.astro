@@ -5,6 +5,7 @@
 // shows.
 import { card } from "../lib/card";
 import { favicon } from "../lib/favicon";
+import { builtBy } from "../lib/landing";
 import { type Page, origin, twinPath } from "../lib/pages";
 
 interface Props {
@@ -33,23 +34,36 @@ const { page, title = page.title } = Astro.props;
 		<meta property="og:image" content={`${origin}${card.path}`} />
 		<meta property="og:image:width" content={String(card.width)} />
 		<meta property="og:image:height" content={String(card.height)} />
-		<meta property="og:image:alt" content="rind, with a curled strip of green graviola peel forming the r" />
+		<meta property="og:image:alt" content="The rind wordmark and Kixel AI mark on graphite" />
 		<meta name="twitter:card" content="summary_large_image" />
 		<link rel="icon" href={favicon} type="image/svg+xml" />
 	</head>
 	<body>
+		<header class="site-brand">
+			<div class="site-brand-inner">
+				<a href="/" class="site-brand-home">
+					<img src={favicon} width="29" height="29" alt="" />
+					<span>rind</span>
+				</a>
+				<a href={builtBy.href}>
+					<img src="/kixel-mark.png" width="22" height="22" alt="" />
+					<span>{builtBy.label}</span>
+				</a>
+			</div>
+		</header>
 		<slot />
 	</body>
 </html>
 
 <style is:global>
 	:root {
-		--bg: #fffdf6;
-		--fg: #1f2410;
-		--muted: #5b6148;
-		--border: #e2dcc4;
-		--surface: #f6f1df;
-		--accent: #4f6a00;
+		--bg: #f5f6f8;
+		--fg: #161c24;
+		--muted: #425064;
+		--border: #9fafc1;
+		--surface: #fcfdfe;
+		--accent: #4d6500;
+		--readout: #704400;
 		font-family:
 			system-ui,
 			-apple-system,
@@ -62,12 +76,13 @@ const { page, title = page.title } = Astro.props;
 	}
 	@media (prefers-color-scheme: dark) {
 		:root {
-			--bg: #12140d;
-			--fg: #ece8d8;
-			--muted: #a9ab95;
-			--border: #33372a;
-			--surface: #1b1e14;
-			--accent: #add500;
+			--bg: #07090d;
+			--fg: #e7ecf2;
+			--muted: #b5c0ce;
+			--border: #2a3340;
+			--surface: #121820;
+			--accent: #a1c702;
+			--readout: #ffb020;
 		}
 	}
 	body {
@@ -75,6 +90,39 @@ const { page, title = page.title } = Astro.props;
 	}
 	a {
 		color: var(--accent);
+	}
+	.site-brand {
+		background: var(--surface);
+		border-bottom: 1px solid var(--border);
+	}
+	.site-brand-inner {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		gap: 0.75rem;
+		max-width: 60rem;
+		margin: 0 auto;
+		padding: 0 1.25rem;
+	}
+	.site-brand-inner a {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.45rem;
+		min-height: 2.75rem;
+		color: var(--fg);
+		font-size: 0.875rem;
+		font-weight: 600;
+		text-decoration: none;
+	}
+	.site-brand-inner a:hover {
+		text-decoration: underline;
+	}
+	.site-brand-inner a:focus-visible {
+		outline: 2px solid var(--accent);
+		outline-offset: 2px;
+	}
+	.site-brand-home span {
+		font-size: 1.1rem;
 	}
 	code,
 	pre {

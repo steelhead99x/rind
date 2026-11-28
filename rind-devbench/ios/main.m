@@ -66,15 +66,17 @@ static NSSet<NSString *> *ArgList(NSString *k) {
 }
 
 #define RGB(r, g, b) [UIColor colorWithRed:(r) / 255.0 green:(g) / 255.0 blue:(b) / 255.0 alpha:1]
-#define C_BG RGB(13, 15, 20)
-#define C_CARD RGB(24, 27, 34)
-#define C_LINE RGB(44, 48, 58)
-#define C_CHIP RGB(36, 40, 50)
-#define C_MUTED RGB(150, 156, 170)
-#define C_TEXT RGB(236, 238, 243)
-#define C_ACCENT RGB(250, 191, 51)
-#define C_GOOD RGB(84, 214, 146)
-#define C_BAD RGB(255, 120, 110)
+// Android's night palette: Rind green for controls, Kixel graphite and amber for readouts.
+#define C_BG RGB(7, 9, 13)
+#define C_CARD RGB(18, 24, 32)
+#define C_LINE RGB(42, 51, 64)
+#define C_CHIP RGB(27, 36, 48)
+#define C_MUTED RGB(181, 192, 206)
+#define C_TEXT RGB(231, 236, 242)
+#define C_ACCENT RGB(161, 199, 2)
+#define C_ON_ACCENT RGB(25, 36, 0)
+#define C_READOUT RGB(255, 176, 32)
+#define C_BAD RGB(255, 180, 171)
 
 static NSString *const kConsent = @"The run keeps the CPU busy (minutes on Quick, longer on Full) and warms the device. "
   "It sends only timings and the model, chip, OS version and CPU features to the computer that installed this app. "
@@ -181,7 +183,7 @@ static UIButtonConfiguration *ButtonConfig(NSString *title, UIFont *font, NSDire
   UIButtonConfiguration *c = b.configuration;
   c.background.backgroundColor = on ? C_ACCENT : C_CHIP;
   c.background.strokeColor = on ? C_ACCENT : C_LINE;
-  c.baseForegroundColor = !b.enabled ? C_MUTED : (on ? UIColor.blackColor : C_TEXT);
+  c.baseForegroundColor = !b.enabled ? C_MUTED : (on ? C_ON_ACCENT : C_TEXT);
   b.configuration = c;
   b.alpha = b.enabled ? 1 : 0.45;
 }
@@ -189,7 +191,7 @@ static UIButtonConfiguration *ButtonConfig(NSString *title, UIFont *font, NSDire
   UIButtonConfiguration *c = ButtonConfig(t, [UIFont systemFontOfSize:17 weight:UIFontWeightBold],
       NSDirectionalEdgeInsetsMake(11, 22, 11, 22), 12);
   c.background.backgroundColor = primary ? C_ACCENT : C_CHIP;
-  c.baseForegroundColor = primary ? UIColor.blackColor : C_TEXT;
+  c.baseForegroundColor = primary ? C_ON_ACCENT : C_TEXT;
   UIButton *b = [UIButton buttonWithConfiguration:c primaryAction:nil];
   b.automaticallyUpdatesConfiguration = NO;
   [b addTarget:self action:a forControlEvents:UIControlEventTouchUpInside]; return b;
@@ -201,6 +203,17 @@ static void SetTitle(UIButton *b, NSString *t) {
 
 #pragma mark - layout
 
+static UIImageView *BrandMark(NSString *name, CGFloat size) {
+  UIImageView *image = [[UIImageView alloc] initWithImage:[UIImage imageNamed:name]];
+  image.contentMode = UIViewContentModeScaleAspectFit;
+  image.isAccessibilityElement = NO;
+  [NSLayoutConstraint activateConstraints:@[
+    [image.widthAnchor constraintEqualToConstant:size],
+    [image.heightAnchor constraintEqualToConstant:size],
+  ]];
+  return image;
+}
+
 - (void)viewDidLoad {
   [super viewDidLoad];
   self.view.backgroundColor = C_BG;
@@ -208,9 +221,15 @@ static void SetTitle(UIButton *b, NSString *t) {
 
   // Header: name, device, where results go.
   UILabel *title = [self label:@"RindBench" size:28 weight:UIFontWeightHeavy color:nil];
-  UILabel *tag = [self label:@"every library" size:15 weight:UIFontWeightSemibold color:C_ACCENT];
-  UIStackView *titleRow = [[UIStackView alloc] initWithArrangedSubviews:@[title, tag, [UIView new]]];
-  titleRow.spacing = 10; titleRow.alignment = UIStackViewAlignmentLastBaseline;
+  title.accessibilityTraits |= UIAccessibilityTraitHeader;
+  UILabel *publisher = [self label:@"Kixel AI" size:13 weight:UIFontWeightSemibold color:C_MUTED];
+  UIStackView *credit = [[UIStackView alloc] initWithArrangedSubviews:@[BrandMark(@"kixel-mark", 21), publisher]];
+  credit.spacing = 6; credit.alignment = UIStackViewAlignmentCenter;
+  credit.isAccessibilityElement = YES; credit.accessibilityLabel = @"Rind by Kixel AI";
+  UIStackView *titleRow = [[UIStackView alloc] initWithArrangedSubviews:@[
+    BrandMark(@"rind-mark", 34), title, [UIView new], credit
+  ]];
+  titleRow.spacing = 8; titleRow.alignment = UIStackViewAlignmentCenter;
   deviceLbl = [self label:@"Reading the list of tests…" size:13 weight:UIFontWeightMedium color:C_MUTED];
   deviceLbl.numberOfLines = 2;
   collectorLbl = [self label:@"Results: looking for the computer that installed this app…" size:13 weight:UIFontWeightRegular color:C_MUTED];
@@ -245,7 +264,7 @@ static void SetTitle(UIButton *b, NSString *t) {
 
   preset = [[UISegmentedControl alloc] initWithItems:@[@"Quick · 1 round", @"Full · 3 rounds"]];
   preset.selectedSegmentIndex = 0; preset.selectedSegmentTintColor = C_ACCENT;
-  [preset setTitleTextAttributes:@{NSForegroundColorAttributeName: UIColor.blackColor} forState:UIControlStateSelected];
+  [preset setTitleTextAttributes:@{NSForegroundColorAttributeName: C_ON_ACCENT} forState:UIControlStateSelected];
   [preset setTitleTextAttributes:@{NSForegroundColorAttributeName: C_TEXT} forState:UIControlStateNormal];
   agree = [UISwitch new]; agree.onTintColor = C_ACCENT;
   [agree addTarget:self action:@selector(agreeChanged) forControlEvents:UIControlEventValueChanged];
@@ -274,9 +293,9 @@ static void SetTitle(UIButton *b, NSString *t) {
   // On a narrow screen the picker folds away during and after a run, and this line stands in for it.
   picksLbl = [self label:@"" size:13 weight:UIFontWeightMedium color:C_ACCENT]; picksLbl.hidden = YES;
   progress = [[UIProgressView alloc] initWithProgressViewStyle:UIProgressViewStyleDefault];
-  progress.progressTintColor = C_ACCENT; progress.trackTintColor = C_LINE; progress.progress = 0;
+  progress.progressTintColor = C_READOUT; progress.trackTintColor = C_LINE; progress.progress = 0;
   currentLbl = [self label:@"" size:13 weight:UIFontWeightRegular color:C_MUTED]; currentLbl.numberOfLines = 2;
-  scoreLbl = [self label:@"" size:34 weight:UIFontWeightHeavy color:C_GOOD]; scoreLbl.numberOfLines = 1;
+  scoreLbl = [self label:@"" size:34 weight:UIFontWeightHeavy color:C_ACCENT]; scoreLbl.numberOfLines = 1;
   scoreLbl.adjustsFontSizeToFitWidth = YES; scoreLbl.minimumScaleFactor = 0.5;
   behindLbl = [self label:@"" size:13 weight:UIFontWeightRegular color:nil];
   behindLbl.font = [UIFont monospacedSystemFontOfSize:13 weight:UIFontWeightRegular];
@@ -284,7 +303,7 @@ static void SetTitle(UIButton *b, NSString *t) {
   [behindLbl setContentCompressionResistancePriority:UILayoutPriorityDefaultLow forAxis:UILayoutConstraintAxisVertical];
   UIView *spring = [UIView new];
   [spring setContentHuggingPriority:UILayoutPriorityDefaultLow forAxis:UILayoutConstraintAxisVertical];
-  UILabel *foot = [self label:@"An unofficial community tool, not run or endorsed by the rind maintainers." size:11 weight:UIFontWeightRegular color:C_MUTED];
+  UILabel *foot = [self label:@"RindBench is a community benchmark build." size:11 weight:UIFontWeightRegular color:C_MUTED];
   UIStackView *results = [self card:@[[self heading:@"Run"], picksLbl, statusLbl, progress, currentLbl, scoreLbl, behindLbl, spring, foot]];
   [results setContentHuggingPriority:UILayoutPriorityDefaultLow forAxis:UILayoutConstraintAxisVertical];
   [results setContentCompressionResistancePriority:UILayoutPriorityDefaultLow forAxis:UILayoutConstraintAxisVertical];
@@ -471,7 +490,7 @@ static void SetTitle(UIButton *b, NSString *t) {
     dispatch_async(dispatch_get_main_queue(), ^{
       self->collectorLbl.text = ok ? [NSString stringWithFormat:@"● Results: %@:%@ over the network, and saved on this device", host, port]
                                    : [NSString stringWithFormat:@"○ Results: %@:%@ not reachable yet (tries again at Start); saved on this device", host, port];
-      self->collectorLbl.textColor = ok ? C_GOOD : C_MUTED;
+      self->collectorLbl.textColor = ok ? C_ACCENT : C_MUTED;
     });
   });
 }
@@ -577,7 +596,7 @@ static void SetTitle(UIButton *b, NSString *t) {
   }
   if (!compared) { scoreLbl.text = @""; behindLbl.text = errors ? [NSString stringWithFormat:@"%d rows failed so far", errors] : @""; return; }
   scoreLbl.text = [NSString stringWithFormat:@"rind fastest on %d of %d", wins, compared];
-  scoreLbl.textColor = wins * 2 >= compared ? C_GOOD : C_ACCENT;
+  scoreLbl.textColor = wins * 2 >= compared ? C_ACCENT : C_READOUT;
   [behind sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) { return [b[@"ratio"] compare:a[@"ratio"]]; }];
   NSMutableAttributedString *out = [NSMutableAttributedString new];
   UIFont *mono = [UIFont monospacedSystemFontOfSize:13 weight:UIFontWeightRegular];
