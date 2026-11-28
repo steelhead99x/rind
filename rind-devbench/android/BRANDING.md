@@ -15,10 +15,12 @@ The iPad and iPhone app use the Android night palette and the same Rind
 and Kixel marks in the header, beside the same "rind by Kixel AI" line,
 and keep the footer saying the app is an unofficial community tool. The
 iOS launcher icons use the Android launcher art. The Rind website uses
-both palettes, the Rind wordmark, and the same Kixel mark.
+both palettes, the Rind peel mark in its header, the wordmark on its
+social card, and the same Kixel mark.
 
 ## Permission
 
-The Kixel AI mark and the Kixel AI name are used with the permission of
-Kixel AI's maintainer, Luke Curley, pending his final approval in the pull
-request that adds them.
+Permission to use the Kixel AI mark and name has not been granted yet.
+Kixel AI's maintainer, Luke Curley, has been asked to approve or decline
+it in [#344](https://github.com/steelhead99x/rind/pull/344); this section
+will cite his answer.

@@ -152,9 +152,10 @@ static NSString *const kConsent = @"The run keeps the CPU busy (minutes on Quick
   s.layoutMargins = UIEdgeInsetsMake(14, 16, 14, 16); s.backgroundColor = C_CARD; s.layer.cornerRadius = 16;
   s.layer.borderWidth = 1; s.layer.borderColor = C_LINE.CGColor; s.clipsToBounds = YES; return s;
 }
-// Buttons are drawn from a UIButtonConfiguration (contentEdgeInsets and the
-// titleLabel/tint setters are deprecated or ignored once one is set). The app
-// paints every state itself, so automatic state updates are off.
+// Action buttons are drawn from a UIButtonConfiguration (contentEdgeInsets and
+// the titleLabel/tint setters are ignored once one is set), with automatic state
+// updates off since the app paints every state. Picker chips are plain custom
+// buttons, so UIKit keeps their per-state title colours.
 static UIButtonConfiguration *ButtonConfig(NSString *title, NSDirectionalEdgeInsets insets, CGFloat radius) {
   UIButtonConfiguration *c = [UIButtonConfiguration plainButtonConfiguration];
   c.title = title;
@@ -177,9 +178,11 @@ static void SetButtonTitleStyle(UIButtonConfiguration *c, NSString *title, UIFon
   b.layer.cornerRadius = small ? 13 : 15;
   b.layer.borderWidth = 1;
   b.titleLabel.font = [UIFont systemFontOfSize:small ? 13 : 14 weight:UIFontWeightSemibold];
+  b.titleLabel.lineBreakMode = NSLineBreakByTruncatingTail;
   [b setTitle:title forState:UIControlStateNormal];
   [b setTitleColor:C_TEXT forState:UIControlStateNormal];
   [b setTitleColor:C_ON_SELECTED forState:UIControlStateSelected];
+  [b setTitleColor:C_ON_SELECTED forState:UIControlStateSelected | UIControlStateHighlighted];
   [b setTitleColor:C_MUTED forState:UIControlStateDisabled];
   [b setTitleColor:C_MUTED forState:UIControlStateDisabled | UIControlStateSelected];
   b.selected = on; b.enabled = en;
