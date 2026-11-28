@@ -332,6 +332,7 @@ final class ContenderView extends LinearLayout {
     }
 
     private void leaveTapped() {
+        reqSeq++; // a lookup still out can't bring the session back
         sessionCard.setVisibility(GONE);
         sessionName.setText("");
         if (enabledOn) joinCard.setVisibility(VISIBLE);

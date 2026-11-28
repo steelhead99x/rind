@@ -173,25 +173,42 @@ fn now_rfc3339() -> String {
 }
 
 /// Lists every row of every bench file (setup code runs; nothing is timed).
+///
+/// A listing that failed in part, as with a keys directory not filled in yet, is listed again here; the apps
+/// call this off their UI thread.
 pub fn catalog() -> Arc<Value> {
-    catalog_in(&mut catalogs())
+    catalog_in(&mut catalogs(), true)
 }
 
-/// [`catalog`], with the cache's lock already held.
-fn catalog_in(cache: &mut Vec<(ListingEnv, Arc<Value>)>) -> Arc<Value> {
+/// What failed to list in a catalog: its `error`, or the files that failed; `None` when it all listed.
+fn listing_failure(c: &Value) -> Option<String> {
+    if let Some(e) = c.get("error") {
+        return Some(e.as_str().unwrap_or("listing failed").to_string());
+    }
+    let f = c["files_failed_to_list"].as_array().filter(|f| !f.is_empty())?;
+    Some(format!("{} failed to list", f.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>().join(", ")))
+}
+
+/// [`catalog`], with the cache's lock already held. `retry_failed`: list a cached catalog that failed in
+/// part again, rather than reuse it.
+fn catalog_in(cache: &mut Vec<(ListingEnv, Arc<Value>)>, retry_failed: bool) -> Arc<Value> {
     let keys = listing_env();
-    if let Some((_, c)) = cache.iter().find(|(k, _)| *k == keys) {
-        return c.clone();
+    let at = cache.iter().position(|(k, _)| *k == keys);
+    if let Some(i) = at
+        && (!retry_failed || listing_failure(&cache[i].1).is_none())
+    {
+        return cache[i].1.clone();
     }
     let c = Arc::new(list_catalog());
-    // A listing that failed, as with a keys directory not filled in yet, isn't kept: a retry lists again.
-    let failed = c.get("error").is_some() || c["files_failed_to_list"].as_array().is_some_and(|f| !f.is_empty());
-    if !failed {
-        // A process normally uses one setting; a host that varies it keeps only the latest few.
-        if cache.len() >= 4 {
-            cache.remove(0);
+    match at {
+        Some(i) => cache[i].1 = c.clone(),
+        None => {
+            // A process normally uses one setting; a host that varies it keeps only the latest few.
+            if cache.len() >= 4 {
+                cache.remove(0);
+            }
+            cache.push((keys, c.clone()));
         }
-        cache.push((keys, c.clone()));
     }
     c
 }
@@ -576,9 +593,19 @@ pub fn start(config_json: &str) -> Result<(), String> {
     // A selection that matches no row would run nothing yet end "done", with status "ok": refuse it
     // before acknowledging the start. Each library and group can be valid alone and still select nothing
     // together, as ring with ML-KEM does.
-    let cat = catalog_in(&mut cache);
-    if select(&cfg, cat["rows"].as_array().map_or(&[][..], |r| r.as_slice())).is_empty() {
-        return Err(refuse("no test matches the libraries and groups picked".into()));
+    // start() runs on the apps' UI thread, so it reuses a catalog that failed in part for the rows it does
+    // list, and lists again only when those don't cover the selection, as when the keys directory has been
+    // filled in since.
+    let picks_none = |c: &Value| select(&cfg, c["rows"].as_array().map_or(&[][..], |r| r.as_slice())).is_empty();
+    let mut cat = catalog_in(&mut cache, false);
+    if picks_none(&cat) && listing_failure(&cat).is_some() {
+        cat = catalog_in(&mut cache, true);
+    }
+    if picks_none(&cat) {
+        return Err(refuse(match listing_failure(&cat) {
+            Some(f) => format!("no test matches the libraries and groups picked ({f})"),
+            None => "no test matches the libraries and groups picked".into(),
+        }));
     }
     std::thread::Builder::new()
         .name("devbench".into())
@@ -725,10 +752,17 @@ mod tests {
         // The refused start put the environment back as it found it.
         assert_eq!(std::env::var_os("RIND_BENCH_KEYS_DIR"), keys_before);
         assert_eq!(std::env::var_os("RIND_BENCH_LOW_MEMORY"), low_before);
-        // Its listing failed, so it wasn't kept: none cached names that directory.
+        assert!(e.contains("rustls failed to list"), "{e}");
         let set = |env: &ListingEnv, k: &str, v: &str| env.iter().any(|(ek, ev)| ek == k && ev == v);
-        assert!(!catalogs().iter().any(|(k, _)| set(k, "RIND_BENCH_KEYS_DIR", keys)));
-        // Once the certificates are in the same directory, a listing with it finds the rustls rows.
+        let cached = || {
+            catalogs().iter().find(|(k, _)| set(k, "RIND_BENCH_KEYS_DIR", keys) && set(k, "RIND_BENCH_LOW_MEMORY", "1"))
+                .map(|(_, c)| c.clone())
+        };
+        // Its partial listing is kept, for a start with the same settings that its rows cover.
+        let partial = cached().unwrap();
+        assert!(listing_failure(&partial).is_some());
+        // Once the certificates are in the same directory, a start that the partial listing can't cover
+        // lists again, and finds the rustls rows.
         let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../rind-rustls/tests/keys");
         for d in std::fs::read_dir(&src).unwrap() {
             let d = d.unwrap();
@@ -738,22 +772,13 @@ mod tests {
                 std::fs::copy(f.path(), dir.join(d.file_name()).join(f.file_name())).unwrap();
             }
         }
-        let failed = |c: &Value| c["files_failed_to_list"].as_array().unwrap().contains(&json!("rustls"));
-        {
-            let mut cache = catalogs();
-            // SAFETY: this is the only test that writes the environment, and the lock keeps listings out.
-            // The same settings as the refused start, so a kept failure would answer here.
-            unsafe { std::env::set_var("RIND_BENCH_KEYS_DIR", keys) };
-            unsafe { std::env::set_var("RIND_BENCH_LOW_MEMORY", "1") };
-            let c = catalog_in(&mut cache);
-            for (k, v) in [("RIND_BENCH_KEYS_DIR", &keys_before), ("RIND_BENCH_LOW_MEMORY", &low_before)] {
-                match v {
-                    Some(v) => unsafe { std::env::set_var(k, v) },
-                    None => unsafe { std::env::remove_var(k) },
-                }
-            }
-            assert!(!failed(&c), "{}", c["files_failed_to_list"]);
-        }
+        let e = start(&format!(r#"{{"libraries": ["no-such-library"], "sections": ["no-such-group"],
+            "env": {{"RIND_BENCH_KEYS_DIR": "{keys}", "RIND_BENCH_LOW_MEMORY": "1"}}}}"#))
+        .unwrap_err();
+        assert_eq!(e, "no test matches the libraries and groups picked");
+        let relisted = cached().unwrap();
+        assert!(!Arc::ptr_eq(&partial, &relisted));
+        assert_eq!(listing_failure(&relisted), None);
         let _ = std::fs::remove_dir_all(&dir);
         for bad in [r#"{"": "1"}"#, r#"{"A=B": "1"}"#, r#"{"A": "x\u0000"}"#] {
             let e = start(&format!(r#"{{"env": {bad}}}"#)).unwrap_err();
