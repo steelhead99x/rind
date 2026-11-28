@@ -52,6 +52,11 @@ fi
 if [[ ${FAIL_TREE:-} != "" ]] && [[ $* == *tree* ]]; then
     exit "$FAIL_TREE"
 fi
+# rind's build script sets the no-CAS cache's cfg on these rows, unless a
+# case says it did not.
+if [[ $* == *--message-format=json* && $* == *no-cas-ecdsa-cache* && ${NO_CAS_CFG:-1} == 1 ]]; then
+    printf '%s\n' '{"reason":"build-script-executed","package_id":"path+file:///rind#0.3.2","cfgs":["rind_no_cas_cache"]}'
+fi
 if [[ ${PRINT_AWS:-} == 1 && $* == *tree* ]]; then
     printf '%s\n' 'aws-lc-rs v1.0.0'
 fi
@@ -250,6 +255,7 @@ for target in thumbv6m-none-eabi riscv32imc-unknown-none-elf; do
     assert_has "$args" "build"
     assert_has "$args" "$target"
     assert_has "$args" "--release"
+    assert_has "$args" "--message-format=json"
     assert_has "$args" "no-cas-ecdsa-cache"
     assert_lacks "$args" "--no-default-features"
     assert_has "$(script_flags "$default/$i.env")" 'getrandom_backend="custom"'
@@ -346,6 +352,13 @@ fi
 aws=$tmp/aws
 if run "$aws" env PRINT_AWS=1 "$script"; then
     echo "expected aws-lc dependency failure" >&2
+    exit 1
+fi
+
+# A no-CAS build whose build script did not set the cache's cfg is an error.
+nocfg=$tmp/nocfg
+if run "$nocfg" env NO_CAS_CFG=0 "$script"; then
+    echo "expected a failure when no-cas-ecdsa-cache set no cfg" >&2
     exit 1
 fi
 

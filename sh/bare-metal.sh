@@ -203,9 +203,19 @@ for target in thumbv6m-none-eabi riscv32imc-unknown-none-elf; do
 done
 # Clippy generates no code, so each is also built once, in release as
 # firmware would be, compiling the table's 32-bit atomic loads and stores.
+# rind's build script decides from the target's atomics whether the feature
+# takes effect, and only warns when it does not, so the build's messages must
+# show it set `rind_no_cas_cache`.
 for target in thumbv6m-none-eabi riscv32imc-unknown-none-elf; do
+    json=$(mktemp)
     run_cargo "$target" "$(required_flags "$target")" "${cargo[@]}" build -p rind --lib --locked \
-        --target "$target" --release --features no-cas-ecdsa-cache
+        --target "$target" --release --features no-cas-ecdsa-cache --message-format=json >"$json"
+    if ! grep '"reason":"build-script-executed"' "$json" | grep -q '"rind_no_cas_cache"'; then
+        rm -f "$json"
+        echo "error: no-cas-ecdsa-cache did not set rind_no_cas_cache for $target" >&2
+        exit 1
+    fi
+    rm -f "$json"
 done
 assemble x86_64-unknown-none
 # The rlib this cargo invocation wrote. A `find` of the shared debug
