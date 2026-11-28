@@ -72,9 +72,9 @@ Both apps support an unattended run with no one looking at the screen (on Androi
   On Android the library and group pickers open in sheets, so `folded` is always true and `clipped` never names `"picker"`; `"score"` there is the results preview, and `"status"` the status card, either out of view in its scrolling pane.
 - On Android, each run that starts logs `RINDBENCH_RUN {"started":true,"preset":…,"libraries":[…],"sections":[…],"host":…,"port":…}` on tag `RindBench` so a runner can check that a launch ran its own selection. A start that doesn't happen logs `RINDBENCH_RUN {"started":false,"reason":…}`, so each autostart launch gets exactly one outcome: the list hasn't loaded or couldn't be read, consent isn't given, no library or group is picked (as when a launch names none that exist), the native start refused it, with its reason (as when the libraries and groups picked, each valid alone, match no test together), a run is going, the Bench tab isn't shown, the app or the Bench tab was left before the run started, or a later launch or a start by hand replaced it while it waited.
   `--activity-single-top` delivers a launch to the app when it is already open; without it Android only brings the app forward and the launch is lost. A launch without `host` sends to the USB or built-in collector, not an earlier launch's `host`.
-  A start the app can only check once the library has listed the tests again (after a list that failed in part, such as a keys copy that failed) logs `started:true`, then ends with `error` in the status if nothing matched.
+  A start the library can only check once it has listed the tests on the run's thread (after a list that failed in part, such as a keys copy that failed) logs `started:true` and, if nothing matched, then `RINDBENCH_RUN {"started":false,"reason":…,"after_start":true}`, which ends that launch; no line reaches the collector for it. An autostart waits for the collector probe to answer before it starts.
   A runner launch without `preset` runs Quick, as a fresh process does, whatever the last run picked.
-- The run itself ends with a `done` or `stopped` line at the collector.
+- The run itself ends with a `done` or `stopped` line at the collector; a start refused after `started:true` sends none (see above).
 
 ## DIT and SHA-3: the A/B/C/D matrix for an iPad
 
