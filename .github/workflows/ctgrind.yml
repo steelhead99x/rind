@@ -173,7 +173,9 @@ jobs:
       - name: ctgrind tests
         run: nix develop .#ctgrind --command admin/ctgrind ${{ matrix.build == 'release' && '--release' || '' }}
         env:
-          RUSTFLAGS: --cfg rind_portable --cfg curve25519_dalek_backend="serial" --cfg rind_limb="${{ matrix.limb }}"
+          # `rind_no_sse2`: AES's integer words, which the architectures without
+          # SSE2 ship; the x86_64 backend's no-SSSE3 rows check the SSE2 words.
+          RUSTFLAGS: --cfg rind_portable --cfg rind_no_sse2 --cfg curve25519_dalek_backend="serial" --cfg rind_limb="${{ matrix.limb }}"
 
   # Valgrind runs no AVX-512, VAES, VPCLMULQDQ, or SHA instruction, so
   # `admin/ct-sde` compares Intel SDE traces of those paths for two secrets
@@ -378,7 +380,7 @@ jobs:
       - name: ct-binsec
         run: nix develop .#binsec --command admin/ct-binsec --timeout 480
         env:
-          RUSTFLAGS: ${{ matrix.backend == 'portable' && '--cfg rind_portable --cfg curve25519_dalek_backend="serial"' || '' }}
+          RUSTFLAGS: ${{ matrix.backend == 'portable' && '--cfg rind_portable --cfg rind_no_sse2 --cfg curve25519_dalek_backend="serial"' || '' }}
 
   # Consumers often build rind with LTO, which inlines it into their code and
   # reoptimizes it, or for size, where LLVM may pick a branch over a select
