@@ -10,7 +10,7 @@
 
 - Start once a scheduled `bench` run on `main` has the RustCrypto rows: `admin/bench-report weekly`, then `admin/bench-report render`, which names each gap without a decision.
 - Expected, from the dispatched run: `blind-rsa2048-blind/*` on armv7 (1.60×), which [kixel-ai/rind#1007](https://github.com/kixel-ai/rind/pull/1007) closes (0.15× in its dispatched [run 45447290902](https://github.com/kixel-ai/rind/actions/runs/45447290902)), so a scheduled run from before it lands records it as closed after the run. That run also had `oprf-ristretto255-blind/*` and `oprf-ristretto255-evaluate/*` on armv7 at 1.07 and 1.16×, but only because its `voprf` rows skipped the point encoding and decoding rind's rows pay; [kixel-ai/rind#1009](https://github.com/kixel-ai/rind/pull/1009) made the rows symmetric, so a gap there now is new. Triage any other new gap the same way, into a speed quest or a recorded reason.
-- Re-measure the x86_64 `oprf-ristretto255-*` gap, whose `gaps.toml` entry points at [the AVX2 quest](/quest/m2/speed/ristretto255-avx2.md): it was measured with the same lopsided rows, so with symmetric ones it should shrink. Resize that quest to what remains and say so on its PR, [kixel-ai/rind#943](https://github.com/kixel-ai/rind/pull/943), or delete the entry if the gap is gone (decided in kixel-ai/rind#1009).
+- Re-measure the x86_64 `oprf-ristretto255-*` gap: it was measured with the same lopsided rows, so with symmetric ones it should shrink. Its `gaps.toml` entry now holds a reason, since the AVX2 quest finished without ADX and left the ADX tier open; narrow that entry to the hosts and tiers still over 10%, or delete it if the gap is gone (decided in kixel-ai/rind#1009).
 
 ## Scheduled
 
