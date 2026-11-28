@@ -342,6 +342,9 @@ final class BenchView extends LinearLayout {
             colHow = "set by adb";
             // After setup, probe the new target; a probe of the old one still out is then ignored.
             if (changed && probeGen > 0) findCollector();
+            // A launch waiting or queued keeps the collector it came with: one that isn't itself an
+            // autostart launch but moves the collector drops it, rather than sending its run elsewhere.
+            if (changed && !it.getBooleanExtra("autostart", false)) dropLaunch("a later launch changed its collector");
         } else if (!it.hasExtra("host") && runnerHost != null && Collector.RUNNER && it.getBooleanExtra("autostart", false)) {
             // A runner launch without `host` goes to the USB or built-in collector, not the last launch's.
             runnerHost = null;

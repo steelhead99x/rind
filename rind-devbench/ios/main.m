@@ -10,6 +10,7 @@
 #include <unistd.h>
 #include <poll.h>
 #include <float.h>
+#include <stdio.h>
 
 extern char *devbench_catalog_json(void);
 extern int devbench_start(const char *config);
@@ -66,6 +67,14 @@ static NSArray<NSString *> *ArgNames(NSString *k) {
   return out.array;
 }
 static NSSet<NSString *> *ArgList(NSString *k) { return [NSSet setWithArray:ArgNames(k)]; }
+// One RINDBENCH_RUN line on stderr, which `devicectl ... --console` shows, for a runner watching an
+// autostart without seeing the screen.
+static void RunLine(NSDictionary *d) {
+  NSData *js = [NSJSONSerialization dataWithJSONObject:d options:0 error:nil];
+  if (!js) return;
+  fprintf(stderr, "RINDBENCH_RUN %s\n", [[NSString alloc] initWithData:js encoding:NSUTF8StringEncoding].UTF8String);
+  fflush(stderr);
+}
 
 #define RGB(r, g, b) [UIColor colorWithRed:(r) / 255.0 green:(g) / 255.0 blue:(b) / 255.0 alpha:1]
 #define C_BG RGB(13, 15, 20)
@@ -126,6 +135,8 @@ static NSString *const kConsent = @"The run keeps the CPU busy (minutes on Quick
   UIButton *startBtn, *stopBtn, *clearBtn;
   BOOL running;
   BOOL autostartQueued;  // -autostart's delayed start, until it fires or a start by hand takes its place
+  BOOL autostartRun;     // the current start is -autostart's: its refusal and picked rows go to stderr
+  long long autostartNo; // its start number (`acked_start`), once accepted
   NSDictionary *catalog;
   NSMutableDictionary<NSString *, UIButton *> *libChips, *secChips;
   NSArray<NSString *> *moreSections;
@@ -399,7 +410,9 @@ static void SetTitle(UIButton *b, NSString *t) {
       self->autostartQueued = NO;
       // The launch's own -libraries and -sections go to the native start as given, so a name the picker
       // lacks (as after a list that failed in part) still reaches the library's own check.
-      self->agree.on = YES; [self agreeChanged]; [self startWithLibs:ArgNames(@"libraries") secs:ArgNames(@"sections")];
+      self->agree.on = YES; [self agreeChanged];
+      self->autostartRun = YES; self->autostartNo = 0;
+      [self startWithLibs:ArgNames(@"libraries") secs:ArgNames(@"sections")];
     });
   }
 }
@@ -502,7 +515,7 @@ static void SetTitle(UIButton *b, NSString *t) {
   [self setPicking:YES]; [self agreeChanged]; [self ready]; [self findCollector];
 }
 
-- (void)startTapped { [self startWithLibs:nil secs:nil]; }
+- (void)startTapped { autostartRun = NO; [self startWithLibs:nil secs:nil]; }
 
 // Starts a run of the picker's selection, or, for an autostart, of the names its launch gave (an empty
 // or nil list keeps the picker's).
@@ -514,7 +527,12 @@ static void SetTitle(UIButton *b, NSString *t) {
   if (moreChip.selected) [secs addObjectsFromArray:moreSections];
   if (wantLibs.count) libs = [wantLibs mutableCopy];
   if (wantSecs.count) secs = [wantSecs mutableCopy];
-  if (!libs.count || !secs.count) { statusLbl.text = @"Pick at least one library and one operation"; return; }
+  if (!libs.count || !secs.count) {
+    statusLbl.text = @"Pick at least one library and one operation";
+    if (autostartRun) RunLine(@{@"started": @NO, @"reason": libs.count ? @"no group is picked" : @"no library is picked"});
+    autostartRun = NO;
+    return;
+  }
   BOOL full = preset.selectedSegmentIndex == 1;
   NSString *docs = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
   NSString *keys = [NSBundle.mainBundle.resourcePath stringByAppendingPathComponent:@"keys"];
@@ -528,7 +546,17 @@ static void SetTitle(UIButton *b, NSString *t) {
   if (host.length && port) { cfg[@"host"] = host; cfg[@"port"] = port; }
   NSData *js = [NSJSONSerialization dataWithJSONObject:cfg options:0 error:nil];
   NSString *s = [[NSString alloc] initWithData:js encoding:NSUTF8StringEncoding];
-  if (devbench_start(s.UTF8String) != 0) { NSDictionary *st = JSON(devbench_status_json()); statusLbl.text = [NSString stringWithFormat:@"Could not start: %@", st[@"start_error"]]; return; }
+  if (devbench_start(s.UTF8String) != 0) {
+    NSDictionary *st = JSON(devbench_status_json());
+    statusLbl.text = [NSString stringWithFormat:@"Could not start: %@", st[@"start_error"]];
+    if (autostartRun) RunLine(@{@"started": @NO, @"reason": [NSString stringWithFormat:@"the native start refused it: %@", st[@"start_error"] ?: @""]});
+    autostartRun = NO;
+    return;
+  }
+  if (autostartRun) {
+    autostartNo = [JSON(devbench_status_json())[@"acked_start"] longLongValue];
+    RunLine(@{@"started": @YES, @"start": @(autostartNo), @"libraries": libs, @"sections": secs});
+  }
   autostartQueued = NO;  // a start by hand consumes the queued -autostart, even once this run stops
   UIApplication.sharedApplication.idleTimerDisabled = YES;
   startBtn.hidden = YES; clearBtn.hidden = YES; stopBtn.hidden = NO; stopBtn.enabled = YES; running = YES;
@@ -547,6 +575,21 @@ static void SetTitle(UIButton *b, NSString *t) {
 - (void)poll {
   NSDictionary *s = JSON(devbench_status_json());
   running = [s[@"running"] boolValue];
+  // An autostart's outcome once the library resolves it: the rows it picked, or its refusal once listed.
+  if (autostartRun && autostartNo > 0) {
+    if ([s[@"run_start"] longLongValue] == autostartNo) {
+      RunLine(@{@"selected": @YES, @"start": @(autostartNo), @"libraries": s[@"libraries_run"] ?: @[],
+                @"libraries_missing": s[@"libraries_missing"] ?: @[], @"sections": s[@"sections_run"] ?: @[],
+                @"sections_missing": s[@"sections_missing"] ?: @[]});
+      autostartRun = NO;
+    } else if (![s[@"run_id"] length] && [s[@"refused_start"] longLongValue] == autostartNo) {
+      RunLine(@{@"started": @NO, @"start": @(autostartNo), @"after_start": @YES,
+                @"reason": [NSString stringWithFormat:@"the native start refused it: %@", s[@"refused_reason"] ?: @""]});
+      autostartRun = NO;
+    } else if (!running) {
+      autostartRun = NO;  // ended without picking rows
+    }
+  }
   NSString *thermal = @[@"nominal", @"fair", @"serious", @"critical"][MIN(3, (NSInteger)NSProcessInfo.processInfo.thermalState)];
   double done = [s[@"done"] doubleValue], total = MAX(1, [s[@"total"] doubleValue]);
   progress.progress = done / total;

@@ -10,9 +10,9 @@ import org.json.JSONObject;
  * A device runner's lines for an accepted start, as the library resolves it, logged by the process rather
  * than by a view, so they come once per start even when no activity is left to poll (as with "Don't keep
  * activities", or the app sent to the background while the run's thread lists tests):
- *   RINDBENCH_RUN {"selected":true,"start":N,"sections":[...],"sections_missing":[...]}
- * once the library has picked the run's rows (`sections` are the groups that run, `sections_missing` the
- * groups named that had no row), or
+ *   RINDBENCH_RUN {"selected":true,"start":N,"libraries":[...],"libraries_missing":[...],"sections":[...],"sections_missing":[...]}
+ * once the library has picked the run's rows (`libraries` and `sections` are the ones the run takes rows
+ * from, the `_missing` ones those named that it takes none from), or
  *   RINDBENCH_RUN {"started":false,"start":N,"reason":...,"after_start":true}
  * when it refused the start once it had listed the tests. N is the start's number, as the started line
  * gives it. Everything runs on the main looper.
@@ -46,6 +46,11 @@ final class RunReporter {
         if (watching != 0) check();
     }
 
+    private static JSONArray array(JSONObject s, String key) {
+        JSONArray a = s.optJSONArray(key);
+        return a != null ? a : new JSONArray();
+    }
+
     /** Logs the watched start's line once its status resolves it; true once it is resolved. */
     private static boolean check() {
         JSONObject s;
@@ -57,10 +62,9 @@ final class RunReporter {
         long n = watching;
         try {
             if (s.optLong("run_start", -1) == n) {
-                JSONArray ran = s.optJSONArray("sections_run"), missing = s.optJSONArray("sections_missing");
                 android.util.Log.i("RindBench", "RINDBENCH_RUN " + new JSONObject().put("selected", true).put("start", n)
-                        .put("sections", ran != null ? ran : new JSONArray())
-                        .put("sections_missing", missing != null ? missing : new JSONArray()));
+                        .put("libraries", array(s, "libraries_run")).put("libraries_missing", array(s, "libraries_missing"))
+                        .put("sections", array(s, "sections_run")).put("sections_missing", array(s, "sections_missing")));
             } else if (s.optString("run_id", "").isEmpty() && s.optLong("refused_start", -1) == n) {
                 android.util.Log.w("RindBench", "RINDBENCH_RUN " + new JSONObject().put("started", false).put("start", n)
                         .put("reason", "the native start refused it: " + s.optString("refused_reason")).put("after_start", true));
