@@ -232,6 +232,49 @@ const _: () = {
     small!(MlKem512, MlKem768, MlKem1024);
 };
 
+/// The 32 random bytes an encapsulation draws, FIPS 203's message `m`, from
+/// the caller's random source rather than the system's, as RustCrypto's KEM
+/// traits pass one in. [`EncapsulationKey::encapsulate`] draws its own and
+/// is the usual way to encapsulate.
+///
+/// The bytes must be fresh from an approved random bit generator: the
+/// shared secret is derived from them alone and the key, so reusing a message
+/// with one key gives the same secret. So a `Message` is neither `Clone` nor
+/// `Copy`, is consumed by [`Message::encapsulate`], and is wiped on drop.
+pub struct Message([u8; 32]);
+
+impl Message {
+    /// Takes the 32 fresh random bytes in `bytes`, zeroing them there so the
+    /// only copy is the `Message`.
+    pub fn new(bytes: &mut [u8; 32]) -> Self {
+        let message = Self(*bytes);
+        low::zeroise(bytes);
+        message
+    }
+
+    /// Encapsulates this message to `key`, returning the ciphertext to send to
+    /// the key's holder and the secret. `self` is wiped as it drops here.
+    pub fn encapsulate<A: Algorithm>(
+        self,
+        key: &EncapsulationKey<A>,
+    ) -> (Ciphertext<A>, SharedSecret<A>) {
+        let (secret, ciphertext) = key.key.encaps_message(mlkem::Message(self.0));
+        (Ciphertext(ciphertext), SharedSecret::new(secret))
+    }
+}
+
+impl fmt::Debug for Message {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("Message").finish_non_exhaustive()
+    }
+}
+
+impl Drop for Message {
+    fn drop(&mut self) {
+        low::zeroise(&mut self.0);
+    }
+}
+
 /// A ciphertext carrying an encapsulated secret, to send to the key's holder.
 pub struct Ciphertext<A: Algorithm>(mlkem::Ciphertext<A>);
 
@@ -341,15 +384,15 @@ mod tests {
         mlkem::DecapKey::keygen_internal(&seed.try_into().unwrap())
     }
 
-    /// The encapsulation of `m` to `key`: its secret and ciphertext.
+    /// The encapsulation of `m` to `key`: its secret and ciphertext, through
+    /// the public [`Message`], so every known-answer test of encapsulation
+    /// checks it. The caller's copy of `m` is zeroed.
     fn encaps<A: Algorithm>(key: &EncapsulationKey<A>, m: &[u8]) -> (Vec<u8>, Ciphertext<A>) {
-        let (secret, ciphertext) = key
-            .key
-            .encaps_internal(mlkem::Message(m.try_into().unwrap()));
-        (
-            secret_bytes(&SharedSecret::<A>::new(secret)),
-            Ciphertext(ciphertext),
-        )
+        let mut bytes: [u8; 32] = m.try_into().unwrap();
+        let message = Message::new(&mut bytes);
+        assert_eq!(bytes, [0; 32]);
+        let (ciphertext, secret) = message.encapsulate(key);
+        (secret_bytes(&secret), ciphertext)
     }
 
     /// The expanded decapsulation key `dk`, or `None` if rind refuses it.

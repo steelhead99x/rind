@@ -1,0 +1,30 @@
+[package]
+name = "rind-digest"
+version = "0.11.0"
+edition = "2024"
+repository = "https://github.com/kixel-ai/rind"
+homepage = "https://rind.kixel.ai"
+license = "Apache-2.0 OR ISC OR MIT-0"
+description = "RustCrypto's digest 0.11 traits on rind"
+categories = ["cryptography"]
+rust-version.workspace = true
+readme = "README.md"
+
+# `sha2`'s and `sha3`'s feature names. `oid` gives each hash its OID, as
+# theirs do; `alloc` is digest's.
+[features]
+default = ["alloc", "oid"]
+alloc = ["digest/alloc"]
+oid = ["digest/oid"]
+
+[dependencies]
+rind = { version = "0.3.2", path = "../rind", default-features = false }
+digest = { version = "0.11.3", default-features = false, features = ["mac"] }
+
+[dev-dependencies]
+sha2 = "0.11"
+sha3 = "0.12"
+hmac = "0.13"
+# Requests reach valgrind only once `rind/__ctgrind` turns on crabgrind's default
+# features, as `admin/ctgrind` does; otherwise they build as no-ops.
+crabgrind = { version = "0.4", default-features = false }

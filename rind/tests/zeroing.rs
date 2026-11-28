@@ -384,6 +384,8 @@ fn mlkem() {
         check_zeroed_on_drop(Box::pin(key));
     }
     check::<MlKem512>();
+    // A caller's message, dropped without encapsulating.
+    check_zeroed_on_drop(Box::pin(Message::new(&mut [0x5a; 32])));
     check::<MlKem768>();
     check::<MlKem1024>();
 }

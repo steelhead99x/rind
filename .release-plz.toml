@@ -20,6 +20,25 @@ git_release_latest = true
 name = "rind-python"
 git_only = true
 
+# rind-digest, rind-aead, rind-signature, and rind-kem, new crates: a trusted-publishing
+# release cannot create a crate, so the maintainer publishes each one's first
+# version by hand, and its entry comes out then.
+[[package]]
+name = "rind-digest"
+release = false
+
+[[package]]
+name = "rind-aead"
+release = false
+
+[[package]]
+name = "rind-signature"
+release = false
+
+[[package]]
+name = "rind-kem"
+release = false
+
 # Published by hand after rind 0.4.0: trusted publishing cannot create a crate.
 [[package]]
 name = "rind-openmls"

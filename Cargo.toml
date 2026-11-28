@@ -16,6 +16,10 @@ members = [
   "rind-rand-core",
   "rind-rcgen",
   "rind-ring",
+  "rind-digest",
+  "rind-aead",
+  "rind-signature",
+  "rind-kem",
   "rind-rustls",
   "rind-str0m",
   "rind-jsonwebtoken",
@@ -63,11 +67,17 @@ debug = true
 # each `Choice` is 0 or 1. dalek's X25519 ladder also loops over the scalar's
 # bits as an iterator of `bool`, testing each secret bit against `None`'s
 # niche, which a bit never equals, until optimization folds the test away:
-# `opt-level = 1` does not, so dalek takes release's level.
+# `opt-level = 1` does not, so dalek takes release's level. crypto-bigint's
+# word arithmetic, which rind-signature's RSA import runs to take `q⁻¹ mod p`
+# out of Montgomery form, checks double-word sums its comments prove cannot
+# overflow.
 [profile.dev.package.fiat-crypto]
 overflow-checks = false
 
 [profile.dev.package.base64ct]
+overflow-checks = false
+
+[profile.dev.package.crypto-bigint]
 overflow-checks = false
 
 [profile.dev.package.curve25519-dalek]

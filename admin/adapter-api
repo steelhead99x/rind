@@ -44,7 +44,12 @@
 #
 # rind-object-store and rind-rand-core are excluded: object_store defines a
 # provider trait, and rand_core RNG traits, and neither ships a provider whose
-# shape the adapter could copy.
+# shape the adapter could copy. So are rind-digest, rind-aead, rind-signature,
+# and rind-kem, which adapt RustCrypto's trait crates under the names of
+# several provider crates each, whose exact signatures no wrapper can equal:
+# ml-kem's sizes are arithmetic over its private traits, p256's keys are the
+# `ecdsa` crate's generic types, and sha2 resolves at two versions. Each
+# builds its providers' examples in its `tests/upstream.rs` instead.
 #
 # The rustdoc JSON format is unstable, so this runs on the flake's pinned
 # stable toolchain, with RUSTC_BOOTSTRAP to unlock the flag.

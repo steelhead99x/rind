@@ -839,6 +839,13 @@ impl<P: Params> EncapKey<P> {
         Ok(self.encaps_internal(m))
     }
 
+    /// Encapsulate the caller's message `m`, FIPS 203's `ML-KEM.Encaps`
+    /// with `m` from the caller's random source rather than the system's.
+    pub(crate) fn encaps_message(&self, m: Message) -> (SharedSecret, Ciphertext<P>) {
+        let _entry = low::Entry::new_secret();
+        self.encaps_internal(m)
+    }
+
     /// The [`EncapKey`] as FIPS 203 encodes it.
     pub(crate) fn as_bytes(&self) -> &P::EncapKeyBytes {
         &self.bytes

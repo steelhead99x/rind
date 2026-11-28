@@ -1,0 +1,353 @@
+//! RSA as `signature`'s `Signer` and `Verifier`, under `rsa`'s module paths
+//! (`rsa::pkcs1v15`, `rsa::pss`) with its key and signature types.
+//!
+//! Both schemes sign and verify through `Signer` and `Verifier`. PSS signing is
+//! `Signer` and `MultipartSigner`, which draw on the system's random number
+//! generator in `rsa` as in rind, and not `RandomizedSigner`, whose caller-chosen
+//! generator rind cannot use. rind refuses a modulus under 2048 bits, which `rsa`
+//! accepts.
+
+use core::marker::PhantomData;
+
+use ::rsa::pkcs1::EncodeRsaPublicKey;
+use ::rsa::traits::{PrivateKeyParts, PublicKeyParts};
+use ::signature::{Error, MultipartSigner, MultipartVerifier, Signer, Verifier};
+use rind_digest::sha2::{Sha256, Sha384, Sha512};
+use zeroize::Zeroizing;
+
+mod sealed {
+    pub trait Sealed {}
+}
+
+/// A hash rind signs RSA with: [`Sha256`], [`Sha384`], and [`Sha512`].
+pub trait Hash: sealed::Sealed {
+    #[doc(hidden)]
+    fn sign() -> &'static rind::rsa::SigningAlgorithm;
+    #[doc(hidden)]
+    fn sign_pss() -> &'static rind::rsa::SigningAlgorithm;
+    #[doc(hidden)]
+    fn verify() -> &'static rind::rsa::VerificationAlgorithm;
+    #[doc(hidden)]
+    fn pss() -> &'static rind::rsa::VerificationAlgorithm;
+    #[doc(hidden)]
+    fn pss_any_salt() -> &'static rind::rsa::VerificationAlgorithm;
+}
+
+macro_rules! hash {
+    ($($hash:ident: $pkcs1:ident, $pss:ident, $any:ident;)*) => {$(
+        impl sealed::Sealed for $hash {}
+        impl Hash for $hash {
+            fn sign() -> &'static rind::rsa::SigningAlgorithm {
+                &rind::rsa::sign::$pkcs1
+            }
+            fn sign_pss() -> &'static rind::rsa::SigningAlgorithm {
+                &rind::rsa::sign::$pss
+            }
+            fn verify() -> &'static rind::rsa::VerificationAlgorithm {
+                &rind::rsa::verify::$pkcs1
+            }
+            fn pss() -> &'static rind::rsa::VerificationAlgorithm {
+                &rind::rsa::verify::$pss
+            }
+            fn pss_any_salt() -> &'static rind::rsa::VerificationAlgorithm {
+                &rind::rsa::verify::$any
+            }
+        }
+    )*};
+}
+
+hash! {
+    Sha256: PKCS1_SHA256, PSS_SHA256, PSS_SHA256_ANY_SALT;
+    Sha384: PKCS1_SHA384, PSS_SHA384, PSS_SHA384_ANY_SALT;
+    Sha512: PKCS1_SHA512, PSS_SHA512, PSS_SHA512_ANY_SALT;
+}
+
+/// The key as rind holds it, parsed from its PKCS#1 `RSAPublicKey` DER. rind
+/// verifies only under a modulus of 2048 to 8192 bits, which `rsa` does not
+/// require, so this can fail where `rsa`'s own `VerifyingKey::new` cannot.
+/// rind's parser takes a modulus from 1017 bits for legacy algorithms, so the
+/// 2048-bit floor is checked here, rather than on every verification.
+fn public_key_der(key: &::rsa::PublicKey) -> Result<rind::rsa::PublicKey, Error> {
+    if key.n().bit_width_vartime() < 2048 {
+        return Err(Error::new());
+    }
+    let der = key.to_pkcs1_der().map_err(|_| Error::new())?;
+    rind::rsa::PublicKey::new(der.as_bytes()).map_err(|_| Error::new())
+}
+
+/// rind's key pair for `key`, loaded from its integers rather than DER.
+///
+/// `rsa`'s PKCS#1 encoder trims each integer's leading zeros and recomputes
+/// the CRT exponents by division, both in time that depends on the secret
+/// integers, and frees that division's scratch unwiped. Instead, each private
+/// integer is written big-endian at its full limb width, which reveals only
+/// the key's size, and rind reads it at that width. The CRT values are the
+/// ones `rsa` precomputed when it built the key; only `q⁻¹ mod p` leaves
+/// Montgomery form, by a constant-time reduction. Every buffer holding a
+/// private integer is wiped on drop.
+///
+/// A key whose precomputed values were cleared with
+/// `rsa::PrivateKey::clear_precomputed` is refused: call `precompute` first.
+fn key_pair(key: &::rsa::PrivateKey) -> Result<rind::rsa::KeyPair, Error> {
+    let [p, q] = key.primes() else {
+        return Err(Error::new());
+    };
+    let (Some(dp), Some(dq), Some(qinv)) = (key.dp(), key.dq(), key.qinv()) else {
+        return Err(Error::new());
+    };
+    let qi = Zeroizing::new(qinv.retrieve());
+    let secret = |x: &::rsa::BoxedUint| Zeroizing::new(x.to_be_bytes());
+    let components = rind::rsa::KeyPairComponents {
+        public_key: rind::rsa::PublicKeyComponents {
+            // Public, so trimmed of leading zeros, as rind requires, in
+            // variable time.
+            n: Zeroizing::new(key.n_bytes()),
+            e: Zeroizing::new(key.e_bytes()),
+        },
+        d: secret(key.d()),
+        p: secret(p),
+        q: secret(q),
+        dp: secret(dp),
+        dq: secret(dq),
+        qi: secret(&qi),
+    };
+    rind::rsa::KeyPair::from_components(&components).map_err(|_| Error::new())
+}
+
+/// RSASSA-PKCS1-v1_5, as `rsa::pkcs1v15`.
+pub mod pkcs1v15 {
+    pub use ::rsa::pkcs1v15::Signature;
+
+    use super::*;
+
+    /// A public key that verifies PKCS#1 v1.5 signatures over `D`.
+    pub struct VerifyingKey<D: Hash> {
+        key: rind::rsa::PublicKey,
+        hash: PhantomData<D>,
+    }
+
+    impl<D: Hash> Clone for VerifyingKey<D> {
+        fn clone(&self) -> Self {
+            Self {
+                key: self.key.clone(),
+                hash: PhantomData,
+            }
+        }
+    }
+
+    impl<D: Hash> VerifyingKey<D> {
+        /// A verifying key for `key`, refused if rind does not take it.
+        pub fn try_new(key: ::rsa::PublicKey) -> Result<Self, Error> {
+            Ok(Self {
+                key: public_key_der(&key)?,
+                hash: PhantomData,
+            })
+        }
+    }
+
+    impl<D: Hash> TryFrom<::rsa::PublicKey> for VerifyingKey<D> {
+        type Error = Error;
+
+        fn try_from(key: ::rsa::PublicKey) -> Result<Self, Error> {
+            Self::try_new(key)
+        }
+    }
+
+    impl<D: Hash> core::fmt::Debug for VerifyingKey<D> {
+        fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            f.write_str("VerifyingKey { .. }")
+        }
+    }
+
+    impl<D: Hash> Verifier<Signature> for VerifyingKey<D> {
+        fn verify(&self, msg: &[u8], signature: &Signature) -> Result<(), Error> {
+            use ::rsa::signature::SignatureEncoding;
+            self.key
+                .verify(D::verify(), msg, &signature.to_bytes())
+                .map_err(|_| Error::new())
+        }
+    }
+
+    impl<D: Hash> MultipartVerifier<Signature> for VerifyingKey<D> {
+        fn multipart_verify(&self, msg: &[&[u8]], signature: &Signature) -> Result<(), Error> {
+            self.verify(&msg.concat(), signature)
+        }
+    }
+
+    /// A private key that signs PKCS#1 v1.5 over `D`: rind's key pair, which
+    /// wipes its whole value, public key included, on drop. The wrapper is
+    /// only that pair: it holds no other copy of the key, and `rsa`'s key is
+    /// read into rind as wiped buffers, as [`key_pair`] describes.
+    #[repr(transparent)]
+    pub struct SigningKey<D: Hash> {
+        pair: rind::rsa::KeyPair,
+        hash: PhantomData<D>,
+    }
+
+    impl<D: Hash> SigningKey<D> {
+        /// A signing key for `key`, which rind refuses if its modulus is under
+        /// 2048 bits or it is otherwise not one it signs with.
+        pub fn try_new(key: ::rsa::PrivateKey) -> Result<Self, Error> {
+            Ok(Self {
+                pair: key_pair(&key)?,
+                hash: PhantomData,
+            })
+        }
+
+        /// The public key.
+        pub fn verifying_key(&self) -> VerifyingKey<D> {
+            VerifyingKey {
+                key: self.pair.public_key().clone(),
+                hash: PhantomData,
+            }
+        }
+    }
+
+    impl<D: Hash> core::fmt::Debug for SigningKey<D> {
+        fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            f.write_str("SigningKey { .. }")
+        }
+    }
+
+    impl<D: Hash> Signer<Signature> for SigningKey<D> {
+        fn try_sign(&self, msg: &[u8]) -> Result<Signature, Error> {
+            let signature = self.pair.sign(D::sign(), msg).map_err(|_| Error::new())?;
+            Signature::try_from(signature.as_ref())
+        }
+    }
+
+    impl<D: Hash> MultipartSigner<Signature> for SigningKey<D> {
+        fn try_multipart_sign(&self, msg: &[&[u8]]) -> Result<Signature, Error> {
+            self.try_sign(&msg.concat())
+        }
+    }
+}
+
+/// RSASSA-PSS with a salt as long as the hash, as `rsa::pss`.
+pub mod pss {
+    pub use ::rsa::pss::Signature;
+
+    use super::*;
+
+    /// A public key that verifies PSS signatures over `D`.
+    pub struct VerifyingKey<D: Hash> {
+        key: rind::rsa::PublicKey,
+        any_salt: bool,
+        hash: PhantomData<D>,
+    }
+
+    impl<D: Hash> Clone for VerifyingKey<D> {
+        fn clone(&self) -> Self {
+            Self {
+                key: self.key.clone(),
+                any_salt: self.any_salt,
+                hash: PhantomData,
+            }
+        }
+    }
+
+    impl<D: Hash> VerifyingKey<D> {
+        /// A verifying key whose signatures carry a salt as long as the hash,
+        /// refused if rind does not take `key`.
+        pub fn try_new(key: ::rsa::PublicKey) -> Result<Self, Error> {
+            Ok(Self {
+                key: public_key_der(&key)?,
+                any_salt: false,
+                hash: PhantomData,
+            })
+        }
+
+        /// A verifying key that takes a signature's salt of any length,
+        /// refused if rind does not take `key`.
+        pub fn try_new_with_auto_salt_len(key: ::rsa::PublicKey) -> Result<Self, Error> {
+            Ok(Self {
+                key: public_key_der(&key)?,
+                any_salt: true,
+                hash: PhantomData,
+            })
+        }
+    }
+
+    impl<D: Hash> TryFrom<::rsa::PublicKey> for VerifyingKey<D> {
+        type Error = Error;
+
+        fn try_from(key: ::rsa::PublicKey) -> Result<Self, Error> {
+            Self::try_new(key)
+        }
+    }
+
+    impl<D: Hash> core::fmt::Debug for VerifyingKey<D> {
+        fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            f.write_str("VerifyingKey { .. }")
+        }
+    }
+
+    impl<D: Hash> Verifier<Signature> for VerifyingKey<D> {
+        fn verify(&self, msg: &[u8], signature: &Signature) -> Result<(), Error> {
+            use ::rsa::signature::SignatureEncoding;
+            let algorithm = if self.any_salt {
+                D::pss_any_salt()
+            } else {
+                D::pss()
+            };
+            self.key
+                .verify(algorithm, msg, &signature.to_bytes())
+                .map_err(|_| Error::new())
+        }
+    }
+
+    impl<D: Hash> MultipartVerifier<Signature> for VerifyingKey<D> {
+        fn multipart_verify(&self, msg: &[&[u8]], signature: &Signature) -> Result<(), Error> {
+            self.verify(&msg.concat(), signature)
+        }
+    }
+
+    /// A private key that signs PSS over `D`: rind's key pair, which wipes
+    /// its whole value on drop, and nothing else, as the PKCS#1 v1.5 key is.
+    #[repr(transparent)]
+    pub struct SigningKey<D: Hash> {
+        pair: rind::rsa::KeyPair,
+        hash: PhantomData<D>,
+    }
+
+    impl<D: Hash> SigningKey<D> {
+        /// A signing key for `key`, refused as [`super::pkcs1v15::SigningKey::try_new`] does.
+        pub fn try_new(key: ::rsa::PrivateKey) -> Result<Self, Error> {
+            Ok(Self {
+                pair: key_pair(&key)?,
+                hash: PhantomData,
+            })
+        }
+
+        /// The public key.
+        pub fn verifying_key(&self) -> VerifyingKey<D> {
+            VerifyingKey {
+                key: self.pair.public_key().clone(),
+                any_salt: false,
+                hash: PhantomData,
+            }
+        }
+    }
+
+    impl<D: Hash> core::fmt::Debug for SigningKey<D> {
+        fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            f.write_str("SigningKey { .. }")
+        }
+    }
+
+    impl<D: Hash> Signer<Signature> for SigningKey<D> {
+        fn try_sign(&self, msg: &[u8]) -> Result<Signature, Error> {
+            let signature = self
+                .pair
+                .sign(D::sign_pss(), msg)
+                .map_err(|_| Error::new())?;
+            Signature::try_from(signature.as_ref())
+        }
+    }
+
+    impl<D: Hash> MultipartSigner<Signature> for SigningKey<D> {
+        fn try_multipart_sign(&self, msg: &[&[u8]]) -> Result<Signature, Error> {
+            self.try_sign(&msg.concat())
+        }
+    }
+}

@@ -1,0 +1,32 @@
+[package]
+name = "rind-kem"
+version = "0.3.0"
+edition = "2024"
+repository = "https://github.com/kixel-ai/rind"
+homepage = "https://rind.kixel.ai"
+license = "Apache-2.0 OR ISC OR MIT-0"
+description = "RustCrypto's kem 0.3 traits on rind"
+categories = ["cryptography"]
+rust-version.workspace = true
+readme = "README.md"
+
+# `ml-kem`'s feature names: `getrandom` is kem's, for `Generate::generate` and
+# `encapsulate` without an RNG argument; `hazmat` documents
+# `encapsulate_deterministic`.
+[features]
+getrandom = ["kem/getrandom"]
+hazmat = []
+
+[dependencies]
+rind = { version = "0.3.2", path = "../rind", default-features = false }
+kem = { version = "0.3.0", default-features = false }
+# kem's arrays are hybrid-array's, which sizes ML-KEM's larger encodings only
+# with `extra-sizes`, as `ml-kem` builds it.
+hybrid-array = { version = "0.4.8", default-features = false, features = ["extra-sizes"] }
+
+[dev-dependencies]
+ml-kem = "0.3.4"
+kem = { version = "0.3.0", features = ["getrandom"] }
+# Requests reach valgrind only once `rind/__ctgrind` turns on crabgrind's default
+# features, as `admin/ctgrind` does; otherwise they build as no-ops.
+crabgrind = { version = "0.4", default-features = false }
