@@ -21,7 +21,7 @@ use std::num::NonZeroU32;
 use std::process::ExitCode;
 
 use rind_fips::acvp::{self, MlDsaMessage};
-use rind_fips::aead::gcm;
+use rind_fips::aead::{self, RandomizedNonceKey, gcm};
 use rind_fips::agreement;
 use rind_fips::cipher::{self, AesCbcDecryptingKey, AesCbcEncryptingKey, AesCtr, CbcIv};
 use rind_fips::digest;
@@ -161,6 +161,7 @@ impl Wrapper {
                 encrypting(direction)?;
                 aes_ctr(args)
             }
+            ["AES-GCM", "seal"] => aes_gcm_seal(args),
             ["AES-GCM", "open"] => aes_gcm_open(args),
             ["AES-KW", "seal"] => aes_kw_seal(Mode::Kw, args),
             ["AES-KW", "open"] => aes_kw_open(Mode::Kw, args),
@@ -458,6 +459,32 @@ fn aes_ctr(args: &[Vec<u8>]) -> Result<Reply> {
     let ctr = AesCtr::new(aes(key)?, key, 128)?;
     let mut out = input.to_vec();
     ctr.apply_keystream(iv.try_into()?, &mut out)?;
+    Ok(vec![out])
+}
+
+/// `AES-GCM/seal`: tag length, key, plaintext, an empty nonce, and AAD, to
+/// the ciphertext, tag, and the 12-byte IV the module generated, in one
+/// string. The module seals only under IVs it generates (IG C.H), with
+/// full tags, so a nonce `acvptool` supplies or a shorter tag is an error.
+fn aes_gcm_seal(args: &[Vec<u8>]) -> Result<Reply> {
+    let [tag_len, key, plaintext, nonce, aad] = take(args)?;
+    if u32_le(tag_len)? != 16 {
+        return Err("a sealing tag of other than 16 bytes".into());
+    }
+    if !nonce.is_empty() {
+        return Err("a sealing nonce: the module generates the IV".into());
+    }
+    let algorithm = match key.len() {
+        16 => &aead::AES_128_GCM,
+        24 => &aead::AES_192_GCM,
+        32 => &aead::AES_256_GCM,
+        len => return Err(format!("an AES key of {len} bytes").into()),
+    };
+    let key = RandomizedNonceKey::new(algorithm, key)?;
+    let mut out = plaintext.to_vec();
+    let (iv, tag) = key.seal_in_place_separate_tag(aad, &mut out)?;
+    out.extend_from_slice(tag.as_ref());
+    out.extend_from_slice(iv.as_ref());
     Ok(vec![out])
 }
 
@@ -1023,7 +1050,7 @@ fn ml_dsa<P: ParameterSet>(operation: &str, args: &[Vec<u8>]) -> Result<Reply> {
 
 #[cfg(test)]
 mod tests {
-    use super::read_request;
+    use super::{aes_gcm_seal, read_request};
 
     #[test]
     fn input_ends_only_between_requests() {
@@ -1039,5 +1066,26 @@ mod tests {
             Some(vec![b"ab".to_vec()])
         );
         assert!(read_request(&mut input).is_err());
+    }
+
+    /// The two guards `acvptool`'s configuration never reaches: a shorter
+    /// tag, and a nonce it supplies, are both refused; the valid call seals.
+    #[test]
+    fn gcm_seal_refuses_a_tag_or_nonce_it_is_not_configured_for() {
+        let seal = |tag_len: u32, nonce: &[u8]| {
+            aes_gcm_seal(&[
+                tag_len.to_le_bytes().to_vec(),
+                vec![7; 32],
+                b"plaintext".to_vec(),
+                nonce.to_vec(),
+                b"aad".to_vec(),
+            ])
+        };
+        // Ciphertext, 16-byte tag, then the 12-byte IV.
+        assert_eq!(seal(16, &[]).unwrap()[0].len(), 9 + 16 + 12);
+        let tag = seal(15, &[]).unwrap_err().to_string();
+        assert!(tag.contains("tag of other than 16 bytes"), "{tag}");
+        let nonce = seal(16, &[0; 12]).unwrap_err().to_string();
+        assert!(nonce.contains("module generates the IV"), "{nonce}");
     }
 }

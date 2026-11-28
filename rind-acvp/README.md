@@ -53,6 +53,4 @@ per `RIND_CPU_DISABLE_<feature>` mask, as the offline test does.
 
 ## What it does not answer yet
 
-- AES-GCM sealing with internally generated IVs, which the module offers
-  but rind-acvp does not register or answer yet; it registers opening only.
 - The TLS 1.3 KDF, which no module service derives through yet.
