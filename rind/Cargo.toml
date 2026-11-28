@@ -36,7 +36,11 @@ zeroize = ["dep:zeroize"]
 # was about 10% faster on a Cortex-M0 model, for about 1.2 KiB more in every
 # ECDSA public key (P-256 too: the key is sized for P-521) and about 3.4 KiB
 # more stack. Targets with compare-and-swap always cache the table and ignore
-# this; any other target without it never caches, and the build warns.
+# this; any other target without it never caches, and the build warns. Before
+# Rust 1.97, Cargo gives the build script only a custom specification's file
+# stem, so a custom target named exactly like a listed built-in one, kept
+# outside the paths build.rs searches and without atomics, is taken for it
+# and fails to compile on the missing `AtomicU32`.
 no-cas-ecdsa-cache = []
 # Runs the unrolled SHA-512 body on the ESP32-S3 instead of the rolled loop
 # every 32-bit microcontroller runs by default. The unrolled body is about 18 KiB of
