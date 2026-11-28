@@ -32,7 +32,7 @@ open VG VG.Spec.Ecdh.Instance
 16 bytes of stack, whose public data are the peer's public key: the
 registration's `Verified`, second conjunct, which `withScrubAllF` proves
 (`Verified.scrubM`) from `ecdh_verified_ifma`:
-https://github.com/pyca/verified-garbage/blob/0aa40d6c21fd02943fe5b38a5b69b6213d07764d/lean/VerifiedGarbage/Artifacts/EcdhP256/X86_64.lean#L96-L100
+https://github.com/pyca/verified-garbage/blob/0aa40d6c21fd02943fe5b38a5b69b6213d07764d/lean/VerifiedGarbage/Artifacts/EcdhP256/X86_64.lean#L97
 https://github.com/pyca/verified-garbage/blob/0aa40d6c21fd02943fe5b38a5b69b6213d07764d/lean/VerifiedGarbage/Proof/Ecdh/X86_64/VerifiedIfma.lean#L218 -/
 axiom vg_ecdh_p256_ifma_ct :
     ConstantTime X86_64.isa (exchangeContract Spec.EcKey.P256.inst X86_64.abi 16).pre
