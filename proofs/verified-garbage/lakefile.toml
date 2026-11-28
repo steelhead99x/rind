@@ -2,7 +2,16 @@ name = "verified-garbage"
 defaultTargets = ["vg-cosim"]
 
 # pyca/verified-garbage's ISA models, which `admin/import-vg-models` vendors
-# byte for byte. They import only Lean core.
+# byte for byte. They import Lean core and, in the scrub's `Proof/` closure
+# that `Cosim.Progs.X86_64` computes its clearing's arguments with,
+# Batteries, at the revision proofs/lake-manifest.json pins through Mathlib
+# and VG's own manifest at REV pins too.
+[[require]]
+name = "batteries"
+scope = "leanprover-community"
+git = "https://github.com/leanprover-community/batteries"
+rev = "66e469188fe07963e5cf666c7d4433f45b8131c5"
+
 [[lean_lib]]
 name = "VerifiedGarbage"
 globs = ["VerifiedGarbage.+"]

@@ -255,7 +255,9 @@ from P-256's arithmetic before any Lean build, and `--check` fails unless
 that generator's output is VG's byte for byte (it compares what the
 generator computes, not the files in the worktree),
 and the cosimulation over them, a Lake package of its own, since the models
-import only Lean core. `nix develop .#vg --command admin/prove vg` checks,
+import only Lean core and, in the scrub's `Proof/` closure that
+`Cosim/Progs/X86_64.lean` computes its clearing's arguments with, Batteries,
+at the revision Mathlib pins. `nix develop .#vg --command admin/prove vg` checks,
 for this CPU's target:
 
 - that every instruction of VG's compiled naked functions, and of each `vg_*`
@@ -266,8 +268,8 @@ for this CPU's target:
   each static a vendored routine reaches, through its relocations and those of
   the statics it reaches, has VG's size, bytes, and relocations;
 - that the text of each `Prog` the leakage axioms are about
-  (`Cosim/Progs.lean`: aarch64's ChaCha20-Poly1305, x86_64's P-256 ECDH with
-  AVX512_IFMA), and of each function it calls, which `vg-print` prints, is VG's assembly for it: `admin/vg-bytes --progs`
+  (`Cosim/Progs/AArch64.lean`: aarch64's ChaCha20-Poly1305;
+  `Cosim/Progs/X86_64.lean`: x86_64's P-256 ECDH with AVX512_IFMA), and of each function it calls, which `vg-print` prints, is VG's assembly for it: `admin/vg-bytes --progs`
   compares them, so VG's vendored printer is trusted to print a `Prog` as the
   text of the code it builds, which is not checked;
 - that each distinct instruction of VG's code ends, from random states, in
@@ -399,7 +401,7 @@ what the routine may leak. The contracts they restate, VG's
 with the modules of VG's `Impl/` they need, so a re-pin that changes them
 fails `admin/import-vg-models --check`. The two leakage axioms in
 `Rind/Aarch64/VgChaCha20Poly1305Ct.lean` state `VG.ConstantTime` of the SVE2
-seal and open over `Cosim.Progs`, VG's own `Prog` terms, and `vg-print` with
+seal and open over `Cosim.Progs.AArch64`'s, VG's own `Prog` terms, and `vg-print` with
 `admin/vg-bytes --progs` binds those terms to VG's assembly text. `Rind/X86_64/VgChaCha20Poly1305.lean`
 restates those about the x86_64 AVX-512 IFMA routines the same way, VG's
 registrations `sealReg` and `openReg` at the `ifma` variant, which add the
@@ -1817,11 +1819,13 @@ proof after those.
   targets' `cipher::ChaCha20` proofs share, and
   `Rind/{X86_64,Aarch64}/VgChaCha20.lean`, each target's glue over VG's
   routines; and `Rind/Aarch64/VgChaCha20Poly1305Ct.lean`, the two axioms that
-  state the leakage of the SVE2 routines over `verified-garbage/Cosim/Progs.lean`
+  state the leakage of the SVE2 routines over `verified-garbage/Cosim/Progs/AArch64.lean`
   (`Cosim/PrintMain.lean`'s `vg-print` prints them for `admin/vg-bytes`).
 - `Rind/X86_64/VgP256Ct.lean`: the axiom that pyca/verified-garbage's
   `vg_ecdh_p256_ifma` is constant time under its contract, over
-  `Cosim.Progs.ecdhP256Ifma`, which `vg-print x86_64` prints.
+  `Cosim.Progs.ecdhP256Ifma` (`verified-garbage/Cosim/Progs/X86_64.lean`),
+  whose clearing's arguments VG's own `withScrubAllF` functions compute, and
+  which `vg-print x86_64` prints.
 - `Rind/Rsa.lean` and `Rind/RsaLemmas.lean`: RFC 8017's verification,
   transliterated, and its lemmas; `Rind/X86_64/{RsaBytes,RsaMont,RsaPublic,RsaKey,RsaVerify,RsaPss}.lean`:
   the RSA verification proof, on x86_64 alone,

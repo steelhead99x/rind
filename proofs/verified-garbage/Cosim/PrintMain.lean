@@ -1,4 +1,5 @@
-import Cosim.Progs
+import Cosim.Progs.AArch64
+import Cosim.Progs.X86_64
 import VerifiedGarbage.TCB.AArch64.Print
 import VerifiedGarbage.TCB.X86_64.Print
 

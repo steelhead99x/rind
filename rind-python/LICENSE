@@ -286,6 +286,8 @@ pyca/verified-garbage <https://github.com/pyca/verified-garbage>
   SHA-2, and HMAC specs PBKDF2's import, and the implementations under
   Impl (bignum, ChaCha20, Poly1305, ECDH, ECDSA, Montgomery, RSA, scrub,
   Weierstrass, and X25519 code) that the cosimulation's programs import,
+  and the x86_64 scrub's proof framework under Proof/Framework, whose
+  functions compute that clearing's arguments,
   under proofs/verified-garbage/VerifiedGarbage, which admin/import-vg-models
   copies byte for byte from verified-garbage, but for P-256's CombTable7 and
   GTable9, which admin/import-vg-models --tables writes, with

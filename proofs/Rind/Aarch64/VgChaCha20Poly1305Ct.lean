@@ -1,4 +1,4 @@
-import Cosim.Progs
+import Cosim.Progs.AArch64
 import VerifiedGarbage.Spec.ChaCha20Poly1305.Contract
 import VerifiedGarbage.TCB.AArch64.Target
 
@@ -16,7 +16,7 @@ over the vendored `VerifiedGarbage/TCB/Artifact.lean`'s `Sig.contract`).
 Each says nothing about rind's Rust wrapper.
 
 The code is VG's own term, `VG.Impl.*` as `admin/import-vg-models` vendors
-it, written as `Cosim/Progs.lean` writes the `Prog` VG registers: its `Artifacts/ChaCha20Poly1305/AArch64.lean`
+it, written as `Cosim/Progs/AArch64.lean` writes the `Prog` VG registers: its `Artifacts/ChaCha20Poly1305/AArch64.lean`
 builds `seal` as `withStackScratchWiped 1280 .x7 96 (sealCode v.callee
 v.stitched)` and `open` as `withStackScratchWiped 1312 .x7 96 (openInPlace
 v.callee v.stitched)`, at the variant `Proof.ChaCha20.AArch64.XorImpl.sve2`,

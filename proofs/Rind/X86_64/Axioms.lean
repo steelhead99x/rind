@@ -191,6 +191,12 @@ trust base.
 #guard_msgs in
 #print axioms p256_shared_secret
 
+/-- info: 'rind.x86_64.vg_ecdh_p256_ifma_ct' depends on axioms: [propext,
+ Quot.sound,
+ vg_ecdh_p256_ifma_ct] -/
+#guard_msgs in
+#print axioms vg_ecdh_p256_ifma_ct
+
 /-- info: 'rind.x86_64.p384_generate' depends on axioms: [propext,
  Classical.choice,
  Quot.sound,
