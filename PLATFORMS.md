@@ -71,11 +71,13 @@ qemu. iOS devices' code is only built.
   parameter sets hash eight SHA-256 inputs at once with a port of the
   SPHINCS+ team's AVX2 code. With `avx512ifma`, as on Ice Lake,
   Sapphire Rapids, and AMD's Zen 4 and 5, ChaCha20-Poly1305 runs
-  [verified-garbage]'s assembly, RSA-2048 and 4096 signing and
+  [verified-garbage]'s assembly (on Zen 4 from 800 bytes sealing and 512 opening, below which aws-lc's is faster), RSA-2048 and 4096 signing and
   the public operation of 2048-, 3072-, and 4096-bit moduli with
   e = 65537 run [verified-garbage]'s routines, and RSA-3072 signing too with `avx512fp16`, as on Intel's
   since Sapphire Rapids, and aws-lc's dual AVX-512 RSAZ without it, as
-  for the 3969- to 4032-bit keys VG's CRT does not take.
+  for the 3969- to 4032-bit keys VG's CRT does not take. On AMD's Zen 5,
+  AES-GCM seals and opens of 6 KB or more run [verified-garbage]'s AVX-512
+  assembly, which is slower on Intel's cores and for shorter messages.
 - 32-bit `arm` from ARMv7 on (tested on `armv7-unknown-linux-gnueabihf` and
   `armv7-linux-androideabi`) runs portable Rust instead, mostly from
   [libcrux] (see [ALGORITHMS.md](ALGORITHMS.md)), and needs no CPU features. RSA's
@@ -163,13 +165,11 @@ qemu. iOS devices' code is only built.
   Raspberry Pi 1 and Zero), on `arm-linux-androideabi`, which Rust builds for
   ARMv5TE, on `powerpc64le` and big-endian `powerpc64` and `powerpc` Linux,
   and on `x86_64`,
-  where `--cfg rind_portable` forces it. `just ci` also compiles the library
-  for `wasm32-wasip2` and `wasm32-unknown-unknown`
-  when a change touches rind, the workspace manifest or lockfile, or the
-  flake, and `just gate` always does. It compiles every published adapter
-  for both, and rind-rustls's and rind-ring's tests for each, when
-  a change touches an adapter, rind's manifest, the workspace manifest or
-  lockfile, or the flake. `wasm32-unknown-unknown` enables `getrandom/wasm_js`
+  where `--cfg rind_portable` forces it. `just gate`, nightly, also compiles the
+  library for `wasm32-wasip2` and `wasm32-unknown-unknown` (its `cross`
+  module), and every published adapter for both, with rind-rustls's and
+  rind-ring's tests for each (`wasm`); `CHECK_MODULES='cross wasm' just ci`
+  does so over a branch's diff. `wasm32-unknown-unknown` enables `getrandom/wasm_js`
   for JavaScript randomness, as rind-ring's `wasm32_unknown_unknown_js` does
   for a ring caller; the WASI target uses its system random source. There the
   adapters' upstreams need what they need with any backend, which
@@ -223,9 +223,9 @@ qemu. iOS devices' code is only built.
   and `xtensa-esp32s3-none-elf` the same four ways, check the ESP-IDF library
   (`xtensa-esp32s3-espidf`, which has std and getrandom's own backend) the
   same four ways, and check `rind-bench`'s bench targets there. Those
-  benches are empty programs on Xtensa: criterion does not build against
-  ESP-IDF's libc, and ring and OpenSSL have no Xtensa port, so those paths
-  are `cfg`'d out. The check compiles the empty programs. A name inside that
+  benches are empty programs on Xtensa: ring and OpenSSL have no Xtensa
+  port, and swole's harness is not checked there, so those paths are
+  `cfg`'d out. The check compiles the empty programs. A name inside that
   `cfg` is not typechecked. None of these targets runs a test or a
   constant-time check.
   RSA and the NIST curves run on 64-bit limbs on 64-bit targets and on

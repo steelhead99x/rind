@@ -194,7 +194,7 @@ an enum over the modules' key pairs.
 | `UnparsedPublicKey::new(&ECDSA_P256_SHA256_ASN1, bytes).verify(m, s)` | `ecdsa::PublicKey::new(&ecdsa::verify::P256_SHA256_ASN1, bytes)?.verify(m, s)` |
 | `UnparsedPublicKey::new(&ED25519, bytes).verify(m, s)` | `ed25519::PublicKey::new(bytes)?.verify(m, s)` |
 | `UnparsedPublicKey::new(&RSA_PKCS1_2048_8192_SHA256, der).verify(m, s)` | `rsa::PublicKey::new(der)?.verify(&rsa::verify::PKCS1_SHA256, m, s)` |
-| `UnparsedPublicKey::new(&ML_DSA_65, bytes).verify(m, s)` | `ml_dsa::PublicKey::<MlDsa65>::new(bytes)?.verify(m, s)` |
+| `UnparsedPublicKey::new(&ML_DSA_65, bytes).verify(m, s)` | `ml_dsa::PublicKey::<MlDsa65>::new(bytes)?.verify(&[], m, s)` |
 | `UnparsedPublicKey::parse`, `ParsedPublicKey::new(alg, bytes)`, `verify_sig` | the module's `PublicKey::new`, or `PublicKey::from_spki` for a `SubjectPublicKeyInfo`, then `verify` |
 | `VerificationAlgorithm` trait, `&'static dyn VerificationAlgorithm` | none: each module's own algorithm type, or none for Ed25519 and ML-DSA |
 | `ParsedPublicKey::as_der()` | `PublicKey::to_spki()` |
@@ -268,12 +268,18 @@ one set fails to compile where another's is expected.
 | `PqdsaKeyPair::generate(&ML_DSA_65_SIGNING)` | `ml_dsa::KeyPair::<MlDsa65>::generate()` |
 | `PqdsaKeyPair::from_seed(&alg, seed)`, `from_pkcs8(&alg, der)` | `ml_dsa::KeyPair::<P>::from_seed(seed)`, `from_pkcs8(der)`, which takes the seed, expanded, and both forms |
 | `PqdsaKeyPair::to_pkcs8v1()`, `to_pkcs8()` | `to_pkcs8()`, the seed form, or the expanded form for a key loaded without its seed, where aws-lc-rs fails |
-| `PqdsaKeyPair::sign(m, &mut sig)` | `sign(m)`, returning an `ml_dsa::Signature<P>` of the set's fixed length |
+| `PqdsaKeyPair::sign(m, &mut sig)` | `sign(&[], m)`, returning an `ml_dsa::Signature<P>` of the set's fixed length |
 | `PqdsaKeyPair::from_raw_private_key`, `private_key().as_raw_bytes()` | none: load the expanded key as PKCS#8 |
 | `ML_DSA_44`, `ML_DSA_65`, `ML_DSA_87` for verification | `ml_dsa::PublicKey::<MlDsa44>::new(bytes)`, the raw key, or `from_spki(der)`, and so on |
 
 `ml_dsa::PublicKey::new` refuses a `SubjectPublicKeyInfo`, which aws-lc-rs
 takes, and `from_spki` takes it.
+
+From rind 0.4, `KeyPair::sign` and `PublicKey::verify` take FIPS 204's
+context string first, up to 255 bytes: pass `&[]` for the empty context that
+TLS and X.509 use, which is all aws-lc-rs's `sign` and `verify` offer. A
+longer context is `Error::WrongLength` to sign, and a bad signature to
+verify.
 
 ## slh_dsa
 

@@ -71,6 +71,16 @@ slow=(
     high::oaep::tests::every_failure_is_the_same
     high::oaep::tests::round_trip
     high::oaep::tests::stays_secret
+    high::opaque::tests::context_mismatch_fails_both_sides
+    high::opaque::tests::refuses_bad_sessions_and_passwords
+    high::opaque::tests::refuses_other_suites
+    high::opaque::tests::refuses_tampered_messages
+    high::opaque::tests::refuses_wrong_password_and_sessions
+    high::opaque::tests::rfc9807_vectors
+    high::opaque::tests::round_trip
+    high::opaque::tests::setup_encoding
+    high::opaque::tests::stays_secret
+    high::opaque::tests::unknown_account_is_refused
     high::oprf::tests::rfc9497_oprf_vectors
     high::oprf::tests::stays_secret
     high::oprf::voprf::tests::refuses_altered_proofs

@@ -2,12 +2,19 @@
 
 A standalone crate (own `[workspace]`), not a member of rind's workspace.
 
-rind-bench's own bench files (`../rind-bench/benches/*.rs`) compiled unchanged
-as modules of one library, with `criterion` replaced by a tiny shim
+rind-bench's bench files as they were written for criterion, compiled
+unchanged as modules of one library, with `criterion` replaced by a tiny shim
 (`criterion-shim/`) that either lists each row's criterion ID or times it. So
 the app times **every library × every operation bench-report has**, under the
-same IDs (`ed25519-verify/aws-lc-rs`, `aes128-gcm/rind/16KB`, …), and gains any
-row rind-bench adds with no app change. The op list (`src/ops.rs`) is
+same IDs (`ed25519-verify/aws-lc-rs`, `aes128-gcm/rind/16KB`, …).
+
+rind-bench moved its benches to swole (kixel-ai/rind#1141), whose
+`#[bench]` functions this shim cannot run, so `criterion-benches/` keeps the
+last criterion files: fork main's before that merge (741e32ae), merged with
+upstream's last criterion versions (84e2aa83), with their `criterion/`,
+`ossl_aead/`, and `ossl_ec/` modules. The swole files keep the
+same row IDs. Until the app runs swole's benches itself, a row rind-bench adds
+reaches the app only by being copied here. The op list (`src/ops.rs`) is
 generated from `admin/bench-report` by `tools/gen-ops.py` (`--check` reports drift; not wired into CI yet).
 
 Data-driven: the app asks the core for its catalog (rows → op, section,

@@ -1,6 +1,6 @@
 # rind-devbench: rind-bench's benches, every library, run inside a phone or
-# tablet app. The bench files are compiled as modules from ../rind-bench/benches
-# unchanged; `criterion` is a small shim (criterion-shim) that lists or times
+# tablet app. The bench files are compiled as modules from criterion-benches,
+# a copy of rind-bench's criterion benches; `criterion` is a small shim (criterion-shim) that lists or times
 # each row by its criterion ID, so row IDs are exactly bench-report's.
 # Local scratch crate, outside rind's workspace.
 [package]

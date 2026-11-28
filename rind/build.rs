@@ -28,6 +28,12 @@
 //! call. `--cfg rind_limb="32"` forces 32-bit limbs on a 64-bit target, so
 //! CI checks both widths on x86_64; like `rind_portable`, it is for testing.
 //!
+//! It sets `rind_sha256_iram` on ESP-IDF Xtensa, whose portable backend runs
+//! SHA-256 from internal RAM (`low/portable/sha256_iram.rs`). `admin/prove`
+//! forces it on a 32-bit host target, whose Charon build then translates the
+//! same selection, with the module's Rust in place of its Xtensa `asm!`; it
+//! is for proofs, not for shipping.
+//!
 //! And it sets `rind_std` where the target has an operating system and
 //! `std`, the only places rind may use `std`: every target but those for
 //! bare metal (`target_os = "none"`), UEFI, and Linux without a libc, such
@@ -76,6 +82,7 @@ fn main() {
     println!("cargo::rustc-check-cfg=cfg(rind_mul16_soft)");
     println!("cargo::rustc-check-cfg=cfg(rind_reg_asm)");
     println!("cargo::rerun-if-env-changed=RUST_TARGET_PATH");
+    println!("cargo::rustc-check-cfg=cfg(rind_sha256_iram)");
 
     let os = env::var("CARGO_CFG_TARGET_OS").expect("cargo sets the target os");
     let libc = env::var("CARGO_CFG_TARGET_ENV").is_ok_and(|e| !e.is_empty());
@@ -129,6 +136,10 @@ fn main() {
     );
     if reg_asm {
         println!("cargo::rustc-cfg=rind_reg_asm");
+    }
+
+    if arch == "xtensa" && os == "espidf" {
+        println!("cargo::rustc-cfg=rind_sha256_iram");
     }
 
     let wide = env::var("CARGO_CFG_TARGET_POINTER_WIDTH").is_ok_and(|w| w == "64")

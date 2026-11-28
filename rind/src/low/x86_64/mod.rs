@@ -8,6 +8,7 @@ pub(crate) mod aes_ctr;
 pub(crate) mod aes_gcm;
 pub(crate) mod aes_gcm_avx;
 pub(crate) mod aes_gcm_vaes;
+pub(crate) mod aes_gcm_vg;
 #[path = "../generic/aes_nohw.rs"]
 pub(crate) mod aes_nohw;
 pub(crate) mod argon2;

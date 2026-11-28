@@ -180,8 +180,8 @@ theorem closure_eq (a b : V) :
 
 theorem pmull_new_spec (h : Std.U128) (tok : low.aarch64.cpu.HaveCryptoExt)
     (o : Option low.aarch64.cpu.HaveSha3) (ho : low.aarch64.cpu.HaveSha3.check = ok o) :
-    ∃ t, low.aarch64.ghash.PmullTable.new h tok = ok t ∧ TableFor (toPoly h.bv) t := by
-  refine ⟨pmullTableOf h.bv o, ?_, ghashPowers h.bv, ghashPowers_spec h.bv, rfl⟩
+    ∃ t, low.aarch64.ghash.PmullTable.new h tok = ok t ∧ TableFor (toPoly h.bv) t ∧ t.eight_way = o := by
+  refine ⟨pmullTableOf h.bv o, ?_, ⟨ghashPowers h.bv, ghashPowers_spec h.bv, rfl⟩, rfl⟩
   simp only [low.aarch64.ghash.PmullTable.new, low.aarch64.ghash.from_u128, big_endian_eq,
     low.aarch64.ghash.mul, mul_eq, ext1_eq, closure_eq, bind_ok, ho]
   rfl
@@ -334,13 +334,13 @@ theorem ghash_add_spec (H : P) (hH : Small H) (t : low.aarch64.ghash.PmullTable)
   exact ⟨y, by simp [low.aarch64.ghash.Ghash.add, hy], hyp⟩
 
 /-- `GhashTable::new` on a CPU with the crypto extension builds a PMULL table
-of the key's powers. -/
+of the key's powers, with `eight_way` what the SHA3 check found. -/
 theorem ghash_table_new_spec (h : Std.U128) (tok : low.aarch64.cpu.HaveCryptoExt)
     (htok : low.aarch64.cpu.HaveCryptoExt.check = ok (some tok))
     (o : Option low.aarch64.cpu.HaveSha3) (ho : low.aarch64.cpu.HaveSha3.check = ok o) :
-    ∃ t, low.aarch64.ghash.GhashTable.new h = ok (.Pmull t) ∧ TableFor (toPoly h.bv) t := by
-  obtain ⟨t, ht, hf⟩ := pmull_new_spec h tok o ho
-  exact ⟨t, by simp [low.aarch64.ghash.GhashTable.new, htok, ht], hf⟩
+    ∃ t, low.aarch64.ghash.GhashTable.new h = ok (.Pmull t) ∧ TableFor (toPoly h.bv) t ∧ t.eight_way = o := by
+  obtain ⟨t, ht, hf, he⟩ := pmull_new_spec h tok o ho
+  exact ⟨t, by simp [low.aarch64.ghash.GhashTable.new, htok, ht], hf, he⟩
 
 end rind.aarch64.pmull
 

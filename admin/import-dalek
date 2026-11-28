@@ -32,11 +32,16 @@ ADMIN = os.path.dirname(os.path.abspath(__file__))
 DEST = os.path.join(ADMIN, "..", "proofs", "curve25519-dalek")
 LEAN = "curve25519-dalek/lean"
 
-# RFC 7748's X25519 as BAIF states it, and the conversion of Aeneas's byte
-# arrays to the vectors it takes.
+# RFC 7748's X25519 and RFC 8032's edwards25519 as BAIF states them, the
+# conversion of Aeneas's byte arrays to the vectors they take, and BAIF's
+# lemmas about the base point and the encoding, which `Rind.DalekEdwards`
+# reads BAIF's Edwards specs in rind's terms with.
 ROOTS = [
     "ForHumans.Specs.X25519",
+    "ForHumans.Specs.Edwards",
     "ForHumans.Specs.Representation.Array",
+    "Proofs.Curve25519.Edwards.Basepoint",
+    "Proofs.Curve25519.Edwards.Encoding",
 ]
 
 # BAIF's own modules: the rest are Mathlib's, Aeneas's, and BAIF's

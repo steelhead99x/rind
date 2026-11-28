@@ -927,7 +927,7 @@ theorem verify_pss_sha384_spec (h : Runs) (hs : RunsSha512) (key : high.rsa.Veri
         (salt.map (pssSaltLen (((wordsNat (lowWords key.n key.n.used)).size - 1 + 7) / 8) 48)) ⦄ := by
   unfold high.rsa.VerifyingKey.verify_pss_sha384
   step with new_public_spec h
-  exact verify_pss_core_spec (sha384_hashSpec hs) sha384_ctx_new_spec (by decide) maxInput_ge hs.2.1 key
+  exact verify_pss_core_spec (sha384_hashSpec hs) sha384_ctx_new_spec (by decide) maxInput_ge hs.held key
     hinv hP hifma salt signature message hm
 
 /-- RSASSA-PSS-VERIFY with SHA-512 and MGF1 with SHA-512. -/
@@ -940,7 +940,7 @@ theorem verify_pss_sha512_spec (h : Runs) (hs : RunsSha512) (key : high.rsa.Veri
         (salt.map (pssSaltLen (((wordsNat (lowWords key.n key.n.used)).size - 1 + 7) / 8) 64)) ⦄ := by
   unfold high.rsa.VerifyingKey.verify_pss_sha512
   step with new_public_spec h
-  exact verify_pss_core_spec (sha512_hashSpec hs) sha512_ctx_new_spec (by decide) maxInput_ge hs.2.1 key
+  exact verify_pss_core_spec (sha512_hashSpec hs) sha512_ctx_new_spec (by decide) maxInput_ge hs.held key
     hinv hP hifma salt signature message hm
 
 end rind.x86_64

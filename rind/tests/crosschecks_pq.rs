@@ -50,11 +50,122 @@ mod mlkem {
     }
 }
 
+/// aws-lc's ML-DSA under a context string, which aws-lc-rs does not expose,
+/// through aws-lc-sys's `EVP_DigestSign` and `EVP_DigestVerify`.
+mod aws_lc_context {
+    use core::ptr::{null, null_mut};
+
+    use aws_lc_sys::{
+        EVP_DigestSign, EVP_DigestSignInit, EVP_DigestVerify, EVP_DigestVerifyInit, EVP_MD_CTX,
+        EVP_MD_CTX_free, EVP_MD_CTX_new, EVP_PKEY, EVP_PKEY_CTX,
+        EVP_PKEY_CTX_set1_signature_context_string, EVP_PKEY_free,
+        EVP_PKEY_pqdsa_new_raw_private_key,
+    };
+
+    pub struct Key(*mut EVP_PKEY);
+
+    impl Key {
+        /// The key aws-lc expands from `seed`, under parameter set `nid`.
+        pub fn from_seed(nid: i32, seed: &[u8]) -> Self {
+            // SAFETY: `seed` is readable for its length.
+            let key = unsafe { EVP_PKEY_pqdsa_new_raw_private_key(nid, seed.as_ptr(), seed.len()) };
+            assert!(!key.is_null());
+            Self(key)
+        }
+
+        /// Runs `operation` on a context bound to this key and `context`,
+        /// or `None` where aws-lc refuses the context.
+        fn with<T>(
+            &self,
+            context: &[u8],
+            init: unsafe extern "C" fn(
+                *mut EVP_MD_CTX,
+                *mut *mut EVP_PKEY_CTX,
+                *const aws_lc_sys::EVP_MD,
+                *mut aws_lc_sys::ENGINE,
+                *mut EVP_PKEY,
+            ) -> core::ffi::c_int,
+            operation: impl FnOnce(*mut EVP_MD_CTX) -> T,
+        ) -> Option<T> {
+            // SAFETY: each pointer is live for the call it is passed to, and
+            // the context is freed once.
+            unsafe {
+                let ctx = EVP_MD_CTX_new();
+                let mut pkey_ctx = null_mut();
+                let mut result = None;
+                if init(ctx, &mut pkey_ctx, null(), null_mut(), self.0) == 1
+                    && EVP_PKEY_CTX_set1_signature_context_string(
+                        pkey_ctx,
+                        context.as_ptr(),
+                        context.len(),
+                    ) == 1
+                {
+                    result = Some(operation(ctx));
+                }
+                EVP_MD_CTX_free(ctx);
+                result
+            }
+        }
+
+        /// Signs `message` under `context`, or `None` if aws-lc refuses.
+        pub fn sign(&self, context: &[u8], message: &[u8]) -> Option<Vec<u8>> {
+            self.with(context, EVP_DigestSignInit, |ctx| {
+                let mut len = 0;
+                // SAFETY: a null output asks for the length, and the buffer
+                // is as long as that says.
+                unsafe {
+                    assert_eq!(
+                        EVP_DigestSign(ctx, null_mut(), &mut len, message.as_ptr(), message.len()),
+                        1
+                    );
+                    let mut signature = vec![0; len];
+                    assert_eq!(
+                        EVP_DigestSign(
+                            ctx,
+                            signature.as_mut_ptr(),
+                            &mut len,
+                            message.as_ptr(),
+                            message.len()
+                        ),
+                        1
+                    );
+                    signature.truncate(len);
+                    signature
+                }
+            })
+        }
+
+        /// Whether `signature` verifies over `message` under `context`.
+        pub fn verify(&self, context: &[u8], message: &[u8], signature: &[u8]) -> bool {
+            self.with(context, EVP_DigestVerifyInit, |ctx| {
+                // SAFETY: each slice is readable for its length.
+                unsafe {
+                    EVP_DigestVerify(
+                        ctx,
+                        signature.as_ptr(),
+                        signature.len(),
+                        message.as_ptr(),
+                        message.len(),
+                    ) == 1
+                }
+            })
+            .unwrap_or(false)
+        }
+    }
+
+    impl Drop for Key {
+        fn drop(&mut self) {
+            // SAFETY: the key is live, and freed once.
+            unsafe { EVP_PKEY_free(self.0) };
+        }
+    }
+}
+
 /// ML-DSA against aws-lc-rs, which runs mldsa-native with the same
 /// s2n-bignum kernels, and against RustCrypto's, which shares no code with
 /// rind.
 macro_rules! ml_dsa_crosschecks {
-    ($set:ident, $signing:ident, $verify:ident, $rustcrypto:ident) => {
+    ($set:ident, $signing:ident, $verify:ident, $rustcrypto:ident, $nid:ident) => {
         use aws_lc_rs::encoding::{AsDer, AsRawBytes};
         use aws_lc_rs::signature::{KeyPair, PqdsaKeyPair, UnparsedPublicKey, $signing};
         use proptest::collection::vec;
@@ -87,20 +198,20 @@ macro_rules! ml_dsa_crosschecks {
 
                 // Signing is hedged, so each verifies the other's signature
                 // rather than matching its bytes.
-                let ours_signature = ours.sign(&message).unwrap();
+                let ours_signature = ours.sign(&[], &message).unwrap();
                 UnparsedPublicKey::new(&aws_lc_rs::signature::$verify, public)
                     .verify(&message, ours_signature.as_ref())
                     .unwrap();
                 let mut signature = vec![0; $signing.signature_len()];
                 theirs.sign(&message, &mut signature).unwrap();
                 let verifier = PublicKey::<$set>::from_spki(spki.as_ref()).unwrap();
-                verifier.verify(&message, &signature).unwrap();
+                verifier.verify(&[], &message, &signature).unwrap();
 
                 // Both refuse it with any one bit flipped.
                 if let Some(flip) = flip {
                     let bit = flip.index(signature.len() * 8);
                     signature[bit / 8] ^= 1 << (bit % 8);
-                    prop_assert!(verifier.verify(&message, &signature).is_err());
+                    prop_assert!(verifier.verify(&[], &message, &signature).is_err());
                     prop_assert!(
                         UnparsedPublicKey::new(&aws_lc_rs::signature::$verify, public)
                             .verify(&message, &signature)
@@ -114,6 +225,7 @@ macro_rules! ml_dsa_crosschecks {
             #[test]
             fn oracle(
                 seed in any::<[u8; 32]>(),
+                context in vec(any::<u8>(), 0..=255),
                 message in vec(any::<u8>(), 0..300),
                 flip in any::<Index>(),
             ) {
@@ -122,19 +234,50 @@ macro_rules! ml_dsa_crosschecks {
                 let their_public = theirs.verifying_key();
                 prop_assert_eq!(ours.public_key().as_ref(), &their_public.encode()[..]);
 
-                let ours_signature = ours.sign(&message).unwrap();
+                let ours_signature = ours.sign(&context, &message).unwrap();
                 let decoded = ml_dsa::Signature::try_from(ours_signature.as_ref()).unwrap();
-                prop_assert!(their_public.verify_with_context(&message, &[], &decoded));
-                let mut signature = theirs.sign_deterministic(&message, &[]).unwrap().encode().to_vec();
+                prop_assert!(their_public.verify_with_context(&message, &context, &decoded));
+                let mut signature = theirs.sign_deterministic(&message, &context).unwrap().encode().to_vec();
                 let verifier = ours.public_key();
-                verifier.verify(&message, &signature).unwrap();
+                verifier.verify(&context, &message, &signature).unwrap();
 
                 let bit = flip.index(signature.len() * 8);
                 signature[bit / 8] ^= 1 << (bit % 8);
-                prop_assert!(verifier.verify(&message, &signature).is_err());
+                prop_assert!(verifier.verify(&context, &message, &signature).is_err());
                 let refused = ml_dsa::Signature::try_from(signature.as_slice())
-                    .is_ok_and(|signature| their_public.verify_with_context(&message, &[], &signature));
+                    .is_ok_and(|signature| their_public.verify_with_context(&message, &context, &signature));
                 prop_assert!(!refused);
+            }
+
+            /// aws-lc signs and verifies under a context as rind does, and
+            /// neither takes a context past 255 bytes or verifies under a
+            /// different one.
+            #[test]
+            fn context(
+                seed in any::<[u8; 32]>(),
+                context in vec(any::<u8>(), 0..=255),
+                message in vec(any::<u8>(), 0..300),
+            ) {
+                let theirs = super::aws_lc_context::Key::from_seed(aws_lc_sys::$nid, &seed);
+                let ours = MlDsaKeyPair::<$set>::from_seed(&seed).unwrap();
+                let public = ours.public_key();
+
+                let signature = ours.sign(&context, &message).unwrap();
+                prop_assert!(theirs.verify(&context, &message, signature.as_ref()));
+                let signature = theirs.sign(&context, &message).unwrap();
+                public.verify(&context, &message, &signature).unwrap();
+
+                // Dropping its first byte, or adding one to the empty
+                // context, makes another context.
+                let other = if context.is_empty() { vec![0] } else { context[1..].to_vec() };
+                prop_assert!(public.verify(&other, &message, &signature).is_err());
+                prop_assert!(!theirs.verify(&other, &message, &signature));
+
+                let long = [&context[..], &[0; 256][..]].concat();
+                prop_assert!(ours.sign(&long, &message).is_err());
+                prop_assert!(theirs.sign(&long, &message).is_none());
+                prop_assert!(public.verify(&long, &message, &signature).is_err());
+                prop_assert!(!theirs.verify(&long, &message, &signature));
             }
 
             /// Both load the other's expanded key, which has no seed, and
@@ -157,7 +300,7 @@ macro_rules! ml_dsa_crosschecks {
                 let ours_pkcs8 = ours.to_pkcs8();
                 let reloaded = PqdsaKeyPair::from_pkcs8(&$signing, ours_pkcs8.as_ref()).unwrap();
                 prop_assert_eq!(reloaded.public_key().as_ref(), theirs.public_key().as_ref());
-                let signature = ours.sign(&message).unwrap();
+                let signature = ours.sign(&[], &message).unwrap();
                 UnparsedPublicKey::new(&aws_lc_rs::signature::$verify, theirs.public_key().as_ref())
                     .verify(&message, signature.as_ref())
                     .unwrap();
@@ -182,15 +325,15 @@ macro_rules! ml_dsa_crosschecks {
 }
 
 mod ml_dsa_44 {
-    ml_dsa_crosschecks!(MlDsa44, ML_DSA_44_SIGNING, ML_DSA_44, MlDsa44);
+    ml_dsa_crosschecks!(MlDsa44, ML_DSA_44_SIGNING, ML_DSA_44, MlDsa44, NID_MLDSA44);
 }
 
 mod ml_dsa_65 {
-    ml_dsa_crosschecks!(MlDsa65, ML_DSA_65_SIGNING, ML_DSA_65, MlDsa65);
+    ml_dsa_crosschecks!(MlDsa65, ML_DSA_65_SIGNING, ML_DSA_65, MlDsa65, NID_MLDSA65);
 }
 
 mod ml_dsa_87 {
-    ml_dsa_crosschecks!(MlDsa87, ML_DSA_87_SIGNING, ML_DSA_87, MlDsa87);
+    ml_dsa_crosschecks!(MlDsa87, ML_DSA_87_SIGNING, ML_DSA_87, MlDsa87, NID_MLDSA87);
 }
 
 // aws-lc-rs has no SLH-DSA, so RustCrypto's and integritychain's `fips205`

@@ -234,11 +234,13 @@ jobs:
           check: hol-light x86_64
           key: ${{ needs.keys.outputs.hol-light-x86_64 }}
 
+  # armv7's proofs took 465 s on GitHub's runner, 245 s of them in the NEON
+  # SHA-512, after 12 minutes of build, so the job ran about 20 minutes.
   hol-light-armv7:
     needs: [select, keys]
     if: ${{ !cancelled() && (!inputs.jobs || contains(fromJSON(needs.select.outputs.jobs || '[]'), 'hol-light-armv7')) && needs.keys.outputs.hit-hol-light-armv7 != 'true' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -270,8 +272,7 @@ jobs:
 
   # pyca/verified-garbage's code for each target against VG's Lean models,
   # on the runner's CPU and, for what it lacks, Intel SDE or qemu-aarch64.
-  # Each run takes its run ID as the seed, so each tries new cases; the merge
-  # queue's build runs x86_64's with a fixed seed.
+  # Each run takes its run ID as the seed, so each tries new cases.
   vg:
     needs: select
     if: ${{ !cancelled() && (!inputs.jobs || contains(fromJSON(needs.select.outputs.jobs || '[]'), 'vg')) && github.event_name != 'push' }}

@@ -3,9 +3,11 @@
 //! AES-GCM on VAES and VPCLMULQDQ, with BoringSSL's `aes-gcm-avx2-x86_64` and
 //! `aes-gcm-avx512-x86_64` kernels, imported by `admin/import-boringssl`.
 //!
-//! Neither is formally verified: their correctness rests on their use and
-//! testing in BoringSSL and Linux, and on rind's tests of them against the
-//! portable GHASH, Wycheproof, and aws-lc-rs. Both support in-place use.
+//! Only the AVX2 key setup, `gcm_init_vpclmulqdq_avx2`, is formally verified
+//! (`proofs/Rind/X86_64/GcmInitAvx2.lean`). The rest's correctness rests on
+//! its use and testing in BoringSSL and Linux, and on rind's tests of it
+//! against the portable GHASH, Wycheproof, and aws-lc-rs. Both kernels
+//! support in-place use.
 
 use core::arch::x86_64::*;
 

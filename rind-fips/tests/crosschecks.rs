@@ -245,7 +245,7 @@ fn check<P: ml_dsa::ParameterSet>(
         // Signing is hedged, so each verifies the other's signature rather
         // than matching its bytes.
         let message = random(100);
-        let signature = ours.sign(&message).unwrap();
+        let signature = ours.sign(&[], &message).unwrap();
         theirs::UnparsedPublicKey::new(theirs_verifying, &public)
             .verify(&message, signature.as_ref())
             .unwrap();
@@ -253,7 +253,7 @@ fn check<P: ml_dsa::ParameterSet>(
         theirs_key.sign(&message, &mut theirs_signature).unwrap();
         ml_dsa::PublicKey::<P>::new(&public)
             .unwrap()
-            .verify(&message, &theirs_signature)
+            .verify(&[], &message, &theirs_signature)
             .unwrap();
     }
 }

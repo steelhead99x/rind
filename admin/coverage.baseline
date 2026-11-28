@@ -86,6 +86,7 @@
 5 0 0 rind/src/high/hpke.rs
 1 0 0 rind/src/high/kem.rs
 3 0 0 rind/src/high/oaep.rs
+50 0 0 rind/src/high/opaque.rs
 11 1 14 rind/src/high/oprf.rs
 17 0 0 rind/src/high/oprf/voprf.rs
 1 0 0 rind/src/high/pbkdf2.rs

@@ -316,6 +316,50 @@ proptest! {
             .unwrap();
         prop_assert_eq!(theirs_secret.as_ref(), secret.as_ref());
 
+        // Each library loads the other's saved key, and saves it back unchanged.
+        let ours_bytes = ours_key.key_bytes().unwrap();
+        let theirs_bytes = theirs_key.key_bytes().unwrap();
+        prop_assert_eq!(ours_bytes.as_ref().len(), theirs_bytes.as_ref().len());
+        let theirs_loaded = theirs::kem::DecapsulationKey::new(theirs_alg, ours_bytes.as_ref()).unwrap();
+        let ours_loaded = ours::kem::DecapsulationKey::new(ours_alg, theirs_bytes.as_ref()).unwrap();
+        let ours_saved = ours_loaded.key_bytes().unwrap();
+        let theirs_saved = theirs_loaded.key_bytes().unwrap();
+        prop_assert_eq!(ours_saved.as_ref(), theirs_bytes.as_ref());
+        prop_assert_eq!(theirs_saved.as_ref(), ours_bytes.as_ref());
+        // A loaded key decapsulates what its original does.
+        let (ciphertext, _) = peer.encapsulate().unwrap();
+        let original = theirs_key
+            .decapsulate(theirs::kem::Ciphertext::from(ciphertext.as_ref()))
+            .unwrap();
+        let loaded = ours_loaded
+            .decapsulate(ours::kem::Ciphertext::from(ciphertext.as_ref()))
+            .unwrap();
+        prop_assert_eq!(original.as_ref(), loaded.as_ref());
+        let (ciphertext, _) = theirs::kem::EncapsulationKey::new(theirs_alg, ours_public.as_ref())
+            .unwrap()
+            .encapsulate()
+            .unwrap();
+        let original = ours_key
+            .decapsulate(ours::kem::Ciphertext::from(ciphertext.as_ref()))
+            .unwrap();
+        let loaded = theirs_loaded
+            .decapsulate(theirs::kem::Ciphertext::from(ciphertext.as_ref()))
+            .unwrap();
+        prop_assert_eq!(original.as_ref(), loaded.as_ref());
+
+        // The wrong length is refused as aws-lc-rs refuses it.
+        for len in [0, ours_bytes.as_ref().len() - 1, ours_bytes.as_ref().len() + 1] {
+            let bytes = vec![0; len];
+            let ours_err = ours::kem::DecapsulationKey::new(ours_alg, &bytes).err().unwrap();
+            let theirs_err = theirs::kem::DecapsulationKey::new(theirs_alg, &bytes).err().unwrap();
+            prop_assert_eq!(ours_err.to_string(), theirs_err.to_string());
+        }
+        // An `H(ek)` that is not its key's is refused, which aws-lc-rs does not check.
+        let mut corrupt = ours_bytes.as_ref().to_vec();
+        let at = corrupt.len() - 33;
+        corrupt[at] ^= 1;
+        prop_assert!(ours::kem::DecapsulationKey::new(ours_alg, &corrupt).is_err());
+
         use ours::kem::AlgorithmIdentifier as _;
         use theirs::kem::AlgorithmIdentifier as _;
         prop_assert_eq!(ours_alg.id().nid(), theirs_alg.id().nid());

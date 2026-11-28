@@ -49,7 +49,14 @@ DECL = re.compile(r"^\s*(?:@\[[^\]]*\]\s*)*(?:(?:private|protected|noncomputable
 # Routines rind vendors that no axiom covers, and why. A routine that calls
 # others covers them too.
 UNCOVERED = {
-    "x86_64": {},
+    "x86_64": {
+        name: "rind's AVX-512 AES-GCM is not proven yet; [its quest](/quest/m4/verified/aes-gcm-x86-vaes.md) restates VG's"
+        for name in [
+            "vg_aes_gcm_prepare_vpclmul_avx512",
+            "vg_aes_gcm_seal_prepared_vaes_vpclmul_avx512",
+            "vg_aes_gcm_open_prepared_vaes_vpclmul_avx512",
+        ]
+    },
     "aarch64": {
         "vg_rsa_public_precompute": "rind's aarch64 RSA is not proven yet; [its quest](/quest/m4/verified/rsa-aarch64-mont-import.md) restates VG's",
     },

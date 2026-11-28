@@ -5,12 +5,15 @@
 fn main() {}
 
 #[cfg(not(target_arch = "xtensa"))]
-mod criterion;
-#[cfg(not(target_arch = "xtensa"))]
-use std::hint::black_box;
+mod common;
 
 #[cfg(not(target_arch = "xtensa"))]
-use criterion::{BatchSize, Criterion, Throughput, criterion_group, criterion_main};
+use std::hint::black_box;
+#[cfg(not(target_arch = "xtensa"))]
+use std::sync::Once;
+
+#[cfg(not(target_arch = "xtensa"))]
+use common::{Dit, Size};
 
 #[cfg(not(target_arch = "xtensa"))]
 const INFO: &[u8] = b"rind-bench info";
@@ -18,6 +21,10 @@ const INFO: &[u8] = b"rind-bench info";
 const AAD: &[u8] = b"rind-bench aad";
 #[cfg(not(target_arch = "xtensa"))]
 const MESSAGE: [u8; 1350] = [0x5a; 1350];
+
+/// The message's one size, which the seal and open rows are named by.
+#[cfg(not(target_arch = "xtensa"))]
+const SIZE: [Size; 1] = [Size::new(MESSAGE.len(), "1350B")];
 
 #[cfg(not(target_arch = "xtensa"))]
 type RcKem = hpke::kem::X25519HkdfSha256;
@@ -49,10 +56,18 @@ fn libcrux_hpke() -> hpke_rs::Hpke<hpke_rs::libcrux::HpkeLibcrux> {
 const AWS_LC_RS: &dyn rustls::crypto::hpke::Hpke =
     rustls::crypto::aws_lc_rs::hpke::DH_KEM_X25519_HKDF_SHA256_AES_128;
 
-// Checks, untimed, that every library speaks the same suite as rind: each
-// opens a message rind sealed to it, and rind opens one each sealed to rind.
+/// Checks, once a process, that every library speaks the same suite as
+/// rind: each opens a message rind sealed to it, and rind opens one each
+/// sealed to rind. Every row's setup runs it, so a row never times a library
+/// that disagrees.
 #[cfg(not(target_arch = "xtensa"))]
 fn check_interop() {
+    static CHECKED: Once = Once::new();
+    CHECKED.call_once(interop);
+}
+
+#[cfg(not(target_arch = "xtensa"))]
+fn interop() {
     use hpke::{Deserializable, Kem, OpModeR, OpModeS, Serializable};
     use rind::hpke::{DHKEM_X25519_HKDF_SHA256, PrivateKey, PublicKey, Recipient, Sender};
 
@@ -120,261 +135,367 @@ fn check_interop() {
     rind_open(&enc, sender.seal(AAD, &MESSAGE).unwrap());
 }
 
-// Encapsulate to the recipient's parsed public key and derive the context.
 #[cfg(not(target_arch = "xtensa"))]
-fn setup_sender(c: &mut Criterion) {
+fn rind_key() -> rind::hpke::PrivateKey {
     check_interop();
-
-    let mut group = c.benchmark_group("hpke-x25519-setup-sender");
-    group.throughput(Throughput::Elements(1));
-
-    group.bench_function("rind", |b| {
-        let _dit = criterion::rind_dit();
-        use rind::hpke::{DHKEM_X25519_HKDF_SHA256, PrivateKey, Sender};
-        let private_key = PrivateKey::generate(&DHKEM_X25519_HKDF_SHA256).unwrap();
-        let public_key = private_key.public_key();
-        b.iter(|| black_box(Sender::new(rind_suite(), public_key, INFO).unwrap()));
-    });
-
-    group.bench_function("aws-lc-rs", |b| {
-        let (public_key, _) = AWS_LC_RS.generate_key_pair().unwrap();
-        b.iter(|| black_box(AWS_LC_RS.setup_sealer(INFO, &public_key).unwrap()));
-    });
-
-    group.bench_function("rustcrypto", |b| {
-        use hpke::{Kem, OpModeS};
-        let (_, public_key) = RcKem::gen_keypair();
-        b.iter(|| {
-            black_box(
-                hpke::setup_sender::<RcAead, RcKdf, RcKem>(&OpModeS::Base, &public_key, INFO)
-                    .unwrap(),
-            )
-        });
-    });
-
-    group.bench_function("libcrux", |b| {
-        let mut hpke = libcrux_hpke();
-        let key_pair = hpke.generate_key_pair().unwrap();
-        b.iter(|| {
-            black_box(
-                hpke.setup_sender(key_pair.public_key(), INFO, None, None, None)
-                    .unwrap(),
-            )
-        });
-    });
+    rind::hpke::PrivateKey::generate(&rind::hpke::DHKEM_X25519_HKDF_SHA256).unwrap()
 }
 
-// Decapsulate the sender's key and derive the same context.
 #[cfg(not(target_arch = "xtensa"))]
-fn setup_recipient(c: &mut Criterion) {
-    let mut group = c.benchmark_group("hpke-x25519-setup-recipient");
-    group.throughput(Throughput::Elements(1));
+fn aws_lc_rs_key() -> (
+    rustls::crypto::hpke::HpkePublicKey,
+    rustls::crypto::hpke::HpkePrivateKey,
+) {
+    check_interop();
+    AWS_LC_RS.generate_key_pair().unwrap()
+}
 
-    group.bench_function("rind", |b| {
-        let _dit = criterion::rind_dit();
-        use rind::hpke::{DHKEM_X25519_HKDF_SHA256, PrivateKey, Recipient, Sender};
-        let private_key = PrivateKey::generate(&DHKEM_X25519_HKDF_SHA256).unwrap();
-        let (enc, _) = Sender::new(rind_suite(), private_key.public_key(), INFO).unwrap();
-        b.iter(|| {
-            black_box(Recipient::new(rind_suite(), &private_key, enc.as_ref(), INFO).unwrap())
-        });
-    });
+#[cfg(not(target_arch = "xtensa"))]
+fn rustcrypto_key() -> (
+    <RcKem as hpke::Kem>::PrivateKey,
+    <RcKem as hpke::Kem>::PublicKey,
+) {
+    use hpke::Kem;
+    check_interop();
+    RcKem::gen_keypair()
+}
 
-    group.bench_function("aws-lc-rs", |b| {
-        let (public_key, private_key) = AWS_LC_RS.generate_key_pair().unwrap();
-        let (enc, _) = AWS_LC_RS.setup_sealer(INFO, &public_key).unwrap();
-        b.iter(|| black_box(AWS_LC_RS.setup_opener(&enc, INFO, &private_key).unwrap()));
-    });
+#[cfg(not(target_arch = "xtensa"))]
+fn libcrux_key() -> (
+    hpke_rs::Hpke<hpke_rs::libcrux::HpkeLibcrux>,
+    hpke_rs::HpkeKeyPair,
+) {
+    check_interop();
+    let mut hpke = libcrux_hpke();
+    let key_pair = hpke.generate_key_pair().unwrap();
+    (hpke, key_pair)
+}
 
-    group.bench_function("rustcrypto", |b| {
-        use hpke::{Kem, OpModeR, OpModeS};
-        let (private_key, public_key) = RcKem::gen_keypair();
-        let (enc, _) =
-            hpke::setup_sender::<RcAead, RcKdf, RcKem>(&OpModeS::Base, &public_key, INFO).unwrap();
-        b.iter(|| {
-            black_box(
-                hpke::setup_receiver::<RcAead, RcKdf, RcKem>(
-                    &OpModeR::Base,
-                    &private_key,
-                    &enc,
-                    INFO,
-                )
+/// Encapsulate to the recipient's parsed public key and derive the context.
+#[cfg(not(target_arch = "xtensa"))]
+mod hpke_x25519_setup_sender {
+    use swole::bench;
+
+    use super::*;
+
+    fn rind_input() -> Dit<rind::hpke::PrivateKey> {
+        Dit::hold(rind_key())
+    }
+
+    #[bench(setup = rind_input)]
+    fn rind(private_key: &Dit<rind::hpke::PrivateKey>) {
+        black_box(rind::hpke::Sender::new(rind_suite(), private_key.public_key(), INFO).unwrap());
+    }
+
+    fn aws_lc_rs_input() -> rustls::crypto::hpke::HpkePublicKey {
+        aws_lc_rs_key().0
+    }
+
+    #[bench(setup = aws_lc_rs_input)]
+    fn aws_lc_rs(public_key: &rustls::crypto::hpke::HpkePublicKey) {
+        black_box(AWS_LC_RS.setup_sealer(INFO, public_key).unwrap());
+    }
+
+    fn rustcrypto_input() -> <RcKem as hpke::Kem>::PublicKey {
+        rustcrypto_key().1
+    }
+
+    #[bench(setup = rustcrypto_input)]
+    fn rustcrypto(public_key: &<RcKem as hpke::Kem>::PublicKey) {
+        black_box(
+            hpke::setup_sender::<RcAead, RcKdf, RcKem>(&hpke::OpModeS::Base, public_key, INFO)
                 .unwrap(),
-            )
-        });
-    });
+        );
+    }
 
-    group.bench_function("libcrux", |b| {
-        let mut hpke = libcrux_hpke();
-        let key_pair = hpke.generate_key_pair().unwrap();
+    #[bench(setup = libcrux_key)]
+    fn libcrux(
+        (hpke, key_pair): &mut (
+            hpke_rs::Hpke<hpke_rs::libcrux::HpkeLibcrux>,
+            hpke_rs::HpkeKeyPair,
+        ),
+    ) {
+        black_box(
+            hpke.setup_sender(key_pair.public_key(), INFO, None, None, None)
+                .unwrap(),
+        );
+    }
+}
+
+/// Decapsulate the sender's key and derive the same context.
+#[cfg(not(target_arch = "xtensa"))]
+mod hpke_x25519_setup_recipient {
+    use swole::bench;
+
+    use super::*;
+
+    fn rind_input() -> Dit<(rind::hpke::PrivateKey, rind::hpke::EncapsulatedKey)> {
+        let private_key = rind_key();
+        let (enc, _) =
+            rind::hpke::Sender::new(rind_suite(), private_key.public_key(), INFO).unwrap();
+        Dit::hold((private_key, enc))
+    }
+
+    #[bench(setup = rind_input)]
+    fn rind(input: &Dit<(rind::hpke::PrivateKey, rind::hpke::EncapsulatedKey)>) {
+        let (private_key, enc) = &**input;
+        black_box(
+            rind::hpke::Recipient::new(rind_suite(), private_key, enc.as_ref(), INFO).unwrap(),
+        );
+    }
+
+    fn aws_lc_rs_input() -> (
+        rustls::crypto::hpke::EncapsulatedSecret,
+        rustls::crypto::hpke::HpkePrivateKey,
+    ) {
+        let (public_key, private_key) = aws_lc_rs_key();
+        let (enc, _) = AWS_LC_RS.setup_sealer(INFO, &public_key).unwrap();
+        (enc, private_key)
+    }
+
+    #[bench(setup = aws_lc_rs_input)]
+    fn aws_lc_rs(
+        (enc, private_key): &(
+            rustls::crypto::hpke::EncapsulatedSecret,
+            rustls::crypto::hpke::HpkePrivateKey,
+        ),
+    ) {
+        black_box(AWS_LC_RS.setup_opener(enc, INFO, private_key).unwrap());
+    }
+
+    fn rustcrypto_input() -> (
+        <RcKem as hpke::Kem>::PrivateKey,
+        <RcKem as hpke::Kem>::EncappedKey,
+    ) {
+        let (private_key, public_key) = rustcrypto_key();
+        let (enc, _) =
+            hpke::setup_sender::<RcAead, RcKdf, RcKem>(&hpke::OpModeS::Base, &public_key, INFO)
+                .unwrap();
+        (private_key, enc)
+    }
+
+    #[bench(setup = rustcrypto_input)]
+    fn rustcrypto(
+        (private_key, enc): &(
+            <RcKem as hpke::Kem>::PrivateKey,
+            <RcKem as hpke::Kem>::EncappedKey,
+        ),
+    ) {
+        black_box(
+            hpke::setup_receiver::<RcAead, RcKdf, RcKem>(
+                &hpke::OpModeR::Base,
+                private_key,
+                enc,
+                INFO,
+            )
+            .unwrap(),
+        );
+    }
+
+    type Libcrux = (
+        hpke_rs::Hpke<hpke_rs::libcrux::HpkeLibcrux>,
+        hpke_rs::HpkeKeyPair,
+        Vec<u8>,
+    );
+
+    fn libcrux_input() -> Libcrux {
+        let (mut hpke, key_pair) = libcrux_key();
         let (enc, _) = hpke
             .setup_sender(key_pair.public_key(), INFO, None, None, None)
             .unwrap();
-        b.iter(|| {
-            black_box(
-                hpke.setup_receiver(&enc, key_pair.private_key(), INFO, None, None, None)
-                    .unwrap(),
-            )
-        });
-    });
+        (hpke, key_pair, enc)
+    }
+
+    #[bench(setup = libcrux_input)]
+    fn libcrux((hpke, key_pair, enc): &mut Libcrux) {
+        black_box(
+            hpke.setup_receiver(enc, key_pair.private_key(), INFO, None, None, None)
+                .unwrap(),
+        );
+    }
 }
 
-// Seal the next message of an established context. rind and `hpke` seal in
-// place into a reused buffer; aws-lc-rs (through rustls) and hpke-rs only
-// return a new one.
+/// Seal the next message of an established context. rind and `hpke` seal in
+/// place into a reused buffer; aws-lc-rs (through rustls) and hpke-rs only
+/// return a new one.
 #[cfg(not(target_arch = "xtensa"))]
-fn seal(c: &mut Criterion) {
-    let mut group = c.benchmark_group("hpke-x25519-aes128-gcm-seal");
-    group.throughput(Throughput::Bytes(MESSAGE.len() as u64));
+mod hpke_x25519_aes128_gcm_seal {
+    use swole::bench;
 
-    group.bench_function("rind/1350B", |b| {
-        let _dit = criterion::rind_dit();
-        use rind::hpke::{DHKEM_X25519_HKDF_SHA256, PrivateKey, Sender};
-        let private_key = PrivateKey::generate(&DHKEM_X25519_HKDF_SHA256).unwrap();
-        let public_key = private_key.public_key();
-        let (_, mut sender) = Sender::new(rind_suite(), public_key, INFO).unwrap();
-        let mut buffer = Vec::with_capacity(MESSAGE.len() + 16);
-        b.iter(|| {
-            buffer.clear();
-            buffer.extend_from_slice(&MESSAGE);
-            sender.seal_in_place_append_tag(AAD, &mut buffer).unwrap();
-            black_box(&buffer);
-        });
-    });
+    use super::*;
 
-    group.bench_function("aws-lc-rs/1350B", |b| {
-        let (public_key, _) = AWS_LC_RS.generate_key_pair().unwrap();
-        let (_, mut sealer) = AWS_LC_RS.setup_sealer(INFO, &public_key).unwrap();
-        b.iter(|| black_box(sealer.seal(AAD, &MESSAGE).unwrap()));
-    });
+    fn buffer() -> Vec<u8> {
+        Vec::with_capacity(MESSAGE.len() + 16)
+    }
 
-    group.bench_function("rustcrypto/1350B", |b| {
-        use hpke::{Kem, OpModeS, Serializable};
-        let (_, public_key) = RcKem::gen_keypair();
-        let (_, mut sender) =
-            hpke::setup_sender::<RcAead, RcKdf, RcKem>(&OpModeS::Base, &public_key, INFO).unwrap();
-        let mut buffer = Vec::with_capacity(MESSAGE.len() + 16);
-        b.iter(|| {
-            buffer.clear();
-            buffer.extend_from_slice(&MESSAGE);
-            let tag = sender
-                .seal_inout_detached(buffer.as_mut_slice().into(), AAD)
+    fn rind_input(_: Size) -> Dit<(rind::hpke::Sender, Vec<u8>)> {
+        let private_key = rind_key();
+        let (_, sender) =
+            rind::hpke::Sender::new(rind_suite(), private_key.public_key(), INFO).unwrap();
+        Dit::hold((sender, buffer()))
+    }
+
+    #[bench(args = SIZE, setup = rind_input)]
+    fn rind(input: &mut Dit<(rind::hpke::Sender, Vec<u8>)>) {
+        let (sender, buffer) = &mut **input;
+        buffer.clear();
+        buffer.extend_from_slice(&MESSAGE);
+        sender.seal_in_place_append_tag(AAD, buffer).unwrap();
+        black_box(buffer);
+    }
+
+    fn aws_lc_rs_input(_: Size) -> Box<dyn rustls::crypto::hpke::HpkeSealer> {
+        let (public_key, _) = aws_lc_rs_key();
+        AWS_LC_RS.setup_sealer(INFO, &public_key).unwrap().1
+    }
+
+    #[bench(args = SIZE, setup = aws_lc_rs_input)]
+    fn aws_lc_rs(sealer: &mut Box<dyn rustls::crypto::hpke::HpkeSealer>) {
+        black_box(sealer.seal(AAD, &MESSAGE).unwrap());
+    }
+
+    type RustCrypto = (hpke::aead::AeadCtxS<RcAead, RcKdf, RcKem>, Vec<u8>);
+
+    fn rustcrypto_input(_: Size) -> RustCrypto {
+        let (_, public_key) = rustcrypto_key();
+        let (_, sender) =
+            hpke::setup_sender::<RcAead, RcKdf, RcKem>(&hpke::OpModeS::Base, &public_key, INFO)
                 .unwrap();
-            buffer.extend_from_slice(&tag.to_bytes());
-            black_box(&buffer);
-        });
-    });
+        (sender, buffer())
+    }
 
-    group.bench_function("libcrux/1350B", |b| {
-        let mut hpke = libcrux_hpke();
-        let key_pair = hpke.generate_key_pair().unwrap();
-        let (_, mut sender) = hpke
+    #[bench(args = SIZE, setup = rustcrypto_input)]
+    fn rustcrypto((sender, buffer): &mut RustCrypto) {
+        use hpke::Serializable;
+        buffer.clear();
+        buffer.extend_from_slice(&MESSAGE);
+        let tag = sender
+            .seal_inout_detached(buffer.as_mut_slice().into(), AAD)
+            .unwrap();
+        buffer.extend_from_slice(&tag.to_bytes());
+        black_box(buffer);
+    }
+
+    fn libcrux_input(_: Size) -> hpke_rs::Context<hpke_rs::libcrux::HpkeLibcrux> {
+        let (mut hpke, key_pair) = libcrux_key();
+        hpke.setup_sender(key_pair.public_key(), INFO, None, None, None)
+            .unwrap()
+            .1
+    }
+
+    #[bench(args = SIZE, setup = libcrux_input)]
+    fn libcrux(sender: &mut hpke_rs::Context<hpke_rs::libcrux::HpkeLibcrux>) {
+        black_box(sender.seal(AAD, &MESSAGE).unwrap());
+    }
+}
+
+/// Open a context's first message. A context opens each sequence number
+/// once, so each call gets a fresh context and ciphertext, made untimed, and
+/// returns them to be dropped untimed too.
+#[cfg(not(target_arch = "xtensa"))]
+mod hpke_x25519_aes128_gcm_open {
+    use swole::bench;
+
+    use super::*;
+
+    type Rind = (rind::cpu::Dit, rind::hpke::Recipient, Vec<u8>);
+
+    /// A recipient and its first ciphertext, with the DIT guard held across
+    /// the call that consumes them.
+    fn rind_input(_: Size) -> Rind {
+        let private_key = rind_key();
+        let (enc, mut sender) =
+            rind::hpke::Sender::new(rind_suite(), private_key.public_key(), INFO).unwrap();
+        let mut ciphertext = MESSAGE.to_vec();
+        sender
+            .seal_in_place_append_tag(AAD, &mut ciphertext)
+            .unwrap();
+        let recipient =
+            rind::hpke::Recipient::new(rind_suite(), &private_key, enc.as_ref(), INFO).unwrap();
+        (rind::cpu::Dit::hold(), recipient, ciphertext)
+    }
+
+    #[bench(args = SIZE, setup = rind_input)]
+    fn rind((dit, mut recipient, mut ciphertext): Rind) -> impl Sized + use<> {
+        let len = recipient.open_in_place(AAD, &mut ciphertext).unwrap().len();
+        (len, dit, recipient, ciphertext)
+    }
+
+    type AwsLcRs = (Box<dyn rustls::crypto::hpke::HpkeOpener>, Vec<u8>);
+
+    fn aws_lc_rs_input(_: Size) -> AwsLcRs {
+        let (public_key, private_key) = aws_lc_rs_key();
+        let (enc, mut sealer) = AWS_LC_RS.setup_sealer(INFO, &public_key).unwrap();
+        let ciphertext = sealer.seal(AAD, &MESSAGE).unwrap();
+        let opener = AWS_LC_RS.setup_opener(&enc, INFO, &private_key).unwrap();
+        (opener, ciphertext)
+    }
+
+    #[bench(args = SIZE, setup = aws_lc_rs_input)]
+    fn aws_lc_rs((mut opener, ciphertext): AwsLcRs) -> impl Sized + use<> {
+        (opener.open(AAD, &ciphertext).unwrap(), opener, ciphertext)
+    }
+
+    type RustCrypto = (hpke::aead::AeadCtxR<RcAead, RcKdf, RcKem>, Vec<u8>);
+
+    fn rustcrypto_input(_: Size) -> RustCrypto {
+        use hpke::Serializable;
+        let (private_key, public_key) = rustcrypto_key();
+        let (enc, mut sender) =
+            hpke::setup_sender::<RcAead, RcKdf, RcKem>(&hpke::OpModeS::Base, &public_key, INFO)
+                .unwrap();
+        // Sealed the way the seal row does, so a wrong tag there fails here.
+        let mut ciphertext = MESSAGE.to_vec();
+        let tag = sender
+            .seal_inout_detached(ciphertext.as_mut_slice().into(), AAD)
+            .unwrap();
+        ciphertext.extend_from_slice(&tag.to_bytes());
+        let recipient = hpke::setup_receiver::<RcAead, RcKdf, RcKem>(
+            &hpke::OpModeR::Base,
+            &private_key,
+            &enc,
+            INFO,
+        )
+        .unwrap();
+        (recipient, ciphertext)
+    }
+
+    #[bench(args = SIZE, setup = rustcrypto_input)]
+    fn rustcrypto((mut recipient, mut ciphertext): RustCrypto) -> impl Sized + use<> {
+        use hpke::Deserializable;
+        let (message, tag) = ciphertext.split_at_mut(MESSAGE.len());
+        let tag = hpke::aead::AeadTag::<RcAead>::from_bytes(tag).unwrap();
+        recipient
+            .open_inout_detached(message.into(), AAD, &tag)
+            .unwrap();
+        (recipient, ciphertext)
+    }
+
+    type Libcrux = (hpke_rs::Context<hpke_rs::libcrux::HpkeLibcrux>, Vec<u8>);
+
+    fn libcrux_input(_: Size) -> Libcrux {
+        let (mut hpke, key_pair) = libcrux_key();
+        let (enc, mut sender) = hpke
             .setup_sender(key_pair.public_key(), INFO, None, None, None)
             .unwrap();
-        b.iter(|| black_box(sender.seal(AAD, &MESSAGE).unwrap()));
-    });
-}
+        let ciphertext = sender.seal(AAD, &MESSAGE).unwrap();
+        let recipient = hpke
+            .setup_receiver(&enc, key_pair.private_key(), INFO, None, None, None)
+            .unwrap();
+        (recipient, ciphertext)
+    }
 
-// Open a context's first message. A context opens each sequence number once,
-// so each iteration gets a fresh context and ciphertext, made and dropped untimed.
-#[cfg(not(target_arch = "xtensa"))]
-fn open(c: &mut Criterion) {
-    let mut group = c.benchmark_group("hpke-x25519-aes128-gcm-open");
-    group.throughput(Throughput::Bytes(MESSAGE.len() as u64));
-
-    group.bench_function("rind/1350B", |b| {
-        let _dit = criterion::rind_dit();
-        use rind::hpke::{DHKEM_X25519_HKDF_SHA256, PrivateKey, Recipient, Sender};
-        let private_key = PrivateKey::generate(&DHKEM_X25519_HKDF_SHA256).unwrap();
-        let public_key = private_key.public_key();
-        b.iter_batched_ref(
-            || {
-                let (enc, mut sender) = Sender::new(rind_suite(), public_key, INFO).unwrap();
-                let mut ciphertext = MESSAGE.to_vec();
-                sender
-                    .seal_in_place_append_tag(AAD, &mut ciphertext)
-                    .unwrap();
-                let recipient =
-                    Recipient::new(rind_suite(), &private_key, enc.as_ref(), INFO).unwrap();
-                (recipient, ciphertext)
-            },
-            |(recipient, ciphertext)| {
-                black_box(recipient.open_in_place(AAD, ciphertext).unwrap().len());
-            },
-            BatchSize::SmallInput,
-        );
-    });
-
-    group.bench_function("aws-lc-rs/1350B", |b| {
-        let (public_key, private_key) = AWS_LC_RS.generate_key_pair().unwrap();
-        b.iter_batched_ref(
-            || {
-                let (enc, mut sealer) = AWS_LC_RS.setup_sealer(INFO, &public_key).unwrap();
-                let ciphertext = sealer.seal(AAD, &MESSAGE).unwrap();
-                let opener = AWS_LC_RS.setup_opener(&enc, INFO, &private_key).unwrap();
-                (opener, ciphertext)
-            },
-            |(opener, ciphertext)| black_box(opener.open(AAD, ciphertext).unwrap()),
-            BatchSize::SmallInput,
-        );
-    });
-
-    group.bench_function("rustcrypto/1350B", |b| {
-        use hpke::{Deserializable, Kem, OpModeR, OpModeS, Serializable};
-        let (private_key, public_key) = RcKem::gen_keypair();
-        b.iter_batched_ref(
-            || {
-                let (enc, mut sender) =
-                    hpke::setup_sender::<RcAead, RcKdf, RcKem>(&OpModeS::Base, &public_key, INFO)
-                        .unwrap();
-                // Sealed the way the seal row does, so a wrong tag there fails here.
-                let mut ciphertext = MESSAGE.to_vec();
-                let tag = sender
-                    .seal_inout_detached(ciphertext.as_mut_slice().into(), AAD)
-                    .unwrap();
-                ciphertext.extend_from_slice(&tag.to_bytes());
-                let recipient = hpke::setup_receiver::<RcAead, RcKdf, RcKem>(
-                    &OpModeR::Base,
-                    &private_key,
-                    &enc,
-                    INFO,
-                )
-                .unwrap();
-                (recipient, ciphertext)
-            },
-            |(recipient, ciphertext)| {
-                let (message, tag) = ciphertext.split_at_mut(MESSAGE.len());
-                let tag = hpke::aead::AeadTag::<RcAead>::from_bytes(tag).unwrap();
-                recipient
-                    .open_inout_detached(message.into(), AAD, &tag)
-                    .unwrap();
-                black_box(&ciphertext);
-            },
-            BatchSize::SmallInput,
-        );
-    });
-
-    group.bench_function("libcrux/1350B", |b| {
-        let mut hpke = libcrux_hpke();
-        let key_pair = hpke.generate_key_pair().unwrap();
-        b.iter_batched_ref(
-            || {
-                let (enc, mut sender) = hpke
-                    .setup_sender(key_pair.public_key(), INFO, None, None, None)
-                    .unwrap();
-                let ciphertext = sender.seal(AAD, &MESSAGE).unwrap();
-                let recipient = hpke
-                    .setup_receiver(&enc, key_pair.private_key(), INFO, None, None, None)
-                    .unwrap();
-                (recipient, ciphertext)
-            },
-            |(recipient, ciphertext)| black_box(recipient.open(AAD, ciphertext).unwrap()),
-            BatchSize::SmallInput,
-        );
-    });
+    #[bench(args = SIZE, setup = libcrux_input)]
+    fn libcrux((mut recipient, ciphertext): Libcrux) -> impl Sized + use<> {
+        (
+            recipient.open(AAD, &ciphertext).unwrap(),
+            recipient,
+            ciphertext,
+        )
+    }
 }
 
 #[cfg(not(target_arch = "xtensa"))]
-criterion_group!(benches, setup_sender, setup_recipient, seal, open);
-#[cfg(not(target_arch = "xtensa"))]
-criterion_main!(benches);
+fn main() {
+    swole::main();
+}

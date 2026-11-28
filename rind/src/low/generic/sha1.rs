@@ -79,18 +79,26 @@ fn sha1_compress_block(state: &mut [u32; 5], block: &[u8; 64]) {
         };
     }
 
-    for t in (0..20).step_by(5) {
-        rounds5!(CH, 0x5a827999, t);
-    }
-    for t in (20..40).step_by(5) {
-        rounds5!(PARITY, 0x6ed9eba1, t);
-    }
-    for t in (40..60).step_by(5) {
-        rounds5!(MAJ, 0x8f1bbcdc, t);
-    }
-    for t in (60..80).step_by(5) {
-        rounds5!(PARITY, 0xca62c1d6, t);
-    }
+    // Every round is written out, so each schedule index is a constant and
+    // the window's words stay in registers or fixed stack slots, as in
+    // aws-lc's `sha1_block_data_order_nohw`; a loop over `t` would index it
+    // at run time.
+    rounds5!(CH, 0x5a827999, 0);
+    rounds5!(CH, 0x5a827999, 5);
+    rounds5!(CH, 0x5a827999, 10);
+    rounds5!(CH, 0x5a827999, 15);
+    rounds5!(PARITY, 0x6ed9eba1, 20);
+    rounds5!(PARITY, 0x6ed9eba1, 25);
+    rounds5!(PARITY, 0x6ed9eba1, 30);
+    rounds5!(PARITY, 0x6ed9eba1, 35);
+    rounds5!(MAJ, 0x8f1bbcdc, 40);
+    rounds5!(MAJ, 0x8f1bbcdc, 45);
+    rounds5!(MAJ, 0x8f1bbcdc, 50);
+    rounds5!(MAJ, 0x8f1bbcdc, 55);
+    rounds5!(PARITY, 0xca62c1d6, 60);
+    rounds5!(PARITY, 0xca62c1d6, 65);
+    rounds5!(PARITY, 0xca62c1d6, 70);
+    rounds5!(PARITY, 0xca62c1d6, 75);
 
     state[0] = state[0].wrapping_add(a);
     state[1] = state[1].wrapping_add(b);
@@ -105,5 +113,32 @@ pub(crate) fn sha1_compress_blocks(state: &mut [u32; 5], blocks: &[u8]) {
     let (chunks, _) = blocks.as_chunks::<64>();
     for block in chunks {
         sha1_compress_block(state, block);
+    }
+}
+
+// Miri and wasm builds have no `sha1` dev-dependency (rind/Cargo.toml).
+#[cfg(all(test, not(any(miri, target_family = "wasm"))))]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use proptest::collection::vec;
+    use proptest::prelude::*;
+
+    use super::*;
+
+    proptest! {
+        // RustCrypto's compression shares no code with this one. An arbitrary
+        // starting state reaches inputs a hash from the standard IV never
+        // does, and up to five blocks carry each block's state into the next.
+        #[test]
+        fn matches_rustcrypto(
+            state in any::<[u32; 5]>(),
+            blocks in (0..=5usize).prop_flat_map(|n| vec(any::<u8>(), n * 64)),
+        ) {
+            let mut want = state;
+            sha1::block_api::compress(&mut want, blocks.as_chunks::<64>().0);
+            let mut got = state;
+            sha1_compress_blocks(&mut got, &blocks);
+            prop_assert_eq!(got, want);
+        }
     }
 }

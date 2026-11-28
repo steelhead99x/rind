@@ -8,7 +8,8 @@
 //! about 30 times this loop's time on an ESP32-S3, streaming its code from
 //! flash. This follows Graviola's portable SHA-256: one 16-word window and
 //! an 80-round loop, a few kilobytes. The round functions are FIPS 180-4
-//! §4.1.3. Every test build compiles it, so ctgrind checks it on a host.
+//! §4.1.3. Every test build compiles it, so ctgrind checks it on a host,
+//! and `proofs/Rind/Mcu/Sha512Rolled.lean` proves it against FIPS 180-4.
 
 use super::sha512::K;
 
@@ -49,6 +50,31 @@ macro_rules! SSIG1 {
     };
 }
 
+/// Round `t`'s schedule word, written into window slot `t mod 16`: the
+/// block's word `t` for the first sixteen rounds, and after them
+///
+/// W[t] = SSIG1(W[t - 2]) + W[t - 7] + SSIG0(W[t - 15]) + W[t - 16]
+///
+/// with every index reduced mod 16 into the window.
+#[inline(always)]
+fn schedule(w: &mut [u64; 16], words: &[[u8; 8]], t: usize) -> u64 {
+    if t < 16 {
+        let w_t = u64::from_be_bytes(words[t]);
+        w[t] = w_t;
+        w_t
+    } else {
+        let w_t = SSIG1!(w[(t - 2) % 16])
+            .wrapping_add(w[(t - 7) % 16])
+            .wrapping_add(SSIG0!(w[(t - 15) % 16]))
+            .wrapping_add(w[(t - 16) % 16]);
+        w[t % 16] = w_t;
+        w_t
+    }
+}
+
+// The round index also picks the schedule word, so the loop is over it
+// rather than over `K`.
+#[allow(clippy::needless_range_loop)]
 #[inline(never)]
 fn sha512_compress_block(state: &mut [u64; 8], block: &[u8; 128]) {
     // Sixteen big-endian words. The caller already holds a whole block, so
@@ -69,24 +95,7 @@ fn sha512_compress_block(state: &mut [u64; 8], block: &[u8; 128]) {
     let mut w: [u64; 16] = [0; 16];
 
     for t in 0..80 {
-        // W[0..16] comes from the block; W[16..80] is
-        //
-        // W[t] = SSIG1(W[t - 2]) + W[t - 7] + SSIG0(W[t - 15]) + W[t - 16]
-        //
-        // with every index reduced mod 16 into the window.
-        let w_t = if t < 16 {
-            let w_t = u64::from_be_bytes(words[t]);
-            w[t] = w_t;
-            w_t
-        } else {
-            let w_t = SSIG1!(w[(t - 2) % 16])
-                .wrapping_add(w[(t - 7) % 16])
-                .wrapping_add(SSIG0!(w[(t - 15) % 16]))
-                .wrapping_add(w[(t - 16) % 16]);
-            w[t % 16] = w_t;
-            w_t
-        };
-
+        let w_t = schedule(&mut w, words, t);
         let t1 = h
             .wrapping_add(BSIG1!(e))
             .wrapping_add(CH!(e, f, g))
@@ -116,9 +125,11 @@ fn sha512_compress_block(state: &mut [u64; 8], block: &[u8; 128]) {
 pub(crate) fn sha512_compress_blocks(state: &mut [u64; 8], blocks: &[u8]) {
     assert!(blocks.len().is_multiple_of(128));
 
-    let (chunks, _) = blocks.as_chunks::<128>();
-    for block in chunks {
+    // Not a `for` over `as_chunks`, whose loop Aeneas cannot translate.
+    let mut rest = blocks;
+    while let Some((block, tail)) = rest.split_first_chunk::<128>() {
         sha512_compress_block(state, block);
+        rest = tail;
     }
 }
 

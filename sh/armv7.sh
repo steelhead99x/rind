@@ -31,7 +31,10 @@ export CARGO_PROFILE_RELEASE_OVERFLOW_CHECKS=true
 
 # shellcheck source=sh/armv7-tiers.sh
 source sh/armv7-tiers.sh
+# qemu's hang bound (.config/nextest.toml). The doc tests, which only show the
+# API, run on the native targets.
+export NEXTEST_PROFILE=emulated
 # RIND_TEST_ARM_* fails a run on the wrong path.
-"${crypto[@]}" RIND_TEST_ARM_NEON=1 RIND_TEST_ARM_CRYPTO_EXT=1 cargo test "${packages[@]}" --locked --release --target "$target"
-"${cortex_a15[@]}" RIND_TEST_ARM_NEON=1 RIND_TEST_ARM_CRYPTO_EXT=0 cargo test "${packages[@]}" --locked --release --target "$target"
-"${no_neon[@]}" RIND_CPU_DISABLE_neon=1 RIND_TEST_ARM_NEON=0 RIND_TEST_ARM_CRYPTO_EXT=0 cargo test "${packages[@]}" --locked --release --target "$target"
+"${crypto[@]}" RIND_TEST_ARM_NEON=1 RIND_TEST_ARM_CRYPTO_EXT=1 cargo nextest run "${packages[@]}" --locked --release --target "$target"
+"${cortex_a15[@]}" RIND_TEST_ARM_NEON=1 RIND_TEST_ARM_CRYPTO_EXT=0 cargo nextest run "${packages[@]}" --locked --release --target "$target"
+"${no_neon[@]}" RIND_CPU_DISABLE_neon=1 RIND_TEST_ARM_NEON=0 RIND_TEST_ARM_CRYPTO_EXT=0 cargo nextest run "${packages[@]}" --locked --release --target "$target"

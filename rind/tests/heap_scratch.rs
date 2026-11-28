@@ -437,7 +437,7 @@ fn ml_dsa_set<P: rind::ml_dsa::ParameterSet>() {
     // Signing is hedged, so even under one key its randomness varies: every
     // block it frees must be wiped.
     for key in &keys {
-        assert_zeroed("ML-DSA signing", || key.sign(b"message").unwrap());
+        assert_zeroed("ML-DSA signing", || key.sign(b"", b"message").unwrap());
     }
 }
 

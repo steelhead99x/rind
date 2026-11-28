@@ -16,6 +16,7 @@ on:
       - rind/**
       - Cargo.toml
       - Cargo.lock
+      - .config/nextest.toml
       - .github/workflows/pr-macos.yml
 
 permissions:
@@ -46,5 +47,9 @@ jobs:
         with:
           toolchain: stable
 
+      - uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
+        with:
+          tool: cargo-nextest@0.9.149
+
       - name: Run rind's tests (debug)
-        run: cargo test -p rind --tests --locked
+        run: cargo nextest run -p rind --tests --locked

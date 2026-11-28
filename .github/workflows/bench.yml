@@ -6,88 +6,110 @@ on:
     - cron: "23 12 * * 6"
   # A dispatch measures every bench target, unless `benches` names some, such
   # as `-f benches='aes_gcm sha2'`: then each row times only those of them it
-  # times at all, and a row left with none skips.
+  # times at all, and a row left with none skips. Kixel Quest's bisect steps
+  # pass `benchmarks` instead, which only the instructions job runs.
   workflow_dispatch:
     inputs:
       benches:
         description: Bench targets of rind-bench to measure, space-separated; empty measures all
         type: string
         default: ""
+      benchmarks:
+        description: Benchmark IDs to count instructions for, newline-separated as metrics.json names them; skips the timed rows
+        type: string
+        default: ""
 
 permissions:
   contents: read
 
+# A newer run on a ref replaces an older one, except a bisect step's: each
+# counts its own commit, so none may cancel another or the weekly run.
 concurrency:
-  group: bench-${{ github.ref }}
+  group: bench-${{ github.ref }}-${{ inputs.benchmarks != '' && github.run_id || 'timed' }}
   cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
-  VALGRIND_BUG_494162: 1
 
 jobs:
-  # CodSpeed refuses an upload with too many benchmarks, so each shard builds
-  # and uploads every third bench target; shards of one workflow run merge
-  # into one report.
-  codspeed:
-    name: codspeed (${{ matrix.shard }}/3)
+  # Each benchmark's instruction count under Valgrind, from `swole` in
+  # the flake's `bench` shell, which an agent runs locally to the same count.
+  # Kixel Quest reads the `kixel-metrics` artifact and bisects a count that
+  # moved through the `benchmarks` input.
+  instructions:
     runs-on: ubuntu-24.04
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2, 3]
     permissions:
       contents: read
-      # CodSpeed authenticates the upload with the job's OIDC token.
-      id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
-        with:
-          toolchain: stable
+      - uses: ./.github/actions/nix
 
-      # The shard's targets, of those the dispatch asked for. Only a shard
-      # left with none of them skips; one with no targets at all fails.
+      # The bench targets the dispatch asked for, narrowed to those holding a
+      # benchmark it names, as `metrics.json` names them:
+      # `rind-bench/benches/<target>.rs::<module>::...`. Without names, every
+      # benchmark those targets list but the rows UNCOUNTED matches.
       - name: Select benchmarks
         id: select
         run: |
-          mapfile -t benches < <(cargo metadata --format-version 1 --no-deps |
-            jq -r --argjson shard ${{ matrix.shard }} '[.packages[] | select(.name == "rind-bench").targets[]
-              | select(.kind == ["bench"]).name] | sort | to_entries[]
-              | select(.key % 3 == $shard - 1) | .value')
-          [ ${#benches[@]} -gt 0 ] || { echo "no bench targets for shard ${{ matrix.shard }}"; exit 1; }
-          selected=$(sh/bench-select.sh "${benches[*]}")
-          echo "benches=$selected" >>"$GITHUB_OUTPUT"
+          selected=$(nix develop .#bench --command sh/bench-select.sh '')
+          read -ra benches <<<"$selected"
+          list=$RUNNER_TEMP/benchmarks
+          if [ -n "$BENCHMARKS" ]; then
+            printf '%s\n' "$BENCHMARKS" | sed '/^$/d' >"$list"
+            mapfile -t named < <(sed 's/::.*//; s#^rind-bench/benches/##; s/\.rs$//' "$list" | sort -u)
+            kept=()
+            for name in "${benches[@]}"; do
+              printf '%s\n' "${named[@]}" | grep -qxF -- "$name" && kept+=("$name")
+            done
+            benches=("${kept[@]}")
+            echo "named=true" >>"$GITHUB_OUTPUT"
+          elif [ ${#benches[@]} -gt 0 ]; then
+            nix develop .#bench --command admin/bench-report names "${benches[@]/#/--bench=}" >"$RUNNER_TEMP/listed"
+            grep -vE "$UNCOUNTED" "$RUNNER_TEMP/listed" >"$list"
+          fi
+          if [ ${#benches[@]} -eq 0 ]; then
+            # A bisect step that counts nothing must fail, not pass empty.
+            [ -z "$BENCHMARKS" ] || { echo "No bench target holds the benchmarks named: each must start rind-bench/benches/<target>.rs::"; exit 1; }
+            echo "skip=true" >>"$GITHUB_OUTPUT"
+            echo "This job counts none of: $BENCHES"
+          fi
+          echo "benches=${benches[*]}" >>"$GITHUB_OUTPUT"
         env:
           BENCHES: ${{ inputs.benches }}
+          BENCHMARKS: ${{ inputs.benchmarks }}
+          # The rows a count would get wrong. rustls's threaded rows count
+          # what each thread runs while the others wait, which the scheduler
+          # decides. Graviola's rustls rows exist only where Graviola runs,
+          # and it asserts ADX, which Valgrind hides, when it builds a
+          # provider.
+          UNCOUNTED: '^rind-bench/benches/rustls\.rs::(rustls_(full|resumed)_handshake_threads\[|.*\[[^]]*/graviola[]/])'
 
-      - name: Install cargo-binstall
-        if: steps.select.outputs.benches != ''
-        uses: cargo-bins/cargo-binstall@5885714d0a40a14b2535c6ffc051fd8e49aa9665 # v1.27.0
-
-      - name: Install cargo-codspeed
-        if: steps.select.outputs.benches != ''
-        run: cargo binstall -y cargo-codspeed
-
-      # Without --bench, cargo codspeed builds every target into one upload.
-      - name: Build benchmarks
-        if: steps.select.outputs.benches != ''
+      # A bisect step names benchmarks with `--benchmarks`, some of which a
+      # commit before one was added, or after a rename, lacks. With
+      # `--allow-missing`, swole names each missing one, counts the rest, and
+      # fails only when none is there; Kixel Quest reads a benchmark
+      # `metrics.json` lacks as unmeasured.
+      - name: Count instructions
+        if: steps.select.outputs.skip != 'true'
         run: |
           read -ra benches <<<"$SELECTED"
-          cargo codspeed build -p rind-bench --features __bench_codspeed "${benches[@]/#/--bench=}"
+          args=(--out metrics.json --benchmarks "$RUNNER_TEMP/benchmarks")
+          [ "$NAMED" != true ] || args+=(--allow-missing)
+          nix develop .#bench --command swole sim "${args[@]}" -- \
+            -p rind-bench "${benches[@]/#/--bench=}"
         env:
           SELECTED: ${{ steps.select.outputs.benches }}
+          NAMED: ${{ steps.select.outputs.named }}
 
-      - name: Run benchmarks
-        if: steps.select.outputs.benches != ''
-        uses: CodSpeedHQ/action@af75f77f17a054769abefaa42fe8dc2975469b5f # v5.6.3
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: steps.select.outputs.skip != 'true'
         with:
-          mode: simulation
-          run: cargo codspeed run
+          name: kixel-metrics
+          path: metrics.json
+          if-no-files-found: error
 
   # Each row reads rind's time relative to the fastest of aws-lc-rs and ring
   # in the same run, not as a device's: the arm64 runner's Neoverse core is
@@ -103,9 +125,10 @@ jobs:
   # ARM detection has no variable to deny, so its build fixes its
   # capabilities to NEON alone with `OPENSSL_STATIC_ARMCAP`; on x86_64, what Sandy Bridge lacks: AVX2,
   # BMI1 and BMI2, ADX, the SHA extensions, AVX-512, VAES, and VPCLMULQDQ.
-  # One x86_64 row denies only AVX-512 IFMA, so RSA signing takes the path
-  # of CPUs without it, such as Zen 3 and Intel's client cores, whichever CPU
-  # the runner draws; an RSA change's A/B reads it. Another denies all of
+  # One x86_64 row denies only AVX-512 IFMA, so RSA signing and
+  # ChaCha20-Poly1305 take the path of CPUs without it, such as Zen 3 and
+  # Intel's client cores, whichever CPU the runner draws; an A/B of either
+  # reads it. Another denies all of
   # AVX-512 but keeps VAES and VPCLMULQDQ, so the VAES AVX2 path of Zen 3 and
   # Intel's client cores is timed every run, not only when the native row
   # draws a CPU without AVX-512.
@@ -124,6 +147,7 @@ jobs:
   # its CMake builder, its default without assembly, only at 0.
   native:
     name: native (${{ matrix.target }}${{ matrix.portable && ', portable' || '' }}${{ matrix.cpu && format(', {0}', matrix.cpu) || '' }})
+    if: inputs.benchmarks == ''
     strategy:
       fail-fast: false
       matrix:
@@ -160,10 +184,11 @@ jobs:
             runner: ubuntu-24.04
             personality: linux64
             portable: true
-            # An RSA A/B on GitHub's runners reads this row: a runner may draw
-            # a CPU with IFMA, so only this row times the same path every run.
+            # An RSA or ChaCha20-Poly1305 A/B on GitHub's runners reads this
+            # row: a runner may draw a CPU with IFMA, so only this row times
+            # the same path every run.
             cpu: no-ifma
-            benches: --bench rsa_priv
+            benches: --bench rsa_priv --bench chacha20poly1305 --bench xchacha20poly1305
           - target: x86_64-unknown-linux-gnu
             runner: ubuntu-24.04
             personality: linux64
@@ -241,6 +266,14 @@ jobs:
           # the filter in "Run benchmarks" names their groups: change both.
           RUSTCRYPTO_ONLY: argon2|slhdsa|blind_rsa|oprf|vrf|spake2plus
 
+      # The swole flake.nix pins, which times the rows, built for the runner.
+      - name: Install swole
+        if: steps.select.outputs.skip != 'true'
+        run: |
+          rev=$(jq -r '.nodes.swole.locked.rev' flake.lock)
+          cargo install --locked --git https://github.com/kixel-ai/swole --rev "$rev" --root "$RUNNER_TEMP/swole" cargo-swole
+          echo "$RUNNER_TEMP/swole/bin" >>"$GITHUB_PATH"
+
       # Hosted hardware can change under the same label. The personality
       # makes the kernel list the features the target's code sees, such as
       # the crypto instructions aws-lc-rs uses. Arm kernels call that list
@@ -265,7 +298,8 @@ jobs:
           sudo apt-get install -y gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf libc6:armhf libssl-dev:armhf
 
       # Only rind, the libraries it is measured against, and
-      # pyca/verified-garbage, whose code rind takes where it is faster.
+      # pyca/verified-garbage, whose code rind takes where it is faster:
+      # listed natively, then timed by swole.
       # VG_CPU_FEATURES lists the features verified-garbage may use, so
       # `vg_deny` names those the CPU has, by its names, less those the tier
       # denies; it panics on a feature the CPU lacks, and on one named without
@@ -322,7 +356,7 @@ jobs:
                 vg_deny avx512f avx512ifma avx512vl avx512bw avx512fp16
                 ;;
               # IFMA in CPUID leaf 7's EBX, which both libraries' dual RSAZ
-              # needs.
+              # and rind's ChaCha20-Poly1305 over VG's IFMA path need.
               x86_64-*/no-ifma)
                 export RIND_CPU_DISABLE_avx512ifma=1
                 export OPENSSL_ia32cap='~0x0:~0x200000'
@@ -380,21 +414,22 @@ jobs:
           filter="(^|/)($libs)(/|\$)"
           # RustCrypto, where aws-lc-rs and ring offer nothing to time rind
           # against: Argon2id, SLH-DSA, and the protocols. These are the
-          # groups of the bench targets in RUSTCRYPTO_ONLY: change both.
+          # operations of the bench targets in RUSTCRYPTO_ONLY: change both.
           if [ "${{ matrix.portable }}" != true ]; then
             filter+='|^(argon2id|slhdsa|blind-rsa\d+|v?oprf|vrf|spake2plus)-[^/]+/rustcrypto$'
           fi
-          cargo bench "${config[@]}" -p rind-bench ${{ steps.select.outputs.args }} --target ${{ matrix.target }} -- --noplot "$filter"
+          read -ra args <<<"${{ steps.select.outputs.args }}"
+          cargo=("${config[@]}" "${args[@]}" --target ${{ matrix.target }})
+          admin/bench-report names --match "$filter" "${cargo[@]}" >"$RUNNER_TEMP/benchmarks"
+          swole bench --benchmarks "$RUNNER_TEMP/benchmarks" --out "$RUNNER_TEMP/times.json" -- -p rind-bench "${cargo[@]}"
         env:
-          # Times RSA key generation too, which varies from run to run.
-          NOISY_BENCHMARKS: 1
           CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER: arm-linux-gnueabihf-gcc
           CC_armv7_unknown_linux_gnueabihf: arm-linux-gnueabihf-gcc
           CXX_armv7_unknown_linux_gnueabihf: arm-linux-gnueabihf-g++
           ARMV7_UNKNOWN_LINUX_GNUEABIHF_OPENSSL_INCLUDE_DIR: /usr/include
           ARMV7_UNKNOWN_LINUX_GNUEABIHF_OPENSSL_LIB_DIR: /usr/lib/arm-linux-gnueabihf
 
-      # Every benchmark's estimate, which the gate job checks and
+      # Every benchmark's time by ID, which the gate job checks and
       # `admin/bench-report weekly` turns into BENCHMARKS.md's CPU-tier
       # heatmap.
       - name: Save results
@@ -407,12 +442,8 @@ jobs:
           for f in avx512f avx512bw avx512vl vaes vpclmulqdq; do
             grep -m1 '^flags' /proc/cpuinfo | grep -qw "$f" || avx512=false
           done
-          find target/criterion -path '*/new/benchmark.json' | sort |
-            while read -r f; do
-              jq -c --slurpfile e "${f%benchmark.json}estimates.json" \
-                '{id: .full_id, ns: ($e[0].slope // $e[0].mean).point_estimate}' "$f"
-            done |
-            jq -s --arg target "$TARGET" --argjson portable "$PORTABLE" --arg tier "$TIER" \
+          admin/bench-report results "$RUNNER_TEMP/times.json" |
+            jq --arg target "$TARGET" --argjson portable "$PORTABLE" --arg tier "$TIER" \
               --arg cpu "$(lscpu | sed -n 's/^Model name: *//p' | head -n1)" --arg commit "$GITHUB_SHA" \
               --argjson avx512 "$avx512" \
               '{schema: 1, target: $target, portable: $portable, tier: $tier, cpu: $cpu, avx512: $avx512, commit: $commit, results: .}' \
@@ -428,20 +459,17 @@ jobs:
           name: bench-${{ matrix.target }}${{ matrix.portable && '-portable' || '' }}${{ matrix.cpu && format('-{0}', matrix.cpu) || '' }}
           path: bench-results.json
 
-      # One row per benchmark, in run order, with rind's time over the fastest
-      # baseline's, and over verified-garbage's. RustCrypto is a baseline only
+      # One row per benchmark, with rind's time over the fastest baseline's,
+      # and over verified-garbage's. RustCrypto is a baseline only
       # where aws-lc-rs and ring offer nothing, the one place it is timed.
       - name: Summarize
         if: steps.select.outputs.skip != 'true'
         shell: bash
         run: |
-          find target/criterion -path '*/new/benchmark.json' -printf '%T@ %p\n' | sort -n | cut -d' ' -f2- |
-            while read -r f; do
-              jq -c --slurpfile e "${f%benchmark.json}estimates.json" '.full_id | split("/")
+          jq -c '.results[] | .ns as $ns | .id | split("/")
                 | {lib: map(select(. == "rind" or . == "aws-lc-rs" or . == "ring" or . == "rustcrypto" or . == "verified-garbage"))[0],
                    key: map(if . == "rind" or . == "aws-lc-rs" or . == "ring" or . == "rustcrypto" or . == "verified-garbage" then "*" else . end) | join("/"),
-                   ns: ($e[0].slope // $e[0].mean).point_estimate}' "$f"
-            done |
+                   ns: $ns}' bench-results.json |
             jq -rs 'def time: if . == null then "-" elif . < 1e3 then "\(round) ns"
                       elif . < 1e6 then "\(. / 10 | round / 100) µs" else "\(. / 1e4 | round / 100) ms" end;
               reduce (.[] | select(.lib)) as $b ({}; .[$b.key][$b.lib] = $b.ns)
@@ -449,6 +477,27 @@ jobs:
                 (to_entries[] | .value as $v | ([$v["aws-lc-rs"], $v.ring, $v.rustcrypto] | map(select(.)) | min) as $best
                   | "| \(.key) | \($v.rind | time) | \($v["aws-lc-rs"] | time) | \($v.ring | time) | \($v.rustcrypto | time) | \(if $v.rind and $best then $v.rind / $best * 100 | round / 100 else "-" end) | \($v["verified-garbage"] | time) | \(if $v.rind and $v["verified-garbage"] then $v.rind / $v["verified-garbage"] * 100 | round / 100 else "-" end) |")' |
             tee -a "$GITHUB_STEP_SUMMARY"
+
+  # What rind and rind-rustls add to admin/build-cost-fixtures' programs, in
+  # the dev shell's toolchain, which `admin/bench-report weekly` puts in
+  # BENCHMARKS.md's build cost from scheduled runs alone.
+  binary-size:
+    if: inputs.benchmarks == '' && (github.event_name == 'schedule' || inputs.benches == '')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/nix
+
+      - name: Measure
+        run: nix develop --command admin/binary-size --json >binary-size.json
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: binary-size
+          path: binary-size.json
 
   # Fails the scheduled run, and so alerts, on a gap over 10% that
   # benchmarks/gaps.toml holds no decision for and that the previous

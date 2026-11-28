@@ -11,7 +11,7 @@ use std::num::NonZeroU32;
 use crabgrind::memcheck::{self, MemState};
 use crabgrind::valgrind::{self, RunningMode};
 use rind_aws_lc_rs::aead::{self, quic};
-use rind_aws_lc_rs::{cipher, hkdf, hmac, iv, key_wrap, pbkdf2};
+use rind_aws_lc_rs::{cipher, hkdf, hmac, iv, kem, key_wrap, pbkdf2};
 
 /// Marks `value` secret: memcheck flags any branch or index that depends on it.
 fn secret<T: ?Sized>(value: &T) {
@@ -91,6 +91,22 @@ fn hkdf() {
         key.less_safe_encrypt(&mut in_out, context).unwrap();
         public(&in_out);
     }
+}
+
+/// A decapsulation key loaded from secret bytes, and saved again.
+#[test]
+fn kem_key_bytes() {
+    let key = kem::DecapsulationKey::generate(&kem::ML_KEM_768).unwrap();
+    let saved = key.key_bytes().unwrap();
+    public(saved.as_ref());
+    let expected = saved.as_ref().to_vec();
+
+    let input = expected.clone();
+    secret(input.as_slice());
+    let loaded = kem::DecapsulationKey::new(&kem::ML_KEM_768, &input).unwrap();
+    let saved = loaded.key_bytes().unwrap();
+    public(saved.as_ref());
+    assert_eq!(saved.as_ref(), expected);
 }
 
 /// `open_within` moves the plaintext to the front of the buffer.

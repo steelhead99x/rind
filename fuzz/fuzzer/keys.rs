@@ -1213,7 +1213,7 @@ fn agree_ml_dsa<P: ParameterSet>(
     }
 
     let message = b"rind";
-    let signature = ours.sign(message).unwrap();
+    let signature = ours.sign(&[], message).unwrap();
     theirs::UnparsedPublicKey::new(set.theirs_verify, public.as_ref())
         .verify(message, signature.as_ref())
         .unwrap();
@@ -1221,7 +1221,7 @@ fn agree_ml_dsa<P: ParameterSet>(
     assert!(independent.verify(public.as_ref(), message, signature.as_ref()));
     let mut signature = [0; 4627];
     let len = theirs.sign(message, &mut signature).unwrap();
-    public.verify(message, &signature[..len]).unwrap();
+    public.verify(&[], message, &signature[..len]).unwrap();
 
     // RustCrypto derives the same key from the seed, if rind holds it, and
     // rind verifies what it signs.
@@ -1229,7 +1229,7 @@ fn agree_ml_dsa<P: ParameterSet>(
         let seed = seed.as_ref().try_into().unwrap();
         let (independent_public, signature) = independent.sign_with_seed(seed, message);
         assert_eq!(public.as_ref(), independent_public);
-        public.verify(message, &signature).unwrap();
+        public.verify(&[], message, &signature).unwrap();
     }
 
     ml_dsa_public::<P>(set, public.as_ref());

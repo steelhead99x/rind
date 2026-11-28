@@ -515,7 +515,7 @@ fn ct_binsec_mldsa() {
 
     fn sign<P: ParameterSet>() {
         let key = KeyPair::<P>::from_seed(&secret::<32>(1)).unwrap();
-        black_box(key.sign(&[2; 40]).is_ok());
+        black_box(key.sign(&[], &[2; 40]).is_ok());
     }
 
     checked(|| {
