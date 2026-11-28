@@ -210,6 +210,8 @@ final class ContenderView extends LinearLayout {
         agree.setEnabled(enable.isChecked());
         agreeRow.setEnabled(enable.isChecked());
         enabledOn = enable.isChecked() && agree.isChecked();
+        // Turning Contender or I agree off drops any probe or lookup still out.
+        if (!enabledOn) reqSeq++;
         joinCard.setVisibility((enabledOn && sessionCard.getVisibility() != VISIBLE) ? VISIBLE : GONE);
         if (!enable.isChecked()) {
             setStatus("Contender is off", OFF, "Nothing connects while this is off.", false);
@@ -236,8 +238,9 @@ final class ContenderView extends LinearLayout {
 
     private void probe() {
         setStatus("Checking moq-bench.dev…", BUSY, "Looking for the live session service.", false);
+        final int seq = ++reqSeq;
         client.probeHealth(h -> ui.post(() -> {
-            if (!enabledOn) return;
+            if (!enabledOn || seq != reqSeq) return;
             if (h.status == ContenderClient.AVAILABLE) {
                 setStatus(h.isLabReferee ? "Lab referee ready" : "Session service ready",
                         OK, client.baseURL, false);
@@ -285,8 +288,8 @@ final class ContenderView extends LinearLayout {
                 "Type the session code instead, or allow the camera in Settings.", false);
     }
 
-    /** Counts session lookups, so only the latest one's answer is shown. */
-    private int lookupSeq;
+    /** Counts health probes and session lookups, so only the latest one's answer is shown. */
+    private int reqSeq;
 
     private void joinTapped() {
         if (!enabledOn) return;
@@ -296,11 +299,11 @@ final class ContenderView extends LinearLayout {
             return;
         }
         setStatus("Looking up session…", BUSY, "Checking code " + code + ".", false);
-        // Lookups can overlap, a second Join or scan before the first answers: only the newest may
-        // change the screen, so an older, slower answer can't replace it.
-        final int seq = ++lookupSeq;
+        // Lookups can overlap each other or the health probe, a second Join or scan before the first
+        // answers: only the newest may change the screen, so an older, slower answer can't replace it.
+        final int seq = ++reqSeq;
         client.lookupSession(code, (session, error) -> ui.post(() -> {
-            if (!enabledOn || seq != lookupSeq) return;
+            if (!enabledOn || seq != reqSeq) return;
             if (error != null || session == null) {
                 boolean unavail = error != null && error.contains("not available");
                 String title = unavail ? "Session service not available yet" : (error != null ? error : "Could not join");

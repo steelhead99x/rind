@@ -28,7 +28,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ffi::{CStr, CString, c_char};
 use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Mutex, Once, OnceLock};
+use std::sync::{Mutex, Once};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 pub const SCHEMA: &str = "rind-devbench/1";
@@ -39,7 +39,20 @@ pub const TARGET: &str = env!("DEVBENCH_TARGET");
 static STOP: AtomicBool = AtomicBool::new(false);
 static RUNNING: AtomicBool = AtomicBool::new(false);
 static STATUS: Mutex<Option<Value>> = Mutex::new(None);
-static CATALOG: OnceLock<Value> = OnceLock::new();
+/// The environment a catalog was listed with that decides its rows: rind-bench's rustls rows read
+/// `RIND_BENCH_KEYS_DIR` while listing, `RIND_BENCH_LOW_MEMORY` drops rows, `RIND_CPU_DISABLE_*` changes what
+/// rind offers, and `NOISY_BENCHMARKS` adds the RSA key-generation rows (`rind-bench/benches/rsa_gen.rs`).
+type ListingEnv = Vec<(std::ffi::OsString, std::ffi::OsString)>;
+
+fn listing_env() -> ListingEnv {
+    let mut v: ListingEnv = std::env::vars_os().filter(|(k, _)| k.to_string_lossy().starts_with("RIND_") || k == "NOISY_BENCHMARKS").collect();
+    v.sort();
+    v
+}
+
+/// Catalogs listed so far, by the environment each was listed with, so a catalog never answers for a
+/// different setting.
+static CATALOGS: Mutex<Vec<(ListingEnv, &'static Value)>> = Mutex::new(Vec::new());
 
 fn stop_flag() -> bool {
     STOP.load(Ordering::Relaxed)
@@ -153,8 +166,20 @@ fn now_rfc3339() -> String {
 
 /// Lists every row of every bench file (setup code runs; nothing is timed).
 pub fn catalog() -> &'static Value {
+    let keys = listing_env();
+    let mut cache = CATALOGS.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((_, c)) = cache.iter().find(|(k, _)| *k == keys) {
+        return c;
+    }
+    // One per setting a process uses, normally one: leaked so callers keep a plain reference.
+    let c: &'static Value = Box::leak(Box::new(list_catalog()));
+    cache.push((keys, c));
+    c
+}
+
+fn list_catalog() -> Value {
     // Bench setup code wants a big stack; the caller may be a GCD or JNI thread.
-    CATALOG.get_or_init(|| {
+    {
         if denies_missing() {
             return json!({"schema": SCHEMA, "error": DENIES_MISSING, "rows": [], "extra": [], "sections": [], "libraries": [], "operations_without_rows": [], "device": device::capabilities()});
         }
@@ -165,7 +190,7 @@ pub fn catalog() -> &'static Value {
             .ok()
             .and_then(|h| h.join().ok())
             .unwrap_or_else(|| json!({"schema": SCHEMA, "error": "listing panicked", "rows": [], "extra": [], "sections": [], "libraries": [], "operations_without_rows": [], "device": device::capabilities()}))
-    })
+    }
 }
 
 fn build_catalog() -> Value {
@@ -328,8 +353,8 @@ fn select(cfg: &Config, rows: &[Value]) -> Vec<(String, String)> {
     selected
 }
 
-fn run(cfg: Config) {
-    let cat = catalog();
+/// `cat` is the catalog `start()` checked the selection against.
+fn run(cfg: Config, cat: &'static Value) {
     let selected = select(&cfg, cat["rows"].as_array().unwrap());
     let rounds = cfg.rounds.unwrap_or(3).max(1);
     let warm_ms = cfg.warm_ms.unwrap_or(300);
@@ -502,8 +527,22 @@ pub fn start(config_json: &str) -> Result<(), String> {
     if RUNNING.swap(true, Ordering::SeqCst) {
         return Err("already running".into());
     }
-    // The configured environment goes in before the catalog is first listed, since rind-bench's rustls
-    // rows read RIND_BENCH_KEYS_DIR while listing and the catalog is cached.
+    // The run slot is ours: a stop() from here on, while the selection is checked, stops this run.
+    STOP.store(false, Ordering::SeqCst);
+    // The configured environment goes in before the catalog is listed, since rind-bench's rustls rows read
+    // RIND_BENCH_KEYS_DIR while listing. A refused start puts back what was there.
+    let before: Vec<(String, Option<std::ffi::OsString>)> = cfg.env.keys().map(|k| (k.clone(), std::env::var_os(k))).collect();
+    let refuse = |e: String| {
+        for (k, v) in &before {
+            // SAFETY: as for set_var below; the run slot is still ours.
+            match v {
+                Some(v) => unsafe { std::env::set_var(k, v) },
+                None => unsafe { std::env::remove_var(k) },
+            }
+        }
+        RUNNING.store(false, Ordering::SeqCst);
+        e
+    };
     for (k, v) in &cfg.env {
         // SAFETY: no run is going (RUNNING was false), so no bench thread reads the environment; the app
         // does not read it concurrently.
@@ -512,16 +551,15 @@ pub fn start(config_json: &str) -> Result<(), String> {
     // A selection that matches no row would run nothing yet end "done", with status "ok": refuse it
     // before acknowledging the start. Each library and group can be valid alone and still select nothing
     // together, as ring with ML-KEM does.
-    if select(&cfg, catalog()["rows"].as_array().map_or(&[][..], |r| r.as_slice())).is_empty() {
-        RUNNING.store(false, Ordering::SeqCst);
-        return Err("no test matches the libraries and groups picked".into());
+    let cat = catalog();
+    if select(&cfg, cat["rows"].as_array().map_or(&[][..], |r| r.as_slice())).is_empty() {
+        return Err(refuse("no test matches the libraries and groups picked".into()));
     }
-    STOP.store(false, Ordering::SeqCst);
     std::thread::Builder::new()
         .name("devbench".into())
         .stack_size(64 << 20)
         .spawn(move || {
-            let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(cfg)));
+            let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(cfg, cat)));
             if r.is_err() {
                 set_status(|s| {
                     s["running"] = json!(false);
@@ -530,10 +568,7 @@ pub fn start(config_json: &str) -> Result<(), String> {
             }
             RUNNING.store(false, Ordering::SeqCst);
         })
-        .map_err(|e| {
-            RUNNING.store(false, Ordering::SeqCst);
-            e.to_string()
-        })?;
+        .map_err(|e| refuse(e.to_string()))?;
     Ok(())
 }
 
@@ -645,13 +680,31 @@ mod tests {
 
     #[test]
     fn a_start_that_would_run_nothing_is_refused_before_it_is_acknowledged() {
-        let e = start(r#"{"libraries": ["no-such-library"], "sections": ["no-such-group"],
-            "env": {"RIND_DEVBENCH_TEST_LISTED_AFTER_ENV": "1"}}"#)
+        if denies_missing() {
+            return; // start() refuses every run of such a build first
+        }
+        let keys = "/nonexistent/rind-devbench-test-keys";
+        let keys_before = std::env::var_os("RIND_BENCH_KEYS_DIR");
+        let low_before = std::env::var_os("RIND_BENCH_LOW_MEMORY");
+        let e = start(&format!(r#"{{"libraries": ["no-such-library"], "sections": ["no-such-group"],
+            "env": {{"RIND_BENCH_KEYS_DIR": "{keys}", "RIND_BENCH_LOW_MEMORY": "1"}}}}"#))
         .unwrap_err();
         assert!(e.contains("no test matches"), "{e}");
         assert!(!RUNNING.load(Ordering::SeqCst));
-        // The configured environment was in place before the catalog was listed for the check.
-        assert_eq!(std::env::var("RIND_DEVBENCH_TEST_LISTED_AFTER_ENV").as_deref(), Ok("1"));
+        // The refused start put the environment back as it found it.
+        assert_eq!(std::env::var_os("RIND_BENCH_KEYS_DIR"), keys_before);
+        assert_eq!(std::env::var_os("RIND_BENCH_LOW_MEMORY"), low_before);
+        // Its check listed with the configured keys directory, where the rustls rows can't list, and that
+        // listing answers only for that setting: the catalog for the environment now has them.
+        let listed: Vec<(ListingEnv, Value)> =
+            CATALOGS.lock().unwrap().iter().map(|(k, c)| (k.clone(), (*c).clone())).collect();
+        let set = |env: &ListingEnv, k: &str, v: &str| env.iter().any(|(ek, ev)| ek == k && ev == v);
+        let failed = |c: &Value| c["files_failed_to_list"].as_array().unwrap().contains(&json!("rustls"));
+        assert!(listed.iter().any(|(k, c)| set(k, "RIND_BENCH_KEYS_DIR", keys) && set(k, "RIND_BENCH_LOW_MEMORY", "1") && failed(c)));
+        if keys_before.is_none() {
+            // The default keys directory lists the rustls rows; a contributor's own setting may not.
+            assert!(!failed(catalog()), "{}", catalog()["files_failed_to_list"]);
+        }
         for bad in [r#"{"": "1"}"#, r#"{"A=B": "1"}"#, r#"{"A": "x\u0000"}"#] {
             let e = start(&format!(r#"{{"env": {bad}}}"#)).unwrap_err();
             assert!(e.contains("environment entry"), "{e}");

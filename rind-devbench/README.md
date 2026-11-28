@@ -54,7 +54,7 @@ CAPTURE --out DIR` splits a collector capture into one JSON per run.
 - Android: `adb install -r RindBench-android.apk`;
   the collector fills itself in (127.0.0.1:9103 via `adb reverse`, else the LAN address given to build-apk.sh as `COLLECTOR_HOST`); headless, from an APK built with
   `DEVICE_RUNNER=1 android/build-apk.sh` (a normal build ignores `autostart`, `host` and `port`, since any app on the phone can start the launcher):
-  `adb shell am start -n io.github.steelhead99x.rindbench/.MainActivity --es preset quick --es libraries rind,ring --es sections AEADs --ez autostart true`;
+  `adb shell am start --activity-single-top -n io.github.steelhead99x.rindbench/.MainActivity --es preset quick --es libraries rind,ring --es sections AEADs --ez autostart true`;
   results also in `/sdcard/Android/data/io.github.steelhead99x.rindbench/files/`.
 - iPad/iPhone headless (the same choices as Android's extras, as launch arguments):
   `xcrun devicectl device process launch --console --device UDID io.github.steelhead99x.rindbench.all -preset quick -libraries rind,ring -sections AEADs -autostart YES [-host H -port P]`.
@@ -70,7 +70,8 @@ Both apps support an unattended run with no one looking at the screen (on Androi
   `w` and `h` are in points (iOS) or dp (Android).
 - `fits` is false when the run controls are cut off or off screen, or when the run panel can't show its status or score. `"picker"` in `clipped` means some chips are out of view (they scroll inside the picker), which a short screen allows.
   On Android the library and group pickers open in sheets, so `folded` is always true and `clipped` never names `"picker"`; `"score"` there is the results preview, and `"status"` the status card, either out of view in its scrolling pane.
-- On Android, each run that starts logs `RINDBENCH_RUN {"started":true,"preset":…,"libraries":[…],"sections":[…],"host":…,"port":…}` on tag `RindBench` so a runner can check that a launch ran its own selection. A start that doesn't happen logs `RINDBENCH_RUN {"started":false,"reason":…}`, so each autostart launch gets exactly one outcome: the list hasn't loaded or couldn't be read, consent isn't given, no library or group is picked (as when a launch names none that exist), the native start refused it (as when the libraries and groups picked, each valid alone, match no test together), a run is going, the Bench tab isn't shown, or the app or the Bench tab was left before the run started.
+- On Android, each run that starts logs `RINDBENCH_RUN {"started":true,"preset":…,"libraries":[…],"sections":[…],"host":…,"port":…}` on tag `RindBench` so a runner can check that a launch ran its own selection. A start that doesn't happen logs `RINDBENCH_RUN {"started":false,"reason":…}`, so each autostart launch gets exactly one outcome: the list hasn't loaded or couldn't be read, consent isn't given, no library or group is picked (as when a launch names none that exist), the native start refused it, with its reason (as when the libraries and groups picked, each valid alone, match no test together), a run is going, the Bench tab isn't shown, the app or the Bench tab was left before the run started, or a later launch or a start by hand replaced it while it waited.
+  `--activity-single-top` delivers a launch to the app when it is already open; without it Android only brings the app forward and the launch is lost.
   A runner launch without `preset` runs Quick, as a fresh process does, whatever the last run picked.
 - The run itself ends with a `done` or `stopped` line at the collector.
 

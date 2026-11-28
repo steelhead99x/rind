@@ -127,6 +127,7 @@ static NSString *const kConsent = @"The run keeps the CPU busy (minutes on Quick
   UISwitch *agree; UISegmentedControl *preset;
   UIButton *startBtn, *stopBtn, *clearBtn;
   BOOL running;
+  BOOL autostartQueued;  // -autostart's delayed start, until it fires or a start by hand takes its place
   NSDictionary *catalog;
   NSMutableDictionary<NSString *, UIButton *> *libChips, *secChips;
   NSArray<NSString *> *moreSections;
@@ -418,11 +419,14 @@ static UIImageView *BrandMark(NSString *name, CGFloat size) {
   [self ready];
   [self reportLayout:@"ready"];
   // -autostart waits a moment, so a runner can capture the picker before the run.
-  if (ArgOn(@"autostart"))
+  if (ArgOn(@"autostart")) {
+    autostartQueued = YES;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-      if (self->running) return;  // started by hand while it waited
+      if (!self->autostartQueued) return;  // a run started by hand while it waited took its place
+      self->autostartQueued = NO;
       self->agree.on = YES; [self agreeChanged]; [self startTapped];
     });
+  }
 }
 
 // One machine-readable line saying whether the screen fits, for a device
@@ -544,6 +548,7 @@ static UIImageView *BrandMark(NSString *name, CGFloat size) {
   NSData *js = [NSJSONSerialization dataWithJSONObject:cfg options:0 error:nil];
   NSString *s = [[NSString alloc] initWithData:js encoding:NSUTF8StringEncoding];
   if (devbench_start(s.UTF8String) != 0) { NSDictionary *st = JSON(devbench_status_json()); statusLbl.text = [NSString stringWithFormat:@"Could not start: %@", st[@"start_error"]]; return; }
+  autostartQueued = NO;  // a start by hand consumes the queued -autostart, even once this run stops
   UIApplication.sharedApplication.idleTimerDisabled = YES;
   startBtn.hidden = YES; clearBtn.hidden = YES; stopBtn.hidden = NO; stopBtn.enabled = YES; running = YES;
   [self setPicking:NO];
