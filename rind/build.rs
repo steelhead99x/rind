@@ -430,13 +430,12 @@ fn rustflag_feature_lists(encoded: &str) -> Vec<&str> {
             lists.push(list);
         } else if let Some(list) = arg.strip_prefix("target-feature=") {
             lists.push(list);
-        } else if *arg == "-C" {
-            if let Some(list) = args
-                .get(i + 1)
-                .and_then(|next| next.strip_prefix("target-feature="))
-            {
-                lists.push(list);
-            }
+        } else if let Some(list) = args
+            .get(i + 1)
+            .filter(|_| *arg == "-C")
+            .and_then(|next| next.strip_prefix("target-feature="))
+        {
+            lists.push(list);
         }
     }
     lists

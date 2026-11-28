@@ -486,7 +486,7 @@ change to the trust base.
 #guard_msgs in
 #print axioms randomized_nonce_key_open
 
-/-- info: 'rind.x86_64.seals' depends on axioms: [propext, Classical.choice, Quot.sound, vg_chacha20_poly1305_seal_ifma_spec] -/
+/-- info: 'rind.x86_64.seals' depends on axioms: [propext, Classical.choice, Quot.sound, vg_chacha20_poly1305_seal_spec] -/
 #guard_msgs in
 #print axioms seals
 
@@ -495,7 +495,7 @@ change to the trust base.
  Quot.sound,
  ct_compare_16_spec,
  ct_compare_bytes_spec,
- vg_chacha20_poly1305_open_ifma_spec] -/
+ vg_chacha20_poly1305_open_spec] -/
 #guard_msgs in
 #print axioms opens
 

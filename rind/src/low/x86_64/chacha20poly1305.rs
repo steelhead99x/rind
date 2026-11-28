@@ -4,8 +4,10 @@
 //! routines, imported by `admin/import-vg`, where the CPU has AVX512_IFMA,
 //! at every length, since they matched or beat aws-lc's at every size
 //! measured on Zen 5 and Granite Rapids; on Zen 4, only from 800 bytes
-//! sealing and 512 opening, below which aws-lc's were faster (see
-//! `HaveIfmaForVgChaCha20Poly1305::check_seal`). Otherwise aws-lc's
+//! sealing and 512 opening, below which aws-lc's were faster. On Arrow Lake,
+//! Intel's one measured core with AVX2 but no AVX-512, VG's AVX2 routines,
+//! from the lengths `cpu::INTEL_AVX2_SEAL_FROM` and `INTEL_AVX2_OPEN_FROM`
+//! name (see `HaveVgChaCha20Poly1305::check_seal`). Otherwise aws-lc's
 //! `chacha20_poly1305_x86_64`, which interleaves ChaCha20 with Poly1305,
 //! imported by `admin/import-aws-lc`, with AVX2 where the CPU has it and
 //! SSE4.1 otherwise, but for the AVX2 seal, which is rind's structured copy
@@ -18,7 +20,7 @@
 //! whether open authenticated, which its contract lets it reveal. Those
 //! proofs are over its models of the instructions, which `admin/prove vg`
 //! cosimulates. `proofs/Rind/X86_64/VgChaCha20Poly1305.lean` takes those
-//! theorems as axioms about `seal_ifma` and `open_ifma`, and
+//! theorems as axioms about `seal_vg` and `open_vg`, and
 //! `proofs/Rind/X86_64/ChaCha20Poly1305.lean` proves `seal` and `open`, and
 //! the AEAD API above them, from them where VG's routines run.
 //! `proofs/Rind/X86_64/ChaCha20Poly1305Asm.lean` proves on rind's extension
@@ -38,8 +40,10 @@
 //! wipe, offers none without it, and its proofs are of the instructions as
 //! emitted. Where they run, they outrun aws-lc's code with that cost included.
 
-use super::cpu::{HaveAvx2, HaveIfmaForVgChaCha20Poly1305, HaveSse41};
+use super::cpu::{HaveAvx2, HaveSse41, HaveVgChaCha20Poly1305, VgChaCha20Poly1305};
+use super::vg::vg_chacha20_poly1305_open_avx2::vg_chacha20_poly1305_open_avx2;
 use super::vg::vg_chacha20_poly1305_open_ifma::vg_chacha20_poly1305_open_ifma;
+use super::vg::vg_chacha20_poly1305_seal_avx2::vg_chacha20_poly1305_seal_avx2;
 use super::vg::vg_chacha20_poly1305_seal_ifma::vg_chacha20_poly1305_seal_ifma;
 use crate::low::generic::chacha20poly1305 as separate;
 use crate::low::{Mcdt, ct_equal};
@@ -47,10 +51,10 @@ use crate::low::{Mcdt, ct_equal};
 /// Encrypts `inout` in place, returning the tag over `aad` and the ciphertext.
 pub(crate) fn seal(key: &[u8; 32], nonce: &[u8; 12], aad: &[u8], inout: &mut [u8]) -> [u8; 16] {
     match (
-        HaveIfmaForVgChaCha20Poly1305::check_seal(inout.len()),
+        HaveVgChaCha20Poly1305::check_seal(inout.len()),
         HaveSse41::check(),
     ) {
-        (Some(ifma), _) => seal_ifma(ifma, key, nonce, aad, inout),
+        (Some(vg), _) => seal_vg(vg, key, nonce, aad, inout),
         (None, Some(sse41)) => one_pass(sse41, HaveAvx2::check(), key, nonce, aad, inout, true),
         (None, None) => separate::seal(key, nonce, aad, inout),
     }
@@ -66,10 +70,10 @@ pub(crate) fn open(
     tag: &[u8; 16],
 ) -> bool {
     match (
-        HaveIfmaForVgChaCha20Poly1305::check_open(inout.len()),
+        HaveVgChaCha20Poly1305::check_open(inout.len()),
         HaveSse41::check(),
     ) {
-        (Some(ifma), _) => open_ifma(ifma, key, nonce, aad, inout, tag),
+        (Some(vg), _) => open_vg(vg, key, nonce, aad, inout, tag),
         (None, Some(sse41)) => ct_equal(
             &one_pass(sse41, HaveAvx2::check(), key, nonce, aad, inout, false),
             tag,
@@ -78,14 +82,15 @@ pub(crate) fn open(
     }
 }
 
-// VG's routines hash with `vpmadd52luq` and `vpmuludq`, which Intel's MXCSR
+// VG's routines hash with `vpmadd52luq` or `vpmuludq`, which Intel's MXCSR
 // mitigation covers. They enter it themselves where they run those, and
 // leave MXCSR as they set it, so each wrapper holds a restoring `Mcdt`:
-// never inlined, holding it throughout, as `low::mcdt` requires.
+// never inlined, holding it throughout, as `low::mcdt` requires. Both of
+// VG's pairs meet the same contracts, so one wrapper calls either.
 
 #[inline(never)]
-fn seal_ifma(
-    _: HaveIfmaForVgChaCha20Poly1305,
+fn seal_vg(
+    vg: HaveVgChaCha20Poly1305,
     key: &[u8; 32],
     nonce: &[u8; 12],
     aad: &[u8],
@@ -97,17 +102,25 @@ fn seal_ifma(
     // SAFETY: each pointer is to a distinct Rust object of the length the
     // routine reads or writes, none of which overlaps the stack below the
     // return address or wraps the address space, as no object does, and the
-    // token proves AVX, AVX2, AVX-512 F and VL, and AVX512_IFMA.
+    // token proves what the routine it names needs: AVX, AVX2, AVX-512 F and
+    // VL, and AVX512_IFMA for the IFMA one, AVX and AVX2 for the AVX2 one.
     unsafe {
-        asm_call!(unsafe extern "sysv64" vg_chacha20_poly1305_seal_ifma(key, nonce, aad.as_ptr(), aad.len(), data, len, &mut tag))
+        match vg.routine() {
+            VgChaCha20Poly1305::Ifma => {
+                asm_call!(unsafe extern "sysv64" vg_chacha20_poly1305_seal_ifma(key, nonce, aad.as_ptr(), aad.len(), data, len, &mut tag))
+            }
+            VgChaCha20Poly1305::Avx2 => {
+                asm_call!(unsafe extern "sysv64" vg_chacha20_poly1305_seal_avx2(key, nonce, aad.as_ptr(), aad.len(), data, len, &mut tag))
+            }
+        }
     };
     tag
 }
 
 /// As `open`, and zeroes `inout` when `tag` is not its tag.
 #[inline(never)]
-fn open_ifma(
-    _: HaveIfmaForVgChaCha20Poly1305,
+fn open_vg(
+    vg: HaveVgChaCha20Poly1305,
     key: &[u8; 32],
     nonce: &[u8; 12],
     aad: &[u8],
@@ -116,9 +129,16 @@ fn open_ifma(
 ) -> bool {
     let _mcdt = Mcdt::enter_restoring();
     let (data, len) = (inout.as_mut_ptr(), inout.len());
-    // SAFETY: as in `seal_ifma`.
+    // SAFETY: as in `seal_vg`.
     let valid = unsafe {
-        asm_call!(unsafe extern "sysv64" vg_chacha20_poly1305_open_ifma(key, nonce, aad.as_ptr(), aad.len(), data, len, tag))
+        match vg.routine() {
+            VgChaCha20Poly1305::Ifma => {
+                asm_call!(unsafe extern "sysv64" vg_chacha20_poly1305_open_ifma(key, nonce, aad.as_ptr(), aad.len(), data, len, tag))
+            }
+            VgChaCha20Poly1305::Avx2 => {
+                asm_call!(unsafe extern "sysv64" vg_chacha20_poly1305_open_avx2(key, nonce, aad.as_ptr(), aad.len(), data, len, tag))
+            }
+        }
     };
     valid == 1
 }
@@ -337,20 +357,36 @@ mod tests {
     type Seal = fn(&[u8; 32], &[u8; 12], &[u8], &mut [u8]) -> [u8; 16];
     type Open = fn(&[u8; 32], &[u8; 12], &[u8], &mut [u8], &[u8; 16]) -> bool;
 
-    /// Each one-pass path the CPU can run, by name.
-    fn paths() -> Vec<(&'static str, Seal, Open)> {
-        let mut paths: Vec<(&'static str, Seal, Open)> = Vec::new();
-        if HaveIfmaForVgChaCha20Poly1305::check().is_some() {
+    /// Each one-pass path the CPU can run, by name, and whether its open
+    /// branches on whether the tag matched, as VG's do.
+    fn paths() -> Vec<(&'static str, Seal, Open, bool)> {
+        let mut paths: Vec<(&'static str, Seal, Open, bool)> = Vec::new();
+        if HaveVgChaCha20Poly1305::ifma().is_some() {
             paths.push((
                 "vg ifma",
                 |key, nonce, aad, inout| {
-                    let t = HaveIfmaForVgChaCha20Poly1305::check().unwrap();
-                    seal_ifma(t, key, nonce, aad, inout)
+                    let t = HaveVgChaCha20Poly1305::ifma().unwrap();
+                    seal_vg(t, key, nonce, aad, inout)
                 },
                 |key, nonce, aad, inout, tag| {
-                    let t = HaveIfmaForVgChaCha20Poly1305::check().unwrap();
-                    open_ifma(t, key, nonce, aad, inout, tag)
+                    let t = HaveVgChaCha20Poly1305::ifma().unwrap();
+                    open_vg(t, key, nonce, aad, inout, tag)
                 },
+                true,
+            ));
+        }
+        if HaveVgChaCha20Poly1305::avx2().is_some() {
+            paths.push((
+                "vg avx2",
+                |key, nonce, aad, inout| {
+                    let t = HaveVgChaCha20Poly1305::avx2().unwrap();
+                    seal_vg(t, key, nonce, aad, inout)
+                },
+                |key, nonce, aad, inout, tag| {
+                    let t = HaveVgChaCha20Poly1305::avx2().unwrap();
+                    open_vg(t, key, nonce, aad, inout, tag)
+                },
+                true,
             ));
         }
         if HaveSse41::check().is_some() && HaveAvx2::check().is_some() {
@@ -364,6 +400,7 @@ mod tests {
                     let (sse41, avx2) = (HaveSse41::check().unwrap(), HaveAvx2::check());
                     ct_equal(&one_pass(sse41, avx2, key, nonce, aad, inout, false), tag)
                 },
+                false,
             ));
         }
         if HaveSse41::check().is_some() {
@@ -384,6 +421,7 @@ mod tests {
                     let sse41 = HaveSse41::check().unwrap();
                     ct_equal(&one_pass(sse41, None, key, nonce, aad, inout, false), tag)
                 },
+                false,
             ));
         }
         paths
@@ -397,10 +435,15 @@ mod tests {
     // and its 16-byte blocks, and longer messages through VG's wider loops,
     // and opening under a tag one bit off, which VG's routine answers by
     // zeroing the message. Valgrind hides AVX-512, so ctgrind checks only the
-    // AVX2 and SSE4.1 routines, and `ct_sde_chacha20poly1305` VG's.
+    // AVX2 and SSE4.1 routines, and `ct_sde_chacha20poly1305` VG's IFMA pair.
+    // VG's open branches on whether the tag matched, which its contract
+    // allows and valgrind cannot tell from a leak, so a path that runs it
+    // opens under a public copy of the key: ctgrind checks VG's AVX2 seal,
+    // and `ct_sde_chacha20poly1305_vg_avx2` its open.
     #[test]
     fn paths_match() {
-        let key = core::array::from_fn(|i| i as u8);
+        let public_key: [u8; 32] = core::array::from_fn(|i| i as u8);
+        let key = public_key;
         ct::secret_slice(&key);
         let nonce = core::array::from_fn(|i| (i * 7) as u8);
         let input: Vec<u8> = (0..16384 + 15).map(|i| (i * 13 + 5) as u8).collect();
@@ -414,7 +457,8 @@ mod tests {
             let mut sealed = input[..len].to_vec();
             let tag = ct::into_public(separate::seal(&key, &nonce, aad, &mut sealed));
             ct::public_slice(&sealed);
-            for (path, seal, open) in paths() {
+            for (path, seal, open, open_branches) in paths() {
+                let open_key = if open_branches { &public_key } else { &key };
                 let mut ours = input[..len].to_vec();
                 let ours_tag = ct::into_public(seal(&key, &nonce, aad, &mut ours));
                 ct::public_slice(&ours);
@@ -423,7 +467,7 @@ mod tests {
                     "{path} seal tag, {len} bytes, {aad_len} of AAD"
                 );
                 assert_eq!(ours, sealed, "{path} seal, {len} bytes, {aad_len} of AAD");
-                let valid = ct::into_public(open(&key, &nonce, aad, &mut ours, &tag));
+                let valid = ct::into_public(open(open_key, &nonce, aad, &mut ours, &tag));
                 ct::public_slice(&ours);
                 assert!(valid, "{path} open, {len} bytes, {aad_len} of AAD");
                 assert_eq!(
@@ -435,7 +479,7 @@ mod tests {
                 let mut wrong = tag;
                 wrong[len % 16] ^= 1 << (len % 8);
                 let mut forged = sealed.clone();
-                let valid = ct::into_public(open(&key, &nonce, aad, &mut forged, &wrong));
+                let valid = ct::into_public(open(open_key, &nonce, aad, &mut forged, &wrong));
                 assert!(!valid, "{path} forged, {len} bytes, {aad_len} of AAD");
             }
         }
@@ -444,16 +488,26 @@ mod tests {
         assert_eq!(crate::low::mcdt::mxcsr(), before);
     }
 
-    // The dispatch picks a path by length on Zen 4, so every length around
-    // where it switches takes it, as well as the paths above.
+    // The dispatch picks a path by length on Zen 4 and on Arrow Lake, so
+    // every length around where it switches takes it, as
+    // well as the paths above.
     #[test]
     fn dispatch_matches() {
+        use crate::low::x86_64::cpu::{INTEL_AVX2_OPEN_FROM, INTEL_AVX2_SEAL_FROM};
         let key = [7u8; 32];
         let nonce = [9u8; 12];
-        let input: Vec<u8> = (0..1100).map(|i| (i * 13 + 5) as u8).collect();
-        for len in (0..=1100)
-            .filter(|len| len % 7 == 0 || (500..=520).contains(len) || (790..=810).contains(len))
-        {
+        let max = 1100
+            .max(INTEL_AVX2_SEAL_FROM + 10)
+            .max(INTEL_AVX2_OPEN_FROM + 10);
+        let input: Vec<u8> = (0..max).map(|i| (i * 13 + 5) as u8).collect();
+        let near = |len: usize, from: usize| len.abs_diff(from) <= 10;
+        for len in (0..=max).filter(|&len| {
+            len % 7 == 0
+                || near(len, 510)
+                || near(len, 800)
+                || near(len, INTEL_AVX2_SEAL_FROM)
+                || near(len, INTEL_AVX2_OPEN_FROM)
+        }) {
             let mut sealed = input[..len].to_vec();
             let tag = separate::seal(&key, &nonce, b"aad", &mut sealed);
             let mut ours = input[..len].to_vec();
@@ -464,18 +518,17 @@ mod tests {
         }
     }
 
-    // Intel SDE runs VG's routines, which valgrind cannot, under
-    // `admin/ct-sde`, with a secret key, nonce, AAD, message, and tag,
-    // sealing, then opening under the right tag and a wrong one, which only
-    // the result may tell apart. The routines branch on the lengths, which
-    // are public, so these take the short and long AAD paths and each
-    // message path: a partial block, the one-block-group and the four-group
-    // loops with tails, a run long enough for the widest loop, and open's
-    // AVX-512 VL body for 449 to 639 bytes, whole blocks and with a tail.
-    #[test]
-    #[ignore = "admin/ct-sde runs it under Intel SDE"]
-    fn ct_sde_chacha20poly1305() {
-        let t = HaveIfmaForVgChaCha20Poly1305::check().expect("AVX512_IFMA");
+    // Intel SDE runs VG's routines under `admin/ct-sde`, with a secret key,
+    // nonce, AAD, message, and tag, sealing, then opening under the right tag
+    // and a wrong one, which only the result may tell apart: the IFMA pair,
+    // which valgrind cannot run, and the AVX2 open, whose branch on the
+    // result valgrind cannot tell from a leak. The routines branch on the
+    // lengths, which are public, so these take the short and long AAD paths
+    // and each message path: a partial block, the one-block-group and the
+    // four-group loops with tails, a run long enough for the widest loop,
+    // and the IFMA open's AVX-512 VL body for 449 to 639 bytes, whole blocks
+    // and with a tail.
+    fn ct_sde_vg(t: HaveVgChaCha20Poly1305) {
         let mut rng = Rng(ct_sde::seed());
         let mut bytes = |n| (0..n).map(|_| rng.next() as u8).collect::<Vec<u8>>();
         let key = bytes(32).try_into().unwrap();
@@ -493,12 +546,12 @@ mod tests {
         ] {
             let aad = bytes(aad_len);
             let mut msg = bytes(msg_len);
-            let tag = ct_sde::traced(|| seal_ifma(t, &key, &nonce, &aad, &mut msg));
+            let tag = ct_sde::traced(|| seal_vg(t, &key, &nonce, &aad, &mut msg));
             let mut forged = msg.clone();
-            assert!(ct_sde::traced(|| open_ifma(
+            assert!(ct_sde::traced(|| open_vg(
                 t, &key, &nonce, &aad, &mut msg, &tag
             )));
-            assert!(!ct_sde::traced(|| open_ifma(
+            assert!(!ct_sde::traced(|| open_vg(
                 t,
                 &key,
                 &nonce,
@@ -507,5 +560,23 @@ mod tests {
                 &wrong
             )));
         }
+    }
+
+    #[test]
+    #[ignore = "admin/ct-sde runs it under Intel SDE"]
+    fn ct_sde_chacha20poly1305() {
+        ct_sde_vg(HaveVgChaCha20Poly1305::ifma().expect("AVX512_IFMA"));
+    }
+
+    // Under SDE's Arrow Lake, whose AVX2 and no AVX-512 the dispatch also
+    // takes this pair on.
+    #[test]
+    #[ignore = "admin/ct-sde runs it under Intel SDE"]
+    fn ct_sde_chacha20poly1305_vg_avx2() {
+        assert_eq!(
+            HaveVgChaCha20Poly1305::check_open(4097).map(HaveVgChaCha20Poly1305::routine),
+            Some(VgChaCha20Poly1305::Avx2)
+        );
+        ct_sde_vg(HaveVgChaCha20Poly1305::avx2().unwrap());
     }
 }
