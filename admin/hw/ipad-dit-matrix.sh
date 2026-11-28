@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # steelhead99x/rind#277: the A/B/C/D DIT and SHA-3 matrix on the iPads
-# (rind-devbench/README.md at the PR's head): four builds of RindBench All,
+# (rind-devbench/README.md at the PR's head): four builds of RindBench,
 # each a fresh launch, read against each other.
 #
 # Host: a Mac with Xcode in /Applications/Xcode.app, xcodegen, ncat, and
@@ -97,7 +97,7 @@ cat <<EOF
 
 Now, on each iPad in turn, for each IPA in $HW_RUN/ipa/ in the order
 ${order[*]} (the last A is the same IPA again):
-  sign and install <device>-<label>.ipa, open RindBench All, pick Full, the
+  sign and install <device>-<label>.ipa, open RindBench, pick Full, the
   same libraries every time, sections Hashes, MACs and KDFs, AEADs, PAKE,
   Signatures, KEMs and "More: dit_toggle", agree, and Start. Keep the iPad
   plugged in and awake. The script tells you when each run has arrived.

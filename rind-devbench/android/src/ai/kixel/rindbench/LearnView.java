@@ -28,7 +28,7 @@ final class LearnView extends LinearLayout {
             root.addView(row(c, items[i][0], items[i][1]));
         }
 
-        TextView foot = Theme.text(c, "Unofficial community tool. Not run or endorsed by the rind maintainers.",
+        TextView foot = Theme.text(c, "Published by kixel.ai. Results are community measurements, not official rind benchmarks.",
                 Theme.Type.BODY_SMALL, Theme.onSurfaceVariant);
         foot.setPadding(Theme.dpi(c, 16), Theme.dpi(c, 24), Theme.dpi(c, 16), 0);
         root.addView(foot);

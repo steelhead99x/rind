@@ -1,5 +1,5 @@
 #!/bin/bash
-# Collector for RindBench All (v14) on the computer the devices report to: one ncat per device port. Appends JSON lines.
+# Collector for RindBench on the computer the devices report to: one ncat per device port. Appends JSON lines.
 # 9101 = iPad Pro M4, 9102 = iPad mini A17 Pro, 9103 = Android (v13 keeps 9099/9100).
 # Android over USB: also `adb reverse tcp:9103 tcp:9103` so the app finds 127.0.0.1:9103 by itself.
 # Starts only the listeners not already running. usage: listen-devbench.sh [DIR]

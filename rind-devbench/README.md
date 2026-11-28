@@ -1,4 +1,4 @@
-# rind-devbench — RindBench "All" for iPad/iPhone and Android
+# rind-devbench — RindBench by kixel.ai for iPad/iPhone and Android
 
 A standalone crate (own `[workspace]`), not a member of rind's workspace.
 
@@ -69,7 +69,7 @@ Both apps support an unattended run with no one looking at the screen (on Androi
   On Android it goes to logcat with tag `RindBench`. On iOS it goes to stderr (seen with `devicectl … --console`) and the device log.
   `w` and `h` are in points (iOS) or dp (Android).
 - `fits` is false when the run controls are cut off or off screen, or when the run panel can't show its status or score. `"picker"` in `clipped` means some chips are out of view (they scroll inside the picker), which a short screen allows.
-  On Android the library and group pickers open in sheets, so `folded` is always true and `clipped` never names `"picker"`; `"score"` there is the results preview, and `"status"` the status card, either out of view in its scrolling pane.
+  On Android the library and group pickers open in sheets, so `folded` is always true and `clipped` never names `"picker"`; `"score"` there is the results preview, and `"status"` the status card, either out of view in its scrolling pane. `"title"` is the app bar, when the app's name doesn't fit it, as at a large font size.
 - On Android, each run that starts logs `RINDBENCH_RUN {"started":true,"preset":…,"libraries":[…],"sections":[…],"host":…,"port":…}` on tag `RindBench` so a runner can check that a launch ran its own selection. A start that doesn't happen logs `RINDBENCH_RUN {"started":false,"reason":…}`: the list hasn't loaded, consent isn't given, no library or group is picked (as when a launch names none that exist), or the native start failed.
 - The run itself ends with a `done` or `stopped` line at the collector.
 

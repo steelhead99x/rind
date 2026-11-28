@@ -95,6 +95,11 @@ public class MainActivity extends Activity {
         setContentView(root);
     }
 
+    /** The app bar, for the layout report: null before it's made. */
+    View appBar() {
+        return appBar;
+    }
+
     private LinearLayout makeAppBar() {
         LinearLayout h = new LinearLayout(this);
         h.setOrientation(LinearLayout.HORIZONTAL);
@@ -110,7 +115,7 @@ public class MainActivity extends Activity {
         LinearLayout name = new LinearLayout(this);
         name.setOrientation(LinearLayout.VERTICAL);
         TextView title = Theme.heading(this, "RindBench", Theme.Type.TITLE_LARGE, Theme.onSurface);
-        title.setSingleLine(true);
+        title.setSingleLine(false);
         title.setTypeface(android.graphics.Typeface.create("sans-serif", android.graphics.Typeface.BOLD));
         name.addView(title);
         name.addView(Theme.text(this, "by kixel.ai", Theme.Type.LABEL_MEDIUM, Theme.onSurfaceVariant));

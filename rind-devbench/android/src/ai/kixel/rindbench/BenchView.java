@@ -540,8 +540,8 @@ final class BenchView extends LinearLayout {
      * One machine-readable line per screen state, for a device runner checking the screen without a person:
      *   RINDBENCH_LAYOUT {"phase":"ready","w":411,"h":914,"wide":false,"folded":true,"fits":true,"clipped":[]}
      * w and h are dp. The library and group pickers open in sheets, so "folded" is true. "clipped" names the
-     * run controls, the status card, and the results preview ("score") when one is cut off or out of view;
-     * fits is false when any is.
+     * run controls, the status card, the results preview ("score"), and the app bar with the app's name
+     * ("title") when one is cut off or out of view; fits is false when any is.
      */
     private void reportLayout(String phase) {
         ui.postDelayed(() -> {
@@ -550,6 +550,8 @@ final class BenchView extends LinearLayout {
                 if (!onView(footer) || !whole(footer)) clipped.add("run controls");
                 if (!onView(statusCard)) clipped.add("status");
                 if (resultsTeaser.getVisibility() == VISIBLE && !onView(resultsTeaser)) clipped.add("score");
+                View bar = host instanceof MainActivity ? ((MainActivity) host).appBar() : null;
+                if (bar != null && (!onView(bar) || !whole(bar))) clipped.add("title");
                 float d = getResources().getDisplayMetrics().density;
                 View root = host.getWindow().getDecorView();
                 JSONObject o = new JSONObject();
