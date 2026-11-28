@@ -388,54 +388,104 @@ impl HaveAvx512Vl {
     }
 }
 
-/// Proof that the CPU has what pyca/verified-garbage's AVX-512 IFMA
-/// ChaCha20-Poly1305 runs: AVX-512 F and IFMA, with AVX, for its seal, and
-/// AVX2 and AVX-512 VL too for its open, whose AVX-512 VL body takes 449 to
-/// 639 bytes.
+/// Proof that the CPU has what one of pyca/verified-garbage's one-pass
+/// ChaCha20-Poly1305 routines runs, and which one.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct HaveIfmaForVgChaCha20Poly1305(());
+pub(crate) struct HaveVgChaCha20Poly1305(VgChaCha20Poly1305);
 
-impl HaveIfmaForVgChaCha20Poly1305 {
-    pub(crate) fn check() -> Option<Self> {
-        has(AVX | AVX2 | AVX512F | AVX512VL | AVX512IFMA).then_some(Self(()))
+/// VG's one-pass ChaCha20-Poly1305 routines rind runs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum VgChaCha20Poly1305 {
+    /// The AVX-512 IFMA routines, which need AVX-512 F and IFMA, with AVX,
+    /// to seal, and AVX2 and AVX-512 VL too to open, whose AVX-512 VL body
+    /// takes 449 to 639 bytes.
+    Ifma,
+    /// The AVX2 routines, which need AVX and AVX2.
+    Avx2,
+}
+
+impl HaveVgChaCha20Poly1305 {
+    /// VG's IFMA routines, where the CPU has what they need.
+    pub(crate) fn ifma() -> Option<Self> {
+        has(AVX | AVX2 | AVX512F | AVX512VL | AVX512IFMA).then_some(Self(VgChaCha20Poly1305::Ifma))
     }
 
-    /// As [`check`](Self::check), but not for a seal of fewer than 800 bytes
-    /// on AMD's family 19h: of its CPUs only Zen 4 has AVX-512 IFMA, and
-    /// there aws-lc's AVX2 one pass seals those faster, by up to 1.14x (see
-    /// [`runs_vg`]).
+    /// VG's AVX2 routines, where the CPU has what they need.
+    pub(crate) fn avx2() -> Option<Self> {
+        has(AVX | AVX2).then_some(Self(VgChaCha20Poly1305::Avx2))
+    }
+
+    /// Which routines this token is for.
+    pub(crate) fn routine(self) -> VgChaCha20Poly1305 {
+        self.0
+    }
+
+    /// The VG routines that seal `len` bytes on this CPU, if any: the IFMA
+    /// ones wherever the CPU has them, but for fewer than 800 bytes on AMD's
+    /// family 19h, of whose CPUs only Zen 4 has AVX-512 IFMA, and there
+    /// aws-lc's AVX2 one pass seals those faster, by up to 1.14x (see
+    /// [`runs_vg`]); and the AVX2 ones on Arrow Lake, Intel's one measured
+    /// core with AVX2 but no AVX-512, from [`INTEL_AVX2_SEAL_FROM`] bytes.
+    /// Other Intel cores without AVX-512, such as Haswell, keep aws-lc's,
+    /// where VG's own API measured slower at 1350 bytes.
     pub(crate) fn check_seal(len: usize) -> Option<Self> {
-        if runs_vg(has(FAMILY_19H), len, 800) {
-            Self::check()
-        } else {
-            None
-        }
+        Self::check_len(len, 800, INTEL_AVX2_SEAL_FROM)
     }
 
-    /// As [`check_seal`](Self::check_seal), for an open of fewer than 512
-    /// bytes.
+    /// As [`check_seal`](Self::check_seal), for an open: on family 19h from
+    /// 512 bytes, and on Arrow Lake from
+    /// [`intel_avx2_open_from`].
     pub(crate) fn check_open(len: usize) -> Option<Self> {
-        if runs_vg(has(FAMILY_19H), len, 512) {
-            Self::check()
-        } else {
-            None
+        Self::check_len(len, 512, intel_avx2_open_from())
+    }
+
+    fn check_len(len: usize, family_19h_from: usize, intel_avx2_from: usize) -> Option<Self> {
+        match Self::ifma() {
+            Some(ifma) => runs_vg(has(FAMILY_19H), len, family_19h_from).then_some(ifma),
+            // Intel's CPUs with AVX-512 but no IFMA, which no measurement
+            // covered, and other vendors' without AVX-512, where the two
+            // codes were level on Zen 3, keep aws-lc's.
+            None => {
+                Self::avx2().filter(|_| has(ARROW_LAKE) && !has(AVX512F) && len >= intel_avx2_from)
+            }
         }
     }
 }
 
-/// Whether VG's ChaCha20-Poly1305 runs a message of `len` bytes, where it
-/// runs none on AMD's family 19h below `vg_from`. In `bench` runs on a Zen 4
-/// EPYC 9V74, VG's routines under rind's glue took 1.07 to 1.04 of aws-lc's
-/// AVX2 routine's time sealing 32 to 512 bytes and 1.05 to 1.11 opening up to
-/// 256, and 0.99 and 0.90 at 1200, so from there they run. A sweep of 16 to
-/// 16384 bytes put VG at 1.03 to 1.14 of aws-lc's through 320 bytes, both
-/// ways, but at 0.90 to 0.92 sealing 384 to 448 bytes, and opening at 1.06 to
-/// 1.13 to 448 and 0.78 to 1.00 from 512 but for 992 to 1088, up to 1.11;
-/// sealing from 800 bytes it took 0.78 to 1.05. The two codes' costs step at
-/// different blocks, which makes the crossover ragged; each limit leaves the
-/// benchmark's sizes on the faster side. Every other CPU with AVX-512 IFMA
-/// runs VG's at every length: on Granite Rapids and Zen 5 it matched or beat
-/// aws-lc's at each size measured.
+/// The shortest seal, and open, that Arrow Lake runs VG's AVX2 routines for,
+/// rather than aws-lc's AVX2 one pass. On `desktop`'s P-cores under rind's
+/// glue, VG's pair lost below 512 bytes, was level at 512, and took 0.98 to
+/// 0.94 of aws-lc's time at 1200 and 1350 bytes and 0.91 (seal) and 0.87
+/// (open) at 16 KiB, so both start between the two.
+pub(crate) const INTEL_AVX2_SEAL_FROM: usize = 1024;
+pub(crate) const INTEL_AVX2_OPEN_FROM: usize = 1024;
+
+/// Where Arrow Lake opens with VG's AVX2 routine: never in
+/// a ctgrind build. VG's open branches on whether the tag matched, which its
+/// contract allows and valgrind cannot tell from a leak, so ctgrind checks
+/// aws-lc's open at every length, and `ct_sde_chacha20poly1305_vg_avx2` VG's,
+/// as on aarch64.
+pub(crate) const fn intel_avx2_open_from() -> usize {
+    if cfg!(feature = "__ctgrind") {
+        usize::MAX
+    } else {
+        INTEL_AVX2_OPEN_FROM
+    }
+}
+
+/// Whether VG's IFMA ChaCha20-Poly1305 runs a message of `len` bytes, where
+/// it runs none on AMD's family 19h below `vg_from`. In `bench` runs on a
+/// Zen 4 EPYC 9V74, VG's routines under rind's glue took 1.07 to 1.04 of
+/// aws-lc's AVX2 routine's time sealing 32 to 512 bytes and 1.05 to 1.11
+/// opening up to 256, and 0.99 and 0.90 at 1200, so from there they run. A
+/// sweep of 16 to 16384 bytes put VG at 1.03 to 1.14 of aws-lc's through 320
+/// bytes, both ways, but at 0.90 to 0.92 sealing 384 to 448 bytes, and
+/// opening at 1.06 to 1.13 to 448 and 0.78 to 1.00 from 512 but for 992 to
+/// 1088, up to 1.11; sealing from 800 bytes it took 0.78 to 1.05. The two
+/// codes' costs step at different blocks, which makes the crossover ragged;
+/// each limit leaves the benchmark's sizes on the faster side. Every other
+/// CPU with AVX-512 IFMA runs VG's at every length: on Granite Rapids and Zen
+/// 5 it matched or beat aws-lc's at each size measured.
 fn runs_vg(family_19h: bool, len: usize, vg_from: usize) -> bool {
     !family_19h || len >= vg_from
 }
@@ -563,6 +613,10 @@ const INTEL: u32 = 1 << 30;
 const FAMILY_19H: u32 = 1 << 21;
 /// AMD's family 1Ah (Zen 5), likewise.
 const FAMILY_1AH: u32 = 1 << 23;
+/// Intel's Arrow Lake (family 6, models 0xC5 and 0xC6), by CPUID leaf 1's
+/// family, model, and vendor: the one Intel core without AVX-512 that VG's
+/// AVX2 ChaCha20-Poly1305 was measured faster on.
+const ARROW_LAKE: u32 = 1 << 24;
 /// What rind's AVX2 kernels use, for [`HaveAvx2`].
 const AVX2_KERNELS: u32 = AVX | AVX2 | BMI1 | BMI2 | POPCNT | SSSE3;
 /// What the AES-GCM kernels for wider vectors build on: the AVX2 ISA, AES-NI
@@ -663,6 +717,7 @@ fn detect() -> u32 {
         (INTEL, "intel"),
         (FAMILY_19H, "family19h"),
         (FAMILY_1AH, "family1ah"),
+        (ARROW_LAKE, "arrowlake"),
     ]
     .into_iter()
     .filter(|&(bit, name)| found & bit != 0 && !super::super::cpu_denied(name))
@@ -749,6 +804,13 @@ fn decode(r: Registers) -> u32 {
         };
     set(r.amd && family == 0x19, FAMILY_19H);
     set(r.amd && family == 0x1a, FAMILY_1AH);
+    // The model is leaf 1's EAX bits 7:4 plus bits 19:16 above them, as
+    // families 6 and 0xf read it; only family 6 is matched.
+    let model = (r.eax1 >> 4 & 0xf) + (r.eax1 >> 12 & 0xf0);
+    set(
+        r.intel && family == 6 && matches!(model, 0xc5 | 0xc6),
+        ARROW_LAKE,
+    );
     set(bit(r.ecx1, 1), PCLMULQDQ);
     set(bit(r.ecx1, 9), SSSE3);
     set(bit(r.ecx1, 19), SSE41);
@@ -869,7 +931,7 @@ mod tests {
     #[test]
     fn detects_what_std_does() {
         assert_eq!(
-            (decode(registers()) | ENABLED) & !(INTEL | FAMILY_19H | FAMILY_1AH),
+            (decode(registers()) | ENABLED) & !(INTEL | FAMILY_19H | FAMILY_1AH | ARROW_LAKE),
             std_detected()
         );
     }
@@ -1035,6 +1097,38 @@ mod tests {
         }
     }
 
+    /// Intel's family 6, models 0xC5 and 0xC6, is Arrow Lake: leaf 1's model
+    /// 0x5 or 0x6 with extended model 0xc, as this host's Core Ultra 9 275HX
+    /// reports 0x000c_0662; not Haswell's 0x3c, another vendor's, or another
+    /// family.
+    #[test]
+    fn decodes_arrow_lake() {
+        let arrow_lake = Registers {
+            intel: true,
+            eax1: 0x000c_0662,
+            ..Registers::default()
+        };
+        assert_eq!(decode(arrow_lake), INTEL | ARROW_LAKE);
+        assert_eq!(
+            decode(Registers {
+                eax1: 0x000c_0652,
+                ..arrow_lake
+            }),
+            INTEL | ARROW_LAKE
+        );
+        for eax1 in [0x0003_06c3, 0x000b_06a2, 0x000c_0f62, 0x000d_0662] {
+            assert_eq!(decode(Registers { eax1, ..arrow_lake }), INTEL, "{eax1:#x}");
+        }
+        assert_eq!(
+            decode(Registers {
+                intel: false,
+                amd: true,
+                ..arrow_lake
+            }),
+            0
+        );
+    }
+
     /// Only AMD's family 19h runs VG's routines from the length it names.
     #[test]
     fn family_19h_runs_vg_from_its_length() {
@@ -1042,6 +1136,41 @@ mod tests {
             assert!(runs_vg(false, len, 800));
             assert_eq!(runs_vg(true, len, 800), len >= 800);
             assert_eq!(runs_vg(true, len, 512), len >= 512);
+        }
+    }
+
+    /// VG's IFMA ChaCha20-Poly1305 runs wherever the CPU has IFMA, its AVX2
+    /// one only on Arrow Lake from its lengths, and
+    /// aws-lc's everywhere else: on this host, and denied down to the tier
+    /// below.
+    #[test]
+    fn vg_chacha20poly1305_runs_by_cpu_and_length() {
+        let ifma = available!("avx", "avx2") && available!("avx512f", "avx512vl", "avx512ifma");
+        let intel_avx2 =
+            !ifma && has(ARROW_LAKE) && available!("avx", "avx2") && !available!("avx512f");
+        let family_19h = has(FAMILY_19H);
+        let lens = [0, 1, 511, 512, 799, 800, 1200, 16384];
+        let near =
+            [INTEL_AVX2_SEAL_FROM, INTEL_AVX2_OPEN_FROM].map(|from| [from.saturating_sub(1), from]);
+        for len in lens.into_iter().chain(near.into_iter().flatten()) {
+            let expect = |family_19h_from, intel_from| match () {
+                _ if ifma && (!family_19h || len >= family_19h_from) => {
+                    Some(VgChaCha20Poly1305::Ifma)
+                }
+                _ if intel_avx2 && len >= intel_from => Some(VgChaCha20Poly1305::Avx2),
+                _ => None,
+            };
+            let seal = HaveVgChaCha20Poly1305::check_seal(len).map(HaveVgChaCha20Poly1305::routine);
+            let open = HaveVgChaCha20Poly1305::check_open(len).map(HaveVgChaCha20Poly1305::routine);
+            assert_eq!(seal, expect(800, INTEL_AVX2_SEAL_FROM), "seal {len}");
+            // Written out rather than read from `intel_avx2_open_from`, so a
+            // mutant of it changes only the dispatch.
+            let open_from = if cfg!(feature = "__ctgrind") {
+                usize::MAX
+            } else {
+                INTEL_AVX2_OPEN_FROM
+            };
+            assert_eq!(open, expect(512, open_from), "open {len}");
         }
     }
 
@@ -1216,8 +1345,12 @@ mod tests {
                     && available!("avx512f", "avx512vl", "avx512ifma"),
             ),
             (
-                HaveIfmaForVgChaCha20Poly1305::check().is_some(),
+                HaveVgChaCha20Poly1305::ifma().is_some(),
                 available!("avx", "avx2") && available!("avx512f", "avx512vl", "avx512ifma"),
+            ),
+            (
+                HaveVgChaCha20Poly1305::avx2().is_some(),
+                available!("avx", "avx2"),
             ),
         ];
         for (i, (check, expected)) in checks.into_iter().enumerate() {
@@ -1280,10 +1413,7 @@ mod tests {
         // ChaCha20-Poly1305's, too.
         if let Some(expected) = std::env::var_os("RIND_TEST_X86_AVX512_RSA") {
             assert_eq!(HaveIfmaForCurve25519::check().is_some(), expected == "1");
-            assert_eq!(
-                HaveIfmaForVgChaCha20Poly1305::check().is_some(),
-                expected == "1"
-            );
+            assert_eq!(HaveVgChaCha20Poly1305::ifma().is_some(), expected == "1");
         }
     }
 }

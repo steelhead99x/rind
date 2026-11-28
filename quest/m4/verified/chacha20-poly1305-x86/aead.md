@@ -2,7 +2,7 @@
 
 ## Goal
 
-`OnePass` in `proofs/Rind/X86_64/ChaCha20Poly1305.lean` is discharged, so ChaCha20-Poly1305 and XChaCha20-Poly1305 earn the ✓ on x86_64 CPUs with SSE4.1 wherever `HaveIfmaForVgChaCha20Poly1305`'s check for the message's length fails: without AVX-512 IFMA, and on Zen 4 sealing under 800 bytes and opening under 512.
+`OnePass` in `proofs/Rind/X86_64/ChaCha20Poly1305.lean` is discharged, so ChaCha20-Poly1305 and XChaCha20-Poly1305 earn the ✓ on x86_64 CPUs with SSE4.1 wherever `HaveVgChaCha20Poly1305`'s check for the message's length fails: without AVX-512 IFMA, but for Arrow Lake from 1024 bytes, and on Zen 4 sealing under 800 bytes and opening under 512.
 
 ## Plan
 
