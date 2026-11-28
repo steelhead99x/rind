@@ -39,13 +39,13 @@ pub const TARGET: &str = env!("DEVBENCH_TARGET");
 static STOP: AtomicBool = AtomicBool::new(false);
 static RUNNING: AtomicBool = AtomicBool::new(false);
 static STATUS: Mutex<Option<Value>> = Mutex::new(None);
-/// The `RIND_*` environment a catalog was listed with, which decides its rows: rind-bench's rustls rows read
-/// `RIND_BENCH_KEYS_DIR` while listing, `RIND_BENCH_LOW_MEMORY` drops rows, and `RIND_CPU_DISABLE_*` changes
-/// what rind offers.
+/// The environment a catalog was listed with that decides its rows: rind-bench's rustls rows read
+/// `RIND_BENCH_KEYS_DIR` while listing, `RIND_BENCH_LOW_MEMORY` drops rows, `RIND_CPU_DISABLE_*` changes what
+/// rind offers, and `NOISY_BENCHMARKS` adds the RSA key-generation rows (`rind-bench/benches/rsa_gen.rs`).
 type ListingEnv = Vec<(std::ffi::OsString, std::ffi::OsString)>;
 
 fn listing_env() -> ListingEnv {
-    let mut v: ListingEnv = std::env::vars_os().filter(|(k, _)| k.to_string_lossy().starts_with("RIND_")).collect();
+    let mut v: ListingEnv = std::env::vars_os().filter(|(k, _)| k.to_string_lossy().starts_with("RIND_") || k == "NOISY_BENCHMARKS").collect();
     v.sort();
     v
 }
