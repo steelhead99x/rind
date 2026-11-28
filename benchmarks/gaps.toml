@@ -21,17 +21,17 @@
 [[gap]]
 operations = ["chacha20poly1305/*/16KB", "chacha20poly1305-open/*/16KB", "xchacha20poly1305/*/16KB"]
 on = ["no AES-NI", "SSE2"]
-reason = "Without SSE4.1 rind runs Graviola's scalar Poly1305 rather than port BoringSSL's SSE2 `poly1305_vec.c` for CPUs older than Westmere, as ALGORITHMS.md records."
+quest = "/quest/m2/speed/sse2-poly1305.md"
 
 [[gap]]
 operations = ["aes*-gcm*", "rustls-bulk/*", "aes*-ctr/*", "aes*-cbc-*"]
 on = ["portable"]
-reason = "The portable backend runs aws-lc's `aes_nohw.c` in its 64-bit configuration, four blocks a pass ([#621](https://github.com/kixel-ai/rind/pull/621)), while this row builds aws-lc's C for x86_64, where it bitslices eight blocks into SSE2 registers: the configuration aws-lc itself runs on the other 64-bit targets the backend is for is rind's. In [run 44941104585](https://github.com/kixel-ai/rind/actions/runs/44941104585) AES-256-GCM measured 1.10× at 16 KB, AES-CTR 1.18 to 1.35× from 1200 B, and CBC decryption 1.22 to 1.30×; shorter messages and the other AES-GCM rows are within 10%."
+quest = "/quest/m2/speed/portable-aes-8way.md"
 
 [[gap]]
 operations = ["sha1/*", "hmac-sha1/*"]
 on = ["portable"]
-reason = "rind's portable SHA-1 trails aws-lc's C by 1.11 to 1.24× from 1200 B up in [run 44941104585](https://github.com/kixel-ai/rind/actions/runs/44941104585). SHA-1 survives only for legacy signatures and HMAC-SHA-1, which are rare on targets without assembly, so it stays rather than take aws-lc's integer `sha1_block_data_order_nohw`, which armv7 without NEON already runs, as a speed quest."
+quest = "/quest/m2/speed/portable-sha1.md"
 
 [[gap]]
 operations = ["aes*-kw-unwrap/*/16B", "aes*-kwp-unwrap/*/16B"]

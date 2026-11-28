@@ -194,6 +194,7 @@ pub(crate) mod p521_jmixadd;
 pub(crate) mod p521_jmixadd_alt;
 pub(crate) mod p521_jscalarmul;
 pub(crate) mod p521_jscalarmul_alt;
+pub(crate) mod poly1305_sse2;
 pub(crate) mod rsa_ifma;
 pub(crate) mod rsa_vg;
 pub(crate) mod rsaz;

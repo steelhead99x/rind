@@ -78,6 +78,7 @@ exclude_re = [
   'rind/src/low/x86_64/aes\.rs:\d+:\d+: replace \| with \^ in store$',
   'rind/src/low/x86_64/aes_gcm\.rs:\d+:\d+: replace \| with \^ in counter_block$',
   'rind/src/low/x86_64/chacha20poly1305\.rs:\d+:\d+: replace \| with \^$',
+  'rind/src/low/x86_64/poly1305_sse2\.rs:\d+:\d+: replace \| with \^ in to_limbs$',
   # Pinned to its line: a `const` has no name to match, and only `AES`'s
   # `1 << 0` survives.
   'rind/src/low/x86_64/cpu\.rs:586:\d+: replace << with >>$',
@@ -127,6 +128,9 @@ exclude_re = [
   # remainders, either of `split`'s rows may lead.
   'rind/src/low/generic/edwards25519_msm\.rs:\d+:\d+: replace > with >= in add_digit$',
   'rind/src/mid/half_size\.rs:\d+:18: replace < with <= in split$',
+  # Poly1305's SSE2 lanes: the threshold only moves where the faster path
+  # starts, and either side of it gives the same tag.
+  'rind/src/low/x86_64/poly1305_sse2\.rs:\d+:\d+: replace < with <= in blocks$',
   # ChaCha20's chunk length: with a whole chunk left, both branches give it.
   # The loop guard's `<`, at column 16, is caught.
   'rind/src/low/generic/chacha20\.rs:\d+:40: replace < with <= in cipher$',
@@ -318,7 +322,7 @@ exclude_re = [
   # Pinned to its line: the `cpu_denied` of a release build or one without
   # an OS, which tests never are. The debug build's, under the same name, is
   # caught.
-  'rind/src/low/mod\.rs:279:\d+: replace cpu_denied -> bool with true$',
+  'rind/src/low/mod\.rs:280:\d+: replace cpu_denied -> bool with true$',
   # The FIPS module's `SystemRandom`, compiled only under `--cfg rind_fips`,
   # which no mutation run sets; `fips_rng`'s tests cover what it calls.
   # Pinned to its line: the other `fill`, under the same name, is caught.
@@ -405,6 +409,25 @@ exclude_re = [
   'rind-aws-lc-rs/src/rsa\.rs:\d+:\d+: replace \|\| with && in PublicKeyComponents<B>::rind$',
   # 0x02 has no low bit, so `|` and `^` with the parity bit agree.
   'rind-aws-lc-rs/src/agreement\.rs:\d+:\d+: replace \| with \^ in compress$',
+  # evp's field arithmetic on public values, for curves rind cannot back.
+  # `num` is only given built-in parameters and field-length coordinates,
+  # 66 bytes at most, so its bound of 72 is never met or passed. A borrow
+  # out of `a - b` and one out of subtracting the incoming borrow cannot
+  # both occur, nor two such carries, so their OR is their XOR.
+  'rind-aws-lc-rs/src/evp\.rs:\d+:\d+: replace > with (==|>=) in num$',
+  'rind-aws-lc-rs/src/evp\.rs:\d+:\d+: replace \| with \^ in (sub|Field::add)$',
+  # `Field::mul`'s accumulator never fills its top limbs: every built-in
+  # prime is below 2^522, so t + a b_i stays below 2^587 and each step's
+  # result below 2p, under 2^523. `t[LIMBS + 1]` and the carry into
+  # `t[LIMBS]` are always zero, whatever combines or shifts them, and
+  # `LIMBS * 2` limbs only add limbs nothing reads. Columns 31, 34, 37, and
+  # 42 are those lines'; the same mutations elsewhere in it are caught.
+  'rind-aws-lc-rs/src/evp\.rs:\d+:(34|37): replace \+ with \* in Field::mul$',
+  'rind-aws-lc-rs/src/evp\.rs:\d+:37: replace \+ with - in Field::mul$',
+  'rind-aws-lc-rs/src/evp\.rs:\d+:(31|42): replace >> with << in Field::mul$',
+  # `has_x` reads (p - 1) / 2 as p - 1 shifted right once, which drops the
+  # bit the decrement clears: p is odd, so p >> 1 is the same exponent.
+  'rind-aws-lc-rs/src/evp\.rs:\d+:\d+: replace -= with /= in Field::has_x$',
   # Compiled only with the `dev-tests-only` and `unstable` features, which
   # campaigns, like aws-lc-rs's default build, leave off.
   'rind-aws-lc-rs/src/rand\.rs:\d+:\d+: replace <impl SecureRandom for T>::mut_fill -> Result<\(\), error::Unspecified> with Ok\(\(\)\)$',

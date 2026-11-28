@@ -13,9 +13,11 @@ moduli with `e = 65537`, through `public_op_ifma`, which `VgRsa.lean`'s
 axiom states. This proves `public_op_ifma`'s glue: the key's precomputed
 words, the exponent's and the input's bytes, and the result's words.
 
-`admin/prove` writes the portable backend's copy without the sections marked
-as this target's alone: its `public_op` has no IFMA path, and its
-`public_op_spec` takes no `IfmaCheckReturns`.
+The `-- portable:` lines and the sections marked as this target's alone are
+kept for the portable backend's copy, which `admin/prove` no longer writes
+while that proof is parked (quest/m4/verified/rsa-verify-portable-four-product.md):
+its `public_op` has no IFMA path, and its `public_op_spec` takes no
+`IfmaCheckReturns`.
 -/
 
 namespace rind.x86_64

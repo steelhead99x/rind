@@ -474,6 +474,13 @@ class PinnedCpus(unittest.TestCase):
         self.assertEqual(br.bench_passes(self.NAMES[4:], "2,3"), [("2,3", self.NAMES[4:])])
         self.assertEqual(br.bench_passes(self.NAMES[1:2], "2,3"), [(None, self.NAMES[1:2])])
 
+    def test_swole_pmu_cpus(self):
+        # A hybrid Intel host, as `swole fingerprint bench` reports it, then one with no perf counters.
+        pinned = "perf: tier L2, counting user space\nPMU: cpu_atom on CPUs 8-23, 8 general-purpose counters\n"
+        self.assertEqual(br.swole_pmu_cpus(pinned), list(range(8, 24)))
+        self.assertEqual(br.swole_pmu_cpus("PMU: cpu on CPUs 0-3,6\n"), [0, 1, 2, 3, 6])
+        self.assertIsNone(br.swole_pmu_cpus("CPUs: 4\nkernel.perf_event_paranoid: 4\n"))
+
 
 class Verified(unittest.TestCase):
     def load(self, text):

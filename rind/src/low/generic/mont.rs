@@ -533,6 +533,7 @@ fn mul_add2(x: &mut [Limb], y: &[Limb], u: Limb, v: Limb, c: Wide) -> Wide {
 /// most `mul_add_limb`'s bound, so the carry fits a limb.
 #[inline]
 fn mul_add(x: &mut [Limb], y: &[Limb], u: Limb) -> Wide {
+    debug_assert_eq!(x.len(), y.len());
     let y = &y[..x.len()];
     let mut carry: Wide = 0;
     let (xb, xr) = x.as_chunks_mut::<4>();

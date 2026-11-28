@@ -500,6 +500,13 @@ def swole():
     return os.path.join(out.strip(), "bin", "swole")
 
 
+def swole_pmu_cpus(text):
+    """The CPUs `swole fingerprint bench`'s report says swole pins timed jobs to, or None when it found no
+    perf counters and so times by wall clock without pinning."""
+    m = re.search(r"^PMU: \S+ on CPUs ([0-9,-]+)", text, re.M)
+    return parse_cpu_list(m.group(1).rstrip(",")) if m else None
+
+
 def pinned_cpus_on(platform, value):
     """The CPU list a Linux run should pin, or None when the env is unset."""
     if platform != "linux":
@@ -1053,8 +1060,20 @@ def run(args):
     # bench's extra row (slhdsa's fips205) runs once, to list it, and is
     # neither timed nor ranked.
     bench_args = ["--features", "__bench_openssl"]
+    # Where swole times on perf counters, it pins each timed job to the counting PMU's CPUs, such as a
+    # hybrid CPU's one kind of core, so a row that needs every logical CPU would fail its assert: such a
+    # host times none of them, as a reserved run times none.
+    probe = subprocess.run([swole_bin, "fingerprint", "bench"], env=env, check=True, capture_output=True, text=True)
+    pmu_cpus = swole_pmu_cpus(probe.stdout + probe.stderr)
+    every_cpu_out = bool(reserved) or (pmu_cpus is not None and len(pmu_cpus) < result["cpu"]["logical_cpus"])
+    if every_cpu_out and not reserved:
+        print(
+            f"{host}: swole pins timing to CPUs {cpu_list(pmu_cpus)} of {result['cpu']['logical_cpus']}, "
+            "so the every-logical-CPU rows are left out",
+            file=sys.stderr,
+        )
     names = bench_names(
-        cargo, env, bench_args, match=lambda i: operation_of(i) and not (reserved and EVERY_CPU.match(i))
+        cargo, env, bench_args, match=lambda i: operation_of(i) and not (every_cpu_out and EVERY_CPU.match(i))
     )
     # Beside the result, in this collection's own copy, since another may
     # share the target directory.

@@ -13,5 +13,3 @@ Fork PR #85, head `271b7397`. Score 6/10. Depends on [#84](/quest/m2/84-bare-met
 - Add `sh/bare-metal-rustc` to the `just check` trigger.
 - Keep a configured `rustc-wrapper`.
 - On the ESP-IDF row, turn off only the false-positive lint, not all of Clippy.
-
-Next: [#87](/quest/m2/87-poly1305-26bit-limbs.md).
