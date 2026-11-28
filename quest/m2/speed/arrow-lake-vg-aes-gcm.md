@@ -15,7 +15,3 @@ Found by `desktop`'s first run on two reserved cores ([kixel-ai/rind#1103](https
 ## Hosts
 
 - linux - `desktop` is the only Intel host without AVX-512
-
-## Related
-
-- [Arrow Lake ChaCha20-Poly1305](/quest/m2/speed/arrow-lake-vg-chacha20-poly1305.md) - the same comparison for the other AEAD on the same host

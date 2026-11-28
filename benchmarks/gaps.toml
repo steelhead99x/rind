@@ -86,7 +86,7 @@ reason = "Noise: other tenants share `ovh-iad`'s VPS, whose load the report cann
 [[gap]]
 operations = ["chacha20poly1305/16KB"]
 on = ["desktop"]
-quest = "/quest/m2/speed/arrow-lake-vg-chacha20-poly1305.md"
+reason = "Fixed, pending `desktop`'s next refresh: rind now seals and opens with pyca/verified-garbage's AVX2 ChaCha20-Poly1305 on Intel without AVX-512 from 1024 bytes. Measured on `desktop` pinned to CPUs 2 and 3 as its refreshes are, median of 5, rind took 7453 ns against verified-garbage's 7401 (1.01x) and aws-lc-rs's 8428 to seal 16 KB, and 7381 against 7392 and 8334 to open it."
 
 [[gap]]
 operations = ["sha512/*"]
