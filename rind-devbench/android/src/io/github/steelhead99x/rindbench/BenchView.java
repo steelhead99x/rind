@@ -321,7 +321,8 @@ final class BenchView extends LinearLayout {
 
         onChromeRelayout();
         presetChanged();
-        applyIntent(intent);
+        // A collector from the saved state is newer than the restored intent's: the intent then only preselects.
+        applyIntent(intent, !(restored && saved.getBoolean(KEY_COLLECTOR_SET)));
         findCollector();
         ui.postDelayed(() -> { if (!running && !collectorOK) findCollector(); }, 4000);
         new Thread(() -> {
@@ -403,10 +404,15 @@ final class BenchView extends LinearLayout {
      * DEVICE_RUNNER=1) takes a collector from them. A runner's launch carries its own (`Launch`).
      */
     void applyIntent(Intent it) {
+        applyIntent(it, true);
+    }
+
+    /** {@link #applyIntent(Intent)}; {@code collector}: also take its `host` and `port`. */
+    private void applyIntent(Intent it, boolean collector) {
         // As the preset buttons, nothing changes while a run is going: its collector was fixed at Start.
         if (it == null || running || isRunnerLaunch(it)) return;
         // A host that isn't a non-blank string, or a port out of range, leaves the collector as it is.
-        String newHost = Collector.RUNNER ? it.getStringExtra("host") : null;
+        String newHost = Collector.RUNNER && collector ? it.getStringExtra("host") : null;
         if (newHost != null) newHost = newHost.trim();
         int newPort = it.getIntExtra("port", Collector.PORT);
         if (newHost != null && !newHost.isEmpty() && newPort > 0 && newPort <= 65535)
