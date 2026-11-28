@@ -432,9 +432,9 @@ impl HaveVgChaCha20Poly1305 {
 
     /// As [`check_seal`](Self::check_seal), for an open: on family 19h from
     /// 512 bytes, and on Intel's CPUs without AVX-512 from
-    /// [`INTEL_AVX2_OPEN_FROM`].
+    /// [`intel_avx2_open_from`].
     pub(crate) fn check_open(len: usize) -> Option<Self> {
-        Self::check_len(len, 512, INTEL_AVX2_OPEN_FROM)
+        Self::check_len(len, 512, intel_avx2_open_from())
     }
 
     fn check_len(len: usize, family_19h_from: usize, intel_avx2_from: usize) -> Option<Self> {
@@ -456,6 +456,19 @@ impl HaveVgChaCha20Poly1305 {
 /// the two numbers that measurement sets.
 pub(crate) const INTEL_AVX2_SEAL_FROM: usize = 1024;
 pub(crate) const INTEL_AVX2_OPEN_FROM: usize = 1024;
+
+/// Where Intel's CPUs without AVX-512 open with VG's AVX2 routine: never in
+/// a ctgrind build. VG's open branches on whether the tag matched, which its
+/// contract allows and valgrind cannot tell from a leak, so ctgrind checks
+/// aws-lc's open at every length, and `ct_sde_chacha20poly1305_vg_avx2` VG's,
+/// as on aarch64.
+pub(crate) const fn intel_avx2_open_from() -> usize {
+    if cfg!(feature = "__ctgrind") {
+        usize::MAX
+    } else {
+        INTEL_AVX2_OPEN_FROM
+    }
+}
 
 /// Whether VG's IFMA ChaCha20-Poly1305 runs a message of `len` bytes, where
 /// it runs none on AMD's family 19h below `vg_from`. In `bench` runs on a
@@ -1102,7 +1115,7 @@ mod tests {
             let seal = HaveVgChaCha20Poly1305::check_seal(len).map(HaveVgChaCha20Poly1305::routine);
             let open = HaveVgChaCha20Poly1305::check_open(len).map(HaveVgChaCha20Poly1305::routine);
             assert_eq!(seal, expect(800, INTEL_AVX2_SEAL_FROM), "seal {len}");
-            assert_eq!(open, expect(512, INTEL_AVX2_OPEN_FROM), "open {len}");
+            assert_eq!(open, expect(512, intel_avx2_open_from()), "open {len}");
         }
     }
 

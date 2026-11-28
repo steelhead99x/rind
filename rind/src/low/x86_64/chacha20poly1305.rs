@@ -357,9 +357,10 @@ mod tests {
     type Seal = fn(&[u8; 32], &[u8; 12], &[u8], &mut [u8]) -> [u8; 16];
     type Open = fn(&[u8; 32], &[u8; 12], &[u8], &mut [u8], &[u8; 16]) -> bool;
 
-    /// Each one-pass path the CPU can run, by name.
-    fn paths() -> Vec<(&'static str, Seal, Open)> {
-        let mut paths: Vec<(&'static str, Seal, Open)> = Vec::new();
+    /// Each one-pass path the CPU can run, by name, and whether its open
+    /// branches on whether the tag matched, as VG's do.
+    fn paths() -> Vec<(&'static str, Seal, Open, bool)> {
+        let mut paths: Vec<(&'static str, Seal, Open, bool)> = Vec::new();
         if HaveVgChaCha20Poly1305::ifma().is_some() {
             paths.push((
                 "vg ifma",
@@ -371,6 +372,7 @@ mod tests {
                     let t = HaveVgChaCha20Poly1305::ifma().unwrap();
                     open_vg(t, key, nonce, aad, inout, tag)
                 },
+                true,
             ));
         }
         if HaveVgChaCha20Poly1305::avx2().is_some() {
@@ -384,6 +386,7 @@ mod tests {
                     let t = HaveVgChaCha20Poly1305::avx2().unwrap();
                     open_vg(t, key, nonce, aad, inout, tag)
                 },
+                true,
             ));
         }
         if HaveSse41::check().is_some() && HaveAvx2::check().is_some() {
@@ -397,6 +400,7 @@ mod tests {
                     let (sse41, avx2) = (HaveSse41::check().unwrap(), HaveAvx2::check());
                     ct_equal(&one_pass(sse41, avx2, key, nonce, aad, inout, false), tag)
                 },
+                false,
             ));
         }
         if HaveSse41::check().is_some() {
@@ -417,6 +421,7 @@ mod tests {
                     let sse41 = HaveSse41::check().unwrap();
                     ct_equal(&one_pass(sse41, None, key, nonce, aad, inout, false), tag)
                 },
+                false,
             ));
         }
         paths
@@ -430,11 +435,15 @@ mod tests {
     // and its 16-byte blocks, and longer messages through VG's wider loops,
     // and opening under a tag one bit off, which VG's routine answers by
     // zeroing the message. Valgrind hides AVX-512, so ctgrind checks only the
-    // AVX2 and SSE4.1 routines, VG's AVX2 pair among them, and
-    // `ct_sde_chacha20poly1305` VG's IFMA pair.
+    // AVX2 and SSE4.1 routines, and `ct_sde_chacha20poly1305` VG's IFMA pair.
+    // VG's open branches on whether the tag matched, which its contract
+    // allows and valgrind cannot tell from a leak, so a path that runs it
+    // opens under a public copy of the key: ctgrind checks VG's AVX2 seal,
+    // and `ct_sde_chacha20poly1305_vg_avx2` its open.
     #[test]
     fn paths_match() {
-        let key = core::array::from_fn(|i| i as u8);
+        let public_key: [u8; 32] = core::array::from_fn(|i| i as u8);
+        let key = public_key;
         ct::secret_slice(&key);
         let nonce = core::array::from_fn(|i| (i * 7) as u8);
         let input: Vec<u8> = (0..16384 + 15).map(|i| (i * 13 + 5) as u8).collect();
@@ -448,7 +457,8 @@ mod tests {
             let mut sealed = input[..len].to_vec();
             let tag = ct::into_public(separate::seal(&key, &nonce, aad, &mut sealed));
             ct::public_slice(&sealed);
-            for (path, seal, open) in paths() {
+            for (path, seal, open, open_branches) in paths() {
+                let open_key = if open_branches { &public_key } else { &key };
                 let mut ours = input[..len].to_vec();
                 let ours_tag = ct::into_public(seal(&key, &nonce, aad, &mut ours));
                 ct::public_slice(&ours);
@@ -457,7 +467,7 @@ mod tests {
                     "{path} seal tag, {len} bytes, {aad_len} of AAD"
                 );
                 assert_eq!(ours, sealed, "{path} seal, {len} bytes, {aad_len} of AAD");
-                let valid = ct::into_public(open(&key, &nonce, aad, &mut ours, &tag));
+                let valid = ct::into_public(open(open_key, &nonce, aad, &mut ours, &tag));
                 ct::public_slice(&ours);
                 assert!(valid, "{path} open, {len} bytes, {aad_len} of AAD");
                 assert_eq!(
@@ -469,7 +479,7 @@ mod tests {
                 let mut wrong = tag;
                 wrong[len % 16] ^= 1 << (len % 8);
                 let mut forged = sealed.clone();
-                let valid = ct::into_public(open(&key, &nonce, aad, &mut forged, &wrong));
+                let valid = ct::into_public(open(open_key, &nonce, aad, &mut forged, &wrong));
                 assert!(!valid, "{path} forged, {len} bytes, {aad_len} of AAD");
             }
         }
@@ -508,18 +518,17 @@ mod tests {
         }
     }
 
-    // Intel SDE runs VG's routines, which valgrind cannot, under
-    // `admin/ct-sde`, with a secret key, nonce, AAD, message, and tag,
-    // sealing, then opening under the right tag and a wrong one, which only
-    // the result may tell apart. The routines branch on the lengths, which
-    // are public, so these take the short and long AAD paths and each
-    // message path: a partial block, the one-block-group and the four-group
-    // loops with tails, a run long enough for the widest loop, and open's
-    // AVX-512 VL body for 449 to 639 bytes, whole blocks and with a tail.
-    #[test]
-    #[ignore = "admin/ct-sde runs it under Intel SDE"]
-    fn ct_sde_chacha20poly1305() {
-        let t = HaveVgChaCha20Poly1305::ifma().expect("AVX512_IFMA");
+    // Intel SDE runs VG's routines under `admin/ct-sde`, with a secret key,
+    // nonce, AAD, message, and tag, sealing, then opening under the right tag
+    // and a wrong one, which only the result may tell apart: the IFMA pair,
+    // which valgrind cannot run, and the AVX2 open, whose branch on the
+    // result valgrind cannot tell from a leak. The routines branch on the
+    // lengths, which are public, so these take the short and long AAD paths
+    // and each message path: a partial block, the one-block-group and the
+    // four-group loops with tails, a run long enough for the widest loop,
+    // and the IFMA open's AVX-512 VL body for 449 to 639 bytes, whole blocks
+    // and with a tail.
+    fn ct_sde_vg(t: HaveVgChaCha20Poly1305) {
         let mut rng = Rng(ct_sde::seed());
         let mut bytes = |n| (0..n).map(|_| rng.next() as u8).collect::<Vec<u8>>();
         let key = bytes(32).try_into().unwrap();
@@ -551,5 +560,23 @@ mod tests {
                 &wrong
             )));
         }
+    }
+
+    #[test]
+    #[ignore = "admin/ct-sde runs it under Intel SDE"]
+    fn ct_sde_chacha20poly1305() {
+        ct_sde_vg(HaveVgChaCha20Poly1305::ifma().expect("AVX512_IFMA"));
+    }
+
+    // Under SDE's Arrow Lake, whose AVX2 and no AVX-512 the dispatch also
+    // takes this pair on.
+    #[test]
+    #[ignore = "admin/ct-sde runs it under Intel SDE"]
+    fn ct_sde_chacha20poly1305_vg_avx2() {
+        assert_eq!(
+            HaveVgChaCha20Poly1305::check_open(4097).map(HaveVgChaCha20Poly1305::routine),
+            Some(VgChaCha20Poly1305::Avx2)
+        );
+        ct_sde_vg(HaveVgChaCha20Poly1305::avx2().unwrap());
     }
 }
