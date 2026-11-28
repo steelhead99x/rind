@@ -545,16 +545,7 @@ impl<P: Params> DecapKey<P> {
         // 8. - 15.
         let mut s = Coeffs::<P::Vector, Normal>::zero();
         let mut e = Coeffs::<P::Vector, Normal>::zero();
-        let mut none: [Poly; 0] = [];
-        sample_poly_cbd(
-            P::ETA1,
-            P::K,
-            &sigma.0,
-            0,
-            s.0.as_mut(),
-            e.0.as_mut(),
-            &mut none,
-        );
+        sample_poly_cbd(P::ETA1, &sigma.0, 0, s.0.as_mut(), e.0.as_mut());
 
         // 16. ŝ <- NTT(s)
         let mut s_hat = s.ntt();
@@ -686,30 +677,15 @@ impl<P: Params> Decoded<P> {
         // 4. - 8. rolled into self.transpose_a_hat.
 
         // 9. - 12. y_i <- SamplePolyCBD_eta1(PRF(r, N))
+        let mut y = Coeffs::<P::Vector, Normal>::zero();
+        let mut none: [Poly; 0] = [];
+        sample_poly_cbd(P::ETA1, &r.0, 0, y.0.as_mut(), &mut none);
+
         // 13. - 16. e_1 <- SamplePolyCBD_eta2(PRF(r, N))
         // 17. e_2 <- SamplePolyCBD_eta2(PRF(r, N))
-        //
-        // N counts on from y's into e_1's and e_2's, so where eta1 is eta2
-        // one call samples all three, and hashes them in fewer batches.
-        let mut y = Coeffs::<P::Vector, Normal>::zero();
         let mut e_1 = Coeffs::<P::Vector, Normal>::zero();
         let mut e_2 = [[0; N]; 1];
-        let mut none: [Poly; 0] = [];
-        if P::ETA1 == ETA2 {
-            sample_poly_cbd(ETA2, P::K, &r.0, 0, y.0.as_mut(), e_1.0.as_mut(), &mut e_2);
-        } else {
-            let mut no_b: [Poly; 0] = [];
-            sample_poly_cbd(P::ETA1, P::K, &r.0, 0, y.0.as_mut(), &mut no_b, &mut none);
-            sample_poly_cbd(
-                ETA2,
-                P::K,
-                &r.0,
-                P::K as u8,
-                e_1.0.as_mut(),
-                &mut e_2,
-                &mut none,
-            );
-        }
+        sample_poly_cbd(ETA2, &r.0, P::K as u8, e_1.0.as_mut(), &mut e_2);
 
         // 18. y^ <- NTT(y)
         let y_hat = y.ntt();
@@ -1322,108 +1298,23 @@ impl<V: FixedArray<Poly>> Coeffs<V, Normal> {
 }
 
 /// `SamplePolyCBD_eta(PRF_eta(sigma, n))` into each polynomial of `a`, then
-/// of `b`, then of `c`, with `n` counting from `first`, for the parameter set
-/// of rank `k`: eight polynomials at a time where the CPU hashes eight at once
-/// (but for ML-KEM-768), and four at a time otherwise.
-fn sample_poly_cbd(
-    eta: usize,
-    k: usize,
-    sigma: &[u8; 32],
-    first: u8,
-    a: &mut [Poly],
-    b: &mut [Poly],
-    c: &mut [Poly],
-) {
-    let total = a.len() + b.len() + c.len();
+/// of `b`, with `n` counting from `first`, four polynomials at a time.
+fn sample_poly_cbd(eta: usize, sigma: &[u8; 32], first: u8, a: &mut [Poly], b: &mut [Poly]) {
+    let total = a.len() + b.len();
     let mut done = 0;
     while done < total {
-        let left = total - done;
-        // ML-KEM-768 never hashes eight at a time: it takes its six or seven
-        // four at a time, over the verified four-way Keccak-f, so Graviola's
-        // unproven eight-way Keccak is off its path, as in `sample_ntt`.
-        // Where that would run, ML-KEM-768 runs pyca/verified-garbage's
-        // routines instead. Only x86_64 has an eight-way PRF, and only
-        // ML-KEM-1024's eta = 2 batches pass four.
-        #[cfg(rind_backend = "x86_64")]
-        if eta == 2 && k == 4 && left > 4 {
-            let count = if left < 8 { left } else { 8 };
-            let polys = sample_poly_cbd2_8x(sigma, first + done as u8, count);
-            for t in 0..count {
-                put_poly(a, b, c, done + t, &polys[t]);
-            }
-            done += count;
-            continue;
-        }
-        #[cfg(not(rind_backend = "x86_64"))]
-        let _ = k;
-        let count = if left < 4 { left } else { 4 };
+        let count = if total - done < 4 { total - done } else { 4 };
         let polys = sample_poly_cbd_4x(eta, sigma, first + done as u8, count);
         for t in 0..count {
-            put_poly(a, b, c, done + t, &polys[t]);
+            let poly = done + t;
+            if poly < a.len() {
+                a[poly] = polys[t];
+            } else {
+                b[poly - a.len()] = polys[t];
+            }
         }
         done += count;
     }
-}
-
-/// Stores `poly` as polynomial `i` of `a`, `b`, and `c` laid end to end.
-fn put_poly(a: &mut [Poly], b: &mut [Poly], c: &mut [Poly], i: usize, poly: &Poly) {
-    if i < a.len() {
-        a[i] = *poly;
-    } else if i < a.len() + b.len() {
-        b[i - a.len()] = *poly;
-    } else {
-        c[i - a.len() - b.len()] = *poly;
-    }
-}
-
-/// `SamplePolyCBD_2(PRF_2(sigma, n + t))` for each `t` below `count`, which is
-/// five to eight, on x86_64's eight-way SHAKE256 where the CPU has it and four
-/// at a time otherwise; the rest are zero. It hands the eight-way Keccak a
-/// function pointer, which Aeneas cannot translate, so `admin/prove` leaves it
-/// opaque.
-#[cfg(rind_backend = "x86_64")]
-fn sample_poly_cbd2_8x(sigma: &[u8; 32], n: u8, count: usize) -> [Poly; 8] {
-    let mut inputs = [[0; 40]; 8];
-    for t in 0..count {
-        inputs[t][..32].copy_from_slice(sigma);
-        inputs[t][32] = n + t as u8;
-        inputs[t][33] = sha3::SHAKE_PAD_BYTE;
-    }
-
-    let mut samples = [[0; 128]; 8];
-    low::mlkem_shake256_8x(&inputs, &mut samples, count, shake256_fours);
-
-    let mut polys = [[0; N]; 8];
-    for t in 0..count {
-        sample_cbd2(&samples[t], &mut polys[t]);
-    }
-    polys
-}
-
-/// [`sha3::shake256_batch`] of the first `count` of eight inputs, four at a
-/// time.
-#[cfg(rind_backend = "x86_64")]
-fn shake256_fours(inputs: &[[u8; 40]; 8], outputs: &mut [[u8; 128]; 8], count: usize) {
-    let (inputs, _) = inputs.as_chunks::<4>();
-    let (outputs, _) = outputs.as_chunks_mut::<4>();
-    for (i, (inputs, outputs)) in inputs.iter().zip(outputs).enumerate() {
-        match count.saturating_sub(i * 4) {
-            0 => {}
-            1 => shake256_batch_of::<1>(inputs, outputs),
-            2 => shake256_batch_of::<2>(inputs, outputs),
-            3 => shake256_batch_of::<3>(inputs, outputs),
-            _ => sha3::shake256_batch(inputs, outputs),
-        }
-    }
-}
-
-/// [`sha3::shake256_batch`] of the first `P` of four inputs.
-#[cfg(rind_backend = "x86_64")]
-fn shake256_batch_of<const P: usize>(inputs: &[[u8; 40]; 4], outputs: &mut [[u8; 128]; 4]) {
-    sha3::shake256_batch::<P>(
-        inputs.first_chunk().unwrap(),
-        outputs.first_chunk_mut().unwrap(),
-    );
 }
 
 /// `SamplePolyCBD_eta(PRF_eta(sigma, n + t))` for each `t` below `count`,
