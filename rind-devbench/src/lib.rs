@@ -329,10 +329,6 @@ fn select(cfg: &Config, rows: &[Value]) -> Vec<(String, String)> {
 }
 
 fn run(cfg: Config) {
-    for (k, v) in &cfg.env {
-        // SAFETY: set before any bench thread starts; the app does not read env concurrently.
-        unsafe { std::env::set_var(k, v) };
-    }
     let cat = catalog();
     let selected = select(&cfg, cat["rows"].as_array().unwrap());
     let rounds = cfg.rounds.unwrap_or(3).max(1);
@@ -499,14 +495,26 @@ pub fn start(config_json: &str) -> Result<(), String> {
     if denies_missing() {
         return Err(DENIES_MISSING.into());
     }
+    // set_var panics on these, and a panic here would escape the C boundary holding the run slot.
+    if let Some(k) = cfg.env.iter().find(|(k, v)| k.is_empty() || k.contains(['=', '\0']) || v.contains('\0')).map(|(k, _)| k) {
+        return Err(format!("environment entry {k:?} has an empty name, or a name with '=' or NUL, or a value with NUL"));
+    }
+    if RUNNING.swap(true, Ordering::SeqCst) {
+        return Err("already running".into());
+    }
+    // The configured environment goes in before the catalog is first listed, since rind-bench's rustls
+    // rows read RIND_BENCH_KEYS_DIR while listing and the catalog is cached.
+    for (k, v) in &cfg.env {
+        // SAFETY: no run is going (RUNNING was false), so no bench thread reads the environment; the app
+        // does not read it concurrently.
+        unsafe { std::env::set_var(k, v) };
+    }
     // A selection that matches no row would run nothing yet end "done", with status "ok": refuse it
     // before acknowledging the start. Each library and group can be valid alone and still select nothing
     // together, as ring with ML-KEM does.
     if select(&cfg, catalog()["rows"].as_array().map_or(&[][..], |r| r.as_slice())).is_empty() {
+        RUNNING.store(false, Ordering::SeqCst);
         return Err("no test matches the libraries and groups picked".into());
-    }
-    if RUNNING.swap(true, Ordering::SeqCst) {
-        return Err("already running".into());
     }
     STOP.store(false, Ordering::SeqCst);
     std::thread::Builder::new()
@@ -522,7 +530,10 @@ pub fn start(config_json: &str) -> Result<(), String> {
             }
             RUNNING.store(false, Ordering::SeqCst);
         })
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| {
+            RUNNING.store(false, Ordering::SeqCst);
+            e.to_string()
+        })?;
     Ok(())
 }
 
@@ -634,8 +645,17 @@ mod tests {
 
     #[test]
     fn a_start_that_would_run_nothing_is_refused_before_it_is_acknowledged() {
-        let e = start(r#"{"libraries": ["no-such-library"], "sections": ["no-such-group"]}"#).unwrap_err();
+        let e = start(r#"{"libraries": ["no-such-library"], "sections": ["no-such-group"],
+            "env": {"RIND_DEVBENCH_TEST_LISTED_AFTER_ENV": "1"}}"#)
+        .unwrap_err();
         assert!(e.contains("no test matches"), "{e}");
         assert!(!RUNNING.load(Ordering::SeqCst));
+        // The configured environment was in place before the catalog was listed for the check.
+        assert_eq!(std::env::var("RIND_DEVBENCH_TEST_LISTED_AFTER_ENV").as_deref(), Ok("1"));
+        for bad in [r#"{"": "1"}"#, r#"{"A=B": "1"}"#, r#"{"A": "x\u0000"}"#] {
+            let e = start(&format!(r#"{{"env": {bad}}}"#)).unwrap_err();
+            assert!(e.contains("environment entry"), "{e}");
+            assert!(!RUNNING.load(Ordering::SeqCst));
+        }
     }
 }
