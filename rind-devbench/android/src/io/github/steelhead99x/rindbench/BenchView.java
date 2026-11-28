@@ -162,8 +162,11 @@ final class BenchView extends LinearLayout {
      * it loads (null where none was): a launch that names only one keeps the other's earlier value.
      */
     private String pickLibs, pickSecs;
-    /** pickLibs and pickSecs are a picker's switches exactly (a restored one): an empty list means none, not the defaults. */
-    private boolean pickExact;
+    /**
+     * pickLibs (pickSecs) is a restored picker's switches exactly, where an empty list means none, not the
+     * defaults; an intent that gives that extra makes it a preselection again.
+     */
+    private boolean exactLibs, exactSecs;
 
     /**
      * `restored`: the activity is being recreated from saved state, after a
@@ -185,7 +188,8 @@ final class BenchView extends LinearLayout {
             if (saved.getBoolean(KEY_COLLECTOR_SET)) useCollector(saved.getString(KEY_HOST), saved.getInt(KEY_PORT, Collector.PORT));
             pickLibs = saved.getString(KEY_LIBS);
             pickSecs = saved.getString(KEY_SECS);
-            pickExact = saved.getBoolean(KEY_EXACT);
+            exactLibs = saved.getBoolean(KEY_EXACT + ".libraries");
+            exactSecs = saved.getBoolean(KEY_EXACT + ".sections");
             fullPreset = saved.getBoolean(KEY_FULL);
         } else if (isRunnerLaunch(intent)) {
             // A run that outlived the last activity turns the launch away now, changing nothing.
@@ -436,10 +440,13 @@ final class BenchView extends LinearLayout {
         // view sends to, even in a new process, whichever intent it comes back with.
         out.putBoolean(KEY_COLLECTOR_SET, true);
         // The picker as it is (or, before the list loads, what its first load will preselect), and the preset.
-        out.putString(KEY_LIBS, loadedOnce ? String.join(",", checked(libSw)) : pickLibs);
-        out.putString(KEY_SECS, loadedOnce ? String.join(",", checked(secSw)) : pickSecs);
-        // A loaded picker's switches exactly, so one the person turned all off stays off.
-        out.putBoolean(KEY_EXACT, loadedOnce || pickExact);
+        // A shown picker's switches exactly, so a list the person turned all off stays off; a list that never
+        // showed (it failed to load) saves what it would have preselected.
+        boolean shown = loadedOnce && catalogReady;
+        out.putString(KEY_LIBS, shown ? String.join(",", checked(libSw)) : pickLibs);
+        out.putString(KEY_SECS, shown ? String.join(",", checked(secSw)) : pickSecs);
+        out.putBoolean(KEY_EXACT + ".libraries", shown || exactLibs);
+        out.putBoolean(KEY_EXACT + ".sections", shown || exactSecs);
         out.putBoolean(KEY_FULL, fullPreset);
         out.putString(KEY_HOST, runnerHost);
         out.putInt(KEY_PORT, runnerPort);
@@ -537,13 +544,13 @@ final class BenchView extends LinearLayout {
             java.util.Set<String> wantSecs = csv(pickSecs);
             for (int i = 0; i < libs.length(); i++) {
                 String l = libs.getString(i);
-                boolean on = pickExact ? wantLibs.contains(l) : wantLibs.isEmpty() || wantLibs.contains(l);
+                boolean on = exactLibs ? wantLibs.contains(l) : wantLibs.isEmpty() || wantLibs.contains(l);
                 libRows.add(checkRow(l, lc.getOrDefault(l, 0), on, true, libSw, l));
             }
             for (int i = 0; i < secs.length(); i++) {
                 String s = secs.getString(i);
                 int n = sc.getOrDefault(s, 0);
-                boolean on = n > 0 && (pickExact ? wantSecs.contains(s)
+                boolean on = n > 0 && (exactSecs ? wantSecs.contains(s)
                         : wantSecs.isEmpty() ? !s.startsWith("More: ") : wantSecs.contains(s));
                 View row = checkRow(s.startsWith("More: ") ? s.substring(6) : s, n, on, n > 0, secSw, s);
                 if (s.startsWith("More: ")) moreRows.add(row); else groupRows.add(row);
@@ -616,7 +623,7 @@ final class BenchView extends LinearLayout {
             showSelection(l.libs, l.secs, true, true);
             presetChanged();
         } else {
-            pickExact = false;
+            exactLibs = exactSecs = false;
             pickLibs = l.libs == null ? null : String.join(",", l.libs);
             pickSecs = l.secs == null ? null : String.join(",", l.secs);
         }
@@ -625,8 +632,8 @@ final class BenchView extends LinearLayout {
     /** Keeps a launch's `libraries` and `sections` for the list's first load, each only if it gives it. */
     private void preselect(Intent it) {
         if (it == null) return;
-        if (it.hasExtra("libraries")) pickLibs = it.getStringExtra("libraries");
-        if (it.hasExtra("sections")) pickSecs = it.getStringExtra("sections");
+        if (it.hasExtra("libraries")) { pickLibs = it.getStringExtra("libraries"); exactLibs = false; }
+        if (it.hasExtra("sections")) { pickSecs = it.getStringExtra("sections"); exactSecs = false; }
     }
 
     /** A launch's `libraries` and `sections` extras, on the loaded list: it changes only what it names. */
