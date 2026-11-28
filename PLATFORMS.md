@@ -140,8 +140,8 @@ qemu. iOS devices' code is only built.
   compare-and-swap (`thumbv6m`, `riscv32imc`), the reuse cache keeps nothing,
   so each use builds its value again. With the `no-cas-ecdsa-cache` feature,
   ECDSA caches each public key's verification table with atomic word loads
-  and stores instead, on any such target with 32-bit atomics (rind's build
-  warns on one without them), for about 1.2 KiB more in every ECDSA public key and
+  and stores instead, on any such target with confirmed 32-bit atomics
+  (rind's build warns on others), for about 1.2 KiB more in every ECDSA public key and
   more stack; ML-DSA still rebuilds its expansion on each use. Neither path
   needs a critical section.
 

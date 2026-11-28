@@ -79,15 +79,15 @@ fn main() {
     println!("cargo::rerun-if-env-changed=RUST_TARGET_PATH");
     // The cache costs every ECDSA public key's memory whether or not the key
     // is reused, so the program opts in with `no-cas-ecdsa-cache`. It takes
-    // effect on every target without compare-and-swap that has 32-bit atomic
-    // loads and stores, which the table is built of; a target with
-    // compare-and-swap always caches through `low::ReuseCache` instead.
+    // effect on every target without compare-and-swap whose 32-bit atomic
+    // loads and stores, which the table is built of, are confirmed; a target
+    // with compare-and-swap always caches through `low::ReuseCache` instead.
     if env::var_os("CARGO_FEATURE_NO_CAS_ECDSA_CACHE").is_some() {
         if !target_has_cas() && target_has_atomic_u32() {
             println!("cargo::rustc-cfg=rind_no_cas_cache");
         } else if !target_has_cas() {
             println!(
-                "cargo::warning=no-cas-ecdsa-cache has no effect on {}, which has no 32-bit atomic loads and stores",
+                "cargo::warning=no-cas-ecdsa-cache has no effect on {}, which has no confirmed 32-bit atomic loads and stores",
                 env::var("TARGET").unwrap_or_default()
             );
         }
@@ -460,22 +460,18 @@ fn target_has_cas() -> bool {
     env::var("CARGO_CFG_TARGET_HAS_ATOMIC").is_ok_and(|widths| widths.split(',').any(|w| w == "8"))
 }
 
-/// Whether the target has `AtomicU32`: a maximum atomic width of at least 32
-/// bits. Stable Cargo passes no cfg for atomic loads and stores without
-/// compare-and-swap (`target_has_atomic_load_store` is unstable), so a custom
-/// specification is read for its `max-atomic-width`, which defaults to the
-/// pointer width as rustc's does, and a built-in target is judged by its
-/// pointer width, less those rustc's specifications give no atomics at all.
-/// The built-in targets without compare-and-swap that this takes are
-/// `thumbv6m-none-eabi`, `xtensa-esp32s2-none-elf`, and the RV32E and RV32I
-/// targets without the A extension, such as `riscv32imc-unknown-none-elf`.
+/// Whether the target is confirmed to have 8- and 32-bit atomic loads and
+/// stores (`AtomicBool` and `AtomicU32`), which the table is built of.
+/// Stable Cargo passes no cfg for them on a target without compare-and-swap
+/// (`target_has_atomic_load_store` is unstable), so this fails closed: a
+/// custom specification must state a `max-atomic-width` of at least 32, and
+/// a built-in target must be one rustc's specifications give 32-bit atomics
+/// without compare-and-swap, as checked against rustc 1.100's target list.
+/// Anything else, a specification this script cannot locate included, is
+/// unconfirmed and keeps the uncached path.
 fn target_has_atomic_u32() -> bool {
-    let pointer_width = env::var("CARGO_CFG_TARGET_POINTER_WIDTH")
-        .ok()
-        .and_then(|w| w.parse::<u32>().ok())
-        .unwrap_or(0);
     if let Some(text) = target_json_text() {
-        let width = text
+        return text
             .split_once("\"max-atomic-width\"")
             .and_then(|(_, rest)| {
                 let digits = rest.trim_start().strip_prefix(':')?.trim_start();
@@ -484,18 +480,20 @@ fn target_has_atomic_u32() -> bool {
                     .unwrap_or(digits.len());
                 digits[..end].parse::<u32>().ok()
             })
-            .unwrap_or(pointer_width);
-        return width >= 32;
+            .is_some_and(|width| width >= 32);
     }
-    let no_atomics = [
-        "armv4t-none-eabi",
-        "armv5te-none-eabi",
-        "thumbv4t-none-eabi",
-        "thumbv5te-none-eabi",
-        "mipsel-sony-psx",
+    let confirmed = [
+        "thumbv6m-none-eabi",
+        "riscv32e-unknown-none-elf",
+        "riscv32em-unknown-none-elf",
+        "riscv32emc-unknown-none-elf",
+        "riscv32i-unknown-none-elf",
+        "riscv32im-unknown-none-elf",
+        "riscv32imc-unknown-none-elf",
+        "riscv32imfc-unknown-none-elf",
+        "xtensa-esp32s2-none-elf",
     ];
-    let target = env::var("TARGET").unwrap_or_default();
-    pointer_width >= 32 && !no_atomics.contains(&target.as_str())
+    env::var("TARGET").is_ok_and(|target| confirmed.contains(&target.as_str()))
 }
 
 fn target_json_text() -> Option<String> {

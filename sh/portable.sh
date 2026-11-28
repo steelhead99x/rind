@@ -29,7 +29,9 @@ SLOW_TESTS=1 cargo test "${packages[@]}" --locked --release --target "$target"
 # The ECDSA verification that `no-cas-ecdsa-cache` caches on
 # `thumbv6m-none-eabi` and `riscv32imc-unknown-none-elf`, which CI only lints:
 # their cfg forced here, so its verify path runs Wycheproof and the curves'
-# tests. Its own target directory, as below.
+# tests. Its own target directory, as below. It keeps `rind_portable`, which
+# also turns off P-384's vg routine: without it, every P-384 verification
+# would take vg and leave the cached table unexercised.
 CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-target}/rind-no-cas-cache" \
     CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="$CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS --cfg rind_no_cas_cache" \
     sh -c 'cargo test -p rind --lib --locked --release --target "$1" -- p256 p384 p521 ecdsa verification_table &&
