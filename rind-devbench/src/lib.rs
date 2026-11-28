@@ -303,13 +303,8 @@ fn median(v: &mut [f64]) -> f64 {
     if n % 2 == 1 { v[n / 2] } else { (v[n / 2 - 1] + v[n / 2]) / 2.0 }
 }
 
-fn run(cfg: Config) {
-    for (k, v) in &cfg.env {
-        // SAFETY: set before any bench thread starts; the app does not read env concurrently.
-        unsafe { std::env::set_var(k, v) };
-    }
-    let cat = catalog();
-    let rows = cat["rows"].as_array().unwrap();
+/// The rows a run takes, as (id, file): by id when it names ids, otherwise by library and group.
+fn select(cfg: &Config, rows: &[Value]) -> Vec<(String, String)> {
     let mut selected: Vec<(String, String)> = Vec::new(); // (id, file)
     let want_ids: HashSet<&str> = cfg.ids.iter().map(|s| s.as_str()).collect();
     for r in rows {
@@ -330,6 +325,16 @@ fn run(cfg: Config) {
             selected.push((id.to_string(), r["file"].as_str().unwrap().to_string()));
         }
     }
+    selected
+}
+
+fn run(cfg: Config) {
+    for (k, v) in &cfg.env {
+        // SAFETY: set before any bench thread starts; the app does not read env concurrently.
+        unsafe { std::env::set_var(k, v) };
+    }
+    let cat = catalog();
+    let selected = select(&cfg, cat["rows"].as_array().unwrap());
     let rounds = cfg.rounds.unwrap_or(3).max(1);
     let warm_ms = cfg.warm_ms.unwrap_or(300);
     let sample_ms = cfg.sample_ms.unwrap_or(100);
@@ -494,6 +499,12 @@ pub fn start(config_json: &str) -> Result<(), String> {
     if denies_missing() {
         return Err(DENIES_MISSING.into());
     }
+    // A selection that matches no row would run nothing yet end "done", with status "ok": refuse it
+    // before acknowledging the start. Each library and group can be valid alone and still select nothing
+    // together, as ring with ML-KEM does.
+    if select(&cfg, catalog()["rows"].as_array().map_or(&[][..], |r| r.as_slice())).is_empty() {
+        return Err("no test matches the libraries and groups picked".into());
+    }
     if RUNNING.swap(true, Ordering::SeqCst) {
         return Err("already running".into());
     }
@@ -594,5 +605,37 @@ pub extern "C" fn devbench_stop() {
 pub unsafe extern "C" fn devbench_free(p: *mut c_char) {
     if !p.is_null() {
         drop(unsafe { CString::from_raw(p) });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cfg(json: Value) -> Config {
+        serde_json::from_value(json).unwrap()
+    }
+
+    fn rows() -> Vec<Value> {
+        vec![
+            json!({"id": "a", "file": "f", "library": "rind", "section": "ML-KEM", "extra": false}),
+            json!({"id": "b", "file": "f", "library": "ring", "section": "AEADs", "extra": false}),
+            json!({"id": "c", "file": "f", "library": "rind", "section": "AEADs", "extra": false}),
+        ]
+    }
+
+    #[test]
+    fn a_library_and_group_valid_alone_can_select_nothing_together() {
+        // ring has AEADs and ML-KEM is rind's: each is a valid pick, together they match no row.
+        assert!(select(&cfg(json!({"libraries": ["ring"], "sections": ["ML-KEM"]})), &rows()).is_empty());
+        assert_eq!(select(&cfg(json!({"libraries": ["ring"], "sections": ["AEADs"]})), &rows()).len(), 1);
+        assert_eq!(select(&cfg(json!({"libraries": ["rind"]})), &rows()).len(), 2);
+    }
+
+    #[test]
+    fn a_start_that_would_run_nothing_is_refused_before_it_is_acknowledged() {
+        let e = start(r#"{"libraries": ["no-such-library"], "sections": ["no-such-group"]}"#).unwrap_err();
+        assert!(e.contains("no test matches"), "{e}");
+        assert!(!RUNNING.load(Ordering::SeqCst));
     }
 }
