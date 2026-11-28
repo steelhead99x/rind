@@ -10,6 +10,7 @@
 #include <unistd.h>
 #include <poll.h>
 #include <float.h>
+#include <stdio.h>
 
 extern char *devbench_catalog_json(void);
 extern int devbench_start(const char *config);
@@ -56,13 +57,23 @@ static BOOL ArgOn(NSString *k) {
   NSString *v = Arg(k).lowercaseString;
   return [v isEqual:@"yes"] || [v isEqual:@"true"] || [v isEqual:@"1"];
 }
-static NSSet<NSString *> *ArgList(NSString *k) {
-  NSMutableSet *out = [NSMutableSet new];
+// A comma-separated argument's names, in order and without repeats.
+static NSArray<NSString *> *ArgNames(NSString *k) {
+  NSMutableOrderedSet *out = [NSMutableOrderedSet new];
   for (NSString *p in [Arg(k) componentsSeparatedByString:@","]) {
     NSString *t = [p stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
     if (t.length) [out addObject:t];
   }
-  return out;
+  return out.array;
+}
+static NSSet<NSString *> *ArgList(NSString *k) { return [NSSet setWithArray:ArgNames(k)]; }
+// One RINDBENCH_RUN line on stderr, which `devicectl ... --console` shows, for a runner watching an
+// autostart without seeing the screen.
+static void RunLine(NSDictionary *d) {
+  NSData *js = [NSJSONSerialization dataWithJSONObject:d options:0 error:nil];
+  if (!js) return;
+  fprintf(stderr, "RINDBENCH_RUN %s\n", [[NSString alloc] initWithData:js encoding:NSUTF8StringEncoding].UTF8String);
+  fflush(stderr);
 }
 
 #define RGB(r, g, b) [UIColor colorWithRed:(r) / 255.0 green:(g) / 255.0 blue:(b) / 255.0 alpha:1]
@@ -123,6 +134,14 @@ static NSString *const kConsent = @"The run keeps the CPU busy (minutes on Quick
   UISwitch *agree; UISegmentedControl *preset;
   UIButton *startBtn, *stopBtn, *clearBtn;
   BOOL running;
+  BOOL autostartQueued;  // -autostart's delayed start, until it fires or a start by hand takes its place
+  BOOL autostartRun;     // the current start is -autostart's: its outcome goes to stderr
+  // The last run's picker selection, as sets of library and group names, and what that run sent: a run
+  // started by hand with the picker untouched since sends the same, so rerunning an autostart doesn't widen
+  // its names to what the picker shows (a "More" chip stands for every More group); a chip tap forgets them.
+  NSArray<NSSet *> *lastPicker;
+  NSArray<NSString *> *lastLibs, *lastSecs;
+  BOOL pickedSinceQueued;  // a chip was tapped while the -autostart waited, so its names don't stand for the picker
   NSDictionary *catalog;
   NSMutableDictionary<NSString *, UIButton *> *libChips, *secChips;
   NSArray<NSString *> *moreSections;
@@ -389,10 +408,28 @@ static void SetTitle(UIButton *b, NSString *t) {
   [self ready];
   [self reportLayout:@"ready"];
   // -autostart waits a moment, so a runner can capture the picker before the run.
-  if (ArgOn(@"autostart"))
+  if (ArgOn(@"autostart")) {
+    autostartQueued = YES; pickedSinceQueued = NO;
+    // The launch's own -libraries, -sections and -preset, fixed now: what it leaves out is the list's
+    // defaults (every library; every group with rows but the More ones), as the picker's first load has it,
+    // so a chip or preset tapped during the wait changes only a run started by hand.
+    NSArray<NSString *> *libs = ArgNames(@"libraries"), *secs = ArgNames(@"sections");
+    if (!libs.count) libs = [cat[@"libraries"] copy] ?: @[];
+    if (!secs.count) {
+      NSMutableArray *d = [NSMutableArray new];
+      for (NSString *s in cat[@"sections"]) if ([sc[s] intValue] > 0 && ![s hasPrefix:@"More: "]) [d addObject:s];
+      secs = d;
+    }
+    NSNumber *full = @([Arg(@"preset") isEqual:@"full"]);
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-      self->agree.on = YES; [self agreeChanged]; [self startTapped];
+      if (!self->autostartQueued) return;  // a run started by hand while it waited took its place
+      self->autostartQueued = NO;
+      // They go to the native start as given, so a name the picker lacks still reaches the library's check.
+      self->agree.on = YES; [self agreeChanged];
+      self->autostartRun = YES;
+      [self startWithLibs:libs secs:secs full:full];
     });
+  }
 }
 
 // One machine-readable line saying whether the screen fits, for a device
@@ -445,6 +482,8 @@ static void SetTitle(UIButton *b, NSString *t) {
 - (void)chipTapped:(UIButton *)b {
   if (running) return;
   b.selected = !b.selected; [self paintChip:b];
+  lastLibs = nil; lastSecs = nil;  // a picked selection, even one back where it was, runs as the picker shows it
+  pickedSinceQueued = YES;
 }
 
 - (void)showConsent {
@@ -488,19 +527,35 @@ static void SetTitle(UIButton *b, NSString *t) {
 - (void)clearTapped {
   if (running) return;
   agree.on = NO; clearBtn.hidden = YES;
+  lastPicker = nil; lastLibs = nil; lastSecs = nil;  // back at the picker: only Run again reuses the last names
   SetTitle(startBtn, @"Start test"); startBtn.hidden = NO;
   showingRun = NO; [self foldPicker];
   [self setPicking:YES]; [self agreeChanged]; [self ready]; [self findCollector];
 }
 
-- (void)startTapped {
+- (void)startTapped { autostartRun = NO; [self startWithLibs:nil secs:nil full:nil]; }
+
+// Starts a run of the picker's selection and preset, or, for an autostart, of its launch's (nil keeps the
+// picker's, or the preset control's).
+- (void)startWithLibs:(NSArray<NSString *> *)wantLibs secs:(NSArray<NSString *> *)wantSecs full:(NSNumber *)wantFull {
   if (!agree.on || !catalog) return;
   NSMutableArray *libs = [NSMutableArray new], *secs = [NSMutableArray new];
   for (NSString *k in libChips) if (libChips[k].selected) [libs addObject:k];
   for (NSString *k in secChips) if (secChips[k].selected) [secs addObject:k];
   if (moreChip.selected) [secs addObjectsFromArray:moreSections];
-  if (!libs.count || !secs.count) { statusLbl.text = @"Pick at least one library and one operation"; return; }
-  BOOL full = preset.selectedSegmentIndex == 1;
+  NSArray<NSSet *> *picker = @[[NSSet setWithArray:libs], [NSSet setWithArray:secs]];
+  if (!wantLibs && !wantSecs && lastLibs && [picker isEqualToArray:lastPicker]) {
+    libs = [lastLibs mutableCopy]; secs = [lastSecs mutableCopy];
+  }
+  if (wantLibs.count) libs = [wantLibs mutableCopy];
+  if (wantSecs.count) secs = [wantSecs mutableCopy];
+  if (!libs.count || !secs.count) {
+    statusLbl.text = @"Pick at least one library and one operation";
+    if (autostartRun) RunLine(@{@"started": @NO, @"reason": libs.count ? @"no group is picked" : @"no library is picked"});
+    autostartRun = NO;
+    return;
+  }
+  BOOL full = wantFull ? wantFull.boolValue : preset.selectedSegmentIndex == 1;
   NSString *docs = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
   NSString *keys = [NSBundle.mainBundle.resourcePath stringByAppendingPathComponent:@"keys"];
   NSMutableDictionary *cfg = [@{
@@ -513,11 +568,35 @@ static void SetTitle(UIButton *b, NSString *t) {
   if (host.length && port) { cfg[@"host"] = host; cfg[@"port"] = port; }
   NSData *js = [NSJSONSerialization dataWithJSONObject:cfg options:0 error:nil];
   NSString *s = [[NSString alloc] initWithData:js encoding:NSUTF8StringEncoding];
-  if (devbench_start(s.UTF8String) != 0) { NSDictionary *st = JSON(devbench_status_json()); statusLbl.text = [NSString stringWithFormat:@"Could not start: %@", st[@"start_error"]]; return; }
+  if (devbench_start(s.UTF8String) != 0) {
+    NSDictionary *st = JSON(devbench_status_json());
+    statusLbl.text = [NSString stringWithFormat:@"Could not start: %@", st[@"start_error"]];
+    if (autostartRun) RunLine(@{@"started": @NO, @"reason": [NSString stringWithFormat:@"the native start refused it: %@", st[@"start_error"] ?: @""]});
+    autostartRun = NO;
+    return;
+  }
+  if (autostartRun) {
+    // The rows the library picked as it accepted the start: the libraries and groups that run, and those
+    // named that have no row.
+    NSDictionary *st = JSON(devbench_status_json());
+    RunLine(@{@"started": @YES, @"start": st[@"acked_start"] ?: @0, @"preset": full ? @"full" : @"quick",
+              @"libraries": st[@"libraries_run"] ?: @[], @"libraries_missing": st[@"libraries_missing"] ?: @[],
+              @"sections": st[@"sections_run"] ?: @[], @"sections_missing": st[@"sections_missing"] ?: @[]});
+    autostartRun = NO;
+  }
+  // A start by hand consumes the queued -autostart, even once this run stops; the launch gets its outcome.
+  if (autostartQueued && !autostartRun) RunLine(@{@"started": @NO, @"reason": @"a start by hand took its place"});
+  autostartQueued = NO;
+  // An autostart's names stand for the picker in a rerun only if nobody touched a chip while it waited.
+  if (wantLibs && pickedSinceQueued) { lastPicker = nil; lastLibs = nil; lastSecs = nil; }
+  else { lastPicker = picker; lastLibs = [libs copy]; lastSecs = [secs copy]; }
   UIApplication.sharedApplication.idleTimerDisabled = YES;
   startBtn.hidden = YES; clearBtn.hidden = YES; stopBtn.hidden = NO; stopBtn.enabled = YES; running = YES;
   [self setPicking:NO];
-  picksLbl.text = [NSString stringWithFormat:@"%@ · %lu libraries · %lu groups", full ? @"Full" : @"Quick", (unsigned long)libs.count, (unsigned long)secs.count];
+  // What the library picked as it accepted the start, not what was asked for.
+  NSDictionary *acked = JSON(devbench_status_json());
+  picksLbl.text = [NSString stringWithFormat:@"%@ · %lu libraries · %lu groups", full ? @"Full" : @"Quick",
+      (unsigned long)[acked[@"libraries_run"] count], (unsigned long)[acked[@"sections_run"] count]];
   showingRun = YES; [self foldPicker];
   statusLbl.text = @"Starting…"; scoreLbl.text = @""; behindLbl.text = @"";
   [self findCollector];
@@ -534,9 +613,15 @@ static void SetTitle(UIButton *b, NSString *t) {
   NSString *thermal = @[@"nominal", @"fair", @"serious", @"critical"][MIN(3, (NSInteger)NSProcessInfo.processInfo.thermalState)];
   double done = [s[@"done"] doubleValue], total = MAX(1, [s[@"total"] doubleValue]);
   progress.progress = done / total;
-  if (running) {
+  if (running && !s[@"run_start"]) {
+    statusLbl.text = @"Starting…";  // accepted, still reaching the collector: no counters yet
+  } else if (running) {
     statusLbl.text = [NSString stringWithFormat:@"Running %@ of %@ · round %@ of %@", s[@"done"], s[@"total"], s[@"round"], s[@"rounds"]];
     currentLbl.text = [NSString stringWithFormat:@"%@\nerrors %@ · sent %@ lines (%@) · thermal %@", s[@"current"] ?: @"", s[@"errors"], s[@"lines"], s[@"sink"], thermal];
+  } else if ([s[@"error"] length]) {
+    // A run that failed, as one whose thread panicked, says so rather than Finished.
+    statusLbl.text = [NSString stringWithFormat:@"Run failed: %@", s[@"error"]];
+    currentLbl.text = @"";
   } else {
     statusLbl.text = [NSString stringWithFormat:@"%@ · %@ rows in %.0f s", [s[@"stopped"] boolValue] ? @"Stopped" : @"Finished", s[@"done"], [s[@"elapsed_s"] doubleValue]];
     currentLbl.text = [NSString stringWithFormat:@"errors %@ · sent %@ lines (%@) · thermal %@ · full timings saved on this device", s[@"errors"], s[@"lines"], s[@"sink"], thermal];
