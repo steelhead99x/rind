@@ -171,26 +171,23 @@ static void SetButtonTitleStyle(UIButtonConfiguration *c, NSString *title, UIFon
 }
 - (UIButton *)chip:(NSString *)title on:(BOOL)on enabled:(BOOL)en {
   BOOL small = [self compact];
-  UIButtonConfiguration *c = ButtonConfig(title,
-      small ? NSDirectionalEdgeInsetsMake(5, 10, 5, 10) : NSDirectionalEdgeInsetsMake(7, 12, 7, 12),
-      small ? 13 : 15);
-  c.background.strokeWidth = 1;
-  UIButton *b = [UIButton buttonWithConfiguration:c primaryAction:nil];
-  b.automaticallyUpdatesConfiguration = NO;
+  UIButton *b = [UIButton buttonWithType:UIButtonTypeCustom];
+  b.contentEdgeInsets = small ? UIEdgeInsetsMake(5, 10, 5, 10) : UIEdgeInsetsMake(7, 12, 7, 12);
+  b.layer.cornerRadius = small ? 13 : 15;
+  b.layer.borderWidth = 1;
+  b.titleLabel.font = [UIFont systemFontOfSize:small ? 13 : 14 weight:UIFontWeightSemibold];
+  [b setTitle:title forState:UIControlStateNormal];
+  [b setTitleColor:C_TEXT forState:UIControlStateNormal];
+  [b setTitleColor:C_ON_SELECTED forState:UIControlStateSelected];
+  [b setTitleColor:C_MUTED forState:UIControlStateDisabled];
+  [b setTitleColor:C_MUTED forState:UIControlStateDisabled | UIControlStateSelected];
   b.selected = on; b.enabled = en;
   [b addTarget:self action:@selector(chipTapped:) forControlEvents:UIControlEventTouchUpInside];
-  [self paintChip:b title:title]; return b;
+  [self paintChip:b]; return b;
 }
-- (void)paintChip:(UIButton *)b title:(NSString *)title {
-  BOOL on = b.selected;
-  UIButtonConfiguration *c = b.configuration;
-  c.background.backgroundColor = on ? C_SELECTED : C_CHIP;
-  c.background.strokeColor = on ? C_SELECTED : C_LINE;
-  UIFont *font = [UIFont systemFontOfSize:[self compact] ? 13 : 14 weight:UIFontWeightSemibold];
-  UIColor *color = !b.enabled ? C_MUTED : (on ? C_ON_SELECTED : C_TEXT);
-  SetButtonTitleStyle(c, title, font, color);
-  b.tintColor = color;
-  b.configuration = c;
+- (void)paintChip:(UIButton *)b {
+  b.backgroundColor = b.selected ? C_SELECTED : C_CHIP;
+  b.layer.borderColor = (b.selected ? C_SELECTED : C_LINE).CGColor;
   b.alpha = b.enabled ? 1 : 0.45;
 }
 - (UIButton *)button:(NSString *)t action:(SEL)a primary:(BOOL)primary {
@@ -474,8 +471,7 @@ static UIImageView *BrandMark(NSString *name, CGFloat size) {
 
 - (void)chipTapped:(UIButton *)b {
   if (running) return;
-  NSString *title = b.configuration.attributedTitle.string;
-  b.selected = !b.selected; [self paintChip:b title:title];
+  b.selected = !b.selected; [self paintChip:b];
 }
 
 - (void)showConsent {
