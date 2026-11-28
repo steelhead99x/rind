@@ -208,8 +208,12 @@ def main():
         for module, table in TABLES.items():
             dest = os.path.join(DEST, path_of(module))
             os.makedirs(os.path.dirname(dest), exist_ok=True)
-            with open(dest, "w") as f:
-                f.write(table())
+            # UTF-8 whatever the locale, as `--check` compares, and replaced
+            # whole, so a Lean build alongside never reads half a table.
+            tmp = dest + ".tmp"
+            with open(tmp, "wb") as f:
+                f.write(table().encode())
+            os.replace(tmp, dest)
         return
     check = args[:1] == ["--check"]
     if check:

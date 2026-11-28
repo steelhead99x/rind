@@ -1180,6 +1180,11 @@ if [[ -n $only && $only != lean ]]; then
     exit 0
 fi
 
+# `Cosim.Progs` imports VG's P-256 code, whose two generated tables Git
+# ignores; write them before the translate-only exit, so every Lean build
+# after it, `lake build` by hand included, finds them.
+admin/import-vg-models --tables
+
 # Each hand model quotes the Rust it models. Fail if that Rust has changed, so
 # the model is reviewed with every change to it: print the first item each line
 # starts, from that line to the closing one at its indentation, or to the `;`
@@ -2155,8 +2160,6 @@ if [[ -n $untested ]]; then
     echo "admin/prove: no vectors test these intrinsic models:" $untested >&2
     exit 1
 fi
-
-admin/import-vg-models --tables
 
 rind_isa
 
