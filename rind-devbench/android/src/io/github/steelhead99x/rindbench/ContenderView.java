@@ -211,7 +211,7 @@ final class ContenderView extends LinearLayout {
         agreeRow.setEnabled(enable.isChecked());
         enabledOn = enable.isChecked() && agree.isChecked();
         // Turning Contender or I agree off drops any probe or lookup still out.
-        if (!enabledOn) reqSeq++;
+        if (!enabledOn) { probeSeq++; lookupSeq++; }
         joinCard.setVisibility((enabledOn && sessionCard.getVisibility() != VISIBLE) ? VISIBLE : GONE);
         if (!enable.isChecked()) {
             setStatus("Contender is off", OFF, "Nothing connects while this is off.", false);
@@ -238,9 +238,9 @@ final class ContenderView extends LinearLayout {
 
     private void probe() {
         setStatus("Checking moq-bench.dev…", BUSY, "Looking for the live session service.", false);
-        final int seq = ++reqSeq;
+        final int seq = ++probeSeq;
         client.probeHealth(h -> ui.post(() -> {
-            if (!enabledOn || seq != reqSeq) return;
+            if (!enabledOn || seq != probeSeq) return;
             if (h.status == ContenderClient.AVAILABLE) {
                 setStatus(h.isLabReferee ? "Lab referee ready" : "Session service ready",
                         OK, client.baseURL, false);
@@ -288,8 +288,9 @@ final class ContenderView extends LinearLayout {
                 "Type the session code instead, or allow the camera in Settings.", false);
     }
 
-    /** Counts health probes and session lookups, so only the latest one's answer is shown. */
-    private int reqSeq;
+    /** Count health probes and session lookups: a lookup supersedes a probe and earlier lookups, and Leave
+     *  supersedes lookups, so only the latest answer is shown. */
+    private int probeSeq, lookupSeq;
 
     private void joinTapped() {
         if (!enabledOn) return;
@@ -301,9 +302,10 @@ final class ContenderView extends LinearLayout {
         setStatus("Looking up session…", BUSY, "Checking code " + code + ".", false);
         // Lookups can overlap each other or the health probe, a second Join or scan before the first
         // answers: only the newest may change the screen, so an older, slower answer can't replace it.
-        final int seq = ++reqSeq;
+        probeSeq++;
+        final int seq = ++lookupSeq;
         client.lookupSession(code, (session, error) -> ui.post(() -> {
-            if (!enabledOn || seq != reqSeq) return;
+            if (!enabledOn || seq != lookupSeq) return;
             if (error != null || session == null) {
                 boolean unavail = error != null && error.contains("not available");
                 String title = unavail ? "Session service not available yet" : (error != null ? error : "Could not join");
@@ -332,7 +334,7 @@ final class ContenderView extends LinearLayout {
     }
 
     private void leaveTapped() {
-        reqSeq++; // a lookup still out can't bring the session back
+        lookupSeq++; // a lookup still out can't bring the session back; a probe still finishes
         sessionCard.setVisibility(GONE);
         sessionName.setText("");
         if (enabledOn) joinCard.setVisibility(VISIBLE);

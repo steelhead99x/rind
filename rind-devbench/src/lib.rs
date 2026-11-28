@@ -390,6 +390,14 @@ fn select(cfg: &Config, rows: &[Value]) -> Vec<(String, String)> {
 }
 
 /// `cat` is the catalog `start()` checked the selection against.
+/// Whether `rows` has a row for every id, library and group `cfg` names.
+fn covers(cfg: &Config, rows: &[Value]) -> bool {
+    let has = |field: &str, v: &str| rows.iter().any(|r| r[field] == v);
+    cfg.ids.iter().all(|v| has("id", v))
+        && cfg.libraries.iter().all(|v| has("library", v))
+        && cfg.sections.iter().all(|v| has("section", v))
+}
+
 fn run(cfg: Config, cat: Arc<Value>) {
     let selected = select(&cfg, cat["rows"].as_array().unwrap());
     let rounds = cfg.rounds.unwrap_or(3).max(1);
@@ -594,11 +602,13 @@ pub fn start(config_json: &str) -> Result<(), String> {
     // before acknowledging the start. Each library and group can be valid alone and still select nothing
     // together, as ring with ML-KEM does.
     // start() runs on the apps' UI thread, so it reuses a catalog that failed in part for the rows it does
-    // list, and lists again only when those don't cover the selection, as when the keys directory has been
-    // filled in since.
-    let picks_none = |c: &Value| select(&cfg, c["rows"].as_array().map_or(&[][..], |r| r.as_slice())).is_empty();
+    // list. It lists again here only when those rows select nothing and the catalog came from the cache, as
+    // when the keys directory has been filled in since; a fresh listing isn't repeated.
+    let rows_of = |c: &Value| c["rows"].as_array().cloned().unwrap_or_default();
+    let picks_none = |c: &Value| select(&cfg, &rows_of(c)).is_empty();
+    let was_cached = cache.iter().any(|(k, _)| *k == listing_env());
     let mut cat = catalog_in(&mut cache, false);
-    if picks_none(&cat) && listing_failure(&cat).is_some() {
+    if picks_none(&cat) && listing_failure(&cat).is_some() && was_cached {
         cat = catalog_in(&mut cache, true);
     }
     if picks_none(&cat) {
@@ -607,10 +617,16 @@ pub fn start(config_json: &str) -> Result<(), String> {
             None => "no test matches the libraries and groups picked".into(),
         }));
     }
+    // A partly failed catalog that selects some rows but lacks others the run names (an id, library or group
+    // with no row in it) is listed again on the run's thread before the run, so a row that lists now is not
+    // silently left out.
+    let refresh = listing_failure(&cat).is_some() && !covers(&cfg, &rows_of(&cat));
+    drop(cache);
     std::thread::Builder::new()
         .name("devbench".into())
         .stack_size(64 << 20)
         .spawn(move || {
+            let cat = if refresh { catalog() } else { cat };
             let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(cfg, cat)));
             if r.is_err() {
                 set_status(|s| {
@@ -722,6 +738,16 @@ mod tests {
             json!({"id": "b", "file": "f", "library": "ring", "section": "AEADs", "extra": false}),
             json!({"id": "c", "file": "f", "library": "rind", "section": "AEADs", "extra": false}),
         ]
+    }
+
+    #[test]
+    fn a_catalog_covers_a_run_only_when_it_has_a_row_for_each_name() {
+        assert!(covers(&cfg(json!({"libraries": ["ring"], "sections": ["AEADs"]})), &rows()));
+        assert!(covers(&cfg(json!({"ids": ["a", "b"]})), &rows()));
+        // A row the listing left out, as rustls's when its keys were missing.
+        assert!(!covers(&cfg(json!({"ids": ["a", "tls"]})), &rows()));
+        assert!(!covers(&cfg(json!({"libraries": ["rind", "rustls"]})), &rows()));
+        assert!(!covers(&cfg(json!({"sections": ["AEADs", "TLS"]})), &rows()));
     }
 
     #[test]
