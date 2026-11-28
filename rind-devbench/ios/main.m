@@ -74,6 +74,8 @@ static NSSet<NSString *> *ArgList(NSString *k) {
 #define C_MUTED RGB(139, 150, 165)
 #define C_TEXT RGB(231, 236, 242)
 #define C_ACCENT RGB(255, 176, 32)
+#define C_SELECTED RGB(58, 44, 16)
+#define C_ON_SELECTED RGB(255, 221, 160)
 #define C_GOOD RGB(84, 214, 146)
 #define C_BAD RGB(255, 120, 110)
 
@@ -166,24 +168,26 @@ static UIButtonConfiguration *ButtonConfig(NSString *title, UIFont *font, NSDire
 }
 - (UIButton *)chip:(NSString *)title on:(BOOL)on enabled:(BOOL)en {
   BOOL small = [self compact];
-  UIButtonConfiguration *c = ButtonConfig(title,
-      [UIFont systemFontOfSize:small ? 13 : 14 weight:UIFontWeightSemibold],
-      small ? NSDirectionalEdgeInsetsMake(5, 10, 5, 10) : NSDirectionalEdgeInsetsMake(7, 12, 7, 12),
-      small ? 13 : 15);
-  c.background.strokeWidth = 1;
-  UIButton *b = [UIButton buttonWithConfiguration:c primaryAction:nil];
-  b.automaticallyUpdatesConfiguration = NO;
+  // Explicit button states keep UIKit's system tint off the picker labels.
+  UIButton *b = [UIButton buttonWithType:UIButtonTypeCustom];
+  b.contentEdgeInsets = small ? UIEdgeInsetsMake(5, 10, 5, 10) : UIEdgeInsetsMake(7, 12, 7, 12);
+  b.layer.cornerRadius = small ? 13 : 15;
+  b.layer.borderWidth = 1;
+  b.titleLabel.font = [UIFont systemFontOfSize:small ? 13 : 14 weight:UIFontWeightSemibold];
+  b.titleLabel.lineBreakMode = NSLineBreakByTruncatingTail;
+  [b setTitle:title forState:UIControlStateNormal];
+  [b setTitleColor:C_TEXT forState:UIControlStateNormal];
+  [b setTitleColor:C_ON_SELECTED forState:UIControlStateSelected];
+  [b setTitleColor:C_ON_SELECTED forState:UIControlStateSelected | UIControlStateHighlighted];
+  [b setTitleColor:C_MUTED forState:UIControlStateDisabled];
+  [b setTitleColor:C_MUTED forState:UIControlStateDisabled | UIControlStateSelected];
   b.selected = on; b.enabled = en;
   [b addTarget:self action:@selector(chipTapped:) forControlEvents:UIControlEventTouchUpInside];
   [self paintChip:b]; return b;
 }
 - (void)paintChip:(UIButton *)b {
-  BOOL on = b.selected;
-  UIButtonConfiguration *c = b.configuration;
-  c.background.backgroundColor = on ? C_ACCENT : C_CHIP;
-  c.background.strokeColor = on ? C_ACCENT : C_LINE;
-  c.baseForegroundColor = !b.enabled ? C_MUTED : (on ? UIColor.blackColor : C_TEXT);
-  b.configuration = c;
+  b.backgroundColor = b.selected ? C_SELECTED : C_CHIP;
+  b.layer.borderColor = (b.selected ? C_SELECTED : C_LINE).CGColor;
   b.alpha = b.enabled ? 1 : 0.45;
 }
 - (UIButton *)button:(NSString *)t action:(SEL)a primary:(BOOL)primary {
@@ -210,8 +214,17 @@ static void SetTitle(UIButton *b, NSString *t) {
   // Header: name, device, where results go.
   UILabel *title = [self label:@"RindBench" size:28 weight:UIFontWeightHeavy color:nil];
   UILabel *tag = [self label:@"by kixel.ai" size:15 weight:UIFontWeightSemibold color:C_MUTED];
-  UIStackView *titleRow = [[UIStackView alloc] initWithArrangedSubviews:@[title, tag, [UIView new]]];
-  titleRow.spacing = 10; titleRow.alignment = UIStackViewAlignmentLastBaseline;
+  UIImageView *mark = [[UIImageView alloc] initWithImage:[UIImage imageNamed:@"rindbench-mark"]];
+  mark.contentMode = UIViewContentModeScaleAspectFit;
+  mark.isAccessibilityElement = NO;
+  [NSLayoutConstraint activateConstraints:@[
+    [mark.widthAnchor constraintEqualToConstant:30],
+    [mark.heightAnchor constraintEqualToConstant:30],
+  ]];
+  UIStackView *name = [[UIStackView alloc] initWithArrangedSubviews:@[title, tag]];
+  name.spacing = 8; name.alignment = UIStackViewAlignmentLastBaseline;
+  UIStackView *titleRow = [[UIStackView alloc] initWithArrangedSubviews:@[mark, name, [UIView new]]];
+  titleRow.spacing = 6; titleRow.alignment = UIStackViewAlignmentCenter;
   deviceLbl = [self label:@"Reading the list of tests…" size:13 weight:UIFontWeightMedium color:C_MUTED];
   deviceLbl.numberOfLines = 2;
   collectorLbl = [self label:@"Results: looking for the computer that installed this app…" size:13 weight:UIFontWeightRegular color:C_MUTED];
